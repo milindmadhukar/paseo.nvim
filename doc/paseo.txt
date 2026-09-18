@@ -12,6 +12,7 @@ CONTENTS                                                      *paseo-contents*
   6. Lua API .................................... |paseo-api|
   7. Workspaces ................................. |paseo-workspaces|
   8. Git ........................................ |paseo-git|
+  9. The agent bridge ........................... |paseo-bridge|
 
 ==============================================================================
 1. INTRODUCTION                                           *paseo-introduction*
@@ -165,6 +166,22 @@ review.context                                          integer, default `0`
     repo. `unified` starts in the unified layout, which shows deleted lines
     inline.
 
+:Paseo explain [kind]                                      *:Paseo-explain*
+
+    Explain the change under the cursor. `kind` is `hunk` (default, falling
+    back to `cursor`), `visual`, `cursor` or `file`. The reply streams into a
+    split rather than an agent terminal -- switching to a terminal to read it
+    is the context switch that breaks the review loop.
+
+:Paseo ask [kind]                                              *:Paseo-ask*
+
+    The same, with your own question instead of the rubric.
+
+:Paseo agent [stop]                                          *:Paseo-agent*
+
+    Sidecar and agent status. `stop` shuts the sidecar down; it restarts on the
+    next request.
+
 :Paseo repos                                                  *:Paseo-repos*
 
     List the repos in the current unit of work: the member worktrees of the
@@ -261,5 +278,37 @@ require("paseo.git").stage({hunk}, {callback})
     hunk UI silently does nothing. Those, and untracked files, go through
     `git add` instead, which records a removal correctly. Everything else goes
     to `gitsigns.stage_hunk()`.
+
+==============================================================================
+9. THE AGENT BRIDGE                                             *paseo-bridge*
+
+Agents are reached through a sidecar: `bin/paseo-bridge.ts`, one Bun (or Node
+>= 22) process per Neovim session, holding one WebSocket to the daemon and
+speaking newline-delimited JSON over stdio.
+
+It is not the `paseo` CLI because that boots Electron per invocation and costs
+about 2.4 seconds. It is not a raw WebSocket in Lua because the frame codec is
+the easy part: the real surface is subscriptions with server-issued IDs,
+snapshot-then-update ordering, timeline epochs and cursors, `replacement`
+invalidation and `subscription_restored` after reconnect.
+
+                                                          *paseo-bridge-agent*
+One agent per repository, reused. It is found again by the label
+`paseo.nvim = review`, which is namespaced because several tools may manage
+agents on one daemon. The provider is discovered from the daemon unless
+|paseo-config.paseo.provider| names one -- installed providers and configured
+models differ between hosts, so a hardcoded model id fails at creation.
+
+                                                       *paseo-bridge-lifetime*
+The sidecar starts on the first request that needs it and is stopped on
+`VimLeavePre`. Agents it created keep running on the daemon and stay visible in
+Paseo; closing Neovim does not archive them.
+
+                                                         *paseo-bridge-local*
+With `backend = "local"` there is no sidecar: prompts go to a floaterm terminal
+through `nvim_chan_send`, wrapped in bracketed paste so a multi-line prompt
+arrives as one block rather than being submitted line by line. No streaming,
+no session reuse. It exists so a sidecar that cannot start is a degradation
+rather than an outage.
 
 `vim:tw=78:ts=8:ft=help:norl:`

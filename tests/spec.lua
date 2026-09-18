@@ -405,6 +405,23 @@ local function test_daemon()
   config.setup {}
 end
 
+-- ---------------------------------------------------------------- bridge
+
+local function test_bridge()
+  local bridge = require "paseo.bridge"
+
+  -- The regression: this resolved through the runtimepath, and lazy.nvim
+  -- resolves Lua modules through its own loader -- so `require` worked while
+  -- the plugin directory was not yet on `rtp`, and the sidecar "could not
+  -- start" on a plugin that was installed and working.
+  local found = vim.api.nvim_get_runtime_file("bin/paseo-bridge.ts", false)[1]
+  truthy(
+    "bridge: the sidecar script is on disk",
+    found ~= nil or vim.uv.fs_stat(vim.fn.getcwd() .. "/bin/paseo-bridge.ts") ~= nil
+  )
+  truthy("bridge: not running before it is started", not bridge.running())
+end
+
 function M.run()
   local suites = {
     { "repos", test_repos },
@@ -414,6 +431,7 @@ function M.run()
     { "qf", test_qf },
     { "review", test_review },
     { "daemon", test_daemon },
+    { "bridge", test_bridge },
   }
 
   for _, suite in ipairs(suites) do
