@@ -19,6 +19,11 @@ local M = {}
 ---                       default. Setting this wins outright. See
 ---                       `paseo.daemon`.
 ---@field home string?    `$PASEO_HOME`; defaults to the env var, then ~/.paseo.
+---@field password string? Daemon password, if it has one. Left unset for a
+---                        local daemon, which does not.
+---@field provider string? `provider/model` for agents this plugin creates.
+---                        Unset means "ask the daemon what is ready" -- which
+---                        is the only answer that survives a different host.
 ---@field cli string      Path to the `paseo` binary. One-shot writes only --
 ---                       it boots Electron per call and costs ~2.4s, so no
 ---                       interactive path may touch it.

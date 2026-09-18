@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@getpaseo/client": "^0.8.0"
+  }
+}
