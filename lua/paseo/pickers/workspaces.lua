@@ -19,8 +19,32 @@ local M = {}
 ---already handles the four things that make a spawned Neovide come up
 ---windowless. It is optional -- the plugin must install for people who do not
 ---have it -- so its absence falls back to `tcd`.
+---Tell the daemon about the workspace before opening it.
+---
+---THE SEAM: `ws` assembles the composite directory, and this hands it to Paseo
+---as an ordinary LOCAL workspace. Paseo never learns it is six worktrees; it
+---sees a directory with agents in it -- which is what makes a multi-repo
+---project work at all, since Paseo's own worktree isolation requires a git
+---repository.
+---
+---Best-effort and asynchronous: a daemon that is down must not stop you opening
+---a workspace whose worktrees are already on disk. `workspaces.open()` reuses
+---the active workspace for a directory, so repeating this is free.
+---@param root string
+local function register(root)
+  local bridge = require "paseo.bridge"
+  bridge.ensure(function(err)
+    if err then
+      return
+    end
+    bridge.request("workspace.open", { cwd = root }, function() end)
+  end)
+end
+
 ---@param root string
 local function open_workspace(root)
+  register(root)
+
   local ok, gui = pcall(require, "utils.gui")
   if ok and type(gui.spawn) == "function" then
     gui.spawn { cwd = root }
