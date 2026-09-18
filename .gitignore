@@ -1,17 +1,10 @@
-# bun / node -- the sidecar's dependencies
-node_modules/
-
-# luarocks / busted, if tests ever need them
-.luarocks/
-lua_modules/
+# the sidecar's dependencies
+sidecar/node_modules/
 
 # editor / OS
 *.swp
 .DS_Store
 
-# build output
-dist/
-
-# worktree assembly
+# worktree assemblies
 .workspaces/
 PLAN.md

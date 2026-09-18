@@ -50,8 +50,17 @@ mkdir -p "$multi"
 for name in clm clm_api; do
   mkdir -p "$multi/$name" && git_init "$multi/$name"
   printf 'base\n' > "$multi/$name/f.txt"
+  # The two ignore patterns the assembly tests depend on. `node_modules/` has a
+  # TRAILING SLASH on purpose -- that is how everyone writes it, and it is
+  # exactly why a symlink of that name is NOT ignored.
+  printf 'node_modules/\n.env\n' > "$multi/$name/.gitignore"
   commit "$multi/$name" init
 done
+
+# A project-level shared sibling. `Docs` here is a sibling of the repos; the
+# `Docs` further down inside a workspace is a different thing entirely.
+mkdir -p "$multi/Docs"
+printf 'shared reference material\n' > "$multi/Docs/readme.md"
 mkdir -p "$multi/.workspaces"
 for name in clm clm_api; do
   git -C "$multi/$name" worktree add -q -b ws/otp "$multi/.workspaces/otp/$name"
