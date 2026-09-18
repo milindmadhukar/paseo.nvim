@@ -60,6 +60,13 @@ commands.review = {
   end,
 }
 
+commands.workspaces = {
+  desc = "Workspace picker, with a live agent status column",
+  run = function()
+    require("paseo.pickers.workspaces").open()
+  end,
+}
+
 commands.explain = {
   desc = "Explain the hunk under the cursor",
   run = function(args)
@@ -127,6 +134,7 @@ function M.setup(opts)
     group = vim.api.nvim_create_augroup("paseo.repos", { clear = true }),
     callback = function()
       repos.invalidate()
+      require("paseo.registry").invalidate()
     end,
   })
 
