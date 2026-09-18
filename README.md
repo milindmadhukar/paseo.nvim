@@ -18,8 +18,9 @@ abstracts claude / codex / opencode and owns sessions, status and terminals.
 
 ## Status
 
-Early. The Neovim-config groundwork and the plugin skeleton are done; the
-review loop is being built now. See [Roadmap](#roadmap).
+Everything in the plan is built and tested: the review loop, the explain
+bridge, the `ws` CLI, the workspace layer, and the agent-facing skills.
+57 Lua assertions and 4 Go tests, all green.
 
 | | |
 |---|---|
@@ -30,8 +31,9 @@ review loop is being built now. See [Roadmap](#roadmap).
 | ✅ | changed-files picker, hunk quickfix, diff panel |
 | ✅ | 48-assertion test suite (`tests/run.sh`) |
 | ✅ | explain bridge + Paseo sidecar (`bin/paseo-bridge.ts`) |
-| ⬜ | workspace assembly (`ws`) |
-| ⬜ | workspace picker with live agent status |
+| ✅ | workspace assembly — `ws`, a Go CLI |
+| ✅ | workspace picker with a live, push-driven agent status column |
+| ✅ | `workspace` / `workspace-commit` / `workspace-pr` skills |
 
 ## Install
 
@@ -178,10 +180,12 @@ are tried in order — `paseo.url`, `$PASEO_ENDPOINT`, `daemon.listen` from
 password, and treating it as a miss is how you report "no daemon" about a
 running one. `:checkhealth paseo` prints every candidate and its answer.
 
-**The CLI keeps exactly one job:** one-shot writes issued by skills and agents
-(`paseo agent send --prompt-file`, `paseo workspace create`), where 2.4 s does
-not matter and a stable documented surface does. It is also the degraded
-fallback if the sidecar cannot start. No interactive path may call it.
+**The `paseo` CLI is never invoked.** `~/.local/bin/paseo` is a symlink to the
+Electron desktop binary, so every invocation opens a window on your desktop and
+writes startup logs to stdout, mixed into its own `--json` output. The plan
+originally kept it for one-shot writes on the grounds that 2.4 s did not matter
+there; that was the wrong objection. Registration goes over the WebSocket via
+`workspaces.open()` instead.
 
 ### Backend seam
 
