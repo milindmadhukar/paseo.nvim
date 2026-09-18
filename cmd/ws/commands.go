@@ -94,6 +94,10 @@ func runCreate(ctx context.Context, args []string) error {
 		return err
 	}
 
+	// ws does NOT register the workspace with Paseo. See the note on
+	// registry.Workspace.PaseoID: registration goes over the daemon's
+	// WebSocket, from paseo.nvim's sidecar, because the `paseo` CLI is the
+	// Electron desktop binary and every invocation opens a window.
 	reg.Add(*ws)
 	if err := reg.Save(); err != nil {
 		return err

@@ -24,9 +24,10 @@ local M = {}
 ---@field provider string? `provider/model` for agents this plugin creates.
 ---                        Unset means "ask the daemon what is ready" -- which
 ---                        is the only answer that survives a different host.
----@field cli string      Path to the `paseo` binary. One-shot writes only --
----                       it boots Electron per call and costs ~2.4s, so no
----                       interactive path may touch it.
+--- (There is no `cli` key. The `paseo` binary is the Electron desktop app --
+--- every invocation opens a window and writes startup logs into its own
+--- --json output -- so nothing here shells out to it. The daemon is reached
+--- over its WebSocket.)
 
 ---@class paseo.Config.Workspaces
 ---@field dir string      Directory, relative to a project root, holding the
@@ -43,10 +44,9 @@ local defaults = {
   backend = "paseo",
 
   paseo = {
-    -- url and home are deliberately absent, not nil-valued: absent means
-    -- "discover it", and a discovered endpoint is right on a host that moved
-    -- the daemon. Set `url` to pin it.
-    cli = "paseo",
+    -- url, home, password and provider are all deliberately absent rather than
+    -- nil-valued: absent means "work it out", and a discovered endpoint is
+    -- right on a host that moved the daemon. Set `url` to pin it.
   },
 
   workspaces = {
