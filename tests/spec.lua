@@ -698,6 +698,59 @@ default = false
   end
 end
 
+-- ------------------------------------------------------------ ws init
+
+local function test_ws_init()
+  -- The regression: `:Paseo ws init` named the buffer <root>/.ws/workspace.toml
+  -- without creating .ws/, so `:w` failed with E212 "Can't open file for
+  -- writing: no such file or directory" -- which reads like a permissions
+  -- problem rather than a missing parent directory.
+  local project = vim.fn.tempname()
+  vim.fn.mkdir(vim.fs.joinpath(project, "repo"), "p")
+  local repo = vim.fs.joinpath(project, "repo")
+  for _, args in ipairs {
+    { "init", "-q", "-b", "main", "." },
+    { "config", "user.email", "t@example.com" },
+    { "config", "user.name", "t" },
+  } do
+    vim.system(vim.list_extend({ "git", "-C", repo }, args)):wait()
+  end
+  local fd = assert(io.open(vim.fs.joinpath(repo, "f.txt"), "w"))
+  fd:write "x\n"
+  fd:close()
+  vim.system({ "git", "-C", repo, "add", "-A" }):wait()
+  vim.system({ "git", "-C", repo, "-c", "commit.gpgsign=false", "commit", "-qm", "init" }):wait()
+
+  in_dir(project, function()
+    vim.cmd "Paseo ws init"
+    vim.wait(2000, function()
+      return vim.api.nvim_buf_get_name(0):find "workspace%.toml" ~= nil
+    end, 50)
+
+    local named = vim.api.nvim_buf_get_name(0)
+    truthy(
+      "ws init: the buffer is named after the manifest",
+      named:find "%.ws/workspace%.toml" ~= nil,
+      named
+    )
+    truthy("ws init: .ws/ exists BEFORE you write", vim.uv.fs_stat(vim.fs.dirname(named)) ~= nil)
+
+    local ok = pcall(vim.cmd, "write")
+    truthy("ws init: :w succeeds", ok)
+    truthy("ws init: the manifest is on disk", vim.uv.fs_stat(named) ~= nil)
+
+    -- A second init must reuse the buffer already sitting on that path rather
+    -- than failing on a duplicate name.
+    truthy("ws init: running it twice does not error", pcall(vim.cmd, "Paseo ws init"))
+
+    local loaded = require("paseo.workspace.manifest").load(project)
+    truthy("ws init: what it wrote parses back", loaded ~= nil and loaded.repos.repo ~= nil)
+    vim.cmd "tabonly"
+  end)
+
+  vim.fn.delete(project, "rf")
+end
+
 function M.run()
   local suites = {
     { "repos", test_repos },
@@ -711,6 +764,7 @@ function M.run()
     { "registry", test_registry },
     { "ref", test_ref },
     { "workspace", test_workspace },
+    { "ws init", test_ws_init },
   }
 
   for _, suite in ipairs(suites) do
