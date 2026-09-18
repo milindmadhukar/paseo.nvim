@@ -1,0 +1,226 @@
+// Package manifest reads and writes <project>/.ws/workspace.toml.
+//
+// The manifest is project-local and uncommitted. "Committed" is not even
+// expressible for a project like ~/Code/openfin, which is a plain directory
+// holding six repositories and is not itself a repository.
+package manifest
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/BurntSushi/toml"
+)
+
+// Dir and File are where a manifest lives, relative to the project root.
+const (
+	Dir  = ".ws"
+	File = "workspace.toml"
+)
+
+// Repo is one member of a project.
+type Repo struct {
+	// Base is the ref new worktrees branch from.
+	//
+	// NEVER assume the default branch. Every openfin repo sits on `dev`, while
+	// clm_api and fos-pwa have origin/HEAD pointing at main -- branching from
+	// origin/HEAD there would silently base the work on the wrong history.
+	Base string `toml:"base"`
+
+	// Copy holds untracked paths COPIED per workspace, never shared. .env
+	// belongs here: an agent editing PORT= in a shared file breaks the primary
+	// checkout and every other workspace at once.
+	Copy []string `toml:"copy,omitempty"`
+
+	// Link holds heavy regenerable directories symlinked to the primary
+	// checkout. Sharing is the point; the risk is two workspaces on divergent
+	// dependency manifests fighting over one store.
+	Link []string `toml:"link,omitempty"`
+
+	// CloneSymlinks recreates a symlink VERBATIM rather than linking to the
+	// link. hipa-v2 has a `plan` symlink into an Obsidian vault; a link to a
+	// link resolves fine until the primary checkout moves.
+	CloneSymlinks []string `toml:"clone_symlinks,omitempty"`
+
+	// Setup runs in the new worktree after assembly.
+	Setup []string `toml:"setup,omitempty"`
+
+	// Default excludes a repo from `ws create` unless named with --with.
+	// hipa-v2 carries 1.5GB of gitignored data and two virtualenvs; including
+	// it by default makes every workspace expensive.
+	Default *bool `toml:"default,omitempty"`
+
+	// Submodules triggers `submodule update --init --recursive` after the
+	// worktree is added.
+	Submodules bool `toml:"submodules,omitempty"`
+}
+
+// IsDefault reports whether the repo is included when --repos is not given.
+func (r Repo) IsDefault() bool { return r.Default == nil || *r.Default }
+
+// Manifest is one project's configuration.
+type Manifest struct {
+	// Shared lists untracked sibling directories symlinked into every
+	// workspace root: openfin/Docs, kora/graphify-out.
+	Shared []string `toml:"shared,omitempty"`
+
+	// WorkspacesDir is where assembled worktrees live, relative to the project
+	// root.
+	WorkspacesDir string `toml:"workspaces_dir,omitempty"`
+
+	// BranchPrefix is prepended to a workspace name to make a branch.
+	BranchPrefix string `toml:"branch_prefix,omitempty"`
+
+	Repos map[string]Repo `toml:"repos"`
+}
+
+// Path is the manifest file for a project root.
+func Path(root string) string { return filepath.Join(root, Dir, File) }
+
+// Load reads a project's manifest.
+func Load(root string) (*Manifest, error) {
+	var m Manifest
+	if _, err := toml.DecodeFile(Path(root), &m); err != nil {
+		return nil, err
+	}
+	m.applyDefaults()
+	return &m, nil
+}
+
+func (m *Manifest) applyDefaults() {
+	if m.WorkspacesDir == "" {
+		m.WorkspacesDir = ".workspaces"
+	}
+	if m.BranchPrefix == "" {
+		m.BranchPrefix = "ws/"
+	}
+	if m.Repos == nil {
+		m.Repos = map[string]Repo{}
+	}
+}
+
+// Names returns repo names in a stable order.
+func (m *Manifest) Names() []string {
+	names := make([]string, 0, len(m.Repos))
+	for name := range m.Repos {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// Select resolves a repo selection: the defaults, plus `with`, or exactly
+// `only` when it is non-empty.
+func (m *Manifest) Select(only, with []string) ([]string, error) {
+	if len(only) > 0 {
+		for _, name := range only {
+			if _, ok := m.Repos[name]; !ok {
+				return nil, fmt.Errorf("no repo %q in the manifest", name)
+			}
+		}
+		return only, nil
+	}
+
+	chosen := map[string]bool{}
+	for name, repo := range m.Repos {
+		if repo.IsDefault() {
+			chosen[name] = true
+		}
+	}
+	for _, name := range with {
+		if _, ok := m.Repos[name]; !ok {
+			return nil, fmt.Errorf("no repo %q in the manifest", name)
+		}
+		chosen[name] = true
+	}
+
+	names := make([]string, 0, len(chosen))
+	for name := range chosen {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// Note is a comment emitted above a repo's block by Render.
+type Note struct {
+	Repo string
+	Text string
+}
+
+// Render writes the manifest as TOML WITH COMMENTS.
+//
+// Hand-rolled rather than marshalled: the comments are the point. A generated
+// manifest that silently picked `dev` over `main` as the base, or excluded a
+// repo for being 1.5GB, has to say so where the reader will look -- and no TOML
+// marshaller preserves that.
+func (m *Manifest) Render(notes []Note) string {
+	byRepo := map[string][]string{}
+	for _, note := range notes {
+		byRepo[note.Repo] = append(byRepo[note.Repo], note.Text)
+	}
+
+	var b strings.Builder
+	b.WriteString("# Generated by `ws init`. Project-local and uncommitted.\n")
+	b.WriteString("# Check the commented lines: they are what init could not decide for you.\n\n")
+
+	if len(m.Shared) > 0 {
+		b.WriteString("# Untracked siblings symlinked into every workspace root.\n")
+		b.WriteString("# init lists every non-repo directory it found; PRUNE THIS. It cannot tell\n")
+		b.WriteString("# a shared reference folder from a directory that merely happens to be here.\n")
+		b.WriteString(fmt.Sprintf("shared = %s\n\n", renderList(m.Shared)))
+	}
+	if m.WorkspacesDir != "" {
+		b.WriteString(fmt.Sprintf("workspaces_dir = %q\n", m.WorkspacesDir))
+	}
+	if m.BranchPrefix != "" {
+		b.WriteString(fmt.Sprintf("branch_prefix = %q\n", m.BranchPrefix))
+	}
+	b.WriteString("\n")
+
+	for _, name := range m.Names() {
+		repo := m.Repos[name]
+		for _, note := range byRepo[name] {
+			b.WriteString("# " + note + "\n")
+		}
+		b.WriteString(fmt.Sprintf("[repos.%s]\n", name))
+		b.WriteString(fmt.Sprintf("base = %q\n", repo.Base))
+		if len(repo.Copy) > 0 {
+			b.WriteString(fmt.Sprintf("copy = %s\n", renderList(repo.Copy)))
+		}
+		if len(repo.Link) > 0 {
+			b.WriteString(fmt.Sprintf("link = %s\n", renderList(repo.Link)))
+		}
+		if len(repo.CloneSymlinks) > 0 {
+			b.WriteString(fmt.Sprintf("clone_symlinks = %s\n", renderList(repo.CloneSymlinks)))
+		}
+		if repo.Submodules {
+			b.WriteString("submodules = true\n")
+		}
+		if repo.Default != nil && !*repo.Default {
+			b.WriteString("default = false\n")
+		}
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
+func renderList(items []string) string {
+	quoted := make([]string, len(items))
+	for i, item := range items {
+		quoted[i] = fmt.Sprintf("%q", item)
+	}
+	return "[" + strings.Join(quoted, ", ") + "]"
+}
+
+// Save writes the rendered manifest, creating .ws/ as needed.
+func (m *Manifest) Save(root string, notes []Note) error {
+	if err := os.MkdirAll(filepath.Join(root, Dir), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(Path(root), []byte(m.Render(notes)), 0o644)
+}
