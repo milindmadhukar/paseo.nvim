@@ -29,6 +29,10 @@ type Request = { id?: number; op: string; [key: string]: unknown };
 
 let client: ReturnType<typeof createPaseoClient> | null = null;
 const timelines = new Map<string, { release?: () => Promise<void> } & (() => void)>();
+let directory: {
+  subscription?: { release: () => Promise<void> };
+  localUnsubscribe?: (() => void) | null;
+} | null = null;
 
 function write(payload: unknown): void {
   process.stdout.write(JSON.stringify(payload) + "\n");
@@ -64,6 +68,12 @@ const ops: Record<string, (req: Request) => Promise<unknown>> = {
   },
 
   async close() {
+    if (directory) {
+      const held = directory;
+      directory = null;
+      held.localUnsubscribe?.();
+      await held.subscription?.release().catch(() => {});
+    }
     for (const [, unsubscribe] of timelines) {
       try {
         await (unsubscribe.release?.() ?? unsubscribe());
@@ -224,6 +234,94 @@ const ops: Record<string, (req: Request) => Promise<unknown>> = {
     timelines.set(id, unsubscribe as any);
     await (unsubscribe as any).ready;
     return { subscribed: true };
+  },
+
+  /**
+   * Follow the agent directory and push every change.
+   *
+   * This is what makes the workspace picker's status column live rather than
+   * polled -- at 2.4s per CLI call a polled column is unobtainable, and that
+   * column is the entire reason for the sidecar.
+   *
+   * The snapshot is delivered BEFORE updates, so the consumer renders from it
+   * and then applies upserts and removes. On reconnect the subscription gets a
+   * new ID and a new snapshot; nothing is replayed.
+   */
+  async "agents.subscribe"() {
+    if (directory) return { subscribed: true, already: true };
+
+    const api = connected();
+    const describe = (agent: any) => ({
+      id: agent.id,
+      title: agent.title ?? null,
+      status: agent.status ?? null,
+      cwd: agent.cwd ?? null,
+      workspaceId: agent.workspaceId ?? null,
+      provider: agent.runtimeInfo?.provider ?? null,
+      requiresAttention: (agent.pendingPermissions?.length ?? 0) > 0,
+    });
+
+    const applyUpdate = (message: any) => {
+      // Both shapes reach here: the wire message, and the bare update the
+      // local listener is handed.
+      const payload = message?.type === "agent_update" ? message.payload : message;
+      if (!payload?.kind) return;
+      if (payload.kind === "upsert") {
+        emit("agents", { kind: "upsert", agent: describe(payload.agent) });
+      } else if (payload.kind === "remove") {
+        emit("agents", { kind: "remove", id: payload.agentId });
+      }
+    };
+
+    // TWO SDK GENERATIONS, and the installed one is the older.
+    //
+    // 0.9+ returns an owned `subscription` from list({ subscribe: {} }) whose
+    // snapshot callback fires before updates. 0.8 has no such object:
+    // `agents.subscribe(handler)` registers a LOCAL listener and the list call
+    // is what asks the daemon to start streaming. Writing only the documented
+    // 0.9 form failed at runtime with "undefined is not an object
+    // (evaluating 'result.subscription.subscribe')", so both are handled and
+    // the difference is confined here.
+    let localUnsubscribe: (() => void) | null = null;
+    if (typeof (api.agents as any).subscribe === "function") {
+      localUnsubscribe = (api.agents as any).subscribe(applyUpdate);
+    }
+
+    const result: any = await api.agents.list({
+      filter: { includeArchived: false },
+      subscribe: {},
+    });
+
+    if (result?.subscription?.subscribe) {
+      // 0.9+: the owned subscription supersedes the local listener, and
+      // delivers its own snapshot first.
+      localUnsubscribe?.();
+      localUnsubscribe = null;
+      result.subscription.subscribe({
+        snapshot: ({ entries }: any) =>
+          emit("agents", { kind: "snapshot", entries: entries.map((e: any) => describe(e.agent)) }),
+        update: applyUpdate,
+        error: (error: unknown) => emit("agents", { kind: "error", error: String(error) }),
+      });
+    } else {
+      // 0.8: the list result IS the snapshot.
+      emit("agents", {
+        kind: "snapshot",
+        entries: (result.entries ?? []).map((e: any) => describe(e.agent)),
+      });
+    }
+
+    directory = { subscription: result?.subscription, localUnsubscribe };
+    return { subscribed: true, subscriptionId: result?.subscriptionId ?? null };
+  },
+
+  async "agents.unsubscribe"() {
+    if (!directory) return { unsubscribed: false };
+    const held = directory;
+    directory = null;
+    held.localUnsubscribe?.();
+    await held.subscription?.release();
+    return { unsubscribed: true };
   },
 
   /** Archive an agent. Only ever our own -- see the label filter in ensure. */
