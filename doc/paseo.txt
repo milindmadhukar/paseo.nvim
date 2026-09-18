@@ -1,0 +1,179 @@
+*paseo.txt*    Review every hunk by hand; ask an agent when one is opaque
+
+                                                                       *paseo*
+==============================================================================
+CONTENTS                                                      *paseo-contents*
+
+  1. Introduction ............................... |paseo-introduction|
+  2. Requirements ............................... |paseo-requirements|
+  3. Setup ...................................... |paseo-setup|
+  4. Configuration .............................. |paseo-configuration|
+  5. Commands ................................... |paseo-commands|
+  6. Lua API .................................... |paseo-api|
+  7. Workspaces ................................. |paseo-workspaces|
+
+==============================================================================
+1. INTRODUCTION                                           *paseo-introduction*
+
+paseo.nvim makes reviewing your own diff the path of least resistance, and
+hands the confusing parts to an agent without leaving Neovim.
+
+It is built around a `workspace`: one named unit of work spanning N git
+worktrees, plus the untracked context they need. A worktree is per-repo; a
+workspace is not, which is what lets a single unit of work span several repos
+under a parent directory that is not itself a git repository.
+
+Agents run on Paseo <https://github.com/getpaseo/paseo>, which abstracts
+claude / codex / opencode.
+
+==============================================================================
+2. REQUIREMENTS                                           *paseo-requirements*
+
+Hard:
+  - Neovim 0.10+
+  - `git`
+  - gitsigns.nvim, telescope.nvim
+
+Optional, for the Paseo backend:
+  - the `paseo` daemon, running
+  - `bun`, or node >= 22, for the sidecar
+
+Run `:checkhealth paseo` to see what is present. Missing optional pieces
+degrade the plugin to the `local` backend; they do not break it.
+
+==============================================================================
+3. SETUP                                                         *paseo-setup*
+
+>lua
+    require("paseo").setup {}
+<
+`setup()` is required. It merges configuration, registers |:Paseo|, and
+installs a DirChanged hook that drops the resolved-repo cache.
+
+==============================================================================
+4. CONFIGURATION                                         *paseo-configuration*
+
+Defaults: >lua
+    require("paseo").setup {
+      backend = "paseo",
+
+      paseo = {
+        url = "ws://127.0.0.1:6767/ws",
+        health_url = "http://127.0.0.1:6767/api/health",
+        cli = "paseo",
+      },
+
+      workspaces = {
+        dir = ".workspaces",
+      },
+
+      review = {
+        context = 0,
+      },
+    }
+<
+                                                        *paseo-config.backend*
+backend                                            string, default `"paseo"`
+
+    `"paseo"` runs agents through the Paseo daemon. `"local"` runs them in a
+    floaterm terminal and pastes prompts with `nvim_chan_send`. Paseo is the
+    default and gets every feature.
+
+                                                      *paseo-config.paseo.cli*
+paseo.cli                                          string, default `"paseo"`
+
+    Used for one-shot writes only. The CLI boots Electron per invocation and
+    costs roughly 2.4 seconds, so no interactive code path may call it.
+
+                                                 *paseo-config.workspaces.dir*
+workspaces.dir                              string, default `".workspaces"`
+
+    Where assembled worktrees live, relative to a project root. Changing this
+    is the single knob that moves them out of the project tree. See
+    |paseo-workspaces|.
+
+                                                 *paseo-config.review.context*
+review.context                                          integer, default `0`
+
+    Context lines asked of `git diff` when building the hunk quickfix list.
+    Keep it at 0: a hunk header's line numbers only delimit the hunk itself at
+    `-U0`, and a delete hunk's quickfix entry has to land on exactly the line
+    `gitsigns.stage_hunk()` acts on.
+
+==============================================================================
+5. COMMANDS                                                   *paseo-commands*
+
+                                                                      *:Paseo*
+:Paseo [subcommand]
+
+    Without an argument, equivalent to `:Paseo repos`.
+
+:Paseo repos                                                  *:Paseo-repos*
+
+    List the repos in the current unit of work: the member worktrees of the
+    containing workspace, or the single repo containing the cwd.
+
+:Paseo health                                                *:Paseo-health*
+
+    Shorthand for `:checkhealth paseo`.
+
+==============================================================================
+6. LUA API                                                         *paseo-api*
+
+                                                            *paseo.repos.list*
+require("paseo.repos").list({opts})                       -> |paseo.Repo|[]
+
+    Every repo in the unit of work containing `opts.path` (default: the cwd).
+    ALWAYS a list, even at length one — every caller iterates it, so widening
+    a workspace from one member to six changes this function and nothing else.
+    Possibly empty; never nil.
+
+                                                         *paseo.repos.resolve*
+require("paseo.repos").resolve({path})             -> |paseo.Repo| or nil
+
+    The repository containing `path`, or nil. Results are cached per directory.
+
+                                                         *paseo.repos.current*
+require("paseo.repos").current({bufnr})            -> |paseo.Repo| or nil
+
+    The repository owning a buffer.
+
+                                                        *paseo.repos.relative*
+require("paseo.repos").relative({repo}, {path})               -> string
+
+    `path` relative to `repo.worktree`, or unchanged if it lies outside it.
+
+                                                      *paseo.repos.invalidate*
+require("paseo.repos").invalidate()
+
+    Drop the resolved-path cache. Called automatically on `DirChanged`; call it
+    by hand after creating or removing a worktree under the current tree.
+
+                                                                  *paseo.Repo*
+A repo is: >lua
+    {
+      name     = "clm_api",                     -- which repo this is
+      worktree = "/home/you/Code/openfin/clm_api",
+      gitdir   = "/home/you/Code/openfin/clm_api/.git",
+    }
+<
+`name` comes from the common git dir, not the worktree's basename. A linked
+worktree is named after the workspace ("otp-rate-limit"); what a picker row
+needs to say is which repo it is.
+
+`gitdir`, conversely, is `<repo>/.git/worktrees/<name>` for a linked worktree
+rather than the common dir. That is also deliberate: it is per-worktree, which
+is what identifies the member.
+
+==============================================================================
+7. WORKSPACES                                               *paseo-workspaces*
+
+A workspace is a directory: >
+    <project>/<workspaces.dir>/<name>/
+<
+Membership is detected from the filesystem, not from a registry. Either that
+directory is itself a git worktree — a single-repo project — or its immediate
+children are, one per member repo. Nothing has to have created it for
+detection to work.
+
+`vim:tw=78:ts=8:ft=help:norl:`
