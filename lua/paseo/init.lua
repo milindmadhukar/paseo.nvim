@@ -95,19 +95,55 @@ commands.ws = {
     if sub == "init" then
       local root = args[2] and vim.fn.fnamemodify(vim.fn.expand(args[2]), ":p")
         or assert(vim.uv.cwd())
+      root = root:gsub("/+$", "")
+
+      local path = workspace.manifest.path(root)
+      local existing = vim.uv.fs_stat(path)
+
       local m, notes = workspace.discover(root)
       if not m then
         return vim.notify("paseo: " .. tostring(notes), vim.log.levels.ERROR)
       end
-      local rendered = workspace.manifest.render(m, notes)
-      -- Shown before it is written: the comments are the whole value of the
-      -- file, and they are what you have to check.
+
+      -- The directory has to exist BEFORE the buffer is named, or `:w` fails
+      -- with E212 "Can't open file for writing: no such file or directory" --
+      -- which reads like a permissions problem rather than a missing parent.
+      -- Creating it is harmless even if you never write the file.
+      vim.fn.mkdir(vim.fs.dirname(path), "p")
+
+      -- A buffer may already be sitting on this path -- a second `init`, or the
+      -- file simply being open. Reuse it rather than failing on a duplicate
+      -- name.
+      local buf = vim.fn.bufnr(path)
       vim.cmd "tabnew"
-      vim.api.nvim_buf_set_lines(0, 0, -1, false, vim.split(rendered, "\n"))
-      vim.bo.filetype = "toml"
-      vim.api.nvim_buf_set_name(0, workspace.manifest.path(root))
-      vim.bo.buftype = ""
-      vim.notify("paseo: review this, then :w to accept it", vim.log.levels.INFO)
+      if buf ~= -1 then
+        vim.api.nvim_win_set_buf(0, buf)
+      else
+        buf = vim.api.nvim_get_current_buf()
+        vim.api.nvim_buf_set_name(buf, path)
+      end
+
+      vim.api.nvim_buf_set_lines(
+        buf,
+        0,
+        -1,
+        false,
+        vim.split(workspace.manifest.render(m, notes), "\n")
+      )
+      vim.bo[buf].filetype = "toml"
+
+      -- Shown before it is written, never written behind your back: the
+      -- comments are the whole value of the file and they are what you have to
+      -- check -- which base branch, which repo is opt-in, which shared siblings
+      -- to prune.
+      vim.notify(
+        existing
+            and ("paseo: %s already exists -- this REPLACES it. Review, then :w"):format(
+              vim.fn.fnamemodify(path, ":~")
+            )
+          or "paseo: review this, then :w to accept it",
+        existing and vim.log.levels.WARN or vim.log.levels.INFO
+      )
       return
     end
 
