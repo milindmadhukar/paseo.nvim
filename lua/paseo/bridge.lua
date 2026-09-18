@@ -203,6 +203,8 @@ function M.request(op, args, callback)
   local id = state.next_id
   state.pending[id] = callback
 
+  -- `id` and `op` are set LAST and therefore win. Nothing in `args` may use
+  -- those names; an agent is passed as `agentId` for exactly this reason.
   local payload = vim.tbl_extend("force", args or {}, { id = id, op = op })
   local ok, err = pcall(function()
     state.handle:write(vim.json.encode(payload) .. "\n")

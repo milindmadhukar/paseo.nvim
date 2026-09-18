@@ -152,9 +152,16 @@ const ops: Record<string, (req: Request) => Promise<unknown>> = {
     return { id: agent.id, created: true, provider };
   },
 
-  /** Fire and forget. Resolves when the daemon accepts the prompt. */
+  /**
+   * Fire and forget. Resolves when the daemon accepts the prompt.
+   *
+   * `agentId`, never `id`: `id` is the protocol's request-correlation field and
+   * the Lua client sets it last, so an agent passed as `id` is silently
+   * replaced by the request number. The daemon then prefix-matched "4" against
+   * every agent whose id starts with 4 and rejected it as ambiguous.
+   */
   async "agent.send"(req) {
-    const agent = connected().agents.ref(String(need(req.id, "id")));
+    const agent = connected().agents.ref(String(need(req.agentId, "agentId")));
     await agent.send(String(need(req.prompt, "prompt")));
     return { sent: true };
   },
