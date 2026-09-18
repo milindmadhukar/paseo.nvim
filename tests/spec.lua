@@ -420,6 +420,27 @@ local function test_bridge()
     found ~= nil or vim.uv.fs_stat(vim.fn.getcwd() .. "/bin/paseo-bridge.ts") ~= nil
   )
   truthy("bridge: not running before it is started", not bridge.running())
+
+  -- The regression: `id` is the request-correlation field and bridge.request
+  -- sets it LAST, so anything in args called `id` is silently replaced by the
+  -- request number. An agent passed that way reached the daemon as "4" and was
+  -- rejected as an ambiguous prefix across three agents.
+  local sidecar = io.open(vim.fn.getcwd() .. "/bin/paseo-bridge.ts", "r")
+  if sidecar then
+    local source = sidecar:read "*a"
+    sidecar:close()
+    truthy(
+      "bridge: no op takes its agent under the reserved key `id`",
+      source:find 'need%(req%.id, "id"%)' == nil
+    )
+  end
+
+  local explain = io.open(vim.fn.getcwd() .. "/lua/paseo/explain.lua", "r")
+  if explain then
+    local source = explain:read "*a"
+    explain:close()
+    truthy("bridge: explain sends `agentId`", source:find("agentId = agent_id", 1, true) ~= nil)
+  end
 end
 
 function M.run()

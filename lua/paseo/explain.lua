@@ -82,7 +82,11 @@ local function ask_with(location, prompt, header)
 
       stream_into_answer(agent_id, header)
       bridge.request("agent.send", {
-        id = agent_id,
+        -- `agentId`, not `id`: `id` is the request-correlation field, which
+        -- `bridge.request` sets LAST and therefore wins. Passed as `id` the
+        -- agent became the request number and the daemon prefix-matched it
+        -- against three different agents.
+        agentId = agent_id,
         prompt = table.concat({ prompt, "", ref.render(location) }, "\n"),
       }, function(send_err)
         if send_err then
@@ -121,9 +125,21 @@ function M.ask(kind)
   end)
 end
 
----Wire the sidecar's streaming events into the answer window. Called once from
----`setup()`.
+---@type boolean
+local attached = false
+
+---Wire the sidecar's streaming events into the answer window.
+---
+---IDEMPOTENT, and it has to be: `setup()` calls it, and anything else that
+---calls it again doubles every listener. Streamed text then appends twice and
+---a reply delivered as "READ" + "Y" renders as "READREADYY" -- which reads
+---like a corrupt stream rather than a duplicated handler.
 function M.attach()
+  if attached then
+    return
+  end
+  attached = true
+
   bridge.on("text", function(payload)
     answer.append(payload.text or "")
   end)
