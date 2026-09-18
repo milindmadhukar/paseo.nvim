@@ -225,10 +225,16 @@ unchanged (`wss://` + password), so this extends to a VPS later for free.
 
 **Finding it.** 6767 is the daemon's default port, not a constant. Candidates
 are tried in order — `paseo.url`, `$PASEO_ENDPOINT`, `daemon.listen` from
-`$PASEO_HOME/config.json`, then `127.0.0.1:6767` — each probed with `GET
-/api/status`. A `401` counts as *reachable*: the daemon is there and wants a
-password, and treating it as a miss is how you report "no daemon" about a
-running one. `:checkhealth paseo` prints every candidate and its answer.
+`$PASEO_HOME/config.json`, and `127.0.0.1:6767` *only* when no config named a
+port. Each is probed with `GET /api/status`. A `401` counts as *reachable*: the
+daemon is there and wants a password, and treating it as a miss is how you
+report "no daemon" about a running one.
+
+**Starting it.** If nothing answers, the plugin runs `paseo daemon start` and
+waits for it to come up — so opening a chat works from cold. It only does this
+when nothing answered: against a running daemon that command exits 1 and prints
+a wall of logs. Set `autostart = false` to opt out. `:checkhealth paseo` prints
+every candidate and its answer.
 
 **The `paseo` CLI is never invoked** — but not because it is broken.
 `/usr/bin/paseo` is a wrapper that runs the Electron binary with

@@ -386,7 +386,9 @@ local function test_daemon()
   truthy("daemon: reads daemon.listen from config.json", vim.tbl_contains(sources, "daemon.listen"))
   local listened = daemon.candidates()[1]
   eq("daemon: uses the port config.json names, not 6767", listened and listened.port, 7777)
-  eq("daemon: the default is always a fallback", sources[#sources], "default")
+  -- NOT "the default is always last": it is only there when nothing else
+  -- named a port. Asserting otherwise was asserting the bug.
+  eq("daemon: a named port is the last word", sources[#sources], "daemon.listen")
 
   write_config "unix:/run/paseo.sock"
   config.setup { paseo = { home = tmp } }
@@ -401,6 +403,39 @@ local function test_daemon()
   config.setup { paseo = { url = "ws://127.0.0.1:1234/ws" } }
   local first = daemon.candidates()[1]
   eq("daemon: an explicit url wins outright", first and first.source, "config")
+
+  -- The hardcoded default is a LAST RESORT. Falling through to 6767 when the
+  -- daemon's own config named a different port meant silently connecting to a
+  -- DIFFERENT daemon -- and it made autostart unreachable, because there was
+  -- always something answering.
+  write_config "127.0.0.1:6799"
+  config.setup { paseo = { home = tmp } }
+  local sources = vim.tbl_map(function(e)
+    return e.source
+  end, daemon.candidates())
+  truthy(
+    "daemon: a configured port suppresses the 6767 fallback",
+    not vim.tbl_contains(sources, "default"),
+    vim.inspect(sources)
+  )
+
+  -- ...but with no config.json at all, the default is the only thing there is.
+  os.remove(tmp .. "/config.json")
+  config.setup { paseo = { home = tmp } }
+  sources = vim.tbl_map(function(e)
+    return e.source
+  end, daemon.candidates())
+  eq("daemon: with no config.json the default is used", sources, { "default" })
+
+  -- `paseo` must be resolved, not trusted: the desktop binary opens a window.
+  local cli = daemon.cli()
+  if cli then
+    truthy(
+      "daemon: cli() only accepts the headless wrapper",
+      vim.fn.resolve(cli):match "resources/bin/paseo$" ~= nil,
+      vim.fn.resolve(cli)
+    )
+  end
 
   config.setup {}
 end

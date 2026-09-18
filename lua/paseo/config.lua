@@ -21,6 +21,11 @@ local M = {}
 ---@field home string?    `$PASEO_HOME`; defaults to the env var, then ~/.paseo.
 ---@field password string? Daemon password, if it has one. Left unset for a
 ---                        local daemon, which does not.
+---@field autostart boolean? Start the daemon when nothing answers. Default
+---                          true: the alternative is every agent action
+---                          failing until you go and start it by hand, which
+---                          is precisely the trip out of Neovim this plugin
+---                          exists to remove.
 ---@field provider string? `provider/model` for agents this plugin creates.
 ---                        Unset means "ask the daemon what is ready" -- which
 ---                        is the only answer that survives a different host.

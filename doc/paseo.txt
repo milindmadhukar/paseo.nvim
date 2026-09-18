@@ -101,6 +101,18 @@ paseo.provider                                            string, unset
     `"claude/claude-sonnet-5"`. Unset means "ask the daemon what is ready",
     which is the only answer that survives moving to another host.
 
+                                                *paseo-config.paseo.autostart*
+paseo.autostart                                       boolean, default true
+
+    Start the daemon when nothing answers. The alternative is every agent
+    action failing until you go and start it by hand -- which is precisely the
+    trip out of Neovim this plugin exists to remove.
+
+    It only ever runs `paseo daemon start` when NOTHING answered: against a
+    running daemon that command exits 1 and prints a wall of daemon logs, so
+    "start it just in case" is not an option. It also refuses to run the
+    desktop binary; see |paseo-no-cli|.
+
                                                  *paseo-config.paseo.password*
 paseo.password                                            string, unset
 
@@ -137,7 +149,14 @@ Daemon discovery ~
       2. `$PASEO_ENDPOINT`
       3. `daemon.listen` in `$PASEO_HOME/config.json` -- the daemon's own
          answer
-      4. `127.0.0.1:6767`
+      4. `127.0.0.1:6767`, ONLY when no config.json named a port
+
+    That last restriction matters. Falling through to 6767 regardless meant a
+    config.json naming 6799, with nothing listening there, silently connected
+    to whatever was on 6767 -- a different daemon, with different agents,
+    reporting success.
+
+    If nothing answers, |paseo-config.paseo.autostart| starts one.
 
     Each is probed with `GET /api/status`. A `401` counts as REACHABLE: the
     daemon is there and wants a password. Treating it as a miss is how you
