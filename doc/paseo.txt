@@ -11,6 +11,7 @@ CONTENTS                                                      *paseo-contents*
   5. Commands ................................... |paseo-commands|
   6. Lua API .................................... |paseo-api|
   7. Workspaces ................................. |paseo-workspaces|
+  8. Git ........................................ |paseo-git|
 
 ==============================================================================
 1. INTRODUCTION                                           *paseo-introduction*
@@ -58,8 +59,7 @@ Defaults: >lua
       backend = "paseo",
 
       paseo = {
-        url = "ws://127.0.0.1:6767/ws",
-        health_url = "http://127.0.0.1:6767/api/health",
+        -- url and home are absent by default: absent means "discover it".
         cli = "paseo",
       },
 
@@ -79,11 +79,47 @@ backend                                            string, default `"paseo"`
     floaterm terminal and pastes prompts with `nvim_chan_send`. Paseo is the
     default and gets every feature.
 
+                                                      *paseo-config.paseo.url*
+paseo.url                                                 string, unset
+
+    Daemon WebSocket endpoint, e.g. `"ws://127.0.0.1:6767/ws"`. Leave it unset
+    and the endpoint is discovered; setting it pins the endpoint and skips
+    discovery. See |paseo-daemon-discovery|.
+
+                                                     *paseo-config.paseo.home*
+paseo.home                                                string, unset
+
+    Overrides `$PASEO_HOME`, which itself defaults to `~/.paseo`. Only affects
+    where `config.json` is read from during discovery.
+
                                                       *paseo-config.paseo.cli*
 paseo.cli                                          string, default `"paseo"`
 
     Used for one-shot writes only. The CLI boots Electron per invocation and
     costs roughly 2.4 seconds, so no interactive code path may call it.
+
+                                                     *paseo-daemon-discovery*
+Daemon discovery ~
+
+    6767 is the daemon's default port, not a constant, so it is resolved
+    rather than assumed. Candidates are tried in order and the first that
+    answers wins:
+
+      1. `paseo.url` from |paseo-setup|
+      2. `$PASEO_ENDPOINT`
+      3. `daemon.listen` in `$PASEO_HOME/config.json` -- the daemon's own
+         answer
+      4. `127.0.0.1:6767`
+
+    Each is probed with `GET /api/status`. A `401` counts as REACHABLE: the
+    daemon is there and wants a password. Treating it as a miss is how you
+    end up reporting "no daemon" about a daemon that is running.
+
+    Only TCP listens can be reached. A `unix:` or `pipe:` listen is a
+    different transport and is skipped rather than turned into a URL that
+    cannot connect.
+
+    `:checkhealth paseo` prints every candidate and what it answered.
 
                                                  *paseo-config.workspaces.dir*
 workspaces.dir                              string, default `".workspaces"`
@@ -175,5 +211,34 @@ Membership is detected from the filesystem, not from a registry. Either that
 directory is itself a git worktree — a single-repo project — or its immediate
 children are, one per member repo. Nothing has to have created it for
 detection to work.
+
+==============================================================================
+8. GIT                                                             *paseo-git*
+
+`paseo.git` is the only module that shells out to git. Two notes matter to
+anyone reading hunks out of it.
+
+                                                             *paseo-git-hunks*
+require("paseo.git").hunks({repo}, {changes})            -> |paseo.Hunk|[]
+
+    Every hunk, as quickfix-ready positions. A hunk's `lnum` is the line
+    `gitsigns.stage_hunk()` acts on. For a deletion, `@@ -a,b +c,0 @@` gives
+    `c` -- NOT `c + 1` -- because stage_hunk() acts on `added.start`, and for
+    a pure deletion that is the line ABOVE the removed block. A deletion at
+    the top of a file yields `c = 0` and clamps to 1.
+
+    Untracked files never reach `git diff`; each becomes one synthetic
+    `kind = "new"` entry.
+
+                                                             *paseo-git-stage*
+require("paseo.git").stage({hunk}, {callback})
+
+    Stages one hunk, routing around the case gitsigns structurally cannot do.
+
+    A WHOLE-FILE DELETION (`hunk.file_deleted`) has no file on disk, so no
+    buffer can open on it and gitsigns can never attach -- staging through the
+    hunk UI silently does nothing. Those, and untracked files, go through
+    `git add` instead, which records a removal correctly. Everything else goes
+    to `gitsigns.stage_hunk()`.
 
 `vim:tw=78:ts=8:ft=help:norl:`

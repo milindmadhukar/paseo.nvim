@@ -13,8 +13,12 @@ local M = {}
 ---@field review paseo.Config.Review
 
 ---@class paseo.Config.Paseo
----@field url string      Daemon WebSocket endpoint the sidecar connects to.
----@field health_url string  Plain HTTP endpoint, used only by :checkhealth.
+---@field url string?     Daemon WebSocket endpoint. Leave unset to DISCOVER
+---                       it -- `daemon.listen` in the daemon's own config.json
+---                       is the authoritative answer and 6767 is only a
+---                       default. Setting this wins outright. See
+---                       `paseo.daemon`.
+---@field home string?    `$PASEO_HOME`; defaults to the env var, then ~/.paseo.
 ---@field cli string      Path to the `paseo` binary. One-shot writes only --
 ---                       it boots Electron per call and costs ~2.4s, so no
 ---                       interactive path may touch it.
@@ -34,8 +38,9 @@ local defaults = {
   backend = "paseo",
 
   paseo = {
-    url = "ws://127.0.0.1:6767/ws",
-    health_url = "http://127.0.0.1:6767/api/health",
+    -- url and home are deliberately absent, not nil-valued: absent means
+    -- "discover it", and a discovered endpoint is right on a host that moved
+    -- the daemon. Set `url` to pin it.
     cli = "paseo",
   },
 
