@@ -29,7 +29,7 @@ review loop is being built now. See [Roadmap](#roadmap).
 | ✅ | `git.lua` — status/diff parsing and hunk staging |
 | ✅ | changed-files picker, hunk quickfix, diff panel |
 | ✅ | 48-assertion test suite (`tests/run.sh`) |
-| 🔨 | explain bridge + Paseo sidecar |
+| ✅ | explain bridge + Paseo sidecar (`bin/paseo-bridge.ts`) |
 | ⬜ | workspace assembly (`ws`) |
 | ⬜ | workspace picker with live agent status |
 
@@ -87,11 +87,15 @@ require("paseo").setup {
 | `:Paseo hunks` | Every hunk in the unit of work, as a quickfix list |
 | `:Paseo stage` | Stage the hunk the quickfix list is on, then advance |
 | `:Paseo review [unified]` | Diff panel, one tab per repo |
+| `:Paseo explain [kind]` | Explain the hunk/selection/file; reply streams into a split |
+| `:Paseo ask [kind]` | Ask a free-form question about the same |
+| `:Paseo agent [stop]` | Sidecar and agent status |
 | `:Paseo repos` | The repos in the current unit of work |
 | `:Paseo health` | `:checkhealth paseo` |
 
 Default keys, all under `<leader>a`: `aa` changes · `aq` hunks · `as` stage ·
-`ar` review · `au` review unified · `aR` repos · `aH` health.
+`ar` review · `au` review unified · `ae` explain (also visual) · `ak` ask (also
+visual) · `af` explain file · `at` agents · `aR` repos · `aH` health.
 
 ## Tests
 
@@ -242,6 +246,16 @@ panels. They have to be serialised on the callback.
 
 **The public hunk type omits `.vend`.** Recompute it as
 `added.start + max(added.count - 1, 0)` or pure-delete hunks are never found.
+
+**lazy.nvim resolves a plugin's Lua modules through its own loader**, so
+`require` works long before the plugin directory reaches the runtimepath.
+Anything that needs a *file* out of the plugin — the sidecar script here — has
+to derive its path from the module's own `debug.getinfo` source, not from
+`nvim_get_runtime_file`.
+
+**`a and nil or b` does not work in Lua.** `true and nil` is `nil`, which falls
+through to `or b`. Written as `message.ok and nil or message.error`, every
+*successful* bridge reply came back as an error.
 
 **`git status --porcelain=v2 -z` rename records carry an extra field.** A `2 `
 record is followed by a NUL-separated `origPath`; a naive NUL split desyncs
