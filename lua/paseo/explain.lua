@@ -1,21 +1,12 @@
---- Asking about a hunk.
+--- Pointing the chat at something.
 ---
---- The branch you take when a hunk is opaque, one keystroke from the hunk you
---- are standing on. If it costs more than that, it does not get taken -- which
---- is the whole reason this lives in the same plugin as the review surfaces
---- rather than in a separate agent-chat plugin.
+--- Thin on purpose. The chat window owns the conversation; this only decides
+--- WHAT gets attached and whether you are asked to type a question first.
 
-local bridge = require "paseo.bridge"
-local config = require "paseo.config"
+local chat = require "paseo.ui.chat"
 local ref = require "paseo.ref"
-local answer = require "paseo.answer"
 
 local M = {}
-
----Per-directory agent ids, so a second question reuses the first one's session
----rather than starting a cold agent that has to re-read the repo.
----@type table<string, string>
-local agents = {}
 
 ---The rubric.
 ---
@@ -23,7 +14,7 @@ local agents = {}
 ---nod along to; asking what to push back on forces a posture where you argue
 ---with the answer. That is what actually addresses not being able to explain
 ---your own code.
-local RUBRIC = table.concat({
+M.RUBRIC = table.concat({
   "Explain this change. Be specific and brief.",
   "",
   "1. What changed, in one or two sentences.",
@@ -32,141 +23,69 @@ local RUBRIC = table.concat({
   "4. What I should push back on: what is unproven, riskier than it looks, or worth arguing about.",
 }, "\n")
 
----The agent for a directory.
----
----Keyed on `ref.root`, not on a repo: a reference may have no repo at all, and
----an agent only ever needed a directory to work in.
----@param root string
----@param label string
----@param callback fun(err: string|nil, agent_id: string|nil)
-local function agent_for(root, label, callback)
-  local existing = agents[root]
-  if existing then
-    return callback(nil, existing)
+---@param kind? "cursor"|"visual"|"hunk"|"file"
+---@return paseo.Ref|nil
+local function locate(kind)
+  local location = ref.get(kind)
+  if not location then
+    vim.notify("paseo: nothing here to point at", vim.log.levels.WARN)
   end
-
-  bridge.request("agent.ensure", {
-    cwd = root,
-    provider = config.get().paseo.provider,
-    title = "paseo.nvim · " .. label,
-  }, function(err, result)
-    if err then
-      return callback(err, nil)
-    end
-    agents[root] = result.id
-    callback(nil, result.id)
-  end)
+  return location
 end
 
----@param agent_id string
----@param header string
-local function stream_into_answer(agent_id, header)
-  answer.begin(header)
-  bridge.request("timeline.subscribe", { agentId = agent_id }, function(err)
-    if err then
-      answer.append("\n\n_could not stream the reply: " .. err .. "_")
-    end
-  end)
-end
-
----Send `prompt`, with `location` as context, and stream the reply into a split.
----@param location paseo.Ref
----@param prompt string
----@param header string
-local function ask_with(location, prompt, header)
-  bridge.ensure(function(err)
-    if err then
-      vim.notify("paseo: " .. err, vim.log.levels.ERROR)
-      return
-    end
-
-    local label = location.repo and location.repo.name or vim.fs.basename(location.root)
-    agent_for(location.root, label, function(agent_err, agent_id)
-      if agent_err then
-        vim.notify("paseo: " .. agent_err, vim.log.levels.ERROR)
-        return
-      end
-
-      stream_into_answer(agent_id, header)
-      bridge.request("agent.send", {
-        -- `agentId`, not `id`: `id` is the request-correlation field, which
-        -- `bridge.request` sets LAST and therefore wins. Passed as `id` the
-        -- agent became the request number and the daemon prefix-matched it
-        -- against three different agents.
-        agentId = agent_id,
-        prompt = table.concat({ prompt, "", ref.render(location) }, "\n"),
-      }, function(send_err)
-        if send_err then
-          answer.append("\n\n_send failed: " .. send_err .. "_")
-        end
-      end)
-    end)
-  end)
-end
-
----Explain the hunk, selection or line under the cursor.
+---Explain the hunk, selection or file, using the rubric.
 ---@param kind? "cursor"|"visual"|"hunk"|"file"
 function M.explain(kind)
-  local location = ref.get(kind)
+  local location = locate(kind)
   if not location then
-    vim.notify("paseo: nothing to explain here", vim.log.levels.WARN)
     return
   end
-  ask_with(location, RUBRIC, "Explain " .. ref.format(location))
+  chat.ask(M.RUBRIC, { root = location.root, context = ref.render(location) })
 end
 
----Ask a free-form question about the same thing.
+---Attach the hunk, selection or file and let you type the question.
+---
+---This is the common case and it deliberately does NOT prompt through
+---`vim.ui.input`: a one-line input box is the wrong shape for a question you
+---want to think about, and it throws away your keymaps and completion. The
+---composer is a real buffer.
 ---@param kind? "cursor"|"visual"|"hunk"|"file"
 function M.ask(kind)
-  local location = ref.get(kind)
+  local location = locate(kind)
   if not location then
-    vim.notify("paseo: nothing to ask about here", vim.log.levels.WARN)
     return
   end
-
-  vim.ui.input({ prompt = "Ask about " .. ref.format(location) .. ": " }, function(question)
-    if not question or question == "" then
-      return
-    end
-    ask_with(location, question, question)
-  end)
+  chat.attach(ref.render(location), { root = location.root })
 end
 
----@type boolean
-local attached = false
-
----Wire the sidecar's streaming events into the answer window.
----
----IDEMPOTENT, and it has to be: `setup()` calls it, and anything else that
----calls it again doubles every listener. Streamed text then appends twice and
----a reply delivered as "READ" + "Y" renders as "READREADYY" -- which reads
----like a corrupt stream rather than a duplicated handler.
-function M.attach()
-  if attached then
+---Attach the whole quickfix list -- every hunk under review at once.
+function M.quickfix()
+  local items = vim.fn.getqflist()
+  if #items == 0 then
+    vim.notify("paseo: the quickfix list is empty", vim.log.levels.WARN)
     return
   end
-  attached = true
 
-  bridge.on("text", function(payload)
-    answer.append(payload.text or "")
-  end)
+  local qf = require "paseo.qf"
+  local lines, root = { "The changes currently under review:" }, nil
+  for index = 1, #items do
+    local hunk = qf.hunk(index)
+    if hunk then
+      root = root or hunk.repo.worktree
+      lines[#lines + 1] = ("- %s:%d  +%d -%d"):format(
+        hunk.path,
+        hunk.lnum,
+        hunk.added,
+        hunk.removed
+      )
+    end
+  end
 
-  -- Turn completion comes from `turn_*`, never from a status transition to
-  -- idle -- the SDK is explicit about that, and idle is reached for reasons
-  -- other than "this turn finished".
-  bridge.on("turn", function(payload)
-    answer.finish(payload.outcome == "turn_completed" and "done" or tostring(payload.outcome))
-  end)
+  chat.attach(table.concat(lines, "\n"), { root = root })
+end
 
-  bridge.on("stream_error", function(payload)
-    answer.append("\n\n_stream error: " .. tostring(payload.error) .. "_")
-  end)
-
-  -- Reconnected, and nothing is replayed. Say so rather than letting the window
-  -- look like the agent simply stopped talking.
-  bridge.on("restored", function()
-    answer.append "\n\n_(reconnected — any output during the gap was not replayed)_\n"
-  end)
+function M.attach()
+  chat.attach_events()
 end
 
 return M

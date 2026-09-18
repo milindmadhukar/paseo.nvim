@@ -435,11 +435,16 @@ local function test_bridge()
     )
   end
 
-  local explain = io.open(vim.fn.getcwd() .. "/lua/paseo/explain.lua", "r")
-  if explain then
-    local source = explain:read "*a"
-    explain:close()
-    truthy("bridge: explain sends `agentId`", source:find("agentId = agent_id", 1, true) ~= nil)
+  -- The sending code moved from explain.lua into the chat window when the
+  -- chat became the primary surface; the rule did not move with it by itself.
+  local chat = io.open(vim.fn.getcwd() .. "/lua/paseo/ui/chat.lua", "r")
+  if chat then
+    local source = chat:read "*a"
+    chat:close()
+    truthy(
+      "bridge: the chat sends `agentId`, not `id`",
+      source:find("agentId = chat.agent_id", 1, true) ~= nil
+    )
   end
 end
 
