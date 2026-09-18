@@ -23,7 +23,10 @@ local M = {}
 ---@field streaming boolean
 ---@field pending string[]   Context blocks queued for the next send.
 
----@type table<string, paseo.Chat>  root -> chat
+---Chats are keyed by AGENT, falling back to the directory until the agent is
+---known. A workspace can hold several sessions, so keying on the directory
+---alone meant the second session took over the first one's window.
+---@type table<string, paseo.Chat>
 local chats = {}
 
 ---@type paseo.Chat|nil
@@ -38,7 +41,7 @@ local function set_winbar(chat)
   if not (chat.win_conversation and vim.api.nvim_win_is_valid(chat.win_conversation)) then
     return
   end
-  local where = vim.fn.fnamemodify(chat.root, ":~")
+  local where = chat.title or vim.fn.fnamemodify(chat.root, ":~")
   local who = chat.provider or "…"
   local state = chat.streaming and "  ●" or ""
   vim.wo[chat.win_conversation].winbar = ("  %s   %s%s"):format(who, where, state)
@@ -258,8 +261,8 @@ end
 
 -- --------------------------------------------------------------------- API
 
----Open (or focus) the chat for a directory.
----@param opts? { root?: string, focus?: boolean }
+---Open (or focus) a chat.
+---@param opts? { root?: string, focus?: boolean, agent_id?: string, title?: string }
 ---@param callback? fun(chat: paseo.Chat|nil, err: string|nil)
 function M.open(opts, callback)
   opts = opts or {}
@@ -271,10 +274,12 @@ function M.open(opts, callback)
     root = ref and ref.root or assert(vim.uv.cwd())
   end
 
-  local chat = chats[root]
+  local key = opts.agent_id or root
+  local chat = chats[key]
   if not chat then
-    chat = { root = root, streaming = false, pending = {} }
-    chats[root] = chat
+    chat =
+      { root = root, agent_id = opts.agent_id, title = opts.title, streaming = false, pending = {} }
+    chats[key] = chat
   end
   current = chat
 
@@ -310,6 +315,10 @@ function M.open(opts, callback)
 
       chat.agent_id = result.id
       chat.provider = result.provider
+      -- Re-key now that the agent is known, so a second session on the same
+      -- directory gets its own chat rather than replacing this one.
+      chats[root] = nil
+      chats[result.id] = chat
       vim.schedule(function()
         -- Replace the placeholder with the real conversation.
         vim.bo[chat.conversation].modifiable = true

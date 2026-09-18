@@ -239,9 +239,23 @@ commands.ws = {
 }
 
 commands.workspaces = {
-  desc = "Workspace picker, with a live agent status column",
+  desc = "Workspace picker: open, sessions, new, archive",
   run = function()
     require("paseo.pickers.workspaces").open()
+  end,
+}
+
+commands.wcreate = {
+  desc = "Create a workspace here",
+  run = function()
+    require("paseo.pickers.workspaces").create()
+  end,
+}
+
+commands.sessions = {
+  desc = "Sessions in the workspace containing this directory",
+  run = function()
+    require("paseo.pickers.sessions").here()
   end,
 }
 
