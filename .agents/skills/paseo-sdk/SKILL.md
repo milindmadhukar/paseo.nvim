@@ -75,9 +75,10 @@ const unsubscribe = agent.timeline.subscribe((update) => {
 await unsubscribe.ready;     // initial subscription acknowledged
 ```
 
-Render from the snapshot first, then apply updates. See
-`references/events.md` — epochs, cursors, reconnect recovery and directory
-subscriptions are the part that rots if you improvise it.
+Render from the snapshot first, then apply updates. Fetch
+<https://paseo.sh/docs/sdk/events.md> before writing any of it — epochs,
+cursors, reconnect recovery and directory subscriptions are the part that rots
+if you improvise it.
 
 ## Finding your way back
 
@@ -92,20 +93,34 @@ const page = await client.agents.list({ filter: { labels: { "my-app-role": "plan
 
 ## Where to read next
 
-Load only what the task needs.
+The SDK is under active development and these pages move. **Nothing upstream is
+vendored here — fetch the page when the task needs it**, one at a time:
 
-| File | When |
+```bash
+curl -sS https://paseo.sh/docs/sdk/events.md
+```
+
+| Page | When |
 |---|---|
-| `references/quickstart.md` | connecting, passwords, remote daemons |
-| `references/agents.md` | follow-ups, subagents, structured output, `commands()`, archive/detach |
-| `references/events.md` | **subscriptions, epochs, cursors, reconnect** — read before writing any live UI |
-| `references/workspaces.md` | reusing a directory, creating a worktree, terminals |
-| `references/providers.md` | discovering installed providers, models, modes, features |
-| `references/provider-options.md` | sandboxing and provider-native settings (codex / claude / opencode) |
-| `references/reference.md` | the full API surface: every method, option and handle property |
-| `references/recipes.md` | issue → agent, parallel reviewers, resident roles, cleanup |
-| `references/transport.md` | **endpoint discovery, measured latencies, why not the CLI** |
+| `sdk/quickstart.md` | connecting, passwords, remote daemons |
+| `sdk/agents.md` | follow-ups, subagents, structured output, `commands()`, archive/detach |
+| `sdk/events.md` | **subscriptions, epochs, cursors, reconnect** — read before writing any live UI |
+| `sdk/workspaces.md` | reusing a directory, creating a worktree, terminals |
+| `sdk/providers.md` | discovering installed providers, models, modes, features |
+| `sdk/provider-options.md` | sandboxing and provider-native settings (codex / claude / opencode) |
+| `sdk/reference.md` | the full API surface: every method, option and handle property (~22 KB — fetch last) |
+| `sdk/recipes.md` | issue → agent, parallel reviewers, resident roles, cleanup |
 
-Upstream docs: <https://paseo.sh/docs/sdk.md>. The current index of every Paseo
-doc page is <https://paseo.sh/llms.txt>; fetch it when a question falls outside
-the SDK.
+The overview page is <https://paseo.sh/docs/sdk.md>; the index of every Paseo
+doc page is <https://paseo.sh/llms.txt>, for questions outside the SDK.
+
+Two things do not come from paseo.sh:
+
+- `references/transport.md` — **endpoint discovery, measured latencies, why not
+  the CLI.** Ours, measured against a live daemon, not documented upstream.
+- `node_modules/@getpaseo/client/dist/*.d.ts` — the installed version's actual
+  types. The authority when a fetch fails, or when the docs describe a release
+  newer than the one this plugin has installed.
+
+The gotchas above were distilled from those pages against Paseo 0.7.2 on
+2026-09-18. If a fetched page contradicts one, the page wins.
