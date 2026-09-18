@@ -324,6 +324,38 @@ const ops: Record<string, (req: Request) => Promise<unknown>> = {
     return { unsubscribed: true };
   },
 
+  /**
+   * Register an assembled directory as an ordinary LOCAL workspace.
+   *
+   * THE SEAM. `ws` builds a composite directory -- N worktrees plus the
+   * untracked context they need -- and this hands it to the daemon as a plain
+   * local workspace. Paseo never learns it is looking at six worktrees; it sees
+   * a directory with agents in it. That is what makes a multi-repo project work
+   * at all, since Paseo's own worktree isolation requires a git repository and
+   * a project like ~/Code/openfin is a plain directory holding six of them.
+   *
+   * It lives here rather than in `ws` because the `paseo` CLI is the Electron
+   * desktop binary: every invocation opens a window on the user's desktop and
+   * writes startup logs to stdout, mixed into its own --json output.
+   *
+   * `open()` reuses the active workspace for that exact directory, so calling
+   * this twice does not litter the app with duplicates.
+   */
+  async "workspace.open"(req) {
+    const workspace = await connected().workspaces.open(String(need(req.cwd, "cwd")));
+    return {
+      id: workspace.id,
+      directory: (workspace as any).directory ?? null,
+      projectId: (workspace as any).projectId ?? null,
+    };
+  },
+
+  async "workspace.archive"(req) {
+    const workspace = connected().workspaces.ref(String(need(req.workspaceId, "workspaceId")));
+    const result = await workspace.archive();
+    return { archivedAt: (result as any)?.archivedAt ?? null };
+  },
+
   /** Archive an agent. Only ever our own -- see the label filter in ensure. */
   async "agent.archive"(req) {
     const agent = connected().agents.ref(String(need(req.agentId, "agentId")));

@@ -93,11 +93,27 @@ paseo.home                                                string, unset
     Overrides `$PASEO_HOME`, which itself defaults to `~/.paseo`. Only affects
     where `config.json` is read from during discovery.
 
-                                                      *paseo-config.paseo.cli*
-paseo.cli                                          string, default `"paseo"`
+                                                 *paseo-config.paseo.provider*
+paseo.provider                                            string, unset
 
-    Used for one-shot writes only. The CLI boots Electron per invocation and
-    costs roughly 2.4 seconds, so no interactive code path may call it.
+    `provider/model` for agents this plugin creates, e.g.
+    `"claude/claude-sonnet-5"`. Unset means "ask the daemon what is ready",
+    which is the only answer that survives moving to another host.
+
+                                                 *paseo-config.paseo.password*
+paseo.password                                            string, unset
+
+    Daemon password, if it has one. A local daemon does not.
+
+                                                              *paseo-no-cli*
+The `paseo` CLI is never invoked ~
+
+    `~/.local/bin/paseo` is a symlink to the Electron desktop binary. Every
+    invocation opens a window on your desktop, takes about 2.4 seconds, and
+    writes startup logs to stdout mixed into its own `--json` output. Nothing
+    in this plugin -- and nothing in `ws` -- shells out to it. The daemon is
+    reached over `ws://…/ws` through |paseo-bridge|, and `GET /api/status`
+    serves as a liveness probe.
 
                                                      *paseo-daemon-discovery*
 Daemon discovery ~

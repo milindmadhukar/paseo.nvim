@@ -10,6 +10,14 @@ local M = {}
 local start, ok, warn, err, info =
   vim.health.start, vim.health.ok, vim.health.warn, vim.health.error, vim.health.info
 
+---Run `<exe> --version`.
+---
+---Only ever called for `bun` and `node`. NOT for `paseo`: that binary is the
+---Electron desktop app, and running it opens a window.
+---Run `<exe> --version`.
+---
+---Only ever called for `bun` and `node`. NEVER for `paseo`: that binary is the
+---Electron desktop app, and running it opens a window.
 ---@param exe string
 ---@return string|nil version line
 local function version_of(exe)
@@ -60,14 +68,16 @@ local function check_paseo()
     info(('backend is "%s"; the Paseo checks below are informational'):format(cfg.backend))
   end
 
-  local cli = version_of(cfg.paseo.cli)
-  if cli then
-    ok(("`%s` -> %s"):format(cfg.paseo.cli, cli))
-    info "the CLI is for one-shot writes only (~2.4s/call); no interactive path uses it"
-  else
-    warn(
-      ("`%s` is not executable; one-shot writes and the CLI fallback are unavailable"):format(
-        cfg.paseo.cli
+  -- The CLI is LOOKED UP, never RUN.
+  --
+  -- `~/.local/bin/paseo` is a symlink to the Electron desktop binary, so
+  -- `paseo --version` OPENS A WINDOW on the user's desktop -- which this check
+  -- did, every single time it ran. Nothing in this plugin shells out to it any
+  -- more; the daemon is reached over its WebSocket.
+  if vim.fn.executable "paseo" == 1 then
+    info(
+      ("`paseo` is at %s -- the desktop app, never invoked from here"):format(
+        vim.fn.exepath "paseo"
       )
     )
   end
@@ -101,7 +111,7 @@ local function check_paseo()
   end
 
   if not found then
-    warn(("no daemon answered; try `%s daemon start`"):format(cfg.paseo.cli))
+    warn "no daemon answered; start the Paseo app, then re-run this check"
   end
 
   -- The sidecar's runtime. Bun is preferred (it is what the rest of the stack

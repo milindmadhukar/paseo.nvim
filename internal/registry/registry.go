@@ -43,11 +43,19 @@ type Repo struct {
 
 // Workspace is one assembled unit of work.
 type Workspace struct {
-	Name      string    `json:"name"`
-	Project   string    `json:"project"`
-	Root      string    `json:"root"`
-	Branch    string    `json:"branch"`
-	Repos     []Repo    `json:"repos"`
+	Name    string `json:"name"`
+	Project string `json:"project"`
+	Root    string `json:"root"`
+	Branch  string `json:"branch"`
+	Repos   []Repo `json:"repos"`
+	// PaseoID is filled in by paseo.nvim, not by ws.
+	//
+	// Registering the assembled directory with the daemon is THE SEAM that
+	// makes multi-repo work -- Paseo sees a plain local workspace and never
+	// learns it is six worktrees. But it happens over the daemon's WebSocket
+	// from the sidecar, never from here: the `paseo` CLI is the Electron
+	// desktop binary, so every invocation opens a window on the user's desktop
+	// and writes startup logs to stdout, mixed into its own --json output.
 	PaseoID   string    `json:"paseoWorkspaceId,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 }
