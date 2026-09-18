@@ -113,15 +113,28 @@ require("paseo").setup {
 | `:Paseo hunks` | Every hunk in the unit of work, as a quickfix list |
 | `:Paseo stage` | Stage the hunk the quickfix list is on, then advance |
 | `:Paseo review [unified]` | Diff panel, one tab per repo |
-| `:Paseo explain [kind]` | Explain the hunk/selection/file; reply streams into a split |
-| `:Paseo ask [kind]` | Ask a free-form question about the same |
+| `:Paseo chat` | Open/close the chat — conversation above, composer below |
+| `:Paseo explain [kind]` | Explain the hunk/selection/file, using the rubric |
+| `:Paseo ask [kind]` | Attach the hunk/selection/file, then type your question |
+| `:Paseo qfask` | Attach every hunk in the quickfix list |
+| `:Paseo model` | Choose the provider/model, from what the daemon has ready |
+| `:Paseo ws …` | `init` · `create <name>` · `rm <name>` · `ls` · `status` |
 | `:Paseo agent [stop]` | Sidecar and agent status |
 | `:Paseo repos` | The repos in the current unit of work |
 | `:Paseo health` | `:checkhealth paseo` |
 
-Default keys, all under `<leader>a`: `aa` changes · `aq` hunks · `as` stage ·
-`ar` review · `au` review unified · `ae` explain (also visual) · `ak` ask (also
-visual) · `af` explain file · `at` agents · `aR` repos · `aH` health.
+Default keys, all under `<leader>a`. `aa` chat · `ae` explain · `ak` ask · `af`
+ask about the file · `aQ` ask about the whole quickfix list — `ae` and `ak`
+also bind in visual mode and send the live selection. Review: `ac` changes ·
+`aq` hunks · `as` stage · `ar`/`au` diff panel. Then `aw` workspaces · `am`
+model · `at` agents · `aR` repos · `aH` health.
+
+## Using it without the Paseo app
+
+That is the point. The composer is a real Neovim buffer, the conversation is
+the agent's actual timeline fetched on open, and the agent lives on the daemon
+— so it survives closing Neovim and reopening the chat picks the conversation
+back up. Paseo is the engine; you should not need to look at it.
 
 ## Tests
 
