@@ -134,21 +134,13 @@ end
 
 ---Start the sidecar and connect it to the daemon.
 ---@param callback? fun(err: string|nil)
-function M.start(callback)
-  callback = callback or function() end
-
-  if state.handle then
-    return callback(nil)
-  end
-
+---Start the sidecar, once an endpoint is known.
+---@param endpoint paseo.Endpoint
+---@param callback fun(err: string|nil)
+local function spawn(endpoint, callback)
   local argv = runtime()
   if not argv then
     return callback "no bun or node found, and the sidecar needs one"
-  end
-
-  local endpoint = select(1, daemon.resolve())
-  if not endpoint then
-    return callback "no Paseo daemon answered; see :checkhealth paseo"
   end
 
   -- The sidecar's one dependency, installed on demand. A plugin manager will
@@ -201,6 +193,38 @@ function M.start(callback)
     password = config.get().paseo.password,
   }, function(err)
     callback(err)
+  end)
+end
+
+---Start the sidecar and connect it to the daemon, starting the daemon if
+---nothing answers.
+---@param callback? fun(err: string|nil)
+function M.start(callback)
+  callback = callback or function() end
+
+  if state.handle then
+    return callback(nil)
+  end
+
+  local endpoint = select(1, daemon.resolve())
+  if endpoint then
+    return spawn(endpoint, callback)
+  end
+
+  if config.get().paseo.autostart == false then
+    return callback "no Paseo daemon answered; see :checkhealth paseo"
+  end
+
+  -- Nothing answered, so start one. This is why the plugin can be the only
+  -- thing you open: the alternative is every agent action failing until you go
+  -- and start the daemon by hand.
+  vim.notify("paseo: no daemon answered — starting one…", vim.log.levels.INFO)
+  daemon.start({}, function(started, err)
+    if not started then
+      return callback(err or "could not start the daemon")
+    end
+    vim.notify("paseo: daemon up", vim.log.levels.INFO)
+    spawn(started, callback)
   end)
 end
 

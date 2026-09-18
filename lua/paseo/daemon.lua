@@ -98,14 +98,29 @@ function M.candidates()
     end
   end
 
+  local configured = listen_from_config()
   for _, candidate in ipairs {
     { vim.env.PASEO_ENDPOINT, "$PASEO_ENDPOINT" },
-    { listen_from_config(), "daemon.listen" },
-    { "127.0.0.1:6767", "default" },
+    { configured, "daemon.listen" },
   } do
     local endpoint = candidate[1] and from_listen(candidate[1], candidate[2])
     if endpoint then
       out[#out + 1] = endpoint
+    end
+  end
+
+  -- The hardcoded default is a LAST RESORT, and only when the daemon's own
+  -- config did not name a port.
+  --
+  -- Falling through to 6767 regardless meant that a config.json saying 6799,
+  -- with nothing listening there, silently connected to whatever was on 6767 --
+  -- a different daemon, with different agents, reporting success. Worse, it
+  -- made autostart unreachable: there was always something to connect to, so
+  -- the daemon that was actually configured never got started.
+  if not configured then
+    local fallback = from_listen("127.0.0.1:6767", "default")
+    if fallback then
+      out[#out + 1] = fallback
     end
   end
 
@@ -165,6 +180,84 @@ function M.probe(endpoint, timeout)
     info = type(decoded) == "table" and decoded or nil,
     needs_password = false,
   }
+end
+
+---The `paseo` CLI, if the one on PATH is actually the CLI.
+---
+---Two executables exist. `/usr/bin/paseo` is a wrapper that execs the Electron
+---binary with `ELECTRON_RUN_AS_NODE=1` -- plain Node, no window.
+---`/opt/Paseo/Paseo` is the desktop app, and running THAT opens a window on the
+---user's desktop. A stale symlink from a CLI-only install can leave the second
+---shadowing the first, so the path is resolved rather than trusted.
+---@return string|nil path
+function M.cli()
+  local exe = vim.fn.exepath "paseo"
+  if exe == "" then
+    return nil
+  end
+  local resolved = vim.fn.resolve(exe)
+  if resolved:match "resources/bin/paseo$" then
+    return exe
+  end
+  return nil
+end
+
+---Start the local daemon, and wait for it to answer.
+---
+---Only ever called when nothing answered: `paseo daemon start` against a
+---RUNNING daemon exits 1 and prints a wall of daemon logs, so "start it just in
+---case" is not an option.
+---@param opts? { timeout?: integer }  seconds to wait for it to come up
+---@param callback fun(endpoint: paseo.Endpoint|nil, err: string|nil)
+function M.start(opts, callback)
+  opts = opts or {}
+
+  local cli = M.cli()
+  if not cli then
+    local exe = vim.fn.exepath "paseo"
+    if exe == "" then
+      return callback(nil, "no daemon is running and `paseo` is not on PATH")
+    end
+    return callback(
+      nil,
+      ("no daemon is running, and `paseo` resolves to %s -- the desktop binary. "):format(
+        vim.fn.resolve(exe)
+      ) .. "Point it at /usr/bin/paseo, or start Paseo yourself."
+    )
+  end
+
+  -- `--home` when one is configured, or the daemon starts against ~/.paseo and
+  -- tries to bind 6767 -- which is somebody else's daemon.
+  local argv = { cli, "daemon", "start" }
+  local home = config.get().paseo.home
+  if home then
+    vim.list_extend(argv, { "--home", home })
+  end
+
+  vim.system(argv, { text = true }, function(result)
+    vim.schedule(function()
+      -- The exit code is not the whole story: the daemon forks, so a non-zero
+      -- exit with a daemon that then answers is still a success. Reachability
+      -- is the only thing worth believing.
+      local deadline = vim.uv.now() + (opts.timeout or 20) * 1000
+      local function poll()
+        local endpoint = M.resolve()
+        if endpoint then
+          return callback(endpoint, nil)
+        end
+        if vim.uv.now() >= deadline then
+          local detail =
+            vim.trim((result.stderr or "") ~= "" and result.stderr or (result.stdout or ""))
+          return callback(
+            nil,
+            "the daemon did not come up" .. (detail ~= "" and (": " .. detail:sub(1, 200)) or "")
+          )
+        end
+        vim.defer_fn(poll, 400)
+      end
+      poll()
+    end)
+  end)
 end
 
 ---The first candidate that answers.
