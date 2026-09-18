@@ -21,8 +21,10 @@ local M = {}
 ---@field added integer
 ---@field removed integer
 ---@field kind "add"|"change"|"delete"|"new"
----@field file_deleted boolean  The whole file is gone. Such a hunk CANNOT be
----                             staged through gitsigns -- see `stage()`.
+---@field file_deleted boolean  The whole file is gone. See `stage()`.
+---@field lines string[]  The hunk verbatim: its `@@` header followed by its
+---                       `-`/`+` body, including any `\ No newline at end of
+---                       file` marker. This is what `stage()` applies.
 
 ---Run git in `repo`, returning stdout or nil.
 ---
@@ -227,7 +229,17 @@ function M.hunks(repo, changes)
             removed = b,
             kind = (d == 0 and "delete") or (b == 0 and "add") or "change",
             file_deleted = file_deleted or false,
+            lines = { line },
           }
+        end
+      elseif #hunks > 0 and path and line ~= "" then
+        -- Body of the hunk just opened. At -U0 these are only `-`, `+` and the
+        -- `\ No newline at end of file` marker -- all of which have to survive
+        -- verbatim into the patch `stage()` builds.
+        local body = hunks[#hunks].lines
+        local head = line:sub(1, 1)
+        if head == "-" or head == "+" or head == "\\" then
+          body[#body + 1] = line
         end
       end
     end
@@ -242,43 +254,74 @@ function M.hunks(repo, changes)
       removed = 0,
       kind = "new",
       file_deleted = false,
+      lines = {},
     }
   end
 
   return hunks
 end
 
----Stage a hunk.
+---Stage one hunk.
 ---
----Routes to gitsigns for anything editable, and to `git add` for the one case
----gitsigns structurally cannot do: a WHOLE-FILE DELETION. The file is gone from
----disk, so no buffer can be opened on it and nothing can attach -- staging it
----through the hunk UI silently does nothing. Found by staging every hunk this
----module reports and checking the index afterwards; `tobedeleted.txt` was the
----only one that did not land.
+---Applies a reconstructed patch to the index rather than driving
+---`gitsigns.stage_hunk()`, for two reasons that both showed up in testing:
 ---
----`git add` is correct for a removal: it records the deletion in the index.
+--- * **The race.** Staging from a list means opening the file first, and
+---   gitsigns attaches asynchronously. `stage_hunk()` called straight after
+---   `:edit` finds no cache for the buffer and returns silently -- it does not
+---   error, it just does nothing. Four of six hunks vanished that way.
+--- * **The buffer.** Staging from the quickfix list should not drag a window
+---   onto a file you were only reading about.
+---
+---`--unidiff-zero` is required: `git apply` refuses zero-context patches
+---otherwise, because without context it cannot verify placement. That is
+---exactly why the hunk's line numbers have to be right.
+---
+---A WHOLE-FILE DELETION and an untracked file both go through `git add`
+---instead. Neither is expressible as a hunk against a tracked file, and
+---`git add` records a removal correctly.
 ---@param hunk paseo.Hunk
 ---@param callback? fun(err?: string)
 function M.stage(hunk, callback)
   callback = callback or function() end
 
   if hunk.file_deleted or hunk.kind == "new" then
-    -- Untracked files go the same way: there is nothing for gitsigns to stage
-    -- hunk-by-hunk in a file git has never seen.
     local out, err = git(hunk.repo, { "add", "--", hunk.path })
     return callback(out == nil and (err or "git add failed") or nil)
   end
 
-  local abs = vim.fs.joinpath(hunk.repo.worktree, hunk.path)
-  vim.cmd.edit(vim.fn.fnameescape(abs))
-  vim.api.nvim_win_set_cursor(0, { hunk.lnum, 0 })
-
-  local ok, gs = pcall(require, "gitsigns")
-  if not ok then
-    return callback "gitsigns is not available"
+  if not hunk.lines or #hunk.lines == 0 then
+    return callback "hunk carries no patch text"
   end
-  gs.stage_hunk(nil, nil, callback)
+
+  -- `diff --git` is ambiguous for paths containing spaces; `git apply` reads
+  -- the ---/+++ lines, which run to end of line and are not.
+  local patch = table.concat({
+    ("diff --git a/%s b/%s"):format(hunk.path, hunk.path),
+    ("--- a/%s"):format(hunk.path),
+    ("+++ b/%s"):format(hunk.path),
+    table.concat(hunk.lines, "\n"),
+    "",
+  }, "\n")
+
+  local cmd = {
+    "git",
+    "-C",
+    hunk.repo.worktree,
+    "-c",
+    "core.quotePath=false",
+    "apply",
+    "--cached",
+    "--unidiff-zero",
+    "-",
+  }
+  local ok, res = pcall(function()
+    return vim.system(cmd, { text = true, stdin = patch }):wait()
+  end)
+  if not ok then
+    return callback(tostring(res))
+  end
+  return callback(res.code ~= 0 and ((res.stderr or ""):gsub("%s+$", "")) or nil)
 end
 
 ---The diff of one file, for a previewer. Working tree against HEAD, so staged

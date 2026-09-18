@@ -26,7 +26,9 @@ review loop is being built now. See [Roadmap](#roadmap).
 | ✅ | `repos.lua` — the repo list, workspace-aware |
 | ✅ | `:checkhealth paseo` |
 | ✅ | `:Paseo` command surface |
-| 🔨 | changed-files picker, hunk quickfix, diff panel |
+| ✅ | `git.lua` — status/diff parsing and hunk staging |
+| ✅ | changed-files picker, hunk quickfix, diff panel |
+| ✅ | 48-assertion test suite (`tests/run.sh`) |
 | 🔨 | explain bridge + Paseo sidecar |
 | ⬜ | workspace assembly (`ws`) |
 | ⬜ | workspace picker with live agent status |
@@ -81,8 +83,28 @@ require("paseo").setup {
 
 | | |
 |---|---|
+| `:Paseo changes` | Changed-files picker; `<C-q>` expands into hunks |
+| `:Paseo hunks` | Every hunk in the unit of work, as a quickfix list |
+| `:Paseo stage` | Stage the hunk the quickfix list is on, then advance |
+| `:Paseo review [unified]` | Diff panel, one tab per repo |
 | `:Paseo repos` | The repos in the current unit of work |
 | `:Paseo health` | `:checkhealth paseo` |
+
+Default keys, all under `<leader>a`: `aa` changes · `aq` hunks · `as` stage ·
+`ar` review · `au` review unified · `aR` repos · `aH` health.
+
+## Tests
+
+```sh
+tests/run.sh
+```
+
+Builds real git fixtures and runs the suite in a real Neovim — no plenary, no
+busted. Every assertion corresponds to something that was actually wrong at
+some point, not to a line that wanted covering: the porcelain-v2 rename record,
+beginning- and end-of-file deletions, a whole-file deletion, a pure rename, a
+non-ASCII path, partial staging of one hunk among three, and the async-cwd race
+in the diff panel.
 
 ## Architecture
 
@@ -206,6 +228,17 @@ the missing count as 0 turns every single-line change into a phantom deletion.
 **A rename's source must be in the pathspec too**, or rename detection has
 nothing to pair the destination with and a pure rename reports as a whole-file
 add.
+
+**`gitsigns.stage_hunk()` races its own attach.** Staging from a list means
+opening the file first, and gitsigns attaches asynchronously — called straight
+after `:edit` it finds no cache for the buffer and returns *silently*. Four of
+six hunks vanished that way. Staging therefore goes through a reconstructed
+patch and `git apply --cached --unidiff-zero`, which needs no buffer at all.
+
+**`:Gitsigns diff` reads `fn.getcwd()` inside its async body.** Opening one
+panel per repo in a loop means every panel resolves against whichever tab was
+current when its body finally ran — the last one. Two tabs, two `tcd`s, zero
+panels. They have to be serialised on the callback.
 
 **The public hunk type omits `.vend`.** Recompute it as
 `added.start + max(added.count - 1, 0)` or pure-delete hunks are never found.

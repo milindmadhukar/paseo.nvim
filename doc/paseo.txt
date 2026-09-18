@@ -144,6 +144,27 @@ review.context                                          integer, default `0`
 
     Without an argument, equivalent to `:Paseo repos`.
 
+:Paseo changes                                              *:Paseo-changes*
+
+    Changed-files picker across every repo in the unit of work. The previewer
+    shows `git diff HEAD` -- staged and unstaged together -- not the file.
+    `<CR>` opens the file on its FIRST HUNK; `<C-q>` expands the selection
+    into a hunk quickfix list; `<C-a>` expands everything.
+
+:Paseo hunks                                                  *:Paseo-hunks*
+
+    Every hunk in the unit of work as a quickfix list, one entry per hunk.
+
+:Paseo stage                                                  *:Paseo-stage*
+
+    Stage the hunk the quickfix list is on, then advance to the next.
+
+:Paseo review [unified]                                      *:Paseo-review*
+
+    A `:Gitsigns diff` panel per repo, each in its own tab, `tcd`'d to that
+    repo. `unified` starts in the unified layout, which shows deleted lines
+    inline.
+
 :Paseo repos                                                  *:Paseo-repos*
 
     List the repos in the current unit of work: the member worktrees of the
