@@ -60,6 +60,53 @@ commands.review = {
   end,
 }
 
+commands.explain = {
+  desc = "Explain the hunk under the cursor",
+  run = function(args)
+    require("paseo.explain").explain(args[1])
+  end,
+}
+
+commands.ask = {
+  desc = "Ask a question about the hunk under the cursor",
+  run = function(args)
+    require("paseo.explain").ask(args[1])
+  end,
+}
+
+commands.agent = {
+  desc = "Sidecar status; `agent stop` shuts it down",
+  run = function(args)
+    local b = require "paseo.bridge"
+    if args[1] == "stop" then
+      b.stop()
+      vim.notify("paseo: sidecar stopped", vim.log.levels.INFO)
+      return
+    end
+    if not b.running() then
+      vim.notify("paseo: sidecar is not running", vim.log.levels.INFO)
+      return
+    end
+    b.request("agents.list", {}, function(err, result)
+      if err then
+        vim.notify("paseo: " .. err, vim.log.levels.ERROR)
+        return
+      end
+      local lines = {}
+      for _, agent in ipairs(result.entries or {}) do
+        lines[#lines + 1] = ("%s  %s  %s"):format(
+          agent.status,
+          agent.provider or "?",
+          agent.title or agent.id
+        )
+      end
+      vim.notify(#lines > 0 and table.concat(lines, "\n") or "no agents", vim.log.levels.INFO, {
+        title = "paseo: agents",
+      })
+    end)
+  end,
+}
+
 commands.health = {
   desc = "Run :checkhealth paseo",
   run = function()
@@ -80,6 +127,18 @@ function M.setup(opts)
     group = vim.api.nvim_create_augroup("paseo.repos", { clear = true }),
     callback = function()
       repos.invalidate()
+    end,
+  })
+
+  -- Streaming events have to be wired before anything can arrive on them.
+  require("paseo.explain").attach()
+
+  -- The sidecar is a child process; leaving it behind on :qa would leak one per
+  -- session.
+  vim.api.nvim_create_autocmd("VimLeavePre", {
+    group = vim.api.nvim_create_augroup("paseo.bridge", { clear = true }),
+    callback = function()
+      require("paseo.bridge").stop()
     end,
   })
 
