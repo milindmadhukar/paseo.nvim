@@ -118,6 +118,9 @@ require("paseo").setup {
 | `:Paseo ask [kind]` | Attach the hunk/selection/file, then type your question |
 | `:Paseo qfask` | Attach every hunk in the quickfix list |
 | `:Paseo model` | Choose the provider/model, from what the daemon has ready |
+| `:Paseo workspaces` | Workspace picker — open, sessions, create, archive |
+| `:Paseo wcreate` | Create a workspace here |
+| `:Paseo sessions` | Sessions in this workspace |
 | `:Paseo ws …` | `init` · `create <name>` · `rm <name>` · `ls` · `status` |
 | `:Paseo agent [stop]` | Sidecar and agent status |
 | `:Paseo repos` | The repos in the current unit of work |
@@ -126,8 +129,30 @@ require("paseo").setup {
 Default keys, all under `<leader>a`. `aa` chat · `ae` explain · `ak` ask · `af`
 ask about the file · `aQ` ask about the whole quickfix list — `ae` and `ak`
 also bind in visual mode and send the live selection. Review: `ac` changes ·
-`aq` hunks · `as` stage · `ar`/`au` diff panel. Then `aw` workspaces · `am`
-model · `at` agents · `aR` repos · `aH` health.
+`aq` hunks · `as` stage · `ar`/`au` diff panel. Then `aw` workspaces · `aW` new
+workspace · `aS` sessions · `am` model · `at` agents · `aR` repos · `aH` health.
+
+## Workspaces and sessions
+
+Paseo's model, used directly:
+
+| | |
+|---|---|
+| **Project** | a directory or repo Paseo knows about — `kora`, `openfin` |
+| **Workspace** | one unit of work inside it, with a working directory |
+| **Session** | an agent inside a workspace; several run at once, sharing its directory |
+
+Isolation belongs to the **workspace**, not the session. Two sessions in one
+workspace edit the same files on purpose — that is what makes "one agent
+writing, another reviewing its diff" work. Two *workspaces* are isolated from
+each other only when each has its own worktree.
+
+Paseo is the source of truth: a workspace created in the app appears in the
+picker exactly like one this plugin assembled. What the plugin adds is what
+Paseo cannot know — that a directory is several worktrees rather than one
+checkout. That matters because `--isolation worktree` needs a git repository,
+and a project like `~/Code/grasslabs/kora` is a plain directory holding five
+repos. Paseo cannot isolate it; assembly can.
 
 ## Using it without the Paseo app
 

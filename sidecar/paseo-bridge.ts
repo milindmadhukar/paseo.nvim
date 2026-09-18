@@ -350,6 +350,99 @@ const ops: Record<string, (req: Request) => Promise<unknown>> = {
     };
   },
 
+  /**
+   * Paseo's workspaces -- the SOURCE OF TRUTH for what workspaces exist.
+   *
+   * A workspace made in the Paseo app, or by `paseo workspace create`, is just
+   * as real as one this plugin assembled. Listing only our own registry meant
+   * half of them were invisible.
+   */
+  async "workspaces.list"(req) {
+    const page: any = await connected().workspaces.list({
+      ...(req.query ? { filter: { query: String(req.query) } } : {}),
+      page: { limit: Number(req.limit ?? 200) },
+    });
+    // Field names taken from the wire, not guessed: the directory is
+    // `workspaceDirectory`, and `directory` does not exist.
+    return {
+      entries: (page.entries ?? []).map((ws: any) => ({
+        id: ws.id,
+        name: ws.name ?? ws.title ?? null,
+        directory: ws.workspaceDirectory ?? ws.project?.checkout?.cwd ?? null,
+        project: ws.projectDisplayName ?? ws.projectId ?? null,
+        projectRoot: ws.projectRootPath ?? null,
+        projectKind: ws.projectKind ?? null,
+        kind: ws.workspaceKind ?? null,
+        status: ws.status ?? null,
+        branch: ws.project?.checkout?.currentBranch ?? null,
+        // Whether PASEO owns the worktree, as opposed to it pointing at a
+        // primary checkout -- the difference between isolated and not.
+        ownedWorktree: ws.project?.checkout?.isPaseoOwnedWorktree ?? false,
+        archivingAt: ws.archivingAt ?? null,
+      })),
+    };
+  },
+
+  /**
+   * A FRESH workspace, as opposed to `workspace.open` which reuses the active
+   * one for a directory.
+   *
+   * `source.kind` is "directory" for an existing checkout, or "worktree" to let
+   * Paseo cut one. Worktree isolation requires a git repository -- a project
+   * that is a plain directory holding several repos cannot use it, which is
+   * what the assembly layer is for.
+   */
+  async "workspace.create"(req) {
+    const source: any = req.worktree
+      ? {
+          kind: "worktree",
+          cwd: String(need(req.cwd, "cwd")),
+          action: "branch-off",
+          refName: String(req.base ?? "main"),
+          branchName: String(need(req.branch, "branch")),
+        }
+      : { kind: "directory", path: String(need(req.cwd, "cwd")) };
+
+    const workspace: any = await connected().workspaces.create({
+      source,
+      ...(req.title ? { title: String(req.title) } : {}),
+    });
+    return {
+      id: workspace.id,
+      directory: workspace.directory ?? null,
+      projectId: workspace.projectId ?? null,
+    };
+  },
+
+  /**
+   * A new SESSION in a workspace.
+   *
+   * Created through the workspace handle, so placement comes from the handle
+   * rather than being repeated -- the SDK is explicit that this avoids
+   * mismatched cwd/workspace arguments.
+   */
+  async "agent.create"(req) {
+    const api = connected();
+    const workspace: any = api.workspaces.ref(String(need(req.workspaceId, "workspaceId")));
+
+    let provider = req.provider ? String(req.provider) : null;
+    if (!provider) {
+      const snapshot: any = await api.providers.waitForReady({ timeoutMs: 30_000 });
+      const entry = (snapshot.entries ?? []).find((e: any) => e.status === "ready");
+      const model = entry?.models?.find((m: any) => m.isDefault) ?? entry?.models?.[0] ?? null;
+      if (!entry || !model) throw new Error("no provider model is ready on this daemon");
+      provider = `${entry.provider}/${model.id}`;
+    }
+
+    const agent = await workspace.agents.create({
+      config: { provider },
+      ...(req.title ? { title: String(req.title) } : {}),
+      ...(req.prompt ? { prompt: String(req.prompt) } : {}),
+      labels: { "paseo.nvim": "session" },
+    });
+    return { id: agent.id, provider };
+  },
+
   async "workspace.archive"(req) {
     const workspace = connected().workspaces.ref(String(need(req.workspaceId, "workspaceId")));
     const result = await workspace.archive();

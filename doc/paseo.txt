@@ -10,7 +10,7 @@ CONTENTS                                                      *paseo-contents*
   4. Configuration .............................. |paseo-configuration|
   5. Commands ................................... |paseo-commands|
   6. Lua API .................................... |paseo-api|
-  7. Workspaces ................................. |paseo-workspaces|
+  7. Workspaces and sessions .................... |paseo-workspaces|
   8. Git ........................................ |paseo-git|
   9. The agent bridge ........................... |paseo-bridge|
  10. The chat window ........................... |paseo-chat|
@@ -227,6 +227,19 @@ review.context                                          integer, default `0`
     Attach every hunk in the quickfix list at once -- "explain this review"
     rather than "explain this hunk".
 
+:Paseo workspaces                                      *:Paseo-workspaces*
+
+    The workspace picker. See |paseo-workspaces-keys|.
+
+:Paseo wcreate                                            *:Paseo-wcreate*
+
+    Create a workspace here, assembling worktrees if the project has a
+    manifest.
+
+:Paseo sessions                                          *:Paseo-sessions*
+
+    Sessions in the workspace containing this directory.
+
 :Paseo ws [init|create|rm|ls|status]                           *:Paseo-ws*
 
     Workspace assembly. `init` opens the generated manifest for you to read
@@ -308,15 +321,62 @@ rather than the common dir. That is also deliberate: it is per-worktree, which
 is what identifies the member.
 
 ==============================================================================
-7. WORKSPACES                                               *paseo-workspaces*
+7. WORKSPACES AND SESSIONS                                  *paseo-workspaces*
 
-A workspace is a directory: >
-    <project>/<workspaces.dir>/<name>/
+Paseo's model, and this plugin uses it directly:
+
+    Project     a directory or repo Paseo knows about -- `kora`, `openfin`
+    Workspace   one unit of work inside it, with a working directory
+    Session     an agent inside a workspace. Several run at once, and they
+                SHARE the workspace's directory
+
+Isolation is a property of the WORKSPACE, not of the session. Two sessions in
+one workspace edit the same files, deliberately -- that is what makes "an agent
+writing code and another reviewing its diff" work. Two workspaces are isolated
+from each other only when each has its own worktree.
+
+                                                      *paseo-workspaces-source*
+Paseo is the source of truth. A workspace created in the Paseo app, or by
+`paseo workspace create`, appears here exactly like one this plugin assembled.
+What this plugin adds is the thing Paseo cannot know: that a directory is
+SEVERAL worktrees rather than one checkout.
+
+                                                       *paseo-workspaces-multi*
+That matters because `--isolation worktree` requires a git repository. A
+project like `~/Code/grasslabs/kora` is a plain directory holding five repos,
+so Paseo cannot isolate it -- every workspace on it points at the same
+checkout. |paseo-ws-assembly| fills that gap: N worktrees assembled into one
+directory, which is then handed to Paseo as an ordinary local workspace.
+
+                                                        *paseo-ws-assembly*
+Assembly ~
+
+A workspace this plugin assembles is a directory: >
+    <project>/.workspaces/<name>/
+    ├── clm/        a worktree of <project>/clm, on ws/<name>
+    ├── clm_api/    a worktree of <project>/clm_api, on ws/<name>
+    └── Docs/       a symlink to <project>/Docs, shared
 <
-Membership is detected from the filesystem, not from a registry. Either that
-directory is itself a git worktree — a single-repo project — or its immediate
-children are, one per member repo. Nothing has to have created it for
-detection to work.
+It is driven by `<project>/.ws/workspace.toml`, which |:Paseo-ws| generates.
+Without a manifest, creating a workspace just registers the directory with
+Paseo -- which is the right behaviour for an ordinary single-repo project,
+where Paseo's own worktree isolation already works.
+
+                                                          *paseo-workspaces-keys*
+In the workspace picker (|:Paseo-workspaces|) ~
+
+    <CR>      open it in a new window
+    <C-s>     its sessions
+    <C-n>     create a workspace
+    <C-d>     archive it -- refuses, and says what it would lose, if a member
+              holds work that exists nowhere else
+    <C-r>     review it here: hunks from every member into the quickfix list
+
+In the sessions picker (|:Paseo-sessions|) ~
+
+    <CR>      open a chat on that session, with its history
+    <C-n>     start a new session in this workspace
+    <C-d>     archive that session
 
 ==============================================================================
 8. GIT                                                             *paseo-git*

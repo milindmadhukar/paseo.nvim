@@ -64,7 +64,13 @@ end
 
 ---@param line string
 local function on_line(line)
-  local ok, message = pcall(vim.json.decode, line)
+  -- `luanil` is not optional. Without it JSON `null` decodes to `vim.NIL`,
+  -- which is a userdata value and therefore TRUTHY -- so `if not ws.archivingAt`
+  -- was false for every workspace that had never been archived, and the list
+  -- came back empty. Every optional field the daemon sends is affected:
+  -- status, provider, cwd, branch, workspaceId. Decoding them as real nil is
+  -- the only place this can be fixed once.
+  local ok, message = pcall(vim.json.decode, line, { luanil = { object = true, array = true } })
   if not ok or type(message) ~= "table" then
     return
   end
