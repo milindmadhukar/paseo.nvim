@@ -1,0 +1,17 @@
+# luarocks / busted, if tests ever land
+.luarocks/
+luarocks/
+lua_modules/
+.busted-cache/
+
+# bun, for the future paseo-bridge sidecar
+node_modules/
+bun.lock
+
+# editor / OS
+*.swp
+.DS_Store
+
+# worktree assembly, once `ws` exists
+.workspaces/
+PLAN.md
