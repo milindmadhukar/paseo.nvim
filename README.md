@@ -230,12 +230,17 @@ are tried in order — `paseo.url`, `$PASEO_ENDPOINT`, `daemon.listen` from
 password, and treating it as a miss is how you report "no daemon" about a
 running one. `:checkhealth paseo` prints every candidate and its answer.
 
-**The `paseo` CLI is never invoked.** `~/.local/bin/paseo` is a symlink to the
-Electron desktop binary, so every invocation opens a window on your desktop and
-writes startup logs to stdout, mixed into its own `--json` output. The plan
-originally kept it for one-shot writes on the grounds that 2.4 s did not matter
-there; that was the wrong objection. Registration goes over the WebSocket via
-`workspaces.open()` instead.
+**The `paseo` CLI is never invoked** — but not because it is broken.
+`/usr/bin/paseo` is a wrapper that runs the Electron binary with
+`ELECTRON_RUN_AS_NODE=1`: headless, clean stdout, parseable `--json`. It just
+still pays Node startup, about **1 s** against 8 ms for the socket, so
+everything goes over the WebSocket.
+
+Worth knowing because the symptom is confusing: `/opt/Paseo/Paseo` is the
+*desktop* binary, and a stale symlink from a CLI-only install can leave it
+shadowing `/usr/bin/paseo` on `$PATH`. Then a window opens and `--json` returns
+Electron startup logs — which looks like a CLI defect and is not.
+`:checkhealth paseo` reports which one you have.
 
 ### Backend seam
 

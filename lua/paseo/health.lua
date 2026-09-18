@@ -68,18 +68,28 @@ local function check_paseo()
     info(('backend is "%s"; the Paseo checks below are informational'):format(cfg.backend))
   end
 
-  -- The CLI is LOOKED UP, never RUN.
+  -- WHICH `paseo` is on PATH matters, and it is worth reporting.
   --
-  -- `~/.local/bin/paseo` is a symlink to the Electron desktop binary, so
-  -- `paseo --version` OPENS A WINDOW on the user's desktop -- which this check
-  -- did, every single time it ran. Nothing in this plugin shells out to it any
-  -- more; the daemon is reached over its WebSocket.
+  -- There are two executables. `/usr/bin/paseo` is the CLI: a wrapper that
+  -- execs the Electron binary with ELECTRON_RUN_AS_NODE=1, so it runs as plain
+  -- Node -- headless, clean stdout, parseable --json. `/opt/Paseo/Paseo` is
+  -- the desktop app, and running THAT opens a window and writes startup logs
+  -- into whatever you were trying to parse.
+  --
+  -- A stale symlink from a CLI-only install can leave the desktop binary
+  -- shadowing the CLI, which looks exactly like the CLI being broken.
   if vim.fn.executable "paseo" == 1 then
-    info(
-      ("`paseo` is at %s -- the desktop app, never invoked from here"):format(
-        vim.fn.exepath "paseo"
+    local resolved = vim.fn.resolve(vim.fn.exepath "paseo")
+    if resolved:match "resources/bin/paseo$" then
+      ok(("`paseo` -> %s (the headless CLI)"):format(resolved))
+    else
+      warn(
+        ("`paseo` resolves to %s, the DESKTOP binary -- running it opens a window. "):format(
+          resolved
+        ) .. "Point it at /usr/bin/paseo instead."
       )
-    )
+    end
+    info "nothing here shells out to it regardless; the daemon is reached over its WebSocket"
   end
 
   -- Endpoint discovery, reported candidate by candidate: "no daemon" and

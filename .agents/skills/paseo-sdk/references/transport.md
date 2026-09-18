@@ -5,18 +5,25 @@ architecture, so they are recorded rather than re-guessed.
 
 | Channel | Latency | Verdict |
 |---|---|---|
-| `paseo … --json` CLI | **2380–2460 ms** | Boots Electron per invocation. Unusable for anything interactive. |
+| `paseo … --json` CLI | **~1000 ms** | Headless and correct, but pays Node startup every call. Fine for one-shot writes; unusable for anything interactive. |
 | `GET /api/status` | ~8 ms | Liveness + identity probe. |
 | `GET /api/health` | ~8 ms | Liveness only. |
 | `ws://127.0.0.1:6767/ws` | ~1–10 ms | **The real API.** Everything the SDK does. |
 
+**Two `paseo` executables exist and only one is the CLI.** `/usr/bin/paseo`
+(→ `/opt/Paseo/resources/bin/paseo`) is a `sh` wrapper that `exec`s the Electron
+binary with `ELECTRON_RUN_AS_NODE=1` — plain Node, no window, clean stdout.
+`/opt/Paseo/Paseo` is the desktop app: running it opens a window and writes
+startup logs into anything you try to parse. A stale symlink from a CLI-only
+install can leave the second shadowing the first on `$PATH`, which presents as
+the CLI being broken.
+
 There is no REST API for agents or workspaces — those paths 404. Anything
 beyond liveness goes over the WebSocket.
 
-**Use the CLI only for one-shot writes** where 2.4 s does not matter and a
-stable documented surface does (`paseo agent send --prompt-file`,
-`paseo workspace create`), and as a degraded fallback. Never on an interactive
-path.
+**Use the CLI only for one-shot writes** where a second does not matter and a
+stable documented surface does, and as a degraded fallback. Never on an
+interactive path.
 
 ## Endpoint discovery
 

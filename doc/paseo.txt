@@ -109,12 +109,22 @@ paseo.password                                            string, unset
                                                               *paseo-no-cli*
 The `paseo` CLI is never invoked ~
 
-    `~/.local/bin/paseo` is a symlink to the Electron desktop binary. Every
-    invocation opens a window on your desktop, takes about 2.4 seconds, and
-    writes startup logs to stdout mixed into its own `--json` output. Nothing
-    in this plugin -- and nothing in `ws` -- shells out to it. The daemon is
-    reached over `ws://…/ws` through |paseo-bridge|, and `GET /api/status`
-    serves as a liveness probe.
+    Not because it is broken -- `/usr/bin/paseo` is a wrapper that runs the
+    Electron binary with `ELECTRON_RUN_AS_NODE=1`, so it is headless, prints
+    clean output and its `--json` is parseable. It simply still pays Node
+    startup: roughly 1 second against 8ms for the socket. Everything goes over
+    `ws://…/ws` through |paseo-bridge| instead, with `GET /api/status` as a
+    liveness probe.
+
+    Two executables exist and only one is the CLI:
+
+      /usr/bin/paseo      -> resources/bin/paseo, the CLI. Headless.
+      /opt/Paseo/Paseo    -> the desktop app. Opens a window.
+
+    A stale symlink from a CLI-only install can leave the desktop binary
+    shadowing the CLI on `$PATH`, which looks exactly like the CLI being
+    broken: a window appears and `--json` returns startup logs instead of
+    JSON. `:checkhealth paseo` reports which one you have.
 
                                                      *paseo-daemon-discovery*
 Daemon discovery ~
