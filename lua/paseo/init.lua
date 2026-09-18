@@ -28,6 +28,38 @@ commands.repos = {
   end,
 }
 
+commands.changes = {
+  desc = "Changed-files picker for this unit of work",
+  run = function()
+    require("paseo.pickers.changes").open()
+  end,
+}
+
+commands.hunks = {
+  desc = "Every hunk in this unit of work, as a quickfix list",
+  run = function()
+    require("paseo.qf").all()
+  end,
+}
+
+commands.stage = {
+  desc = "Stage the hunk the quickfix list is on, then advance",
+  run = function()
+    require("paseo.qf").stage()
+  end,
+}
+
+commands.review = {
+  desc = "Diff panel, one tab per repo",
+  run = function(args)
+    require("paseo.review").open({ unified = args[1] == "unified" }, function(opened)
+      if opened == 0 then
+        vim.notify("paseo: no diff panel opened", vim.log.levels.WARN)
+      end
+    end)
+  end,
+}
+
 commands.health = {
   desc = "Run :checkhealth paseo",
   run = function()
