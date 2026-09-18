@@ -443,6 +443,49 @@ local function test_bridge()
   end
 end
 
+-- ------------------------------------------------------------------ ref
+
+local function test_ref()
+  local ref = require "paseo.ref"
+
+  -- A file with no repository at all. This was impossible: build() required
+  -- repos.resolve() to succeed, so "ask about this file" silently did nothing
+  -- for a scratch file, a note, or anything under ~/.config.
+  local loose = vim.fn.tempname() .. ".txt"
+  local fd = assert(io.open(loose, "w"))
+  fd:write "alpha\nbeta\ngamma\ndelta\n"
+  fd:close()
+
+  vim.cmd.edit(vim.fn.fnameescape(loose))
+  local file = ref.file()
+  truthy("ref: a file outside any git repo still yields a reference", file ~= nil)
+  eq("ref: and it has no repo", file and file.repo, nil)
+  eq("ref: its root is the file's directory", file and file.root, vim.fs.dirname(loose))
+  truthy(
+    "ref: render() does not require a repo",
+    file and ref.render(file):find("alpha", 1, true) ~= nil
+  )
+
+  -- A <cmd> mapping fires while visual mode is STILL ACTIVE, so '< and '> hold
+  -- the PREVIOUS selection. Reading them sent the agent the wrong lines with no
+  -- error at all.
+  vim.api.nvim_win_set_cursor(0, { 1, 0 })
+  vim.cmd "normal! Vj"
+  vim.cmd [[execute "normal! \<Esc>"]]
+  vim.api.nvim_win_set_cursor(0, { 4, 0 })
+  vim.cmd "normal! V"
+
+  local marks = vim.api.nvim_buf_get_mark(0, "<")[1]
+  local visual = ref.visual()
+  eq("ref: the marks are indeed stale mid-selection", marks, 1)
+  eq("ref: visual() reads the LIVE selection, not the marks", visual and visual.lnum, 4)
+  eq("ref: and its text is the selected line", visual and visual.lines[1], "delta")
+
+  vim.cmd [[execute "normal! \<Esc>"]]
+  vim.cmd "bdelete!"
+  os.remove(loose)
+end
+
 -- ------------------------------------------------------------- registry
 
 local function test_registry()
@@ -502,6 +545,7 @@ function M.run()
     { "daemon", test_daemon },
     { "bridge", test_bridge },
     { "registry", test_registry },
+    { "ref", test_ref },
   }
 
   for _, suite in ipairs(suites) do

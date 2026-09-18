@@ -10,15 +10,17 @@ local repos = require "paseo.repos"
 local M = {}
 
 ---@class paseo.Ref
----@field repo paseo.Repo
----@field path string       Relative to the workspace root, else to the repo.
+---@field repo paseo.Repo|nil  nil when the file is not in a git repo at all.
+---@field root string       Directory an agent should work in.
+---@field path string       Relative to the workspace root, else to the repo,
+---                         else just the file name.
 ---@field lnum integer      1-based, inclusive.
 ---@field end_lnum integer  1-based, inclusive.
 ---@field lines string[]    The referenced text.
 ---@field kind "cursor"|"visual"|"hunk"|"file"
 
 ---`path` as it should be written to an agent.
----@param repo paseo.Repo
+---@param repo paseo.Repo|nil
 ---@param abs string
 ---@return string
 local function display_path(repo, abs)
@@ -29,7 +31,12 @@ local function display_path(repo, abs)
       return abs:sub(#prefix + 1)
     end
   end
-  return repos.relative(repo, abs)
+  if repo then
+    return repos.relative(repo, abs)
+  end
+  -- No repo: the absolute path shortened at $HOME is the only honest answer,
+  -- and it is still something an agent can open.
+  return vim.fn.fnamemodify(abs, ":~")
 end
 
 ---@param bufnr integer
@@ -43,10 +50,12 @@ local function build(bufnr, first, last, kind)
     return nil
   end
 
-  local repo = repos.resolve(name)
-  if not repo then
-    return nil
-  end
+  -- A REPO IS NOT REQUIRED. It was, and that silently made "ask about this
+  -- file" impossible for anything outside a git repository -- a scratch file, a
+  -- config under ~/.config, a note. The repo only decides how the path is
+  -- written and where the agent runs; neither needs version control.
+  local absolute = vim.fn.fnamemodify(name, ":p")
+  local repo = repos.resolve(absolute)
 
   local total = vim.api.nvim_buf_line_count(bufnr)
   first = math.max(first, 1)
@@ -54,7 +63,8 @@ local function build(bufnr, first, last, kind)
 
   return {
     repo = repo,
-    path = display_path(repo, vim.fn.fnamemodify(name, ":p")),
+    root = repo and repo.worktree or vim.fs.dirname(absolute),
+    path = display_path(repo, absolute),
     lnum = first,
     end_lnum = last,
     lines = vim.api.nvim_buf_get_lines(bufnr, first - 1, last, false),
@@ -69,12 +79,27 @@ function M.cursor()
   return build(0, lnum, lnum, "cursor")
 end
 
----The last visual selection.
+---The visual selection.
 ---
----`'<` and `'>` rather than the live cursor: by the time a mapping runs, visual
----mode has already been left, and the marks are the only record of it.
+---`getpos("v")` and the cursor, NOT the `'<` / `'>` marks.
+---
+---A `<cmd>` mapping fires while visual mode is still ACTIVE, and the marks are
+---only written when you leave visual mode -- so they still hold the PREVIOUS
+---selection. Reading them sent the agent whichever lines were selected last
+---time, silently and with no error. Verified: select 2-3, leave, select line 4,
+---and the marks still read 2-3 while `getpos("v")` reads 4.
+---
+---The marks remain the fallback, for a `:<C-u>` style mapping or a call made
+---after visual mode has already ended.
 ---@return paseo.Ref|nil
 function M.visual()
+  local mode = vim.fn.mode()
+  if mode == "v" or mode == "V" or mode == "\22" then
+    local anchor = vim.fn.getpos("v")[2]
+    local cursor = vim.api.nvim_win_get_cursor(0)[1]
+    return build(0, math.min(anchor, cursor), math.max(anchor, cursor), "visual")
+  end
+
   local first = vim.api.nvim_buf_get_mark(0, "<")[1]
   local last = vim.api.nvim_buf_get_mark(0, ">")[1]
   if first == 0 or last == 0 then
@@ -160,7 +185,7 @@ function M.render(ref)
     or ft
 
   return table.concat({
-    ("%s (%s)"):format(M.format(ref), ref.repo.name),
+    ref.repo and ("%s (%s)"):format(M.format(ref), ref.repo.name) or M.format(ref),
     "",
     "```" .. (fence ~= "" and fence or ""),
     table.concat(ref.lines, "\n"),
