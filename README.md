@@ -105,6 +105,19 @@ visual) · `af` explain file · `at` agents · `aR` repos · `aH` health.
 tests/run.sh
 ```
 
+## Layout
+
+```
+lua/paseo/          the plugin
+  workspace/        assembling N worktrees into one unit of work
+  pickers/          changed files, workspaces
+  backends/         the no-daemon fallback
+sidecar/            paseo-bridge.ts and its bun deps
+.agents/skills/     skills, symlinked from .claude/skills
+tests/              fixtures + spec, run by tests/run.sh
+doc/                :help paseo
+```
+
 Builds real git fixtures and runs the suite in a real Neovim — no plenary, no
 busted. Every assertion corresponds to something that was actually wrong at
 some point, not to a line that wanted covering: the porcelain-v2 rename record,
@@ -121,10 +134,10 @@ others.
 ┌ paseo.nvim ──────────────────────────────────────────────────┐
 │  pickers · hunk quickfix · diff panel · explain bridge       │
 └───────────┬──────────────────────────────┬───────────────────┘
-            │ ws --json                    │ stdio JSON-lines
-            │ (rare, on demand)            │ (push, ~1–10 ms)
+            │ in-process                   │ stdio JSON-lines
+            │                              │ (push, ~1–10 ms)
 ┌───────────▼──────────────┐   ┌───────────▼───────────────────┐
-│ ws (Go) — CONDITIONAL    │   │ paseo-bridge.ts (Bun sidecar) │
+│ workspace/ (Lua)         │   │ paseo-bridge.ts (Bun sidecar) │
 │ N worktrees + .env copy  │   │ @getpaseo/client              │
 │ + heavy-dir links        │   └───────────┬───────────────────┘
 │ + shared siblings        │               │ ws://127.0.0.1:6767/ws
@@ -281,11 +294,10 @@ everything after it.
   `explain-change` skill whose rubric ends in *what the reviewer should push
   back on*. The acceptance test is that the whole loop runs without leaving the
   quickfix list.
-- **Phase 2 — `ws`, a Go CLI.** *Conditional.* Buys exactly one thing:
-  concurrent isolated agents on a multi-repo project. Single-repo projects
-  already get real worktree isolation from Paseo, and multi-repo projects
-  already work for one agent at a time. Build it only if serialising agents
-  becomes the bottleneck.
+- **Phase 2 — workspace assembly.** Started as a Go CLI and is now
+  `lua/paseo/workspace/`. The only argument for Go was concurrency across ~66
+  git invocations, and `vim.system` gives that natively — so the binary bought
+  a build step, a release pipeline and a second language for nothing.
 - **Phase 3 — workspace layer.** Workspace picker with a live, push-driven
   agent status column; a new Neovide window per workspace.
 - **Phase 4 — commit, PR, merge.** Agent-agnostic skills over `ws … --json`.

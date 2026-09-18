@@ -36,14 +36,14 @@ local state = {
 local function script_path()
   local source = debug.getinfo(1, "S").source
   if source:sub(1, 1) == "@" then
-    -- @<root>/lua/paseo/bridge.lua -> <root>/bin/paseo-bridge.ts
+    -- @<root>/lua/paseo/bridge.lua -> <root>/sidecar/paseo-bridge.ts
     local root = vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(source:sub(2))))
-    local candidate = vim.fs.joinpath(root, "bin", "paseo-bridge.ts")
+    local candidate = vim.fs.joinpath(root, "sidecar", "paseo-bridge.ts")
     if vim.uv.fs_stat(candidate) then
       return candidate
     end
   end
-  return vim.api.nvim_get_runtime_file("bin/paseo-bridge.ts", false)[1]
+  return vim.api.nvim_get_runtime_file("sidecar/paseo-bridge.ts", false)[1]
 end
 
 ---@return string[]|nil argv

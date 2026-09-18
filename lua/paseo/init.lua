@@ -60,6 +60,148 @@ commands.review = {
   end,
 }
 
+---@param args string[]
+---@return table|nil m, string|nil root, string|nil err
+local function project(args)
+  local registry = require "paseo.registry"
+  local root = registry.project_root(args and args.root)
+  if not root then
+    return nil, nil, "no .ws/workspace.toml here or above; run `:Paseo ws init` first"
+  end
+  local m, err = require("paseo.workspace.manifest").load(root)
+  if not m then
+    return nil, nil, err
+  end
+  return m, root, nil
+end
+
+---Split `a,b` or `a b` into a list.
+---@param text string|nil
+---@return string[]
+local function split(text)
+  if not text or text == "" then
+    return {}
+  end
+  return vim.split(text, "[,%s]+", { trimempty = true })
+end
+
+commands.ws = {
+  desc = "Workspaces: init | create <name> [repos] | rm <name> [force] | ls | status",
+  run = function(args)
+    local sub = args[1] or "ls"
+    local workspace = require "paseo.workspace"
+    local registry = require "paseo.registry"
+
+    if sub == "init" then
+      local root = args[2] and vim.fn.fnamemodify(vim.fn.expand(args[2]), ":p")
+        or assert(vim.uv.cwd())
+      local m, notes = workspace.discover(root)
+      if not m then
+        return vim.notify("paseo: " .. tostring(notes), vim.log.levels.ERROR)
+      end
+      local rendered = workspace.manifest.render(m, notes)
+      -- Shown before it is written: the comments are the whole value of the
+      -- file, and they are what you have to check.
+      vim.cmd "tabnew"
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, vim.split(rendered, "\n"))
+      vim.bo.filetype = "toml"
+      vim.api.nvim_buf_set_name(0, workspace.manifest.path(root))
+      vim.bo.buftype = ""
+      vim.notify("paseo: review this, then :w to accept it", vim.log.levels.INFO)
+      return
+    end
+
+    local m, root, err = project { root = nil }
+    if not m then
+      return vim.notify("paseo: " .. err, vim.log.levels.ERROR)
+    end
+
+    if sub == "create" then
+      local name = args[2]
+      if not name then
+        return vim.notify("paseo: usage :Paseo ws create <name> [repo,repo]", vim.log.levels.ERROR)
+      end
+      if registry.find(name, root) then
+        return vim.notify(("paseo: workspace %q already exists"):format(name), vim.log.levels.ERROR)
+      end
+
+      local ws, create_err =
+        workspace.create(m, { name = name, root = root, only = split(args[3]) })
+      if not ws then
+        return vim.notify("paseo: " .. create_err, vim.log.levels.ERROR)
+      end
+      registry.add(ws)
+
+      -- Hand the assembled directory to the daemon as a plain local workspace.
+      -- Best-effort: a daemon that is down must not cost you a workspace whose
+      -- worktrees are already on disk.
+      local bridge = require "paseo.bridge"
+      bridge.ensure(function(bridge_err)
+        if not bridge_err then
+          bridge.request("workspace.open", { cwd = ws.root }, function() end)
+        end
+      end)
+
+      local lines = { ws.root }
+      for _, repo in ipairs(ws.repos) do
+        if repo.state == "active" then
+          lines[#lines + 1] = ("  %s  %s"):format(repo.name, repo.branch)
+        end
+      end
+      return vim.notify(
+        table.concat(lines, "\n"),
+        vim.log.levels.INFO,
+        { title = "paseo: created" }
+      )
+    end
+
+    if sub == "rm" then
+      local name = args[2]
+      local ws = name and registry.find(name, root)
+      if not ws then
+        return vim.notify(
+          ("paseo: no workspace %q here"):format(tostring(name)),
+          vim.log.levels.ERROR
+        )
+      end
+      local ok, rm_err = workspace.remove(ws, { force = args[3] == "force" })
+      if not ok then
+        return vim.notify("paseo: " .. rm_err, vim.log.levels.WARN)
+      end
+      registry.remove(name, root)
+      return vim.notify("paseo: removed " .. name, vim.log.levels.INFO)
+    end
+
+    if sub == "status" then
+      local lines = {}
+      for _, ws in ipairs(registry.list()) do
+        if ws.project == root then
+          lines[#lines + 1] = ws.name
+          for _, repo in ipairs(registry.active(ws)) do
+            lines[#lines + 1] = ("  %-20s %s"):format(repo.name, repo.branch or "")
+          end
+        end
+      end
+      return vim.notify(
+        #lines > 0 and table.concat(lines, "\n") or "no workspaces",
+        vim.log.levels.INFO
+      )
+    end
+
+    -- ls
+    local lines = {}
+    for _, ws in ipairs(registry.list()) do
+      if ws.project == root then
+        lines[#lines + 1] = ("%-24s %d repo(s)  %s"):format(ws.name, #registry.active(ws), ws.root)
+      end
+    end
+    vim.notify(
+      #lines > 0 and table.concat(lines, "\n") or "no workspaces here",
+      vim.log.levels.INFO
+    )
+  end,
+}
+
 commands.workspaces = {
   desc = "Workspace picker, with a live agent status column",
   run = function()

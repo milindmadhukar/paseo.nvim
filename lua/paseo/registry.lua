@@ -90,10 +90,99 @@ function M.active(ws)
   return out
 end
 
----Drop the cache. Called after `ws create`/`ws rm`, which change the file
----behind our back.
+---Drop the cache.
 function M.invalidate()
   cache = { mtime = nil, data = nil, path = nil }
+end
+
+---Write the registry ATOMICALLY: a temp file and a rename.
+---
+---Two Neovim instances, one per workspace, is the intended way to use this --
+---so concurrent writers are ordinary rather than exceptional, and a
+---half-written registry loses every workspace rather than one.
+---@param workspaces paseo.Workspace[]
+---@return boolean ok, string|nil err
+local function save(workspaces)
+  local path = M.path()
+  vim.fn.mkdir(vim.fs.dirname(path), "p")
+
+  table.sort(workspaces, function(a, b)
+    if a.project ~= b.project then
+      return a.project < b.project
+    end
+    return a.name < b.name
+  end)
+
+  local temp = path .. ".tmp." .. vim.uv.getpid()
+  local fd, err = io.open(temp, "w")
+  if not fd then
+    return false, err
+  end
+  fd:write(vim.json.encode { version = 1, workspaces = workspaces } .. "\n")
+  fd:close()
+
+  local ok, rename_err = vim.uv.fs_rename(temp, path)
+  M.invalidate()
+  return ok == true, rename_err
+end
+
+---Record a workspace, replacing any entry with the same name and project.
+---@param ws paseo.Workspace
+---@return boolean ok, string|nil err
+function M.add(ws)
+  local all = vim.deepcopy(M.list())
+  for index, existing in ipairs(all) do
+    if existing.name == ws.name and existing.project == ws.project then
+      all[index] = ws
+      return save(all)
+    end
+  end
+  all[#all + 1] = ws
+  return save(all)
+end
+
+---Drop a workspace.
+---@param name string
+---@param project? string
+---@return boolean removed
+function M.remove(name, project)
+  local all = vim.deepcopy(M.list())
+  for index, ws in ipairs(all) do
+    if ws.name == name and (not project or ws.project == project) then
+      table.remove(all, index)
+      save(all)
+      return true
+    end
+  end
+  return false
+end
+
+---The workspace with this name.
+---@param name string
+---@param project? string
+---@return paseo.Workspace|nil
+function M.find(name, project)
+  for _, ws in ipairs(M.list()) do
+    if ws.name == name and (not project or ws.project == project) then
+      return ws
+    end
+  end
+  return nil
+end
+
+---The nearest ancestor of `start` holding a manifest.
+---@param start? string
+---@return string|nil
+function M.project_root(start)
+  local dir = vim.fn.fnamemodify(start or assert(vim.uv.cwd()), ":p")
+  local manifest = require "paseo.workspace.manifest"
+  while dir and dir ~= "/" do
+    if vim.uv.fs_stat(manifest.path(dir)) then
+      return (dir:gsub("/+$", ""))
+    end
+    dir = vim.fs.dirname(dir)
+  end
+  return nil
 end
 
 return M
