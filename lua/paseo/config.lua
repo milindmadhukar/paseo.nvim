@@ -24,10 +24,9 @@ local M = {}
 ---@field provider string? `provider/model` for agents this plugin creates.
 ---                        Unset means "ask the daemon what is ready" -- which
 ---                        is the only answer that survives a different host.
---- (There is no `cli` key. The `paseo` binary is the Electron desktop app --
---- every invocation opens a window and writes startup logs into its own
---- --json output -- so nothing here shells out to it. The daemon is reached
---- over its WebSocket.)
+--- (There is no `cli` key. `/usr/bin/paseo` is a perfectly good headless CLI,
+--- but it still pays Node startup -- about 1s against 8ms for the socket -- so
+--- nothing here shells out to it. The daemon is reached over its WebSocket.)
 
 ---@class paseo.Config.Workspaces
 ---@field dir string      Directory, relative to a project root, holding the
