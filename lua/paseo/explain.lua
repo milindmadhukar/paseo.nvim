@@ -32,22 +32,28 @@ local RUBRIC = table.concat({
   "4. What I should push back on: what is unproven, riskier than it looks, or worth arguing about.",
 }, "\n")
 
+---The agent for a directory.
+---
+---Keyed on `ref.root`, not on a repo: a reference may have no repo at all, and
+---an agent only ever needed a directory to work in.
+---@param root string
+---@param label string
 ---@param callback fun(err: string|nil, agent_id: string|nil)
-local function agent_for(repo, callback)
-  local existing = agents[repo.worktree]
+local function agent_for(root, label, callback)
+  local existing = agents[root]
   if existing then
     return callback(nil, existing)
   end
 
   bridge.request("agent.ensure", {
-    cwd = repo.worktree,
+    cwd = root,
     provider = config.get().paseo.provider,
-    title = "paseo.nvim · " .. repo.name,
+    title = "paseo.nvim · " .. label,
   }, function(err, result)
     if err then
       return callback(err, nil)
     end
-    agents[repo.worktree] = result.id
+    agents[root] = result.id
     callback(nil, result.id)
   end)
 end
@@ -74,7 +80,8 @@ local function ask_with(location, prompt, header)
       return
     end
 
-    agent_for(location.repo, function(agent_err, agent_id)
+    local label = location.repo and location.repo.name or vim.fs.basename(location.root)
+    agent_for(location.root, label, function(agent_err, agent_id)
       if agent_err then
         vim.notify("paseo: " .. agent_err, vim.log.levels.ERROR)
         return
