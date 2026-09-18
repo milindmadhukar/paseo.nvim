@@ -53,6 +53,7 @@ end
 
 local function check_paseo()
   local cfg = config.get()
+  local daemon = require "paseo.daemon"
   start "paseo.nvim: Paseo backend"
 
   if cfg.backend ~= "paseo" then
@@ -71,20 +72,36 @@ local function check_paseo()
     )
   end
 
-  -- The daemon, over plain HTTP. This is the only REST endpoint that exists --
-  -- everything else 404s -- so it is a liveness probe and nothing more.
-  if vim.fn.executable "curl" == 1 then
-    local probe = { "curl", "-s", "-m", "3", "-o", "/dev/null", "-w", "%{http_code}" }
-    probe[#probe + 1] = cfg.paseo.health_url
-    local res = vim.system(probe, { text = true }):wait()
-    if (res.stdout or ""):match "^2%d%d$" then
-      ok(("daemon is up (%s)"):format(cfg.paseo.health_url))
+  -- Endpoint discovery, reported candidate by candidate: "no daemon" and
+  -- "a daemon somewhere else" look identical from a single failed probe.
+  if vim.fn.executable "curl" == 0 then
+    info "`curl` not found; skipped daemon discovery"
+    return
+  end
+
+  local found = false
+  for _, endpoint in ipairs(daemon.candidates()) do
+    local probe = daemon.probe(endpoint)
+    local label = ("%s (%s)"):format(endpoint.ws, endpoint.source)
+
+    if probe.needs_password then
+      -- Still a hit. A daemon that wants a password is a daemon.
+      warn(("%s -> 401, daemon is up but wants a password"):format(label))
+      found = true
+      break
+    elseif probe.reachable then
+      local version = probe.info and probe.info.version or "?"
+      local host = probe.info and probe.info.hostname or "?"
+      ok(("%s -> up, Paseo %s on %s"):format(label, version, host))
+      found = true
+      break
     else
-      local fix = "daemon is not answering at %s -- try `%s daemon start`"
-      warn(fix:format(cfg.paseo.health_url, cfg.paseo.cli))
+      info(("%s -> no answer"):format(label))
     end
-  else
-    info "`curl` not found; skipped the daemon liveness probe"
+  end
+
+  if not found then
+    warn(("no daemon answered; try `%s daemon start`"):format(cfg.paseo.cli))
   end
 
   -- The sidecar's runtime. Bun is preferred (it is what the rest of the stack
@@ -98,8 +115,6 @@ local function check_paseo()
   else
     warn "neither bun nor node found; the push-based agent status column needs one"
   end
-
-  info(("agent transport: %s"):format(cfg.paseo.url))
 end
 
 function M.check()

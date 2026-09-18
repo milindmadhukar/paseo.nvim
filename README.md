@@ -62,8 +62,8 @@ require("paseo").setup {
   backend = "paseo",              -- or "local" (floaterm + nvim_chan_send)
 
   paseo = {
-    url = "ws://127.0.0.1:6767/ws",
-    health_url = "http://127.0.0.1:6767/api/health",
+    -- url and home are absent by default: absent means "discover the daemon".
+    -- Set url to pin it, e.g. "ws://127.0.0.1:6767/ws".
     cli = "paseo",
   },
 
@@ -145,6 +145,13 @@ than polling: `client.agents.list({ subscribe: {} })` streams `agent_update`,
 which is unobtainable at 2.4 s per poll. The same bridge reaches a remote daemon
 unchanged (`wss://` + password), so this extends to a VPS later for free.
 
+**Finding it.** 6767 is the daemon's default port, not a constant. Candidates
+are tried in order — `paseo.url`, `$PASEO_ENDPOINT`, `daemon.listen` from
+`$PASEO_HOME/config.json`, then `127.0.0.1:6767` — each probed with `GET
+/api/status`. A `401` counts as *reachable*: the daemon is there and wants a
+password, and treating it as a miss is how you report "no daemon" about a
+running one. `:checkhealth paseo` prints every candidate and its answer.
+
 **The CLI keeps exactly one job:** one-shot writes issued by skills and agents
 (`paseo agent send --prompt-file`, `paseo workspace create`), where 2.4 s does
 not matter and a stable documented surface does. It is also the degraded
@@ -186,6 +193,19 @@ Persistent virtual lines also desync a line's visual position from its real
 number, which matters precisely because delete-hunk staging is
 exactly-one-line sensitive. The supported surfaces are `preview_hunk_inline()`
 and `:Gitsigns diff --diff=unified`.
+
+**A whole-file deletion cannot be staged through gitsigns at all.** The file
+is gone from disk, so no buffer opens on it and nothing attaches — staging
+silently does nothing. Found by staging every hunk we compute and checking the
+index afterwards: it was the one case out of five that never landed. Those, and
+untracked files, route to `git add`, which records a removal correctly.
+
+**A hunk header omits a count of 1.** `@@ -2 +2 @@` means `-2,1 +2,1`. Reading
+the missing count as 0 turns every single-line change into a phantom deletion.
+
+**A rename's source must be in the pathspec too**, or rename detection has
+nothing to pair the destination with and a pure rename reports as a whole-file
+add.
 
 **The public hunk type omits `.vend`.** Recompute it as
 `added.start + max(added.count - 1, 0)` or pure-delete hunks are never found.
