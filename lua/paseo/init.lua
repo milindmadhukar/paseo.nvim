@@ -209,17 +209,73 @@ commands.workspaces = {
   end,
 }
 
+commands.chat = {
+  desc = "Open the chat for this directory (toggle)",
+  run = function()
+    require("paseo.ui.chat").toggle()
+  end,
+}
+
 commands.explain = {
-  desc = "Explain the hunk under the cursor",
+  desc = "Explain the hunk/selection/file, using the rubric",
   run = function(args)
     require("paseo.explain").explain(args[1])
   end,
 }
 
 commands.ask = {
-  desc = "Ask a question about the hunk under the cursor",
+  desc = "Attach the hunk/selection/file and type a question",
   run = function(args)
     require("paseo.explain").ask(args[1])
+  end,
+}
+
+commands.qfask = {
+  desc = "Attach every hunk in the quickfix list",
+  run = function()
+    require("paseo.explain").quickfix()
+  end,
+}
+
+commands.model = {
+  desc = "Choose the provider/model new agents are created with",
+  run = function()
+    local bridge = require "paseo.bridge"
+    bridge.ensure(function(err)
+      if err then
+        return vim.notify("paseo: " .. err, vim.log.levels.ERROR)
+      end
+      bridge.request("providers", {}, function(list_err, result)
+        if list_err then
+          return vim.notify("paseo: " .. list_err, vim.log.levels.ERROR)
+        end
+
+        -- Only what the daemon reports as ready. Installed providers and
+        -- configured models differ between hosts, so a hardcoded list would be
+        -- wrong on any machine but this one.
+        local choices = {}
+        for _, entry in ipairs(result.entries or {}) do
+          if entry.status == "ready" then
+            for _, model in ipairs(entry.models or {}) do
+              choices[#choices + 1] = ("%s/%s"):format(entry.provider, model.id)
+            end
+          end
+        end
+        if #choices == 0 then
+          return vim.notify("paseo: no provider is ready on this daemon", vim.log.levels.WARN)
+        end
+
+        vim.schedule(function()
+          vim.ui.select(choices, { prompt = "Provider/model for new agents" }, function(choice)
+            if not choice then
+              return
+            end
+            require("paseo.config").get().paseo.provider = choice
+            vim.notify("paseo: new agents will use " .. choice, vim.log.levels.INFO)
+          end)
+        end)
+      end)
+    end)
   end,
 }
 
@@ -281,7 +337,7 @@ function M.setup(opts)
   })
 
   -- Streaming events have to be wired before anything can arrive on them.
-  require("paseo.explain").attach()
+  require("paseo.ui.chat").attach_events()
 
   -- The sidecar is a child process; leaving it behind on :qa would leak one per
   -- session.

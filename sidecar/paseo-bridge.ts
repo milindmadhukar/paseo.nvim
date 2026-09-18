@@ -363,6 +363,52 @@ const ops: Record<string, (req: Request) => Promise<unknown>> = {
     return { archivedAt: result?.archivedAt ?? null };
   },
 
+  /**
+   * A page of an agent's timeline.
+   *
+   * What makes a chat window a CONVERSATION rather than a transcript of
+   * whatever happened while it was open: reopening a chat shows what was said
+   * before, including from a previous Neovim session, because the agent lives
+   * on the daemon and outlives the editor.
+   *
+   * Paging uses the returned cursors rather than invented offsets.
+   */
+  async "timeline.history"(req) {
+    const agent = connected().agents.ref(String(need(req.agentId, "agentId")));
+    const page: any = await agent.timeline.refetch({
+      direction: (req.direction as any) ?? "before",
+      limit: Number(req.limit ?? 100),
+      ...(req.cursor ? { cursor: req.cursor as any } : {}),
+    });
+
+    const items = (page.entries ?? []).flatMap((entry: any) => {
+      const item = entry.item ?? {};
+      // Only the two kinds a chat window renders. Tool calls and internal
+      // bookkeeping belong in the Paseo app, not here.
+      if (item.type === "assistant_message") return [{ role: "assistant", text: item.text ?? "" }];
+      if (item.type === "user_message") return [{ role: "user", text: item.text ?? "" }];
+      return [];
+    });
+
+    return {
+      items,
+      hasOlder: page.hasOlder ?? false,
+      hasNewer: page.hasNewer ?? false,
+      startCursor: page.startCursor ?? null,
+      endCursor: page.endCursor ?? null,
+    };
+  },
+
+  /** Switch an existing agent's model, without starting a new session. */
+  async "agent.reconfigure"(req) {
+    const agent: any = connected().agents.ref(String(need(req.agentId, "agentId")));
+    if (typeof agent.setConfig !== "function") {
+      throw new Error("this daemon cannot reconfigure a running agent; create a new one instead");
+    }
+    await agent.setConfig({ provider: String(need(req.provider, "provider")) });
+    return { provider: req.provider };
+  },
+
   async "timeline.unsubscribe"(req) {
     const id = String(need(req.agentId, "agentId"));
     const unsubscribe = timelines.get(id);
