@@ -46,15 +46,39 @@ bridge, the `ws` CLI, the workspace layer, and the agent-facing skills.
     "nvim-telescope/telescope.nvim",
     "lewis6991/gitsigns.nvim",
   },
-  cmd = "Paseo",
+  event = "VeryLazy",
   opts = {},
 }
 ```
 
-Requires Neovim 0.10+ and `git`. The Paseo backend additionally wants the
-`paseo` daemon running and `bun` (or node ≥ 22) for the sidecar; without them
-the plugin degrades to the `local` backend rather than breaking. Run
-`:checkhealth paseo` to see which of those you have.
+**No build step and no binary.** Everything is Lua, except the sidecar, which
+is a single TypeScript file run by `bun` (or node ≥ 22) — no bundling, no
+compilation, nothing to fetch from a releases page.
+
+`VeryLazy` rather than `cmd = "Paseo"` matters for one small reason: lazy.nvim
+has no checkhealth integration, so an unloaded plugin is not on the
+runtimepath and a cold `:checkhealth paseo` answers *"No healthcheck found"*,
+which reads like a broken install.
+
+| Needed for | |
+|---|---|
+| Everything | Neovim 0.10+, `git` |
+| The pickers | telescope.nvim |
+| Staging and previews | gitsigns.nvim |
+| Agents | the Paseo daemon running, and `bun` or node ≥ 22 |
+
+Without a daemon the review half works unchanged and the agent half degrades
+to the `local` backend rather than breaking. `:checkhealth paseo` reports
+exactly which of these you have.
+
+### The sidecar's one dependency
+
+`@getpaseo/client` is installed on first use, into `sidecar/`. To do it ahead
+of time:
+
+```sh
+cd ~/.local/share/nvim/lazy/paseo.nvim/sidecar && bun install
+```
 
 ## Configuration
 

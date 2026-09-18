@@ -151,10 +151,26 @@ function M.start(callback)
     return callback "no Paseo daemon answered; see :checkhealth paseo"
   end
 
+  -- The sidecar's one dependency, installed on demand. A plugin manager will
+  -- not have run `bun install` for us, and requiring a `build` step just for
+  -- this would put a toolchain between the user and a working install.
+  local script = assert(script_path())
+  local sidecar_dir = vim.fs.dirname(script)
+  if not vim.uv.fs_stat(vim.fs.joinpath(sidecar_dir, "node_modules", "@getpaseo", "client")) then
+    if vim.fn.executable "bun" == 0 then
+      return callback "the sidecar needs @getpaseo/client; install bun, or run `npm install` in the plugin's sidecar/ directory"
+    end
+    vim.notify("paseo: installing the sidecar's dependencies…", vim.log.levels.INFO)
+    local install = vim.system({ "bun", "install" }, { cwd = sidecar_dir, text = true }):wait()
+    if install.code ~= 0 then
+      return callback("could not install the sidecar's dependencies: " .. (install.stderr or ""))
+    end
+  end
+
   local ok, handle = pcall(vim.system, argv, {
     stdin = true,
     text = true,
-    cwd = vim.fs.dirname(vim.fs.dirname(assert(script_path()))),
+    cwd = sidecar_dir,
     stdout = on_stdout,
     stderr = function(_, chunk)
       if chunk and chunk ~= "" then
