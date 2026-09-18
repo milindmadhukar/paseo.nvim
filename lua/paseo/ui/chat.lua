@@ -22,6 +22,9 @@ local M = {}
 ---@field win_composer integer|nil
 ---@field streaming boolean
 ---@field pending string[]   Context blocks queued for the next send.
+---@field seq integer|nil    Highest timeline seq rendered.
+---@field epoch string|nil   The epoch those seqs belong to.
+---@field initialised boolean  Subscribed, history fetched, settings loaded.
 
 ---Chats are keyed by AGENT, falling back to the directory until the agent is
 ---known. A workspace can hold several sessions, so keying on the directory
@@ -31,6 +34,9 @@ local chats = {}
 
 ---@type paseo.Chat|nil
 local current
+
+---Forward declaration: `initialise` is defined below but referenced by `open`.
+local initialise
 
 local ns = vim.api.nvim_create_namespace "paseo.chat"
 
@@ -42,9 +48,23 @@ local function set_winbar(chat)
     return
   end
   local where = chat.title or vim.fn.fnamemodify(chat.root, ":~")
-  local who = chat.provider or "…"
+  local parts = { chat.provider or "…" }
+  if chat.mode then
+    parts[#parts + 1] = chat.mode
+  end
+  if chat.thinking then
+    parts[#parts + 1] = "think:" .. chat.thinking
+  end
+  -- The lightning bolt, same as the app's.
+  if chat.features and chat.features.fast_mode then
+    parts[#parts + 1] = "⚡"
+  end
   local state = chat.streaming and "  ●" or ""
-  vim.wo[chat.win_conversation].winbar = ("  %s   %s%s"):format(who, where, state)
+  vim.wo[chat.win_conversation].winbar = ("  %s   %s%s"):format(
+    table.concat(parts, " · "),
+    where,
+    state
+  )
 end
 
 ---@param chat paseo.Chat
@@ -119,10 +139,10 @@ local function send(chat)
   end
   local prompt = table.concat(parts, "\n\n")
 
-  append(chat, { "", "### you", "" })
-  append(chat, vim.split(prompt, "\n"))
-  append(chat, { "", "### agent", "" })
-
+  -- The prompt is NOT echoed locally. It comes back on the timeline as a
+  -- user_message, and rendering it here as well would print it twice -- while
+  -- a prompt typed in the Paseo app would appear only once. The timeline is
+  -- the single source of truth for what was said, whoever said it.
   vim.api.nvim_buf_set_lines(chat.composer, 0, -1, false, { "" })
   chat.pending = {}
   chat.streaming = true
@@ -237,6 +257,32 @@ end
 
 -- ------------------------------------------------------------------- history
 
+---Should a live event be rendered, or has history already covered it?
+---
+---History and the live subscription race: a message arriving between
+---`timeline.subscribe` and the history fetch is delivered by BOTH, and renders
+---twice. The timeline's own sequence numbers settle it -- anything at or below
+---what history already covered is a duplicate.
+---@param chat paseo.Chat
+---@param payload table
+---@return boolean
+local function fresh(chat, payload)
+  local seq = payload.seq
+  if not seq or not chat.seq then
+    return true
+  end
+  -- A new epoch invalidates the old numbering entirely.
+  if payload.epoch and chat.epoch and payload.epoch ~= chat.epoch then
+    chat.seq, chat.epoch = nil, payload.epoch
+    return true
+  end
+  if seq <= chat.seq then
+    return false
+  end
+  chat.seq = seq
+  return true
+end
+
 ---@param chat paseo.Chat
 local function load_history(chat)
   bridge.request("timeline.history", { agentId = chat.agent_id, limit = 60 }, function(err, result)
@@ -253,10 +299,46 @@ local function load_history(chat)
       end
       if #lines > 0 then
         append(chat, lines)
-        append(chat, { "", "---", "" })
+      end
+
+      -- Everything up to here is now on screen, so live events at or below this
+      -- point are duplicates.
+      local cursor = result.endCursor
+      if cursor then
+        chat.seq = cursor.seq
+        chat.epoch = cursor.epoch
       end
     end)
   end)
+end
+
+---Everything a chat needs once its agent is known: a clean buffer, the live
+---subscription, the conversation so far, and the session's current settings.
+---
+---One function because these belong together -- an agent that is subscribed but
+---whose history was never fetched looks like an empty conversation, and one
+---whose settings were never read shows the wrong mode in the winbar.
+---@param chat paseo.Chat
+initialise = function(chat)
+  if chat.initialised then
+    return
+  end
+  chat.initialised = true
+
+  -- Clear the placeholder before history lands on top of it.
+  if vim.api.nvim_buf_is_valid(chat.conversation) then
+    vim.bo[chat.conversation].modifiable = true
+    vim.api.nvim_buf_set_lines(chat.conversation, 0, -1, false, {})
+    vim.bo[chat.conversation].modifiable = false
+  end
+  set_winbar(chat)
+
+  -- Subscribe BEFORE fetching history, so nothing said in between is lost.
+  -- The seq comparison in `fresh` is what stops the overlap rendering twice.
+  bridge.request("timeline.subscribe", { agentId = chat.agent_id }, function()
+    load_history(chat)
+  end)
+  M.load_settings(chat)
 end
 
 -- --------------------------------------------------------------------- API
@@ -288,8 +370,31 @@ function M.open(opts, callback)
     vim.api.nvim_set_current_win(chat.win_composer)
   end
 
-  if chat.agent_id then
+  -- An agent we were HANDED still needs everything an agent we created needs.
+  --
+  -- This used to return early when `chat.agent_id` was already set, which is
+  -- exactly the case when you open an existing session from the sessions
+  -- picker -- so it never subscribed, never fetched the conversation, and
+  -- never loaded the mode. You got an empty window onto a session with
+  -- history.
+  if chat.agent_id and chat.initialised then
     return callback(chat, nil)
+  end
+
+  if chat.agent_id then
+    append(chat, { "_loading…_" })
+    return bridge.ensure(function(err)
+      if err then
+        vim.schedule(function()
+          append(chat, { "", "_" .. err .. "_", "" })
+        end)
+        return callback(nil, err)
+      end
+      vim.schedule(function()
+        initialise(chat)
+      end)
+      callback(chat, nil)
+    end)
   end
 
   append(chat, { "_connecting…_" })
@@ -320,15 +425,8 @@ function M.open(opts, callback)
       chats[root] = nil
       chats[result.id] = chat
       vim.schedule(function()
-        -- Replace the placeholder with the real conversation.
-        vim.bo[chat.conversation].modifiable = true
-        vim.api.nvim_buf_set_lines(chat.conversation, 0, -1, false, {})
-        vim.bo[chat.conversation].modifiable = false
-        set_winbar(chat)
-        load_history(chat)
+        initialise(chat)
       end)
-
-      bridge.request("timeline.subscribe", { agentId = result.id }, function() end)
       callback(chat, nil)
     end)
   end)
@@ -431,9 +529,23 @@ function M.attach_events()
     return nil
   end
 
+  -- A user message, from wherever it was typed: here, the Paseo app, another
+  -- client. This is what makes the two views the same conversation.
+  bridge.on("user", function(payload)
+    local chat = by_agent(payload.agentId)
+    if not chat or not fresh(chat, payload) then
+      return
+    end
+    append(chat, { "", "### you", "" })
+    append(chat, vim.split(payload.text or "", "\n"))
+    append(chat, { "", "### agent", "" })
+    chat.streaming = true
+    set_winbar(chat)
+  end)
+
   bridge.on("text", function(payload)
     local chat = by_agent(payload.agentId)
-    if chat then
+    if chat and fresh(chat, payload) then
       stream(chat, payload.text or "")
     end
   end)
@@ -465,6 +577,41 @@ function M.attach_events()
     if chat then
       append(chat, { "", "_(reconnected — anything said during the gap was not replayed)_", "" })
     end
+  end)
+end
+
+---Redraw the winbar after a session setting changed.
+---@param chat paseo.Chat
+function M.refresh(chat)
+  set_winbar(chat)
+end
+
+---Load the session's current mode, thinking level and features into the
+---winbar. Called once the agent is known, so the bar reflects reality rather
+---than only what you changed from here.
+---@param chat paseo.Chat
+function M.load_settings(chat)
+  bridge.request("agent.config", { agentId = chat.agent_id }, function(err, config)
+    if err or not config then
+      return
+    end
+    vim.schedule(function()
+      for _, mode in ipairs(config.availableModes or {}) do
+        if mode.id == config.modeId then
+          chat.mode = mode.label or mode.id
+        end
+      end
+      for _, option in ipairs(config.thinkingOptions or {}) do
+        if option.id == config.thinkingOptionId then
+          chat.thinking = option.label or option.id
+        end
+      end
+      chat.features = {}
+      for _, feature in ipairs(config.features or {}) do
+        chat.features[feature.id] = feature.value
+      end
+      set_winbar(chat)
+    end)
   end)
 end
 

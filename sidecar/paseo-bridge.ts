@@ -23,11 +23,24 @@
  * corrupts the stream and Lua sees a parse error rather than a reply.
  */
 
-import { createPaseoClient } from "@getpaseo/client";
+import { createPaseoApi } from "@getpaseo/client";
+// DaemonClient is not on the package root -- only the typed API is. It lives on
+// the `internal/` subpath, which is where the setters this needs live too.
+import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 
 type Request = { id?: number; op: string; [key: string]: unknown };
 
-let client: ReturnType<typeof createPaseoClient> | null = null;
+// TWO HANDLES ON ONE CONNECTION.
+//
+// The typed API (`createPaseoApi`) is the documented surface and covers almost
+// everything. But changing a running agent's mode, thinking level, model or
+// feature toggles is not on it -- `availableModes` and `features` are readonly
+// there -- and those live on the raw DaemonClient as setAgentMode,
+// setAgentThinkingOption, setAgentModel and setAgentFeature. Building the API
+// from an explicit DaemonClient keeps both on one socket instead of opening a
+// second connection for four calls.
+let daemon: DaemonClient | null = null;
+let client: ReturnType<typeof createPaseoApi> | null = null;
 const timelines = new Map<string, { release?: () => Promise<void> } & (() => void)>();
 let directory: {
   subscription?: { release: () => Promise<void> };
@@ -56,14 +69,22 @@ function connected() {
   return client;
 }
 
+function raw() {
+  if (!daemon) throw new Error("not connected; send {op:'connect'} first");
+  return daemon;
+}
+
 const ops: Record<string, (req: Request) => Promise<unknown>> = {
   async connect(req) {
-    if (client) await client.close().catch(() => {});
-    client = createPaseoClient({
+    if (daemon) await daemon.close().catch(() => {});
+    daemon = new DaemonClient({
       url: String(need(req.url, "url")),
+      clientId: `paseo.nvim-${process.pid}`,
+      clientType: "cli",
       ...(req.password ? { password: String(req.password) } : {}),
     });
-    await client.connect();
+    await daemon.connect();
+    client = createPaseoApi(daemon);
     return { connected: true };
   },
 
@@ -82,7 +103,8 @@ const ops: Record<string, (req: Request) => Promise<unknown>> = {
       }
     }
     timelines.clear();
-    if (client) await client.close();
+    if (daemon) await daemon.close();
+    daemon = null;
     client = null;
     return { closed: true };
   },
@@ -205,10 +227,22 @@ const ops: Record<string, (req: Request) => Promise<unknown>> = {
       const event = update?.event;
       if (!event) return;
 
+      // seq and epoch live on the UPDATE, not the event. They are what lets a
+      // consumer tell a live message apart from the same message arriving in a
+      // history fetch -- without them the two race and the message renders
+      // twice.
+      const at = { seq: update.seq ?? null, epoch: update.epoch ?? null };
+
       switch (event.type) {
         case "timeline":
           if (event.item?.type === "assistant_message") {
-            emit("text", { agentId: id, text: event.item.text ?? "" });
+            emit("text", { agentId: id, text: event.item.text ?? "", ...at });
+          } else if (event.item?.type === "user_message") {
+            // TWO-WAY SYNC. The timeline carries user messages too, whoever
+            // typed them -- the Paseo app, another client, or us. Dropping
+            // them meant a prompt typed in the desktop never appeared here and
+            // the conversation silently diverged.
+            emit("user", { agentId: id, text: event.item.text ?? "", ...at });
           }
           break;
         case "turn_completed":
@@ -474,14 +508,25 @@ const ops: Record<string, (req: Request) => Promise<unknown>> = {
       ...(req.cursor ? { cursor: req.cursor as any } : {}),
     });
 
-    const items = (page.entries ?? []).flatMap((entry: any) => {
+    // Only the two kinds a chat window renders. Tool calls and internal
+    // bookkeeping belong in the Paseo app, not here.
+    //
+    // Consecutive assistant items are MERGED: a reply is streamed as many
+    // timeline items, one per chunk, so rendering them separately turns one
+    // answer into a dozen "### agent" blocks.
+    const items: { role: string; text: string }[] = [];
+    for (const entry of page.entries ?? []) {
       const item = entry.item ?? {};
-      // Only the two kinds a chat window renders. Tool calls and internal
-      // bookkeeping belong in the Paseo app, not here.
-      if (item.type === "assistant_message") return [{ role: "assistant", text: item.text ?? "" }];
-      if (item.type === "user_message") return [{ role: "user", text: item.text ?? "" }];
-      return [];
-    });
+      const role =
+        item.type === "assistant_message" ? "assistant" : item.type === "user_message" ? "user" : null;
+      if (!role) continue;
+      const last = items[items.length - 1];
+      if (last && last.role === role && role === "assistant") {
+        last.text += item.text ?? "";
+      } else {
+        items.push({ role, text: item.text ?? "" });
+      }
+    }
 
     return {
       items,
@@ -489,17 +534,99 @@ const ops: Record<string, (req: Request) => Promise<unknown>> = {
       hasNewer: page.hasNewer ?? false,
       startCursor: page.startCursor ?? null,
       endCursor: page.endCursor ?? null,
+      epoch: page.epoch ?? null,
     };
   },
 
-  /** Switch an existing agent's model, without starting a new session. */
-  async "agent.reconfigure"(req) {
-    const agent: any = connected().agents.ref(String(need(req.agentId, "agentId")));
-    if (typeof agent.setConfig !== "function") {
-      throw new Error("this daemon cannot reconfigure a running agent; create a new one instead");
+  /**
+   * Everything adjustable about a running session, in one read.
+   *
+   * Modes are per PROVIDER (claude has plan/default/acceptEdits/auto/
+   * bypassPermissions; codex has auto/auto-review/full-access). Thinking
+   * options are per MODEL, not per provider -- they hang off the model entry
+   * with its own default. Features are per AGENT and carry their current value;
+   * `fast_mode` is the lightning bolt.
+   */
+  async "agent.config"(req) {
+    const api = connected();
+    const agent: any = api.agents.ref(String(need(req.agentId, "agentId")));
+    await agent.refresh();
+    const snap: any = agent.current();
+    const runtime = snap?.runtimeInfo ?? {};
+
+    // The model entry owns the thinking options, so the provider catalogue has
+    // to be consulted for them -- the agent snapshot does not carry the list.
+    let thinkingOptions: any[] = [];
+    let models: any[] = [];
+    try {
+      const catalogue: any = await api.providers.snapshot({});
+      const entry = (catalogue.entries ?? []).find((e: any) => e.provider === runtime.provider);
+      models = (entry?.models ?? []).map((m: any) => ({ id: m.id, label: m.label, isDefault: !!m.isDefault }));
+      const model = (entry?.models ?? []).find((m: any) => m.id === runtime.model);
+      thinkingOptions = (model?.thinkingOptions ?? []).map((t: any) => ({
+        id: t.id,
+        label: t.label,
+        isDefault: !!t.isDefault,
+      }));
+    } catch {
+      /* the catalogue is a nicety; the modes and features below are not */
     }
-    await agent.setConfig({ provider: String(need(req.provider, "provider")) });
-    return { provider: req.provider };
+
+    return {
+      provider: runtime.provider ?? null,
+      model: runtime.model ?? null,
+      modeId: runtime.modeId ?? runtime.mode ?? null,
+      thinkingOptionId: runtime.thinkingOptionId ?? null,
+      availableModes: (snap?.availableModes ?? []).map((m: any) => ({
+        id: m.id,
+        label: m.label,
+        description: m.description ?? null,
+      })),
+      thinkingOptions,
+      models,
+      features: (snap?.features ?? []).map((f: any) => ({
+        id: f.id,
+        type: f.type,
+        label: f.label,
+        description: f.description ?? null,
+        value: f.value,
+      })),
+    };
+  },
+
+  async "agent.setMode"(req) {
+    const notice = await raw().setAgentMode(
+      String(need(req.agentId, "agentId")),
+      String(need(req.modeId, "modeId")),
+    );
+    // A provider may accept the change and still have something to say about
+    // it -- pass that through rather than swallowing it.
+    return { modeId: req.modeId, notice: notice ?? null };
+  },
+
+  async "agent.setThinking"(req) {
+    const notice = await raw().setAgentThinkingOption(
+      String(need(req.agentId, "agentId")),
+      req.thinkingOptionId === null ? null : String(req.thinkingOptionId),
+    );
+    return { thinkingOptionId: req.thinkingOptionId ?? null, notice: notice ?? null };
+  },
+
+  async "agent.setFeature"(req) {
+    await raw().setAgentFeature(
+      String(need(req.agentId, "agentId")),
+      String(need(req.featureId, "featureId")),
+      req.value,
+    );
+    return { featureId: req.featureId, value: req.value };
+  },
+
+  async "agent.setModel"(req) {
+    await raw().setAgentModel(
+      String(need(req.agentId, "agentId")),
+      req.modelId === null ? null : String(req.modelId),
+    );
+    return { modelId: req.modelId ?? null };
   },
 
   async "timeline.unsubscribe"(req) {
