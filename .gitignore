@@ -1,12 +1,9 @@
-# luarocks / busted, if tests ever land
-.luarocks/
-luarocks/
-lua_modules/
-.busted-cache/
-
-# bun, for the future paseo-bridge sidecar
+# bun / node -- the sidecar's dependencies
 node_modules/
-bun.lock
+
+# luarocks / busted, if tests ever need them
+.luarocks/
+lua_modules/
 
 # editor / OS
 *.swp
