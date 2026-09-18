@@ -109,11 +109,11 @@ end
 ---Recognised by shape: some ancestor's PARENT is named `config.workspaces.dir`.
 ---So `~/Code/openfin/.workspaces/otp-rate-limit/clm/app/main.py` yields
 ---`~/Code/openfin/.workspaces/otp-rate-limit`.
----@param path string  Absolute, normalised.
+---@param path? string  Defaults to the cwd.
 ---@return string|nil root
-local function workspace_root(path)
+function M.workspace_root(path)
   local marker = config.get().workspaces.dir
-  local dir = path
+  local dir = path and normalise(path) or normalise(assert(vim.uv.cwd()))
   while dir and dir ~= "/" do
     local parent = vim.fs.dirname(dir)
     if vim.fs.basename(parent) == marker then
@@ -136,7 +136,7 @@ function M.list(opts)
 
   local start = opts.path and normalise(opts.path) or normalise(assert(vim.uv.cwd()))
 
-  local root = workspace_root(start)
+  local root = M.workspace_root(start)
   if not root then
     local repo = M.resolve(start)
     return repo and { repo } or {}
