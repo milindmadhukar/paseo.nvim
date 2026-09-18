@@ -9,6 +9,9 @@ lua_modules/
 *.swp
 .DS_Store
 
-# worktree assembly, once `ws` exists
+# build output
+dist/
+
+# worktree assembly
 .workspaces/
 PLAN.md
