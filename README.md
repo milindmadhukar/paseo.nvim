@@ -117,7 +117,12 @@ require("paseo").setup {
 | `:Paseo explain [kind]` | Explain the hunk/selection/file, using the rubric |
 | `:Paseo ask [kind]` | Attach the hunk/selection/file, then type your question |
 | `:Paseo qfask` | Attach every hunk in the quickfix list |
-| `:Paseo model` | Choose the provider/model, from what the daemon has ready |
+| `:Paseo mode` | Permission mode — plan, always ask, accept edits, auto, bypass |
+| `:Paseo thinking` | Reasoning level for this session |
+| `:Paseo fast` | Toggle fast mode (⚡), or pick another feature toggle |
+| `:Paseo switchmodel` | Change the running session's model |
+| `:Paseo session` | What this session is set to |
+| `:Paseo model` | Choose the provider/model new agents get |
 | `:Paseo workspaces` | Workspace picker — open, sessions, create, archive |
 | `:Paseo wcreate` | Create a workspace here |
 | `:Paseo sessions` | Sessions in this workspace |
@@ -129,8 +134,15 @@ require("paseo").setup {
 Default keys, all under `<leader>a`. `aa` chat · `ae` explain · `ak` ask · `af`
 ask about the file · `aQ` ask about the whole quickfix list — `ae` and `ak`
 also bind in visual mode and send the live selection. Review: `ac` changes ·
-`aq` hunks · `as` stage · `ar`/`au` diff panel. Then `aw` workspaces · `aW` new
-workspace · `aS` sessions · `am` model · `at` agents · `aR` repos · `aH` health.
+`aq` hunks · `as` stage · `ar`/`au` diff panel. Session controls, the row under the composer in the app: `ap` mode · `ah`
+thinking · `az` fast · `am` model · `a?` settings. Then `aw` workspaces · `aW`
+new workspace · `aS` sessions · `at` agents · `aR` repos · `aH` health.
+
+Everything in those pickers is **discovered from the daemon**. Modes are per
+provider — claude has plan / always-ask / accept-edits / auto / bypass, codex
+has auto / auto-review / full-access. Thinking levels are per *model*. Feature
+toggles are per agent. Hardcoding any of it would be wrong on the next
+provider.
 
 ## Workspaces and sessions
 
@@ -146,6 +158,11 @@ Isolation belongs to the **workspace**, not the session. Two sessions in one
 workspace edit the same files on purpose — that is what makes "one agent
 writing, another reviewing its diff" work. Two *workspaces* are isolated from
 each other only when each has its own worktree.
+
+**The conversation is two-way.** A prompt typed in the Paseo desktop appears in
+the Neovim chat, and vice versa — they are the same timeline. Live events carry
+a `seq`, which is what lets an overlapping history fetch and subscription render
+each message exactly once instead of twice.
 
 Paseo is the source of truth: a workspace created in the app appears in the
 picker exactly like one this plugin assembled. What the plugin adds is what

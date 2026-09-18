@@ -287,6 +287,41 @@ commands.qfask = {
   end,
 }
 
+commands.mode = {
+  desc = "Permission / operating mode for this session",
+  run = function()
+    require("paseo.ui.session").mode()
+  end,
+}
+
+commands.thinking = {
+  desc = "Reasoning level for this session",
+  run = function()
+    require("paseo.ui.session").thinking()
+  end,
+}
+
+commands.fast = {
+  desc = "Toggle fast mode (or pick another feature toggle)",
+  run = function(args)
+    require("paseo.ui.session").toggle(args[1])
+  end,
+}
+
+commands.session = {
+  desc = "What this session is set to",
+  run = function()
+    require("paseo.ui.session").status()
+  end,
+}
+
+commands.switchmodel = {
+  desc = "Change the running session's model",
+  run = function()
+    require("paseo.ui.session").model()
+  end,
+}
+
 commands.model = {
   desc = "Choose the provider/model new agents are created with",
   run = function()

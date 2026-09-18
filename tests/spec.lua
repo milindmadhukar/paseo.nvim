@@ -456,6 +456,18 @@ local function test_bridge()
   )
   truthy("bridge: not running before it is started", not bridge.running())
 
+  -- Every module has to at least load: a syntax error in one of these only
+  -- shows up when you press the key, which is the worst time to find it.
+  for _, name in ipairs {
+    "paseo.ui.chat",
+    "paseo.ui.session",
+    "paseo.workspaces",
+    "paseo.pickers.sessions",
+    "paseo.pickers.workspaces",
+  } do
+    truthy("bridge: " .. name .. " loads", (pcall(require, name)))
+  end
+
   -- The regression: `id` is the request-correlation field and bridge.request
   -- sets it LAST, so anything in args called `id` is silently replaced by the
   -- request number. An agent passed that way reached the daemon as "4" and was
