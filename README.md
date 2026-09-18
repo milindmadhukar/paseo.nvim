@@ -18,16 +18,16 @@ abstracts claude / codex / opencode and owns sessions, status and terminals.
 
 ## Status
 
-Early. Phase 0 (Neovim config) and the plugin skeleton are done; the review
-layer is next. See [Roadmap](#roadmap).
+Early. The Neovim-config groundwork and the plugin skeleton are done; the
+review loop is being built now. See [Roadmap](#roadmap).
 
 | | |
 |---|---|
 | ✅ | `repos.lua` — the repo list, workspace-aware |
 | ✅ | `:checkhealth paseo` |
 | ✅ | `:Paseo` command surface |
-| ⬜ | changed-files picker, hunk quickfix, diff panel |
-| ⬜ | explain bridge + Paseo sidecar |
+| 🔨 | changed-files picker, hunk quickfix, diff panel |
+| 🔨 | explain bridge + Paseo sidecar |
 | ⬜ | workspace assembly (`ws`) |
 | ⬜ | workspace picker with live agent status |
 
@@ -196,28 +196,28 @@ everything after it.
 
 ## Roadmap
 
-- **Phase 0 — Neovim config.** *(done, lives in the nvim config repo)*
+- **Phase 0 — Neovim config.** *(done; lives in the nvim config repo)*
   `word_diff`, `diff_opts.linematch`, `nav_hunk`-based motions, the `ih` text
   object, `preview_hunk_inline` and the diff panel on the preview/diff keys,
   and a deduplicated `<leader>g` group.
-- **Phase 1 — review layer, single repo.** Changed-files picker, per-hunk
-  quickfix, diff panel in a fresh tab with `tcd`.
-- **Phase 2 — the explain bridge.** References from cursor / selection / hunk /
-  file, the Bun sidecar, and a shared `explain-change` skill whose rubric ends
-  in *what the reviewer should push back on*.
-- **Phase 3 — `ws`, a Go CLI.** *Conditional.* Buys exactly one thing:
+- **Phase 1 — the review loop, end to end.** *(in progress)* Review and explain
+  are one phase, not two, because they are halves of a single loop: *find the
+  hunk → read it → stage it, or ask about it → next hunk*. Splitting them ships
+  half a loop twice — a quickfix list of hunks you cannot interrogate is the
+  same dead end as an agent chat with no diff in front of it. So: changed-files
+  picker, per-hunk quickfix, diff panel in a fresh tab with `tcd`, references
+  from cursor / selection / hunk / file, the Bun sidecar, and a shared
+  `explain-change` skill whose rubric ends in *what the reviewer should push
+  back on*. The acceptance test is that the whole loop runs without leaving the
+  quickfix list.
+- **Phase 2 — `ws`, a Go CLI.** *Conditional.* Buys exactly one thing:
   concurrent isolated agents on a multi-repo project. Single-repo projects
   already get real worktree isolation from Paseo, and multi-repo projects
   already work for one agent at a time. Build it only if serialising agents
   becomes the bottleneck.
-- **Phase 4 — workspace layer.** Workspace picker with a live, push-driven
+- **Phase 3 — workspace layer.** Workspace picker with a live, push-driven
   agent status column; a new Neovide window per workspace.
-- **Phase 5 — commit, PR, merge.** Agent-agnostic skills over `ws … --json`.
-
-## Naming
-
-*Paseo* is the walk; this is the plugin that makes you take it. Working
-alternates, cheap to change: `atelier.nvim`, `workbench.nvim`, `readback.nvim`.
+- **Phase 4 — commit, PR, merge.** Agent-agnostic skills over `ws … --json`.
 
 ## Licence
 
