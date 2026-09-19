@@ -865,6 +865,375 @@ local function test_ws_init()
   vim.fn.delete(project, "rf")
 end
 
+-- ------------------------------------------------------------------ ui
+
+--- The rendering layer. All pure, so all of it runs headlessly.
+local function test_ui()
+  local render = require "paseo.ui.render"
+  local timeline = require "paseo.ui.timeline"
+  local transcript = require "paseo.ui.transcript"
+  require("paseo.ui.hl").setup()
+
+  -- Every module has to at least load, same reason as the bridge suite.
+  for _, name in ipairs {
+    "paseo.ui.hl",
+    "paseo.ui.render",
+    "paseo.ui.timeline",
+    "paseo.ui.transcript",
+    "paseo.ui.permission",
+  } do
+    truthy("ui: " .. name .. " loads", (pcall(require, name)))
+  end
+
+  -- ---------------------------------------------------------------- render
+
+  -- A card whose lines are not all exactly the requested width draws a ragged
+  -- right edge, which is what every box-drawing bug looks like.
+  local card = render.card(
+    { { "✓ Shell", "PaseoToolOk" } },
+    { { { "ls -la" } }, { { "a.txt" } } },
+    { width = 40 }
+  )
+  local ragged
+  for _, line in ipairs(card) do
+    if render.width(line) ~= 40 then
+      ragged = render.concat(line)
+    end
+  end
+  eq("ui: every card line is exactly the requested width", ragged, nil)
+
+  -- Found by real agent history, not by a fixture: a multi-line shell command
+  -- comes back with newlines in `display.summary`, and nvim_buf_set_lines
+  -- rejects a line containing one ("'replacement string' item contains
+  -- newlines"). A single heredoc in a transcript was enough to hit it.
+  local newline_card = render.card(
+    { { "Shell", "PaseoToolName" }, { "cat <<EOF\nhello\nEOF", "PaseoToolArg" } },
+    {},
+    { width = 50 }
+  )
+  eq(
+    "ui: a cell containing a newline is flattened, not passed through",
+    render.concat(newline_card[1]):find("\n", 1, true),
+    nil
+  )
+  eq("ui: and the card is still exactly its width", render.width(newline_card[1]), 50)
+
+  -- Also from real data: a header long enough to be truncated used the body's
+  -- width budget, which does not account for the opening "╭─ " and the closing
+  -- corner, so every truncated card came out one column too wide.
+  local long = render.card(
+    { { string.rep("x", 400), "PaseoToolArg" } },
+    { { { string.rep("y", 400) } } },
+    { width = 60 }
+  )
+  local widths = {}
+  for _, line in ipairs(long) do
+    widths[#widths + 1] = render.width(line)
+  end
+  eq("ui: a truncated header does not overflow the card", widths, { 60, 60, 60 })
+
+  -- A collapsed card is ONE line. A transcript of three-line boxes around
+  -- "read a file" is unreadable.
+  eq("ui: a card with no body is a single line", #render.card({ { "x" } }, {}, { width = 40 }), 1)
+
+  -- Extmark columns are BYTES; widths are display columns. Box-drawing and the
+  -- status glyphs make the two differ on literally every card line.
+  local buf = vim.api.nvim_create_buf(false, true)
+  render.to_buffer(buf, require("paseo.ui.hl").ns, 0, -1, {
+    { { "│ ", "PaseoBorder" }, { "ok", "PaseoToolOk" } },
+  })
+  local marks =
+    vim.api.nvim_buf_get_extmarks(buf, require("paseo.ui.hl").ns, 0, -1, { details = true })
+  local text = vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1]
+  local second = marks[2]
+  eq(
+    "ui: extmark columns are byte offsets, not display columns",
+    second and text:sub(second[3] + 1, second[4].end_col),
+    "ok"
+  )
+
+  -- Highlights must outrank treesitter: the transcript is a markdown buffer and
+  -- markdown's captures sit at the default priority of 100.
+  truthy("ui: transcript highlights outrank treesitter", marks[1] and marks[1][4].priority == 200)
+
+  -- ------------------------------------------------------------- timeline
+
+  -- The whole complaint: the agent reading a file and running commands was
+  -- invisible. Each of these must produce something.
+  for _, case in ipairs {
+    { "shell", { type = "shell", command = "ls -la", output = "a\nb", exitCode = 0 } },
+    { "read", { type = "read", filePath = "/tmp/a.lua", offset = 1, limit = 20 } },
+    { "edit", { type = "edit", filePath = "/tmp/a.lua", unifiedDiff = "@@ -1 +1 @@\n-a\n+b" } },
+    { "write", { type = "write", filePath = "/tmp/a.lua", content = "x\ny" } },
+    { "search", { type = "search", query = "foo", numFiles = 2, numMatches = 7 } },
+    { "fetch", { type = "fetch", url = "https://example.com", code = 200 } },
+    { "sub_agent", { type = "sub_agent", description = "explore", log = "", actions = {} } },
+    { "plan", { type = "plan", text = "do the thing" } },
+    { "plain_text", { type = "plain_text", text = "note" } },
+    { "unknown", { type = "unknown", input = { a = 1 }, output = nil } },
+  } do
+    local built = timeline.card({
+      kind = "tool",
+      callId = "c",
+      name = "T",
+      status = "completed",
+      display = { displayName = "T", summary = "s" },
+      detail = case[2],
+    }, { width = 60, expanded = true })
+    truthy("ui: a " .. case[1] .. " tool call renders", #built.lines > 0)
+  end
+
+  -- Reasoning is the "thinking steps" half of the complaint.
+  local thought = timeline.card({ kind = "thinking", text = "line one\nline two" }, { width = 60 })
+  truthy("ui: reasoning renders", #thought.lines > 0)
+  truthy("ui: reasoning is collapsible", thought.collapsible)
+  eq("ui: reasoning collapses to one line", #thought.lines, 1)
+
+  -- A failure you have to expand to notice is a failure you will not notice.
+  local failed = timeline.card({
+    kind = "tool",
+    callId = "c",
+    name = "T",
+    status = "failed",
+    error = "boom",
+    display = { displayName = "T", errorText = "exit 1" },
+    detail = { type = "shell", command = "false" },
+  }, { width = 60 })
+  truthy(
+    "ui: a failed tool call shows its error while collapsed",
+    render.concat(failed.lines[1]):find("exit 1", 1, true) ~= nil
+  )
+
+  -- ----------------------------------------------------------- transcript
+
+  local chat = { conversation = vim.api.nvim_create_buf(false, true) }
+  transcript.reset(chat)
+
+  transcript.upsert(chat, { kind = "user", text = "run ls" })
+  transcript.upsert(chat, {
+    kind = "tool",
+    callId = "call-1",
+    name = "Bash",
+    status = "running",
+    display = { displayName = "Shell", summary = "ls -la" },
+    detail = { type = "shell", command = "ls -la" },
+  })
+  -- Content arriving BELOW the running card is what makes its line number go
+  -- stale, which is why blocks are anchored by extmark rather than by row.
+  transcript.upsert(chat, { kind = "thinking", text = "waiting" })
+  transcript.stream(chat, "Run")
+  transcript.stream(chat, "ning.")
+
+  local before = vim.api.nvim_buf_line_count(chat.conversation)
+  transcript.upsert(chat, {
+    kind = "tool",
+    callId = "call-1",
+    name = "Bash",
+    status = "completed",
+    display = { displayName = "Shell", summary = "ls -la" },
+    detail = { type = "shell", command = "ls -la", output = "a.txt", exitCode = 0 },
+  })
+
+  -- The regression this guards: a tool call arrives TWICE, running then
+  -- completed. Appending the second one prints every command in the
+  -- transcript twice.
+  eq("ui: a completing tool call replaces its card rather than appending", before,
+    vim.api.nvim_buf_line_count(chat.conversation))
+  local blocks = 0
+  for _ in pairs(chat.blocks) do
+    blocks = blocks + 1
+  end
+  eq("ui: and does not create a second block", blocks, 4)
+
+  local joined = table.concat(vim.api.nvim_buf_get_lines(chat.conversation, 0, -1, false), "\n")
+  truthy("ui: the completed card shows its terminal status", joined:find("✓", 1, true) ~= nil)
+  truthy("ui: and no longer shows the running one", joined:find("◐", 1, true) == nil)
+
+  -- Streamed chunks must join: a reply delivered as "Run" + "ning." renders
+  -- "Running.", not two lines.
+  truthy("ui: streamed chunks join into one block", joined:find("Running.", 1, true) ~= nil)
+
+  -- Expanding grows the card and pushes everything below it down; the anchors
+  -- must survive that, or the next replace lands in the wrong place.
+  local tool = chat.blocks[chat.by_call["call-1"]]
+  tool.expanded = true
+  transcript.rerender(chat, tool)
+  truthy(
+    "ui: expanding a card reveals its output",
+    table.concat(vim.api.nvim_buf_get_lines(chat.conversation, 0, -1, false), "\n")
+      :find("a.txt", 1, true) ~= nil
+  )
+  eq("ui: anchors survive a block changing height", #vim.api.nvim_buf_get_extmarks(
+    chat.conversation, require("paseo.ui.hl").ns_anchor, 0, -1, {}), 4)
+
+  -- `replaced` invalidates the epoch. It was emitted by the sidecar and
+  -- listened to by nobody, so a replacement left stale messages on screen.
+  transcript.reset(chat)
+  eq("ui: reset empties the transcript", vim.api.nvim_buf_line_count(chat.conversation), 1)
+  eq("ui: and drops the callId map", next(chat.by_call), nil)
+
+  -- --------------------------------------------------------------- surfaces
+
+  -- Opening and closing the float must leave nothing behind. The regression:
+  -- `close()` set its state to nil before the helper that closes the
+  -- conversation and composer floats read it, so two windows survived every
+  -- close and stacked up across the session.
+  local float = require "paseo.ui.float"
+  local surface_chat = {
+    root = vim.uv.cwd(),
+    agent_id = "test-agent",
+    provider = "test",
+    streaming = false,
+    pending = {},
+    conversation = vim.api.nvim_create_buf(false, true),
+    composer = vim.api.nvim_create_buf(false, true),
+  }
+  transcript.reset(surface_chat)
+  transcript.upsert(surface_chat, { kind = "user", text = "hello" })
+
+  local wins_before = #vim.api.nvim_list_wins()
+  local bufs_before = #vim.api.nvim_list_bufs()
+  for _ = 1, 3 do
+    float.open(surface_chat)
+    float.select "Usage"
+    float.select "Chat"
+    float.close()
+  end
+  eq("ui: the float leaves no windows behind", #vim.api.nvim_list_wins(), wins_before)
+  eq("ui: the float leaves no buffers behind", #vim.api.nvim_list_bufs(), bufs_before)
+
+  -- Volt keys its state by buffer and never clears it; ours must.
+  if pcall(require, "volt") then
+    local entries = 0
+    for _ in pairs(require "volt.state") do
+      entries = entries + 1
+    end
+    eq("ui: the float clears its volt state", entries, 0)
+    eq("ui: and takes its buffer off volt's key handler", #require("volt.events").bufs, 0)
+  end
+
+  -- The session panel replaces four separate `vim.ui.select` prompts, so its
+  -- rows have to be actionable -- a read-only list of settings you still have
+  -- to leave the panel to change would be worse than the prompts.
+  local session_panel = require "paseo.ui.panels.session"
+  surface_chat.config_snapshot = {
+    modeId = "default",
+    availableModes = { { id = "plan", label = "Plan" }, { id = "default", label = "Always ask" } },
+    thinkingOptions = {},
+    models = {},
+    features = { { id = "fast_mode", label = "Fast mode", type = "toggle", value = true } },
+  }
+  local clickable = 0
+  for _, line in ipairs(session_panel.lines(surface_chat, 80)) do
+    for _, cell in ipairs(line) do
+      if type(cell[3]) == "function" then
+        clickable = clickable + 1
+      end
+    end
+  end
+  truthy("ui: the session panel's rows carry click actions", clickable >= 6)
+
+  -- Volt's convention is the cell's THIRD element, and everything between the
+  -- panel and volt must preserve it -- truncate, flatten and to_volt all
+  -- rebuild cell tables.
+  local action = function() end
+  local through = render.to_volt { render.truncate({ { "x", "PaseoDim", action } }, 40) }
+  eq("ui: click actions survive truncate and to_volt", through[1][1][3], action)
+
+  -- Both surfaces draw the header from ONE builder, so they cannot drift into
+  -- disagreeing about which mode the session is in.
+  local sidebar = require "paseo.ui.sidebar"
+  surface_chat.mode = "acceptEdits"
+  surface_chat.permissions = { { id = "x" } }
+  local header = render.concat(sidebar.header(surface_chat))
+  truthy("ui: the header shows the mode", header:find("acceptEdits", 1, true) ~= nil)
+  truthy("ui: and shouts when something is waiting on you", header:find("needs you", 1, true) ~= nil)
+
+  -- `%` is the statusline escape character: a path or command containing one
+  -- would be read as a format item and eat the rest of the bar.
+  local escaped = render.to_winbar { { "50% done", "PaseoDim" } }
+  truthy("ui: winbar text escapes %", escaped:find("50%% done", 1, true) ~= nil)
+
+  -- ---------------------------------------------------- source invariants
+
+  -- NOT `vim.fn.getcwd()`: the review and ws-init suites `tcd` into fixture
+  -- directories, so by the time this runs the cwd is wherever they left it and
+  -- every one of these assertions silently skipped instead of failing.
+  local root_dir = vim.fs.dirname(vim.api.nvim_get_runtime_file("lua/paseo/ui/render.lua", false)[1])
+  root_dir = root_dir and vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(root_dir)))
+
+  local function source_of(path)
+    if not root_dir then
+      return nil
+    end
+    local fd = io.open(root_dir .. "/" .. path, "r")
+    if not fd then
+      return nil
+    end
+    local text = fd:read "*a"
+    fd:close()
+    return text
+  end
+
+  truthy("ui: the source tree under test was located", root_dir ~= nil)
+
+  local sidecar = source_of "sidecar/paseo-bridge.ts"
+  if sidecar then
+    -- The root cause of "I can't see the thinking steps": the sidecar's switch
+    -- forwarded only assistant_message and user_message and dropped the rest.
+    truthy("ui: the sidecar forwards reasoning", sidecar:find('case "reasoning"', 1, true) ~= nil)
+    truthy("ui: the sidecar forwards tool calls", sidecar:find('case "tool_call"', 1, true) ~= nil)
+    truthy(
+      "ui: the sidecar forwards permission requests",
+      sidecar:find('case "permission_requested"', 1, true) ~= nil
+    )
+    truthy(
+      "ui: history carries tool calls too, through the same describer",
+      sidecar:find("describeItem(entry.item", 1, true) ~= nil
+    )
+    -- A synthesised action id is ours, not the provider's, and sending one back
+    -- is rejected.
+    truthy(
+      "ui: synthetic action ids are stripped before answering",
+      sidecar:find('startsWith("__")', 1, true) ~= nil
+    )
+  end
+
+  local chat_source = source_of "lua/paseo/ui/chat.lua"
+  if chat_source then
+    truthy(
+      "ui: the replaced event is handled",
+      chat_source:find('bridge.on("replaced"', 1, true) ~= nil
+    )
+  end
+
+  -- Volt sets `modifiable = false` and binds `q`/`<Esc>` to close. Handing it
+  -- the composer would make the one buffer you type into untypeable.
+  for _, path in ipairs { "lua/paseo/ui/chat.lua", "lua/paseo/ui/transcript.lua" } do
+    local text = source_of(path)
+    if text then
+      truthy(
+        "ui: " .. path .. " never hands a chat buffer to volt",
+        text:find("volt.run", 1, true) == nil and text:find("volt.mappings", 1, true) == nil
+      )
+    end
+  end
+
+  -- volt.draw does `table.remove(marks, 3)` on whatever it is handed, stripping
+  -- the actions permanently. So to_volt must hand over COPIES -- asserted by
+  -- behaviour rather than by grepping for `vim.deepcopy`, which says nothing
+  -- about whether the copy actually reaches volt.
+  local source_line = { { "click me", "PaseoKey", { click = function() end } } }
+  local handed = render.to_volt { source_line }
+  truthy("ui: to_volt hands volt a different table", handed[1] ~= source_line)
+  truthy("ui: and different cells within it", handed[1][1] ~= source_line[1])
+  table.remove(handed[1][1], 3) -- what volt.draw does
+  truthy(
+    "ui: so volt stripping the actions cannot reach ours",
+    source_line[1][3] ~= nil
+  )
+end
+
 function M.run()
   local suites = {
     { "repos", test_repos },
@@ -880,6 +1249,7 @@ function M.run()
     { "ref", test_ref },
     { "workspace", test_workspace },
     { "ws init", test_ws_init },
+    { "ui", test_ui },
   }
 
   for _, suite in ipairs(suites) do

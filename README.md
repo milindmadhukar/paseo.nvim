@@ -31,6 +31,9 @@ bridge, the `ws` CLI, the workspace layer, and the agent-facing skills.
 | ✅ | changed-files picker, hunk quickfix, diff panel |
 | ✅ | 48-assertion test suite (`tests/run.sh`) |
 | ✅ | explain bridge + Paseo sidecar (`bin/paseo-bridge.ts`) |
+| ✅ | tool calls, reasoning and todos rendered in the transcript |
+| ✅ | permission dialog — answer a prompt without the desktop app |
+| ✅ | two surfaces: the sidebar pane and the full-screen dashboard |
 | ✅ | workspace assembly — `ws`, a Go CLI |
 | ✅ | workspace picker with a live, push-driven agent status column |
 | ✅ | `workspace` / `workspace-commit` / `workspace-pr` skills |
@@ -43,6 +46,7 @@ bridge, the `ws` CLI, the workspace layer, and the agent-facing skills.
 {
   "milindmadhukar/paseo.nvim",
   dependencies = {
+    "nvzone/volt",
     "nvim-telescope/telescope.nvim",
     "lewis6991/gitsigns.nvim",
   },
@@ -63,6 +67,7 @@ which reads like a broken install.
 | Needed for | |
 |---|---|
 | Everything | Neovim 0.10+, `git` |
+| The chat UI | nvzone/volt |
 | The pickers | telescope.nvim |
 | Staging and previews | gitsigns.nvim |
 | Agents | the Paseo daemon running, and `bun` or node ≥ 22 |
@@ -124,6 +129,7 @@ require("paseo").setup {
 | `:Paseo fast` | Toggle fast mode (⚡), or pick another feature toggle |
 | `:Paseo switchmodel` | Change the running session's model |
 | `:Paseo session` | What this session is set to |
+| `:Paseo dash` | The chat full screen, with the session panels |
 | `:Paseo model` | Choose the provider/model new agents get |
 | `:Paseo workspaces` | Workspace picker — open, sessions, create, archive |
 | `:Paseo wcreate` | Create a workspace here |

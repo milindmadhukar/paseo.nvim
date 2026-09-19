@@ -27,6 +27,12 @@ import { createPaseoApi } from "@getpaseo/client";
 // DaemonClient is not on the package root -- only the typed API is. It lives on
 // the `internal/` subpath, which is where the setters this needs live too.
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
+// The daemon's OWN formatter for a tool call. Every provider names its tools
+// differently -- Bash/shell/run_command, Read/read_file/view -- and the rules
+// for turning one into "Bash · rg foo src/" already exist here. Reimplementing
+// them in Lua would be wrong on the next provider, which is the same reason
+// modes and thinking levels are discovered rather than hardcoded.
+import { buildToolCallDisplayModel } from "@getpaseo/protocol/tool-call-display";
 
 type Request = { id?: number; op: string; [key: string]: unknown };
 
@@ -93,6 +99,113 @@ function pictures(req: Request): Array<{ data: string; mimeType: string }> | und
     if (url) return { data: url[2]!, mimeType: url[1]! };
     return { data, mimeType: String(need(image?.mimeType, `images[${index}].mimeType`)) };
   });
+}
+
+/**
+ * A permission request with buttons GUARANTEED to exist.
+ *
+ * `actions` is optional in the protocol, and a provider that omits it means
+ * plain allow/deny. Synthesising them here rather than in Lua keeps the dialog
+ * to one code path -- it renders `request.actions` and never asks whether they
+ * are real.
+ *
+ * The synthetic ones are MARKED, because their ids are ours, not the
+ * provider's. Sending an invented `selectedActionId` back is rejected, so
+ * `agent.respondToPermission` strips it when the flag is set.
+ */
+function withFallbackActions(request: any): any {
+  if (Array.isArray(request?.actions) && request.actions.length > 0) return request;
+  return {
+    ...request,
+    actions: [
+      { id: "__allow", label: "Allow", behavior: "allow", variant: "primary", synthetic: true },
+      { id: "__deny", label: "Deny", behavior: "deny", variant: "secondary", synthetic: true },
+    ],
+  };
+}
+
+/**
+ * ONE timeline item, flattened for Lua. Used by BOTH the live subscription and
+ * the history fetch, so a reply looks the same whether it just arrived or was
+ * loaded from the daemon on open.
+ *
+ * This used to forward only assistant_message and user_message, and the comment
+ * here said tool calls "belong in the Paseo app, not here". That was the whole
+ * bug: the agent reading a file, running a command or thinking never reached
+ * Neovim, so the window showed a long silence and then an answer.
+ *
+ * `kind` is the event name the Lua listens on. Returning null means the item is
+ * bookkeeping with nothing to render -- plugin items, for now.
+ */
+function describeItem(item: any, cwd?: string): { kind: string; [key: string]: unknown } | null {
+  switch (item?.type) {
+    case "assistant_message":
+      return { kind: "text", text: item.text ?? "" };
+
+    case "user_message":
+      // TWO-WAY SYNC. The timeline carries user messages too, whoever typed
+      // them -- the Paseo app, another client, or us.
+      return { kind: "user", text: item.text ?? "" };
+
+    case "reasoning":
+      return { kind: "thinking", text: item.text ?? "" };
+
+    case "tool_call": {
+      // `display` is precomputed here so the Lua never has to know that a
+      // "shell" detail keys its command as `command` and a "read" keys its path
+      // as `filePath`. The renderer still gets the raw `detail` for the
+      // expanded body.
+      let display: unknown = null;
+      try {
+        display = buildToolCallDisplayModel({
+          name: item.name,
+          status: item.status,
+          error: item.error,
+          metadata: item.metadata,
+          detail: item.detail,
+          ...(cwd ? { cwd } : {}),
+        });
+      } catch {
+        // A provider shape the installed SDK does not know is not a reason to
+        // drop the card -- the Lua falls back to the bare tool name.
+      }
+      return {
+        kind: "tool",
+        callId: item.callId,
+        name: item.name,
+        status: item.status ?? "running",
+        error: item.error == null ? null : String(item.error),
+        display,
+        detail: item.detail ?? null,
+      };
+    }
+
+    case "todo":
+      return {
+        kind: "todo",
+        items: (item.items ?? []).map((task: any) => ({
+          text: task.text ?? "",
+          status: task.status ?? (task.completed ? "completed" : "pending"),
+        })),
+      };
+
+    case "error":
+      return { kind: "notice", level: "error", message: item.message ?? "" };
+
+    case "notification":
+      return { kind: "notice", level: item.level ?? "info", message: item.message ?? "" };
+
+    case "compaction":
+      return {
+        kind: "compaction",
+        status: item.status ?? "loading",
+        trigger: item.trigger ?? null,
+        preTokens: item.preTokens ?? null,
+      };
+
+    default:
+      return null;
+  }
 }
 
 const ops: Record<string, (req: Request) => Promise<unknown>> = {
@@ -258,21 +371,75 @@ const ops: Record<string, (req: Request) => Promise<unknown>> = {
       const at = { seq: update.seq ?? null, epoch: update.epoch ?? null };
 
       switch (event.type) {
-        case "timeline":
-          if (event.item?.type === "assistant_message") {
-            emit("text", { agentId: id, text: event.item.text ?? "", ...at });
-          } else if (event.item?.type === "user_message") {
-            // TWO-WAY SYNC. The timeline carries user messages too, whoever
-            // typed them -- the Paseo app, another client, or us. Dropping
-            // them meant a prompt typed in the desktop never appeared here and
-            // the conversation silently diverged.
-            emit("user", { agentId: id, text: event.item.text ?? "", ...at });
+        case "timeline": {
+          const described = describeItem(event.item);
+          if (described) {
+            const { kind, ...rest } = described;
+            emit(kind, { agentId: id, ...rest, ...at });
           }
+          break;
+        }
+        case "permission_requested":
+          // The agent is BLOCKED until this is answered. It already rode the
+          // same subscription; there was simply no case for it here, which is
+          // why the permission dialog had nothing to show.
+          emit("permission", { agentId: id, request: withFallbackActions(event.request) });
+          break;
+        case "permission_resolved":
+          // Fires whoever answered -- including the Paseo app. That is what
+          // lets a dialog open in Neovim close itself when you approve on the
+          // desktop instead.
+          emit("permission_resolved", {
+            agentId: id,
+            requestId: event.requestId,
+            resolution: event.resolution ?? null,
+          });
           break;
         case "turn_completed":
         case "turn_failed":
         case "turn_canceled":
-          emit("turn", { agentId: id, outcome: event.type });
+          // The usage on turn_completed is the final word for the turn; the
+          // panel wants it even though the turn event itself carries no lines.
+          if (event.usage) emit("usage", { agentId: id, usage: event.usage });
+          emit("turn", {
+            agentId: id,
+            outcome: event.type,
+            error: event.error ?? null,
+            reason: event.reason ?? null,
+          });
+          break;
+
+        case "usage_updated":
+          // Context-window fill and cost, pushed. The usage panel would
+          // otherwise have to poll agent.config, which is a round trip per
+          // refresh for a number that arrives here for free.
+          emit("usage", { agentId: id, usage: event.usage });
+          break;
+
+        // Mode, model and thinking level can all be changed from the Paseo app
+        // or another client. Without these the header shows whatever we last
+        // set ourselves and quietly lies -- the same divergence that dropping
+        // user_message used to cause.
+        case "mode_changed":
+          emit("settings", {
+            agentId: id,
+            modeId: event.currentModeId ?? null,
+            availableModes: event.availableModes ?? [],
+          });
+          break;
+        case "model_changed":
+          emit("settings", {
+            agentId: id,
+            model: event.runtimeInfo?.model ?? null,
+            provider: event.runtimeInfo?.provider ?? null,
+          });
+          break;
+        case "thinking_option_changed":
+          emit("settings", { agentId: id, thinkingOptionId: event.thinkingOptionId ?? null });
+          break;
+
+        case "attention_required":
+          emit("attention", { agentId: id, reason: event.reason });
           break;
         case "subscription_restored":
           // Reconnected. Nothing is replayed; the consumer decides whether to
@@ -529,31 +696,45 @@ const ops: Record<string, (req: Request) => Promise<unknown>> = {
     const page: any = await agent.timeline.refetch({
       direction: (req.direction as any) ?? "before",
       limit: Number(req.limit ?? 100),
+      // "projected" asks the DAEMON to collapse the timeline the way the app
+      // sees it: assistant chunks merged, reasoning merged, and a tool call
+      // already folded into its terminal status rather than arriving as a
+      // running item followed by a completed one. Doing it here instead meant
+      // reimplementing three merge rules that can drift from the daemon's.
+      projection: "projected",
       ...(req.cursor ? { cursor: req.cursor as any } : {}),
     });
 
-    // Only the two kinds a chat window renders. Tool calls and internal
-    // bookkeeping belong in the Paseo app, not here.
+    // History renders through the SAME describeItem as the live subscription,
+    // so reopening a chat shows the tool calls and thinking that were there the
+    // first time rather than a conversation with all the work cut out of it.
     //
-    // Consecutive assistant items are MERGED: a reply is streamed as many
-    // timeline items, one per chunk, so rendering them separately turns one
-    // answer into a dozen "### agent" blocks.
-    const items: { role: string; text: string }[] = [];
+    // The projection above already merges, so the merge below is DEFENSIVE
+    // only -- and it merges strictly adjacent text, never across a tool call.
+    // The old code merged every assistant item in the page regardless of what
+    // sat between them, which would now splice the sentence before "read a
+    // file" onto the sentence after it and lose where the work happened.
+    const items: { kind: string; [key: string]: unknown }[] = [];
     for (const entry of page.entries ?? []) {
-      const item = entry.item ?? {};
-      const role =
-        item.type === "assistant_message" ? "assistant" : item.type === "user_message" ? "user" : null;
-      if (!role) continue;
+      const described = describeItem(entry.item ?? {});
+      if (!described) continue;
+      // `seqEnd` rather than a running counter: it is what the live
+      // subscription compares against to decide an event is a duplicate.
+      described.seq = entry.seqEnd ?? entry.seqStart ?? null;
       const last = items[items.length - 1];
-      if (last && last.role === role && role === "assistant") {
-        last.text += item.text ?? "";
+      if (last && last.kind === "text" && described.kind === "text") {
+        last.text = String(last.text ?? "") + String(described.text ?? "");
+        last.seq = described.seq;
       } else {
-        items.push({ role, text: item.text ?? "" });
+        items.push(described);
       }
     }
 
     return {
       items,
+      // Free, from a call already being made: a chat opening onto an agent that
+      // is ALREADY blocked can show the dialog rather than looking idle.
+      pendingPermissions: (page.agent?.pendingPermissions ?? []).map(withFallbackActions),
       hasOlder: page.hasOlder ?? false,
       hasNewer: page.hasNewer ?? false,
       startCursor: page.startCursor ?? null,
@@ -615,6 +796,19 @@ const ops: Record<string, (req: Request) => Promise<unknown>> = {
         description: f.description ?? null,
         value: f.value,
       })),
+      // What the usage panel draws. `contextWindowUsedTokens` over
+      // `contextWindowMaxTokens` is the fill bar; the rest is the table.
+      usage: snap?.lastUsage
+        ? {
+            inputTokens: snap.lastUsage.inputTokens ?? null,
+            cachedInputTokens: snap.lastUsage.cachedInputTokens ?? null,
+            outputTokens: snap.lastUsage.outputTokens ?? null,
+            totalCostUsd: snap.lastUsage.totalCostUsd ?? null,
+            contextWindowMaxTokens: snap.lastUsage.contextWindowMaxTokens ?? null,
+            contextWindowUsedTokens: snap.lastUsage.contextWindowUsedTokens ?? null,
+          }
+        : null,
+      pendingPermissions: (snap?.pendingPermissions ?? []).map(withFallbackActions),
     };
   },
 
@@ -651,6 +845,62 @@ const ops: Record<string, (req: Request) => Promise<unknown>> = {
       req.modelId === null ? null : String(req.modelId),
     );
     return { modelId: req.modelId ?? null };
+  },
+
+  /**
+   * Answer a permission request -- the thing that previously required the
+   * desktop app.
+   *
+   * `behavior` is the union discriminant, and the two arms carry different
+   * fields: allow takes updatedInput/updatedPermissions, deny takes a message
+   * and `interrupt`. Building it here rather than passing a blob through means
+   * a malformed response is a TypeScript error instead of a daemon rejection.
+   *
+   * `selectedActionId` is the provider's OWN action id, from request.actions --
+   * "allow once" and "allow for this session" are both behavior:"allow" and
+   * differ only by that id, so dropping it silently downgrades the answer.
+   */
+  async "agent.respondToPermission"(req) {
+    const agent = connected().agents.ref(String(need(req.agentId, "agentId")));
+    const requestId = String(need(req.requestId, "requestId"));
+    const behavior = String(need(req.behavior, "behavior"));
+    // A synthetic id is ours, not the provider's, and sending it back is
+    // rejected. See withFallbackActions.
+    const actionId =
+      req.selectedActionId && !String(req.selectedActionId).startsWith("__")
+        ? String(req.selectedActionId)
+        : null;
+
+    const response: any =
+      behavior === "allow"
+        ? {
+            behavior: "allow",
+            ...(actionId ? { selectedActionId: actionId } : {}),
+            ...(req.updatedInput ? { updatedInput: req.updatedInput } : {}),
+          }
+        : {
+            behavior: "deny",
+            ...(actionId ? { selectedActionId: actionId } : {}),
+            ...(req.message ? { message: String(req.message) } : {}),
+            ...(req.interrupt === undefined ? {} : { interrupt: Boolean(req.interrupt) }),
+          };
+
+    await agent.respondToPermission({ requestId, response });
+    return { requestId, behavior };
+  },
+
+  /**
+   * Permissions already waiting on an agent.
+   *
+   * Needed because `permission_requested` fires ONCE, when the agent blocks. A
+   * chat opened onto an agent that blocked five minutes ago never sees that
+   * event, and without this it looks idle while the daemon waits for an answer.
+   */
+  async "agent.pendingPermissions"(req) {
+    const agent: any = connected().agents.ref(String(need(req.agentId, "agentId")));
+    await agent.refresh();
+    const snap: any = agent.current();
+    return { requests: (snap?.pendingPermissions ?? []).map(withFallbackActions) };
   },
 
   async "timeline.unsubscribe"(req) {

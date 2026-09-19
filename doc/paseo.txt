@@ -14,6 +14,7 @@ CONTENTS                                                      *paseo-contents*
   8. Git ........................................ |paseo-git|
   9. The agent bridge ........................... |paseo-bridge|
  10. The chat window ........................... |paseo-chat|
+ 11. Permissions ............................... |paseo-permission|
 
 ==============================================================================
 1. INTRODUCTION                                           *paseo-introduction*
@@ -36,6 +37,7 @@ Hard:
   - Neovim 0.10+
   - `git`
   - gitsigns.nvim, telescope.nvim
+  - nvzone/volt, for the chat chrome, the panels and the permission dialog
 
 Optional, for the Paseo backend:
   - the `paseo` daemon, running
@@ -450,7 +452,25 @@ rather than an outage.
 ==============================================================================
 10. THE CHAT WINDOW                                              *paseo-chat*
 
-Two buffers in a split: the conversation above, the composer below.
+Two surfaces onto one conversation.
+
+                                                         *paseo-chat-sidebar*
+The SIDEBAR is a pane on the right: the conversation above, the composer
+below. `:Paseo chat` toggles it. This is the everyday surface -- narrow,
+beside your code.
+
+                                                           *paseo-chat-float*
+The FULL SCREEN surface is `:Paseo dash`, or `<C-f>` from the sidebar. Same
+conversation, plus tabs for everything about the session: >
+
+    Chat       the conversation and composer
+    Session    mode, thinking level, model and feature toggles
+    Sessions   the agents in this workspace, live
+    Changes    what is changed on disk, across every repo
+    Usage      context window, tokens and cost
+<
+Both surfaces share the same buffers, so switching preserves your draft and
+your scroll position. `<C-f>` switches back.
 
                                                           *paseo-chat-keys*
 In the composer ~
@@ -458,6 +478,15 @@ In the composer ~
     <CR>      (normal mode) send
     <C-s>     send, from normal or insert mode
     <C-v>     paste the image on the clipboard
+    <C-f>     switch surface
+    q         close the chat
+
+In the conversation ~
+
+    <Tab>     expand or collapse the item under the cursor
+    <CR>      the same
+    gp        reopen a pending permission prompt
+    <C-f>     switch surface
     q         close the chat
 
 The composer is an ORDINARY buffer, so your insert-mode keymaps, completion,
@@ -465,10 +494,30 @@ abbreviations and undo all work. That is the difference between writing a
 prompt and filling in a text field, and it is why |:Paseo-ask| does not go
 through `vim.ui.input`.
 
+The conversation is an ordinary buffer too, on purpose: `y`, `/` and soft-wrap
+work on an agent's reply. Volt draws the chrome around it -- the header, the
+panels, the permission dialog -- because virtual text cannot be yanked.
+
+                                                        *paseo-chat-timeline*
+The transcript shows what the agent is DOING, not only what it says: files
+read, commands run, edits made, searches, sub-agents, and its reasoning.
+
+Each is a card, collapsed to one line, with a status glyph: >
+
+    ◐  running        ✓  completed
+    ✗  failed         ⊘  canceled
+<
+`<Tab>` expands one to show what it actually did -- a command's output and
+exit code, an edit's diff, a read's line range, a search's matches. A failed
+call shows its error without being expanded.
+
+A card is updated IN PLACE when the call finishes; it does not appear twice.
+
                                                        *paseo-chat-history*
-The conversation is the agent's real timeline, fetched when the chat opens.
-Reopening it shows what was said before -- including from a previous Neovim
-session, because the agent lives on the daemon and outlives the editor.
+The conversation is the agent's real timeline, fetched when the chat opens,
+tool calls and all. Reopening it shows what was said and done before --
+including from a previous Neovim session, because the agent lives on the
+daemon and outlives the editor.
 
                                                        *paseo-chat-context*
 Context is ATTACHED AND VISIBLE. |:Paseo-ask| on a hunk puts a line like >
@@ -502,5 +551,36 @@ One agent per directory, reused across questions. A fresh agent per question
 throws away the context that makes the second question cheap. The provider
 comes from |paseo-config.paseo.provider|, or from whatever the daemon reports
 as ready.
+
+==============================================================================
+11. PERMISSIONS                                            *paseo-permission*
+
+When an agent asks to do something its mode does not cover, it BLOCKS until
+the request is answered. The dialog shows the request and the exact thing
+being approved -- the command, or the diff -- rendered as the same card the
+transcript uses.
+
+                                                    *paseo-permission-keys*
+    1-9       choose that action
+    y         the first "allow" action
+    n         the first "deny" action
+    N         deny and interrupt the turn
+    <Esc>     dismiss WITHOUT answering; the request stays pending
+    q         the same
+
+`<Esc>` deliberately does not deny. Silently denying on a stray keypress
+throws away whatever the agent was doing. The request stays pending, the
+header shows `` needs you``, and `gp` in the conversation reopens it.
+
+The actions are the PROVIDER'S own -- "allow once" and "allow for this
+session" are different answers, not the same one. A provider that offers none
+gets a plain Allow/Deny pair.
+
+Every request is also logged inline in the transcript, so it is part of the
+conversation and answerable even after the dialog is dismissed.
+
+A request answered in the Paseo desktop app closes the dialog here too. To
+avoid being asked at all, set a more permissive mode with |:Paseo-mode|; to be
+asked about everything, set `default`.
 
 `vim:tw=78:ts=8:ft=help:norl:`

@@ -124,8 +124,18 @@ local function on_stdout(_, chunk)
   end
 end
 
----Subscribe to an event the sidecar emits (`text`, `turn`, `restored`,
----`replaced`, `stream_error`, `protocol_error`).
+---Subscribe to an event the sidecar emits.
+---
+---Conversation: `user`, `text`, `thinking`, `tool`, `todo`, `notice`,
+---`compaction`. Everything but the first two used to be dropped at the
+---sidecar, which is why the chat showed a silence while the agent worked.
+---
+---Permissions: `permission`, `permission_resolved`.
+---
+---Session: `settings`, `usage`, `attention`, `turn`.
+---
+---Connection: `restored`, `replaced`, `stream_error`, `protocol_error`,
+---`ready`, `agents`.
 ---@param event string
 ---@param fn fun(payload: table)
 function M.on(event, fn)

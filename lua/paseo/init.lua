@@ -266,6 +266,13 @@ commands.chat = {
   end,
 }
 
+commands.dash = {
+  desc = "Open the chat full screen, with the session panels",
+  run = function()
+    require("paseo.ui.chat").fullscreen()
+  end,
+}
+
 commands.explain = {
   desc = "Explain the hunk/selection/file, using the rubric",
   run = function(args)
@@ -427,6 +434,10 @@ function M.setup(opts)
       require("paseo.registry").invalidate()
     end,
   })
+
+  -- The chat's highlight groups, derived from whatever colourscheme is
+  -- loaded, and re-derived on :colorscheme.
+  require("paseo.ui.hl").attach()
 
   -- Streaming events have to be wired before anything can arrive on them.
   require("paseo.ui.chat").attach_events()
