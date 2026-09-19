@@ -9,6 +9,8 @@
 
 local bridge = require "paseo.bridge"
 local config = require "paseo.config"
+local sidebar = require "paseo.ui.sidebar"
+local transcript = require "paseo.ui.transcript"
 
 local M = {}
 
@@ -39,85 +41,28 @@ local current
 ---Forward declaration: `initialise` is defined below but referenced by `open`.
 local initialise
 
-local ns = vim.api.nvim_create_namespace "paseo.chat"
-
 -- ------------------------------------------------------------------ buffers
 
+---Repaint the header.
+---
+---The header itself lives in `ui/sidebar.lua`, and the float draws the same
+---cells, so the two surfaces cannot drift into disagreeing about which mode the
+---session is in.
 ---@param chat paseo.Chat
 local function set_winbar(chat)
-  if not (chat.win_conversation and vim.api.nvim_win_is_valid(chat.win_conversation)) then
-    return
-  end
-  local where = chat.title or vim.fn.fnamemodify(chat.root, ":~")
-  local parts = { chat.provider or "…" }
-  if chat.mode then
-    parts[#parts + 1] = chat.mode
-  end
-  if chat.thinking then
-    parts[#parts + 1] = "think:" .. chat.thinking
-  end
-  -- The lightning bolt, same as the app's.
-  if chat.features and chat.features.fast_mode then
-    parts[#parts + 1] = "⚡"
-  end
-  local state = chat.streaming and "  ●" or ""
-  vim.wo[chat.win_conversation].winbar = ("  %s   %s%s"):format(
-    table.concat(parts, " · "),
-    where,
-    state
-  )
+  sidebar.refresh(chat)
 end
 
----@param chat paseo.Chat
----@param lines string[]
-local function append(chat, lines)
-  if not vim.api.nvim_buf_is_valid(chat.conversation) then
-    return
-  end
-  vim.bo[chat.conversation].modifiable = true
-  local count = vim.api.nvim_buf_line_count(chat.conversation)
-  local first = count == 1 and vim.api.nvim_buf_get_lines(chat.conversation, 0, 1, false)[1] == ""
-  vim.api.nvim_buf_set_lines(chat.conversation, first and 0 or count, -1, false, lines)
-  vim.bo[chat.conversation].modifiable = false
-
-  -- Follow only when already at the bottom, so scrolling back to reread
-  -- something is not yanked away by the next chunk.
-  local win = chat.win_conversation
-  if win and vim.api.nvim_win_is_valid(win) then
-    local total = vim.api.nvim_buf_line_count(chat.conversation)
-    if vim.api.nvim_win_get_cursor(win)[1] >= total - #lines - 1 then
-      pcall(vim.api.nvim_win_set_cursor, win, { total, 0 })
-    end
-  end
-end
-
----Append streamed text, continuing the last line.
+---A status line in the transcript -- "connecting…", "send failed: …".
 ---
----Assistant messages arrive in PIECES -- a reply delivered as "READ" + "Y" must
----render as READY, not as two lines.
+---These used to be italic markdown written straight into the buffer. They are
+---now ordinary timeline items, so they are highlighted like everything else and
+---the buffer has exactly one writer.
 ---@param chat paseo.Chat
----@param text string
-local function stream(chat, text)
-  if not vim.api.nvim_buf_is_valid(chat.conversation) then
-    return
-  end
-  vim.bo[chat.conversation].modifiable = true
-
-  local last = vim.api.nvim_buf_line_count(chat.conversation)
-  local tail = vim.api.nvim_buf_get_lines(chat.conversation, last - 1, last, false)[1] or ""
-  local incoming = vim.split(text, "\n", { plain = true })
-
-  local replacement = { tail .. incoming[1] }
-  for i = 2, #incoming do
-    replacement[#replacement + 1] = incoming[i]
-  end
-  vim.api.nvim_buf_set_lines(chat.conversation, last - 1, last, false, replacement)
-  vim.bo[chat.conversation].modifiable = false
-
-  local win = chat.win_conversation
-  if win and vim.api.nvim_win_is_valid(win) then
-    pcall(vim.api.nvim_win_set_cursor, win, { vim.api.nvim_buf_line_count(chat.conversation), 0 })
-  end
+---@param message string
+---@param level? "info"|"warning"|"error"
+local function notice(chat, message, level)
+  transcript.upsert(chat, { kind = "notice", level = level or "info", message = message })
 end
 
 -- ------------------------------------------------------------------ sending
@@ -169,7 +114,7 @@ local function send(chat)
     if err then
       chat.streaming = false
       vim.schedule(function()
-        append(chat, { "", "_send failed: " .. err .. "_", "" })
+        notice(chat, "send failed: " .. err, "error")
         set_winbar(chat)
       end)
     end
@@ -246,6 +191,35 @@ local function make_buffers(chat)
       chat.conversation,
       "paseo://chat/" .. vim.fs.basename(chat.root)
     )
+
+    -- The conversation buffer had no keymaps at all: there was nothing on it
+    -- to act on. Now a tool card can be opened to see what the command
+    -- actually printed, and a pending permission answered from the log.
+    local conv = { buffer = chat.conversation, nowait = true }
+    for _, key in ipairs { "<Tab>", "<CR>", "za" } do
+      vim.keymap.set("n", key, function()
+        transcript.toggle_at_cursor(chat)
+      end, vim.tbl_extend("force", conv, { desc = "paseo: expand/collapse" }))
+    end
+    vim.keymap.set("n", "q", function()
+      M.close()
+    end, vim.tbl_extend("force", conv, { desc = "paseo: close chat" }))
+    vim.keymap.set("n", "gp", function()
+      require("paseo.ui.permission").reopen(chat)
+    end, vim.tbl_extend("force", conv, { desc = "paseo: reopen permission prompt" }))
+    vim.keymap.set("n", "<C-f>", M.fullscreen, vim.tbl_extend("force", conv, {
+      desc = "paseo: sidebar <-> full screen",
+    }))
+
+    -- Cards are drawn to the window width, so a resize leaves every box either
+    -- short or wrapped. Re-render rather than live with it.
+    vim.api.nvim_create_autocmd("WinResized", {
+      buffer = chat.conversation,
+      callback = function()
+        transcript.redraw(chat)
+      end,
+      desc = "paseo: re-render the transcript at the new width",
+    })
   end
 
   if not (chat.composer and vim.api.nvim_buf_is_valid(chat.composer)) then
@@ -292,52 +266,24 @@ local function make_buffers(chat)
     vim.keymap.set("n", "gq", function()
       M.close()
     end, vim.tbl_extend("force", opts, { desc = "paseo: close chat" }))
+    for _, mode in ipairs { "n", "i" } do
+      vim.keymap.set(mode, "<C-f>", function()
+        vim.cmd.stopinsert()
+        M.fullscreen()
+      end, vim.tbl_extend("force", opts, { desc = "paseo: sidebar <-> full screen" }))
+    end
   end
 end
 
+---Put the chat on screen, on whichever surface it belongs to.
 ---@param chat paseo.Chat
 local function layout(chat)
   make_buffers(chat)
-
-  if chat.win_conversation and vim.api.nvim_win_is_valid(chat.win_conversation) then
-    vim.api.nvim_set_current_win(chat.win_composer)
-    return
+  if chat.surface == "float" then
+    require("paseo.ui.float").open(chat)
+  else
+    sidebar.open(chat)
   end
-
-  local from = vim.api.nvim_get_current_win()
-  local width = math.max(60, math.floor(vim.o.columns * 0.4))
-
-  vim.cmd("botright " .. width .. "vsplit")
-  chat.win_conversation = vim.api.nvim_get_current_win()
-  vim.api.nvim_win_set_buf(chat.win_conversation, chat.conversation)
-  for option, value in pairs {
-    wrap = true,
-    linebreak = true,
-    number = false,
-    relativenumber = false,
-    signcolumn = "no",
-  } do
-    vim.wo[chat.win_conversation][option] = value
-  end
-
-  -- The composer sits under the conversation, small: it is where you type one
-  -- question, not where you write a document.
-  vim.cmd "belowright 8split"
-  chat.win_composer = vim.api.nvim_get_current_win()
-  vim.api.nvim_win_set_buf(chat.win_composer, chat.composer)
-  for option, value in pairs {
-    wrap = true,
-    linebreak = true,
-    number = false,
-    relativenumber = false,
-    signcolumn = "no",
-  } do
-    vim.wo[chat.win_composer][option] = value
-  end
-  vim.wo[chat.win_composer].winbar = "  ↵ send · ^V image · q close"
-
-  set_winbar(chat)
-  vim.api.nvim_set_current_win(from)
 end
 
 -- ------------------------------------------------------------------- history
@@ -375,15 +321,11 @@ local function load_history(chat)
       return
     end
     vim.schedule(function()
-      local lines = {}
+      -- History now carries the SAME item shape as the live subscription --
+      -- tool calls, reasoning, todos and all -- so reopening a chat shows the
+      -- work the agent did, not just the sentences it ended with.
       for _, item in ipairs(result.items or {}) do
-        lines[#lines + 1] = ""
-        lines[#lines + 1] = item.role == "user" and "### you" or "### agent"
-        lines[#lines + 1] = ""
-        vim.list_extend(lines, vim.split(item.text or "", "\n"))
-      end
-      if #lines > 0 then
-        append(chat, lines)
+        transcript.upsert(chat, item)
       end
 
       -- Everything up to here is now on screen, so live events at or below this
@@ -392,6 +334,14 @@ local function load_history(chat)
       if cursor then
         chat.seq = cursor.seq
         chat.epoch = cursor.epoch
+      end
+
+      -- An agent that blocked BEFORE this window opened never fires
+      -- `permission_requested` at us -- that event fired once, while we were
+      -- not listening. Without this the session looks idle when it is actually
+      -- waiting on an answer.
+      for _, request in ipairs(result.pendingPermissions or {}) do
+        require("paseo.ui.permission").offer(chat, request)
       end
     end)
   end)
@@ -410,12 +360,9 @@ initialise = function(chat)
   end
   chat.initialised = true
 
-  -- Clear the placeholder before history lands on top of it.
-  if vim.api.nvim_buf_is_valid(chat.conversation) then
-    vim.bo[chat.conversation].modifiable = true
-    vim.api.nvim_buf_set_lines(chat.conversation, 0, -1, false, {})
-    vim.bo[chat.conversation].modifiable = false
-  end
+  -- Clear the placeholder before history lands on top of it. `reset` also
+  -- wipes the block table, so ids from a previous agent cannot collide.
+  transcript.reset(chat)
   set_winbar(chat)
 
   -- Subscribe BEFORE fetching history, so nothing said in between is lost.
@@ -473,11 +420,11 @@ function M.open(opts, callback)
   end
 
   if chat.agent_id then
-    append(chat, { "_loading…_" })
+    notice(chat, "loading…")
     return bridge.ensure(function(err)
       if err then
         vim.schedule(function()
-          append(chat, { "", "_" .. err .. "_", "" })
+          notice(chat, err, "error")
         end)
         return callback(nil, err)
       end
@@ -488,11 +435,11 @@ function M.open(opts, callback)
     end)
   end
 
-  append(chat, { "_connecting…_" })
+  notice(chat, "connecting…")
   bridge.ensure(function(err)
     if err then
       vim.schedule(function()
-        append(chat, { "", "_" .. err .. "_", "" })
+        notice(chat, err, "error")
       end)
       return callback(nil, err)
     end
@@ -504,7 +451,7 @@ function M.open(opts, callback)
     }, function(agent_err, result)
       if agent_err then
         vim.schedule(function()
-          append(chat, { "", "_" .. agent_err .. "_", "" })
+          notice(chat, agent_err, "error")
         end)
         return callback(nil, agent_err)
       end
@@ -602,20 +549,42 @@ function M.close()
   if not chat then
     return
   end
-  for _, win in ipairs { chat.win_composer, chat.win_conversation } do
-    if win and vim.api.nvim_win_is_valid(win) then
-      vim.api.nvim_win_close(win, false)
-    end
-  end
-  chat.win_composer, chat.win_conversation = nil, nil
+  require("paseo.ui.float").close()
+  sidebar.close(chat)
 end
 
 function M.toggle()
   local chat = current
-  if chat and chat.win_conversation and vim.api.nvim_win_is_valid(chat.win_conversation) then
+  if chat and (sidebar.is_open(chat) or require("paseo.ui.float").is_open(chat)) then
     return M.close()
   end
   M.open {}
+end
+
+---Swap surface, keeping the conversation and the draft.
+---
+---Both live on the chat rather than in a window, so this is genuinely just a
+---matter of closing one set of windows and opening another.
+function M.fullscreen()
+  local chat = current
+  if not chat then
+    return M.open({}, function(opened)
+      if opened then
+        M.fullscreen()
+      end
+    end)
+  end
+
+  local float = require "paseo.ui.float"
+  if float.is_open(chat) then
+    float.close()
+    chat.surface = "sidebar"
+    sidebar.open(chat)
+  else
+    sidebar.close(chat)
+    chat.surface = "float"
+    float.open(chat)
+  end
 end
 
 ---@type boolean
@@ -641,6 +610,15 @@ function M.attach_events()
     return nil
   end
 
+  ---Render an item, if it is not something history already covered.
+  ---@param payload table
+  local function ingest(payload)
+    local chat = by_agent(payload.agentId)
+    if chat and fresh(chat, payload) then
+      transcript.upsert(chat, payload)
+    end
+  end
+
   -- A user message, from wherever it was typed: here, the Paseo app, another
   -- client. This is what makes the two views the same conversation.
   bridge.on("user", function(payload)
@@ -648,9 +626,7 @@ function M.attach_events()
     if not chat or not fresh(chat, payload) then
       return
     end
-    append(chat, { "", "### you", "" })
-    append(chat, vim.split(payload.text or "", "\n"))
-    append(chat, { "", "### agent", "" })
+    transcript.upsert(chat, { kind = "user", text = payload.text or "" })
     chat.streaming = true
     set_winbar(chat)
   end)
@@ -658,7 +634,56 @@ function M.attach_events()
   bridge.on("text", function(payload)
     local chat = by_agent(payload.agentId)
     if chat and fresh(chat, payload) then
-      stream(chat, payload.text or "")
+      transcript.stream(chat, payload.text or "")
+    end
+  end)
+
+  -- THE MISSING HALF. Reasoning, tool calls, todos, notices and compaction all
+  -- reach Neovim now; before this they were dropped at the sidecar and the
+  -- window showed a long silence while the agent read files and ran commands.
+  for _, event in ipairs { "thinking", "tool", "todo", "notice", "compaction" } do
+    bridge.on(event, ingest)
+  end
+
+  -- A permission request. The agent is BLOCKED until this is answered.
+  bridge.on("permission", function(payload)
+    local chat = by_agent(payload.agentId)
+    if chat and payload.request then
+      require("paseo.ui.permission").offer(chat, payload.request)
+    end
+  end)
+
+  bridge.on("permission_resolved", function(payload)
+    local chat = by_agent(payload.agentId)
+    if chat then
+      require("paseo.ui.permission").resolved(chat, payload.requestId, payload.resolution)
+    end
+  end)
+
+  -- Mode, model and thinking can be changed from the Paseo app too. Without
+  -- this the header shows whatever we last set ourselves and quietly lies.
+  bridge.on("settings", function(payload)
+    local chat = by_agent(payload.agentId)
+    if not chat then
+      return
+    end
+    if payload.modeId then
+      chat.mode = payload.modeId
+    end
+    if payload.thinkingOptionId then
+      chat.thinking = payload.thinkingOptionId
+    end
+    if payload.model then
+      chat.provider = (payload.provider or chat.provider or "?") .. "/" .. payload.model
+    end
+    set_winbar(chat)
+  end)
+
+  bridge.on("usage", function(payload)
+    local chat = by_agent(payload.agentId)
+    if chat then
+      chat.usage = payload.usage
+      set_winbar(chat)
     end
   end)
 
@@ -668,7 +693,12 @@ function M.attach_events()
     local chat = by_agent(payload.agentId)
     if chat then
       chat.streaming = false
-      append(chat, { "" })
+      -- The open assistant block is finished; the next reply starts a new one
+      -- rather than being appended to this answer.
+      chat.open_text = nil
+      if payload.error then
+        transcript.upsert(chat, { kind = "notice", level = "error", message = payload.error })
+      end
       set_winbar(chat)
     end
   end)
@@ -677,7 +707,10 @@ function M.attach_events()
     local chat = by_agent(payload.agentId)
     if chat then
       chat.streaming = false
-      append(chat, { "", "_stream error: " .. tostring(payload.error) .. "_", "" })
+      transcript.upsert(
+        chat,
+        { kind = "notice", level = "error", message = "stream error: " .. tostring(payload.error) }
+      )
       set_winbar(chat)
     end
   end)
@@ -687,7 +720,20 @@ function M.attach_events()
   bridge.on("restored", function(payload)
     local chat = by_agent(payload.agentId)
     if chat then
-      append(chat, { "", "_(reconnected — anything said during the gap was not replayed)_", "" })
+      notice(chat, "reconnected — anything said during the gap was not replayed", "warning")
+    end
+  end)
+
+  -- The epoch was replaced, so EVERYTHING on screen is stale.
+  --
+  -- The sidecar has always emitted this and nothing ever listened, so a
+  -- replacement left a transcript of messages that no longer exist. Throw the
+  -- buffer away and refetch rather than appending to a lie.
+  bridge.on("replaced", function(payload)
+    local chat = by_agent(payload.agentId)
+    if chat then
+      transcript.reset(chat)
+      load_history(chat)
     end
   end)
 end
@@ -708,6 +754,16 @@ function M.load_settings(chat)
       return
     end
     vim.schedule(function()
+      -- A chat opened onto an EXISTING agent never went through
+      -- `agent.ensure`, so it has no provider and the header read "…" for the
+      -- whole session. The config call already knows.
+      if config.provider then
+        chat.provider = config.model and (config.provider .. "/" .. config.model)
+          or config.provider
+      end
+      chat.usage = config.usage or chat.usage
+      chat.config_snapshot = config
+
       for _, mode in ipairs(config.availableModes or {}) do
         if mode.id == config.modeId then
           chat.mode = mode.label or mode.id
@@ -722,6 +778,11 @@ function M.load_settings(chat)
       for _, feature in ipairs(config.features or {}) do
         chat.features[feature.id] = feature.value
       end
+
+      for _, request in ipairs(config.pendingPermissions or {}) do
+        require("paseo.ui.permission").offer(chat, request)
+      end
+
       set_winbar(chat)
     end)
   end)
