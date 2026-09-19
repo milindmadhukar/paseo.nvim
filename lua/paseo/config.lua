@@ -37,6 +37,10 @@ local M = {}
 ---@field dir string      Directory, relative to a project root, holding the
 ---                       assembled worktrees. Flipping this is the one knob
 ---                       that moves them out of the project tree.
+---@field branch_prefix string  Prefix for the branch a new workspace works on.
+---                       A manifest carries its own `branch_prefix` and that
+---                       wins; this is for the case that has no manifest --
+---                       a plain git repo, where Paseo cuts the worktree.
 
 ---@class paseo.Config.Review
 ---@field context integer Lines of context asked of `git diff` when building the
@@ -55,6 +59,7 @@ local defaults = {
 
   workspaces = {
     dir = ".workspaces",
+    branch_prefix = "ws/",
   },
 
   review = {

@@ -55,7 +55,35 @@ local function display(ws, widths)
   )
 end
 
----Prompt for a name and assemble a workspace.
+---Create a workspace by name.
+---
+---"creating", not "assembling": assembly is one of three shapes this may turn
+---out to be, and which one is not settled until `workspaces.strategy` has
+---looked at the directory. The shape is reported AFTERWARDS, when it is known.
+---@param name string
+---@param root? string
+---@param after? fun()
+function M.named(name, root, after)
+  if name:find "[/\\ ]" then
+    return vim.notify("paseo: names may not contain slashes or spaces", vim.log.levels.ERROR)
+  end
+
+  vim.notify("paseo: creating " .. name .. "…", vim.log.levels.INFO)
+  workspaces.create({ name = name, root = root }, function(_, err, plan)
+    if err then
+      return vim.notify("paseo: " .. err, vim.log.levels.ERROR)
+    end
+    vim.notify(
+      ("paseo: created %s — %s"):format(name, workspaces.describe(plan)),
+      vim.log.levels.INFO
+    )
+    if after then
+      vim.schedule(after)
+    end
+  end)
+end
+
+---Prompt for a name, then create.
 ---@param root? string
 ---@param after? fun()
 function M.create(root, after)
@@ -63,20 +91,7 @@ function M.create(root, after)
     if not name or name == "" then
       return
     end
-    if name:find "[/\\ ]" then
-      return vim.notify("paseo: names may not contain slashes or spaces", vim.log.levels.ERROR)
-    end
-
-    vim.notify("paseo: assembling " .. name .. "…", vim.log.levels.INFO)
-    workspaces.create({ name = name, root = root }, function(id, err)
-      if err then
-        return vim.notify("paseo: " .. err, vim.log.levels.ERROR)
-      end
-      vim.notify("paseo: created " .. name, vim.log.levels.INFO)
-      if after then
-        vim.schedule(after)
-      end
-    end)
+    M.named(name, root, after)
   end)
 end
 

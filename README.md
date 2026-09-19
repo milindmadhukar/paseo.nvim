@@ -103,6 +103,7 @@ require("paseo").setup {
 
   workspaces = {
     dir = ".workspaces",          -- relative to a project root
+    branch_prefix = "ws/",        -- used when there is no manifest to ask
   },
 
   review = {
@@ -132,9 +133,9 @@ require("paseo").setup {
 | `:Paseo dash` | The chat full screen, with the session panels |
 | `:Paseo model` | Choose the provider/model new agents get |
 | `:Paseo workspaces` | Workspace picker — open, sessions, create, archive |
-| `:Paseo wcreate` | Create a workspace here |
+| `:Paseo wcreate` | Create a workspace here — the shape is worked out for you |
 | `:Paseo sessions` | Sessions in this workspace |
-| `:Paseo ws …` | `init` · `create <name>` · `rm <name>` · `ls` · `status` |
+| `:Paseo ws …` | Manifest-level: `init` · `create <name> [repos]` · `rm` · `ls` · `status` |
 | `:Paseo agent [stop]` | Sidecar and agent status |
 | `:Paseo repos` | The repos in the current unit of work |
 | `:Paseo health` | `:checkhealth paseo` |
@@ -197,6 +198,29 @@ Paseo cannot know — that a directory is several worktrees rather than one
 checkout. That matters because `--isolation worktree` needs a git repository,
 and a project like `~/Code/grasslabs/kora` is a plain directory holding five
 repos. Paseo cannot isolate it; assembly can.
+
+### One command, three mechanisms
+
+That leaves three ways to get a working directory — and which one applies is a
+property of the **directory**, not a question worth asking you. So `:Paseo
+wcreate` answers it:
+
+| Project | What happens | Picker says |
+|---|---|---|
+| A plain directory holding repos | Its worktrees are **assembled** into one composite directory, handed to Paseo as a local workspace | `N repos` |
+| A git repository | Paseo **cuts the worktree** itself, on `ws/<name>` off whatever is checked out | `worktree` |
+| Neither | A plain workspace on the directory as it stands | `local` |
+
+No manifest in the first case? One is discovered and written on the way past,
+and what it *guessed* is reported rather than swallowed — the base branch it
+had to infer, and the `shared` list you should prune. Every later `wcreate` in
+that project reads the file. `:Paseo ws init` still exists for when you would
+rather read it before anything happens, and `:Paseo ws create <name> repo,repo`
+is still the only way to pick which repos a workspace gets — but neither is a
+prerequisite any more.
+
+The point is that "is this the `ws init` kind of project?" is a question about
+plumbing, and you should be able to type one command without answering it.
 
 ## Using it without the Paseo app
 

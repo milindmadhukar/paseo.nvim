@@ -34,6 +34,22 @@ local function normalise(path)
   return (vim.fn.resolve(vim.fn.fnamemodify(path, ":p")):gsub("/+$", ""))
 end
 
+---@param dir string
+---@param args string[]
+---@return string|nil
+local function git(dir, args)
+  local cmd = { "git", "-C", dir }
+  vim.list_extend(cmd, args)
+  local ok, res = pcall(function()
+    return vim.system(cmd, { text = true }):wait()
+  end)
+  if not ok or res.code ~= 0 then
+    return nil
+  end
+  local out = (res.stdout or ""):gsub("%s+$", "")
+  return out ~= "" and out or nil
+end
+
 ---Every workspace, Paseo's merged with ours.
 ---@param callback fun(list: paseo.PaseoWorkspace[]|nil, err: string|nil)
 function M.list(callback)
@@ -76,47 +92,205 @@ function M.list(callback)
   end)
 end
 
----Create a workspace.
----
----If the directory's project has a manifest, the worktrees are ASSEMBLED first
----and Paseo is pointed at the result. Otherwise Paseo is asked for a plain
----workspace on the directory. Either way it ends up as an ordinary Paseo
----workspace -- that is the seam.
----@param opts { name: string, root?: string }
----@param callback fun(id: string|nil, err: string|nil)
-function M.create(opts, callback)
-  local root = opts.root or assert(vim.uv.cwd())
-  local project = registry.project_root(root)
+-- ----------------------------------------------------------------- creating
 
-  local directory = root
+---@class paseo.Strategy
+---@field kind "assemble"|"discover"|"worktree"|"local"
+---@field root string      Directory a workspace was asked for.
+---@field project string?  Project root holding the manifest.  assemble, discover
+---@field manifest table?  Discovered, not yet on disk.        discover
+---@field notes table[]?   What discovery could not decide.    discover
+---@field repo string?     Git toplevel the worktree is cut from.  worktree
+---@field base string?     Ref the worktree branches off.          worktree
+---@field members integer? Worktrees assembled. Filled in after.   assemble
+
+---The ref new work is cut from: what is CHECKED OUT, never origin/HEAD.
+---
+---Assembly learned this the hard way -- every openfin repo sits on `dev` while
+---origin/HEAD reports `main`, so origin/HEAD would silently base the work on
+---the wrong history. A second entry point getting it wrong is the same bug
+---twice.
+---@param repo string
+---@return string
+local function base_of(repo)
+  local branch = git(repo, { "branch", "--show-current" })
+  if branch then
+    return branch
+  end
+  local head = git(repo, { "symbolic-ref", "--short", "refs/remotes/origin/HEAD" })
+  return head and (head:gsub("^origin/", "")) or "main"
+end
+
+---What creating a workspace in `root` would actually do.
+---
+---THE POINT IS THAT YOU SHOULD NOT HAVE TO KNOW. A multi-repo project needs its
+---worktrees assembled, because Paseo's own isolation requires a git repository
+---and a directory holding six of them is not one. A plain git repo needs no
+---assembly at all -- Paseo cuts and owns the worktree itself. A directory that
+---is neither gets a workspace on itself.
+---
+---That is three different mechanisms for one intention, and which one applies
+---is a property of the DIRECTORY, not a question for the person typing. So it
+---is answered here, once, instead of by remembering whether this project was
+---the `ws init` kind.
+---@param root string
+---@return paseo.Strategy
+function M.strategy(root)
+  root = (vim.fn.fnamemodify(vim.fn.expand(root), ":p"):gsub("/+$", ""))
+
+  -- An explicit manifest wins outright, and wins from INSIDE a member repo:
+  -- ~/Code/kora/kora-app belongs to kora's manifest, not to kora-app alone.
+  local project = registry.project_root(root)
   if project then
-    local manifest = require("paseo.workspace.manifest").load(project)
-    if manifest then
-      if registry.find(opts.name, project) then
-        return callback(nil, ("a workspace called %q already exists here"):format(opts.name))
-      end
-      local ws, err =
-        require("paseo.workspace").create(manifest, { name = opts.name, root = project })
-      if not ws then
-        return callback(nil, err)
-      end
-      registry.add(ws)
-      directory = ws.root
+    return { kind = "assemble", root = root, project = project }
+  end
+
+  -- A git repository needs nothing assembled. This is the case the plugin used
+  -- to have no answer for: it fell through to a plain workspace on the primary
+  -- checkout, so two "workspaces" were two names for the same files.
+  local top = git(root, { "rev-parse", "--show-toplevel" })
+  if top then
+    return { kind = "worktree", root = root, repo = top, base = base_of(top) }
+  end
+
+  -- Not a repo, but repos live below: the manifest is MISSING rather than
+  -- deliberately absent, so it gets written on the way past.
+  local m, notes = require("paseo.workspace").discover(root)
+  if m then
+    return { kind = "discover", root = root, project = root, manifest = m, notes = notes }
+  end
+
+  return { kind = "local", root = root }
+end
+
+---One phrase for the shape a plan turned out to be, for the message after it.
+---@param plan paseo.Strategy|nil
+---@return string
+function M.describe(plan)
+  if not plan then
+    return "workspace"
+  end
+  if plan.kind == "worktree" then
+    return "isolated worktree off " .. (plan.base or "?")
+  end
+  if plan.kind == "local" then
+    return "shared checkout"
+  end
+  return ("%d worktree(s)"):format(plan.members or 0)
+end
+
+---What discovery guessed, said out loud.
+---
+---`ws init` put these in a buffer and made you read them before anything
+---happened. Nothing reads the file now, so they have to arrive as a message:
+---the guessed base branch and the `shared` list are the two things discovery
+---genuinely cannot decide, and both are wrong often enough to matter.
+---@param plan paseo.Strategy
+local function report(plan)
+  local manifest = require "paseo.workspace.manifest"
+  local lines = {
+    ("wrote %s — %d repo(s)"):format(
+      vim.fn.fnamemodify(manifest.path(plan.project), ":~"),
+      vim.tbl_count(plan.manifest.repos)
+    ),
+  }
+  if #(plan.manifest.shared or {}) > 0 then
+    lines[#lines + 1] = ("shared = %s — prune what does not belong"):format(
+      table.concat(plan.manifest.shared, ", ")
+    )
+  end
+  for _, note in ipairs(plan.notes or {}) do
+    lines[#lines + 1] = ("%s: %s"):format(note.repo, note.text)
+  end
+  vim.notify(table.concat(lines, "\n"), vim.log.levels.WARN, { title = "paseo: manifest" })
+end
+
+---Create a workspace, whatever kind of project this is.
+---
+---ONE ENTRY POINT. `strategy` decides the shape, not the caller, and all three
+---paths converge on the same thing: an ordinary Paseo workspace with a
+---directory. That is the seam -- Paseo never learns whether it is looking at
+---six assembled worktrees, one it cut itself, or a plain checkout.
+---@param opts { name: string, root?: string }
+---@param callback fun(id: string|nil, err: string|nil, plan: paseo.Strategy|nil)
+function M.create(opts, callback)
+  if not opts.name or opts.name == "" then
+    return callback(nil, "a workspace needs a name")
+  end
+  if opts.name:find "[/\\ ]" then
+    return callback(
+      nil,
+      ("workspace names may not contain slashes or spaces: %q"):format(opts.name)
+    )
+  end
+
+  local plan = M.strategy(opts.root or assert(vim.uv.cwd()))
+
+  -- A discovered manifest is WRITTEN rather than offered for review: being sent
+  -- to read a TOML file is exactly the "which kind of project is this?" detour
+  -- this entry point exists to remove. Its notes are not swallowed, though --
+  -- they are what `ws init` would have shown, and `report` says them.
+  if plan.kind == "discover" then
+    local manifest = require "paseo.workspace.manifest"
+    local ok, err = manifest.save(plan.project, plan.manifest, plan.notes)
+    if not ok then
+      return callback(
+        nil,
+        ("could not write %s: %s"):format(manifest.path(plan.project), tostring(err))
+      )
     end
+    report(plan)
+    -- From here it is an ordinary manifested project, including on every later
+    -- run: the file is now on disk, so `strategy` answers `assemble` next time.
+    plan.kind = "assemble"
+  end
+
+  local directory = plan.root
+  if plan.kind == "assemble" then
+    local m, load_err = require("paseo.workspace.manifest").load(plan.project)
+    if not m then
+      return callback(nil, load_err)
+    end
+    if registry.find(opts.name, plan.project) then
+      return callback(nil, ("a workspace called %q already exists here"):format(opts.name))
+    end
+
+    local ws, create_err =
+      require("paseo.workspace").create(m, { name = opts.name, root = plan.project })
+    if not ws then
+      return callback(nil, create_err)
+    end
+    registry.add(ws)
+    directory = ws.root
+    plan.members = #registry.active(ws)
   end
 
   bridge.ensure(function(err)
     if err then
-      return callback(nil, err)
+      return callback(nil, err, plan)
     end
+
+    if plan.kind == "worktree" then
+      -- `workspace.open` here would hand back a workspace on the PRIMARY
+      -- checkout -- not isolation at all, just a second name for the same
+      -- files, which is the trap this branch exists to avoid.
+      local prefix = require("paseo.config").get().workspaces.branch_prefix or "ws/"
+      return bridge.request("workspace.create", {
+        cwd = plan.repo,
+        worktree = true,
+        branch = prefix .. opts.name,
+        base = plan.base,
+        title = opts.name,
+      }, function(create_err, result)
+        callback(result and result.id, create_err, plan)
+      end)
+    end
+
     -- `open` rather than `create`: it reuses the active workspace for that
     -- exact directory, so assembling twice does not litter the app with
     -- duplicates pointing at the same place.
     bridge.request("workspace.open", { cwd = directory }, function(open_err, result)
-      if open_err then
-        return callback(nil, open_err)
-      end
-      callback(result.id, nil)
+      callback(result and result.id, open_err, plan)
     end)
   end)
 end

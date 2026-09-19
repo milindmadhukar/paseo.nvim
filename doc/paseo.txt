@@ -67,11 +67,11 @@ Defaults: >lua
 
       paseo = {
         -- url and home are absent by default: absent means "discover it".
-        cli = "paseo",
       },
 
       workspaces = {
         dir = ".workspaces",
+        branch_prefix = "ws/",
       },
 
       review = {
@@ -180,6 +180,13 @@ workspaces.dir                              string, default `".workspaces"`
     is the single knob that moves them out of the project tree. See
     |paseo-workspaces|.
 
+                                       *paseo-config.workspaces.branch_prefix*
+workspaces.branch_prefix                           string, default `"ws/"`
+
+    Prefix for the branch a new workspace works on. A manifest carries its own
+    `branch_prefix` and that wins; this covers the case with no manifest -- a
+    plain git repo, where Paseo cuts the worktree. See |paseo-workspace-kinds|.
+
                                                  *paseo-config.review.context*
 review.context                                          integer, default `0`
 
@@ -243,8 +250,8 @@ review.context                                          integer, default `0`
 
 :Paseo wcreate                                            *:Paseo-wcreate*
 
-    Create a workspace here, assembling worktrees if the project has a
-    manifest.
+    Create a workspace here. THE ONE YOU WANT: it works out for itself what
+    kind of project this is, and you never have to. See |paseo-workspace-kinds|.
 
 :Paseo sessions                                          *:Paseo-sessions*
 
@@ -252,10 +259,43 @@ review.context                                          integer, default `0`
 
 :Paseo ws [init|create|rm|ls|status]                           *:Paseo-ws*
 
-    Workspace assembly. `init` opens the generated manifest for you to read
-    before you `:w` it -- the comments in it are what init could not decide
-    for you. `create <name> [repo,repo]` assembles worktrees; `rm <name>
-    [force]` dismantles one and refuses if there is unsaved work.
+    The manifest-level controls, for when you want to see the machinery
+    rather than have it decided for you. |:Paseo-wcreate| needs none of this.
+
+    `init` opens the generated manifest for you to read before you `:w` it --
+    the comments in it are what init could not decide for you. `create <name>
+    [repo,repo]` assembles worktrees, and is the only way to pick WHICH repos
+    a workspace gets; `rm <name> [force]` dismantles one and refuses if there
+    is unsaved work. `create` with no repo list is just |:Paseo-wcreate|, and
+    works with no manifest at all.
+
+                                                     *paseo-workspace-kinds*
+One intention, three mechanisms ~
+
+A workspace is one unit of work with a working directory. How it gets that
+directory depends on what the project is, and |:Paseo-wcreate| decides from
+the directory rather than asking you:
+
+    assembled   A plain directory holding several repos. Its worktrees are
+                assembled into one composite directory, which Paseo is then
+                handed as an ordinary local workspace. This exists because
+                Paseo's own isolation needs a git repository and
+                `~/Code/openfin` is not one.
+
+                No manifest yet? One is discovered and written on the way
+                past, and what it could not decide is reported rather than
+                swallowed -- the guessed base branch, and the `shared` list
+                to prune. Run |:Paseo-ws| `init` instead to read it first.
+
+    worktree    A git repository. Paseo cuts and owns the worktree itself,
+                on `branch_prefix .. name`, off whatever is CHECKED OUT.
+                Nothing is assembled; there is nothing to assemble.
+
+    local       Neither. A workspace on the directory as it stands, shared
+                with anything else pointed at it.
+
+The picker's shape column, and the message after `wcreate`, say which one you
+got.
 
 :Paseo explain [kind]                                      *:Paseo-explain*
 
