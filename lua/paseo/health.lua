@@ -50,6 +50,7 @@ local function check_core()
   for name, why in pairs {
     ["gitsigns"] = "the staging and preview surface",
     ["telescope"] = "the changed-files and workspace pickers",
+    ["volt"] = "the chat chrome, the session panels and the permission dialog",
   } do
     if pcall(require, name) then
       ok(("%s is available (%s)"):format(name, why))
@@ -57,6 +58,20 @@ local function check_core()
       warn(("%s is not loaded -- it may just be lazy; needed for %s"):format(name, why))
     end
   end
+
+  -- A partial volt install is its own failure mode: `volt` resolves but
+  -- `volt.ui` does not, and every panel comes up empty with no error anyone
+  -- sees. Probe the submodule the panels actually use.
+  if pcall(require, "volt") and not pcall(require, "volt.ui") then
+    warn "volt is present but volt.ui is not -- the panels will render without their components"
+  end
+
+  -- Which palette volt derives from, because it changes what the chat looks
+  -- like and is the first thing to check when the colours look wrong.
+  info(
+    vim.g.base46_cache and "volt colours come from base46 (NvChad)"
+      or "volt colours are derived from Normal/Comment"
+  )
 end
 
 local function check_paseo()
