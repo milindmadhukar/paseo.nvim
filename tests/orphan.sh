@@ -35,7 +35,11 @@ echo "runtime: $runtime"
 
 if [ ! -d "$root/sidecar/node_modules/@getpaseo" ]; then
   echo "orphan: installing the sidecar's dependencies…"
-  (cd "$root/sidecar" && bun install >/dev/null) || exit 2
+  if command -v bun >/dev/null 2>&1; then
+    (cd "$root/sidecar" && bun install >/dev/null) || exit 2
+  else
+    (cd "$root/sidecar" && npm install --no-package-lock >/dev/null) || exit 2
+  fi
 fi
 
 status=0
