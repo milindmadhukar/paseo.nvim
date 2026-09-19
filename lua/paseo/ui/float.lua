@@ -132,17 +132,29 @@ local function tab_lines()
   if not state then
     return { {}, {} }
   end
-  -- Two spaces between tabs rather than a `│` rule: six numbered names plus
-  -- five separators is 70 columns, which is exactly the inner width of the
-  -- surface in an 80-column terminal -- so the last tab was the one truncated
-  -- away, and the last tab is the one you had not discovered yet.
-  local tabs = { { "  ", "PaseoDim" } }
+  -- One pill per tab, number and name inside the same background, so a tab is
+  -- a shape you can aim at rather than two differently-coloured words that
+  -- happen to sit next to each other. Six pills plus gaps is ~68 columns,
+  -- which still fits the inner width of an 80-column terminal.
+  local tabs = {}
   for i, name in ipairs(M.TABS) do
     local active = name == state.tab
-    local click = goto_tab(name)
-    tabs[#tabs + 1] = { ("%d "):format(i), "PaseoKey", click }
-    tabs[#tabs + 1] = { name, active and "PaseoHeader" or "PaseoDim", click }
-    tabs[#tabs + 1] = { "  ", nil }
+    local id = "paseo:tab:" .. name
+    local hovered = vim.g.nvmark_hovered == id
+    -- Gap BEFORE each pill but the first, never after the last. Six pills and
+    -- six gaps is exactly two columns more than an 80-column terminal has
+    -- room for, and the two columns it loses are the end of "Workspaces" --
+    -- the tab you had not discovered yet.
+    if i > 1 then
+      tabs[#tabs + 1] = { " ", nil }
+    end
+    tabs[#tabs + 1] = {
+      (" %d %s "):format(i, name),
+      (active or hovered) and "PaseoChipFocus" or "PaseoChipOff",
+      -- Hover paints a tab exactly as focus does, so pointing at one and
+      -- being on one look like the same state, because they are.
+      { click = goto_tab(name), hover = { id = id, redraw = "tabs" } },
+    }
   end
   return {
     render.truncate(tabs, state.geometry.width - 2),
@@ -162,9 +174,13 @@ local function body_lines()
 
   if state.tab ~= "Chat" then
     local ok, panel = pcall(require, "paseo.ui.panels." .. state.tab:lower())
-    local body = ok and panel.lines(state.chat, g.width - 4) or {
-      { { "  this panel is unavailable", "PaseoToolFail" } },
-    }
+    -- The height is passed as well as the width. A panel that can tighten
+    -- itself -- Session drops the breathing room inside its cards -- needs to
+    -- know how many rows it is being given, and the rest simply ignore it.
+    local body = ok and panel.lines(state.chat, g.width - 4, height)
+      or {
+        { { "  this panel is unavailable", "PaseoToolFail" } },
+      }
     for _, line in ipairs(body) do
       local row = { { "  ", nil } }
       vim.list_extend(row, render.truncate(vim.deepcopy(line), g.width - 4))
@@ -188,32 +204,17 @@ end
 
 ---@return table[][]
 local function footer_lines()
-  local last = tostring(#M.TABS)
+  -- One builder for every hint bar in the plugin. This row had been copied
+  -- into five files and they had already drifted -- this one advertised
+  -- "1-5 jump" while there were six tabs.
   return {
-    {
-      { "  ", "PaseoDim" },
-      { "1-" .. last, "PaseoKey" },
-      { " tabs · ", "PaseoDim" },
-      { "<Tab>", "PaseoKey" },
-      { " cycle · ", "PaseoDim" },
-      { "click", "PaseoKey" },
-      { " anything · ", "PaseoDim" },
-      { "<C-f>", "PaseoKey" },
-      { " sidebar · ", "PaseoDim" },
-      { "q", "PaseoKey" },
-      { " close", "PaseoDim" },
+    require("paseo.ui.widgets").hints {
+      { "1-" .. #M.TABS, "tabs" },
+      { "⇥", "cycle" },
+      { "^F", "sidebar" },
+      { "q", "close" },
     },
   }
-end
-
----Every line of the chrome, in order. The no-volt fallback draws this.
----@return table[][]
-local function chrome_lines()
-  local lines = {}
-  for _, section in ipairs { header_lines, tab_lines, body_lines, footer_lines } do
-    vim.list_extend(lines, section())
-  end
-  return lines
 end
 
 ---Redraw the chrome. The ONE entry point for any content change.
@@ -228,58 +229,51 @@ function M.rebuild()
     return
   end
 
+  local volt = require "volt"
   local g = state.geometry
-  local ok = pcall(function()
-    local volt = require "volt"
-    api.nvim_buf_clear_namespace(state.buf, ns, 0, -1)
-    volt.gen_data {
-      {
-        buf = state.buf,
-        ns = ns,
-        xpad = 1,
-        layout = {
-          -- Fresh tables every call: volt's `draw` strips the third element
-          -- from every cell it is handed, so a cached line list loses its
-          -- click targets after the first draw.
-          {
-            name = "header",
-            lines = function()
-              return render.to_volt(header_lines())
-            end,
-          },
-          {
-            name = "tabs",
-            lines = function()
-              return render.to_volt(tab_lines())
-            end,
-          },
-          {
-            name = "body",
-            lines = function()
-              return render.to_volt(body_lines())
-            end,
-          },
-          {
-            name = "footer",
-            lines = function()
-              return render.to_volt(footer_lines())
-            end,
-          },
+
+  api.nvim_buf_clear_namespace(state.buf, ns, 0, -1)
+  volt.gen_data {
+    {
+      buf = state.buf,
+      ns = ns,
+      xpad = 1,
+      layout = {
+        -- Fresh tables every call: volt's `draw` strips the third element
+        -- from every cell it is handed, so a cached line list loses its
+        -- click targets after the first draw.
+        {
+          name = "header",
+          lines = function()
+            return render.to_volt(header_lines())
+          end,
+        },
+        {
+          name = "tabs",
+          lines = function()
+            return render.to_volt(tab_lines())
+          end,
+        },
+        {
+          name = "body",
+          lines = function()
+            return render.to_volt(body_lines())
+          end,
+        },
+        {
+          name = "footer",
+          lines = function()
+            return render.to_volt(footer_lines())
+          end,
         },
       },
-    }
-    vim.bo[state.buf].modifiable = true
-    volt.set_empty_lines(state.buf, g.height, g.width)
-    vim.bo[state.buf].modifiable = false
-    volt.redraw(state.buf, "all")
-  end)
+    },
+  }
 
-  if not ok then
-    -- No volt: draw the same cells as real text. The surface still works, it
-    -- just cannot be clicked.
-    render.to_buffer(state.buf, require("paseo.ui.hl").ns, 0, -1, chrome_lines())
-    vim.bo[state.buf].modifiable = false
-  end
+  vim.bo[state.buf].modifiable = true
+  volt.set_empty_lines(state.buf, g.height, g.width)
+  vim.bo[state.buf].modifiable = false
+  volt.redraw(state.buf, "all")
 end
 
 ---Repaint only what changes while a turn runs.
@@ -292,21 +286,9 @@ function M.refresh_header(chat)
   if not state or state.chat ~= chat or not api.nvim_buf_is_valid(state.buf) then
     return
   end
-  local ok = pcall(function()
-    local volt = require "volt"
-    -- Usage is the other thing a running turn changes, and it is pure Lua --
-    -- no subprocess -- so it can afford to ride along.
-    volt.redraw(state.buf, state.tab == "Usage" and { "header", "body" } or { "header" })
-  end)
-
-  if not ok then
-    -- No volt. Replace the header's one line of real text rather than falling
-    -- back to `rebuild`, which would drag the Changes panel's `git status`
-    -- through all ten frames a second.
-    vim.bo[state.buf].modifiable = true
-    render.to_buffer(state.buf, require("paseo.ui.hl").ns, 0, 1, header_lines())
-    vim.bo[state.buf].modifiable = false
-  end
+  -- Usage is the other thing a running turn changes, and it is pure Lua -- no
+  -- subprocess -- so it can afford to ride along.
+  require("volt").redraw(state.buf, state.tab == "Usage" and { "header", "body" } or { "header" })
 end
 
 -- --------------------------------------------------------------- child panes
@@ -412,6 +394,16 @@ local function show_chat_panes()
     zindex = g.z_panes,
   })
 
+  -- The surface reads as ONE sheet: the conversation shares the chrome's
+  -- background, and the composer is a raised card -- the same tier the Session
+  -- panel's cards sit on, so "where you type" is visibly a control and not
+  -- more transcript.
+  pcall(function()
+    vim.wo[chat.win_conversation].winhl = "Normal:PaseoNormal,NormalFloat:PaseoNormal"
+    vim.wo[chat.win_composer].winhl =
+      "Normal:PaseoCard,NormalFloat:PaseoCard,FloatBorder:PaseoCardBorder"
+  end)
+
   for _, win in ipairs { chat.win_conversation, chat.win_composer } do
     for option, value in pairs {
       wrap = true,
@@ -455,12 +447,45 @@ end
 
 -- ------------------------------------------------------------------- tabs
 
+---The panel module for a tab, if it has one.
+---
+---Chat has none -- it is the conversation, floated over the body -- and a tab
+---whose module fails to load must not take the surface down with it.
+---@param name string
+---@return table|nil
+local function panel_for(name)
+  local ok, panel = pcall(require, "paseo.ui.panels." .. name:lower())
+  return ok and panel or nil
+end
+
+---Give a panel the chrome buffer's keys, and take them back again.
+---
+---The six panels SHARE one buffer, so a panel that binds `<CR>` has to unbind
+---it on the way out or the Changes tab inherits it and tries to apply a
+---session setting. `attach`/`detach` are both optional: the panel contract has
+---always been pcall-and-optional.
+---@param name string
+---@param method "attach"|"detach"
+local function panel_keys(name, method)
+  if not state then
+    return
+  end
+  local panel = panel_for(name)
+  if panel and type(panel[method]) == "function" then
+    pcall(panel[method], state.chat, state.buf)
+  end
+end
+
 ---@param name string
 function M.select(name)
   if not state or not vim.tbl_contains(M.TABS, name) then
     return
   end
   local was_chat = state.tab == "Chat"
+  local leaving = state.tab
+  if leaving ~= name then
+    panel_keys(leaving, "detach")
+  end
   state.tab = name
 
   if name == "Chat" and not was_chat then
@@ -471,10 +496,11 @@ function M.select(name)
     -- once and cached the answer is a panel that shows you a workspace list
     -- from an hour ago -- or, if the daemon happened to be down then, an error
     -- for the rest of the session.
-    local ok, panel = pcall(require, "paseo.ui.panels." .. name:lower())
-    if ok and type(panel.load) == "function" then
+    local panel = panel_for(name)
+    if panel and type(panel.load) == "function" then
       pcall(panel.load, state.chat)
     end
+    panel_keys(name, "attach")
   end
 
   M.rebuild()
@@ -503,6 +529,10 @@ function M.close()
   if not state then
     return
   end
+  -- Before `state` goes: `panel_keys` reads it, and a panel left attached
+  -- would have its mappings outlive the buffer they were bound to.
+  panel_keys(state.tab, "detach")
+
   local held = state
   state = nil
 
@@ -518,20 +548,16 @@ function M.close()
     if buf and api.nvim_buf_is_valid(buf) then
       -- Volt never clears its own state table; without this the chrome
       -- buffer's clickable and hoverable tables leak for the session.
-      pcall(function()
-        require("volt.state")[buf] = nil
-      end)
+      require("volt.state")[buf] = nil
       -- And its global on_key handler keeps dispatching against a dead buffer
       -- unless the buf is taken off its list.
-      pcall(function()
-        local bufs = require("volt.events").bufs
-        for i, id in ipairs(bufs) do
-          if id == buf then
-            table.remove(bufs, i)
-            break
-          end
+      local bufs = require("volt.events").bufs
+      for i, id in ipairs(bufs) do
+        if id == buf then
+          table.remove(bufs, i)
+          break
         end
-      end)
+      end
       pcall(api.nvim_buf_delete, buf, { force = true })
     end
   end
@@ -553,6 +579,11 @@ function M.open(chat)
     return
   end
   M.close()
+
+  -- The background tiers the whole surface is drawn on. Idempotent, and
+  -- re-derived on `ColorScheme` -- but a user who opens the dashboard before
+  -- anything else has touched the highlights still gets them.
+  require("paseo.ui.hl").setup()
 
   local g = geometry()
 
@@ -585,6 +616,12 @@ function M.open(chat)
     zindex = g.z_chrome,
   })
 
+  -- fg == bg on the border group: `nvim_open_win`'s border glyphs render as
+  -- solid colour, so the box becomes a one-cell padding ring in the surface's
+  -- own background. This is the single change that stops the dashboard looking
+  -- like a framed rectangle and starts it looking like a card.
+  vim.wo[win].winhl = "Normal:PaseoNormal,NormalFloat:PaseoNormal,FloatBorder:PaseoNormalBorder"
+
   state = {
     buf = buf,
     win = win,
@@ -597,18 +634,17 @@ function M.open(chat)
   chat.surface = "float"
 
   M.rebuild()
-  pcall(function()
-    local events = require "volt.events"
-    events.add(buf)
-    -- THE HALF THAT MAKES A CELL CLICKABLE WITH A MOUSE. `events.add` only
-    -- binds `<CR>`; the `LeftMouse` dispatch lives behind `enable`, which
-    -- `volt.run` calls and this surface -- which drives `gen_data`/`redraw`
-    -- itself, to keep the conversation out of volt's hands -- never did. So
-    -- the tab bar and every panel row had actions that no click reached.
-    if not vim.g.extmarks_events then
-      events.enable()
-    end
-  end)
+
+  local events = require "volt.events"
+  events.add(buf)
+  -- THE HALF THAT MAKES A CELL CLICKABLE WITH A MOUSE. `events.add` only
+  -- binds `<CR>`; the `LeftMouse` dispatch lives behind `enable`, which
+  -- `volt.run` calls and this surface -- which drives `gen_data`/`redraw`
+  -- itself, to keep the conversation out of volt's hands -- never did. So
+  -- the tab bar and every panel row had actions that no click reached.
+  if not vim.g.extmarks_events then
+    events.enable()
+  end
 
   local map = function(key, fn)
     vim.keymap.set("n", key, fn, { buffer = buf, nowait = true, silent = true })

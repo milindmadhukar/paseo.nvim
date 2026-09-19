@@ -1378,10 +1378,13 @@ local function test_ui()
   local chrome_buf
   for _, win in ipairs(vim.api.nvim_list_wins()) do
     local buf = vim.api.nvim_win_get_buf(win)
-    if pcall(require, "volt") and require("volt.state")[buf] then
+    -- volt is a HARD dependency now -- there is no plain-text fallback behind
+    -- the chrome any more -- so this is a lookup, not a probe.
+    if require("volt.state")[buf] then
       chrome_buf = buf
     end
   end
+  truthy("ui: the dashboard chrome is a volt buffer", chrome_buf ~= nil)
   if chrome_buf then
     local marks =
       vim.api.nvim_buf_get_extmarks(chrome_buf, -1, { 0, 0 }, { 1, -1 }, { details = true })
@@ -1413,39 +1416,304 @@ local function test_ui()
     end
     truthy("ui: the tab bar and header carry click targets", targets >= #float.TABS, targets)
     truthy("ui: and volt's mouse dispatch is switched on", vim.g.extmarks_events == true)
+
+    -- The six panels SHARE the chrome buffer, so a panel that binds keys has
+    -- to give them back. `<CR>` is the one that matters: volt binds it at open
+    -- and that is how every other panel's rows are reached from the keyboard,
+    -- so a Session panel that simply DELETED its own `<CR>` on the way out
+    -- would leave the key dead on all five of the others.
+    local function buf_map(lhs)
+      local found = vim.fn.maparg(lhs, "n", false, true)
+      return type(found) == "table" and found.buffer == 1 and found or nil
+    end
+    vim.api.nvim_set_current_buf(chrome_buf)
+
+    local volt_cr = buf_map "<CR>"
+    truthy("ui: volt binds <CR> on the chrome buffer", volt_cr ~= nil)
+    eq("ui: and the Session keys are not bound on another tab", buf_map "h", nil)
+
+    float.select "Session"
+    truthy("ui: the Session panel takes the movement keys", buf_map "h" ~= nil)
+    truthy("ui: and its group mnemonics", buf_map "s" ~= nil)
+    truthy("ui: and displaces volt's <CR>", buf_map("<CR>").callback ~= volt_cr.callback)
+
+    float.select "Usage"
+    eq("ui: leaving gives the movement keys back", buf_map "h", nil)
+    eq("ui: and the mnemonics", buf_map "s", nil)
+    eq(
+      "ui: and RESTORES volt's <CR> rather than deleting it",
+      buf_map("<CR>").callback,
+      volt_cr.callback
+    )
   end
   float.close()
 
   -- Volt keys its state by buffer and never clears it; ours must.
-  if pcall(require, "volt") then
-    local entries = 0
-    for _ in pairs(require "volt.state") do
-      entries = entries + 1
-    end
-    eq("ui: the float clears its volt state", entries, 0)
-    eq("ui: and takes its buffer off volt's key handler", #require("volt.events").bufs, 0)
+  local entries = 0
+  for _ in pairs(require "volt.state") do
+    entries = entries + 1
   end
+  eq("ui: the float clears its volt state", entries, 0)
+  eq("ui: and takes its buffer off volt's key handler", #require("volt.events").bufs, 0)
 
   -- The session panel replaces four separate `vim.ui.select` prompts, so its
   -- rows have to be actionable -- a read-only list of settings you still have
   -- to leave the panel to change would be worse than the prompts.
+  local session = require "paseo.ui.session"
   local session_panel = require "paseo.ui.panels.session"
+  local widgets = require "paseo.ui.widgets"
+
   surface_chat.config_snapshot = {
+    model = "opus",
     modeId = "default",
-    availableModes = { { id = "plan", label = "Plan" }, { id = "default", label = "Always ask" } },
-    thinkingOptions = {},
-    models = {},
+    thinkingOptionId = "low",
+    availableModes = {
+      { id = "plan", label = "Plan" },
+      { id = "default", label = "Always ask" },
+      { id = "bypassPermissions", label = "Bypass" },
+    },
+    thinkingOptions = { { id = "low", label = "Think", isDefault = true } },
+    models = { { id = "opus", label = "Opus 5" }, { id = "sonnet", label = "Sonnet 5" } },
     features = { { id = "fast_mode", label = "Fast mode", type = "toggle", value = true } },
   }
+
+  -- The daemon reports four lists that agree about nothing. One shape out, or
+  -- the renderer has to know which group it is drawing.
+  local groups = session.groups(surface_chat)
+  eq("session: four groups come back", #groups, 4)
+  local by_id = {}
+  for _, group in ipairs(groups) do
+    by_id[group.id] = group
+  end
+  eq("session: the mode group knows what is set", by_id.mode.current, "default")
+  eq("session: the model group does too", by_id.model.current, "opus")
+  eq("session: a toggle keeps its value", by_id.features.entries[1].value, true)
+  eq("session: a default is noted", by_id.thinking.entries[1].note, "default")
+  -- The one that matters: `bypassPermissions` cannot look like `plan`.
+  eq("session: bypassing permissions is drawn as danger", by_id.mode.entries[3].tone, "danger")
+  eq("session: and planning is not", by_id.mode.entries[1].tone, nil)
+
   local clickable = 0
   for _, line in ipairs(session_panel.lines(surface_chat, 80)) do
     for _, cell in ipairs(line) do
-      if type(cell[3]) == "function" then
+      -- A table, not a function: the cells carry `{ click = …, hover = … }`
+      -- now, because hover has to paint a chip the same way focus does.
+      if type(cell[3]) == "table" and type(cell[3].click) == "function" then
         clickable = clickable + 1
       end
     end
   end
   truthy("ui: the session panel's rows carry click actions", clickable >= 6)
+
+  -- A card one cell narrower than its neighbour is instantly visible in a
+  -- two-column layout, and `render.card` -- the older one -- had exactly that
+  -- class of off-by-one in its header budget.
+  local card = widgets.card {
+    title = "Permission mode",
+    icon = "",
+    w = 40,
+    lines = { { { "short" } }, { { string.rep("x", 90) } } },
+  }
+  local ragged = nil
+  for i, line in ipairs(card) do
+    if render.width(line) ~= 40 then
+      ragged = ("row %d is %d wide"):format(i, render.width(line))
+    end
+  end
+  eq("ui: every row of a card is exactly its width", ragged, nil)
+
+  -- volt's `hpad` expands a cell whose text is the literal `_pad_`, and
+  -- `line_w` skips it when measuring -- but `render.width` counts it as five
+  -- columns of text. So the order is hpad THEN truncate, never the reverse,
+  -- and `widgets.row` resolves the sentinel before returning.
+  local justified = widgets.row({ { "left" } }, { { "right" } }, 30)
+  eq("ui: a justified row lands on its width", render.width(justified), 30)
+  for _, cell in ipairs(justified) do
+    truthy("ui: and leaves no _pad_ sentinel behind", cell[1] ~= "_pad_")
+  end
+
+  -- Keyboard, not just mouse: the panel used to have no mappings at all, so
+  -- the only way to change a setting was to aim at it.
+  local view = session_panel.new(surface_chat)
+  local _, focused = view:resolve()
+  eq("session: focus starts on what is set", focused.id, "default")
+  view:move(1)
+  local _, after = view:resolve()
+  eq("session: and moves on to the next entry", after.id, "bypassPermissions")
+  view:jump "s"
+  local jumped_group, jumped = view:resolve()
+  eq("session: a mnemonic jumps to its group", jumped_group.id, "model")
+  eq("session: landing on what that group has set", jumped.id, "opus")
+  -- Running off the end of a group lands on the NEXT GROUP rather than
+  -- wrapping inside itself, so `j` means "the next thing" everywhere and
+  -- there is one traversal rather than one per card. `m` lands on the
+  -- selected mode, which is the second of three; two steps back is one step
+  -- past the top.
+  view:jump "m"
+  view:move(-1)
+  view:move(-1)
+  local wrapped_group, wrapped = view:resolve()
+  eq("session: stepping off the top lands in the last group", wrapped_group.id, "model")
+  eq("session: on its last entry", wrapped.id, "sonnet")
+
+  -- `maparg` reads the CURRENT buffer, not the one being bound -- and at the
+  -- moment the Session panel attaches, the current buffer is usually the
+  -- COMPOSER, whose `<CR>` sends the prompt. Saving the displaced mapping from
+  -- the wrong buffer restored "send the prompt" onto the chrome buffer.
+  local host = vim.api.nvim_create_buf(false, true)
+  local elsewhere = vim.api.nvim_create_buf(false, true)
+  local host_cr = function() end
+  local elsewhere_cr = function() end
+  vim.keymap.set("n", "<CR>", host_cr, { buffer = host })
+  vim.keymap.set("n", "<CR>", elsewhere_cr, { buffer = elsewhere })
+
+  local was = vim.api.nvim_get_current_buf()
+  vim.api.nvim_set_current_buf(elsewhere)
+  session_panel.attach(surface_chat, host)
+  session_panel.detach(surface_chat, host)
+
+  vim.api.nvim_buf_call(host, function()
+    eq(
+      "session: detaching restores the mapping THAT BUFFER had",
+      vim.fn.maparg("<CR>", "n", false, true).callback,
+      host_cr
+    )
+  end)
+  vim.api.nvim_buf_call(elsewhere, function()
+    eq(
+      "session: and leaves the buffer that happened to be current alone",
+      vim.fn.maparg("<CR>", "n", false, true).callback,
+      elsewhere_cr
+    )
+  end)
+  vim.api.nvim_set_current_buf(was)
+  vim.api.nvim_buf_delete(host, { force = true })
+  vim.api.nvim_buf_delete(elsewhere, { force = true })
+
+  -- `:Paseo mode` used to be a `vim.ui.select`. It is the same view object the
+  -- dashboard draws, in a window of its own, which is why there is no second
+  -- renderer to keep in step.
+  local settings = require "paseo.ui.settings"
+  local wins_before, bufs_before = #vim.api.nvim_list_wins(), #vim.api.nvim_list_bufs()
+  settings.open(surface_chat, "mode")
+  truthy("settings: the popup opens", settings.is_open())
+
+  local popup_buf = vim.api.nvim_get_current_buf()
+  eq("settings: with a filetype of its own", vim.bo[popup_buf].ft, "paseo-settings")
+  -- The height is VOLT'S, read back out of its state after `gen_data`. A
+  -- window sized before the layout is built is sized against a guess, and this
+  -- layout's size depends on how many models the provider has.
+  eq(
+    "settings: sized to the layout volt measured",
+    vim.api.nvim_win_get_height(0),
+    require("volt.state")[popup_buf].h
+  )
+  eq(
+    "settings: and the buffer has exactly that many lines to anchor extmarks to",
+    #vim.api.nvim_buf_get_lines(popup_buf, 0, -1, false),
+    require("volt.state")[popup_buf].h
+  )
+  -- `only` means one group, not a highlighted group in a list of four.
+  local drawn_groups = 0
+  for _, name in ipairs { "Permission mode", "Thinking", "Model", "Features" } do
+    for _, line in ipairs(vim.api.nvim_buf_get_extmarks(popup_buf, -1, 0, -1, { details = true })) do
+      for _, cell in ipairs(line[4].virt_text or {}) do
+        if cell[1] == name then
+          drawn_groups = drawn_groups + 1
+        end
+      end
+    end
+  end
+  eq("settings: opened on one group, it draws one group", drawn_groups, 1)
+
+  -- A section that changes height when you MOVE THE MOUSE is a crash. Volt
+  -- records each section's starting row once, in `gen_data`, then draws at
+  -- those offsets without clearing or re-padding -- so a description that
+  -- appeared on hover wrote extmarks past the end of the buffer and raised
+  -- "Invalid 'line': out of range" from inside `vim.on_key`.
+  local tall = {
+    agent_id = "x",
+    config_snapshot = {
+      modeId = "short",
+      availableModes = {
+        { id = "short", label = "Short", description = "One line." },
+        {
+          id = "long",
+          label = "Long",
+          description = ("wordy "):rep(60),
+        },
+      },
+      thinkingOptions = {},
+      models = {},
+      features = {},
+    },
+  }
+  local stable = session_panel.new(tall)
+  local on_short = #stable:lines(60)
+  stable:move(1)
+  local on_long = #stable:lines(60)
+  eq("session: a card's height does not depend on which entry is focused", on_long, on_short)
+
+  settings.close()
+  truthy("settings: and closes", not settings.is_open())
+  eq("settings: leaving no windows behind", #vim.api.nvim_list_wins(), wins_before)
+  eq("settings: nor buffers", #vim.api.nvim_list_bufs(), bufs_before)
+  eq("settings: nor an entry in volt's state", require("volt.state")[popup_buf], nil)
+
+  -- Clamping the WINDOW without clamping the LAYOUT is worse than not
+  -- clamping at all: `nvim_open_win` shrinks quietly, volt goes on drawing at
+  -- the rows it recorded, and the throw lands between opening the window and
+  -- binding `q` -- an empty popup over a full-screen backdrop with no key
+  -- that dismisses either.
+  local real_lines = vim.o.lines
+  vim.o.lines = 20
+  surface_chat.config_snapshot.models = {}
+  for i = 1, 12 do
+    surface_chat.config_snapshot.models[i] = { id = "m" .. i, label = "Model " .. i }
+  end
+  local opened = pcall(settings.open, surface_chat)
+  truthy("settings: twelve models on a twenty-row editor still opens", opened)
+  if opened then
+    local squeezed = vim.api.nvim_get_current_buf()
+    local drawn = #vim.api.nvim_buf_get_lines(squeezed, 0, -1, false)
+    eq("settings: the buffer is as long as the layout volt measured", drawn, require("volt.state")[squeezed].h)
+    truthy("settings: and fits the editor", vim.api.nvim_win_get_height(0) <= vim.o.lines - 4)
+    settings.close()
+  end
+
+  -- `nvim_buf_set_lines` collapses extmarks onto the last line rather than
+  -- deleting them, so a redraw of a SHORTER layout stacked every row it no
+  -- longer had on the popup's bottom row, overprinting there forever. Needs
+  -- room to shrink into, so it is checked on a tall editor rather than the
+  -- clamped one above.
+  vim.o.lines = 40
+  settings.open(surface_chat, "model")
+  local shrinking = vim.api.nvim_get_current_buf()
+  local before = #vim.api.nvim_buf_get_lines(shrinking, 0, -1, false)
+  surface_chat.config_snapshot.models = {
+    { id = "m1", label = "Model 1" },
+    { id = "m2", label = "Model 2" },
+  }
+  vim.api.nvim_feedkeys(vim.keycode "l", "x", false)
+  local after = #vim.api.nvim_buf_get_lines(shrinking, 0, -1, false)
+  truthy("settings: dropping ten models shrinks the buffer", after < before, before .. " -> " .. after)
+
+  local per_row = {}
+  for _, mark in
+    ipairs(vim.api.nvim_buf_get_extmarks(shrinking, require("volt.state")[shrinking].ns, 0, -1, {}))
+  do
+    per_row[mark[2]] = (per_row[mark[2]] or 0) + 1
+  end
+  local stacked = nil
+  for row, n in pairs(per_row) do
+    if n > 1 then
+      stacked = ("row %d carries %d"):format(row, n)
+    end
+  end
+  eq("settings: and leaves no extmarks stacked on a row", stacked, nil)
+  settings.close()
+
+  vim.o.lines = real_lines
 
   -- Volt's convention is the cell's THIRD element, and everything between the
   -- panel and volt must preserve it -- truncate, flatten and to_volt all

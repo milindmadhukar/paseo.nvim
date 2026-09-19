@@ -10,6 +10,18 @@
 --- otherwise, exposing `ExRed`/`ExGreen`/`ExBlue`/`ExYellow`/`CommentFg`. We
 --- build on those so the chat matches whatever theme is loaded, the same way
 --- `typr/ui/hl.lua` does.
+---
+--- There are TWO families here and the split matters:
+---
+---   * foreground-only groups -- the transcript, the timeline, the permission
+---     dialog. These draw on top of whatever background the window has.
+---   * background groups -- `PaseoNormal`, `PaseoCard`, the chips. These are
+---     what gives the dashboard depth, and they are the reason the surface
+---     stopped looking like coloured text on a flat float. They are DERIVED
+---     from `Normal`'s background by lightness steps, exactly as
+---     `volt/highlights.lua` derives its own tiers, and they are SKIPPED
+---     ENTIRELY on a transparent theme -- painting an opaque rectangle over
+---     someone's wallpaper is worse than having no card at all.
 
 local api = vim.api
 
@@ -30,6 +42,13 @@ M.ns = api.nvim_create_namespace "paseo.chat"
 ---extmarks, which is why a card can be replaced by id rather than by a line
 ---number that went stale three messages ago.
 M.ns_anchor = api.nvim_create_namespace "paseo.chat.anchor"
+
+---True when the surface has real card backgrounds to sit on.
+---
+---Read by the widgets: a card with no background is drawn as a plain rule
+---instead of a filled rectangle, because an unfilled box on a transparent
+---theme is just noise.
+M.opaque = false
 
 ---@param value integer|nil
 ---@return string|nil
@@ -83,13 +102,59 @@ local function palette()
     yellow = pick("ExYellow", "DiagnosticWarn", "WarningMsg"),
     grey = pick("CommentFg", "Comment", "NonText"),
     border = pick("ExLightGrey", "LineNr", "Comment"),
-    bg = bg_of "Normal",
+    -- `Normal` first, not `NormalFloat`. The dashboard covers most of the
+    -- screen and REPLACES its windows' `Normal` with `PaseoNormal`, so the
+    -- colour it has to be a step away from is the editor's, not the popup
+    -- background some themes make markedly greyer -- `morning` links
+    -- `NormalFloat` to `Pmenu` at #b2b2b2 against a #e4e4e4 editor, and
+    -- deriving from that put a grey slab over a white screen.
+    bg = bg_of "Normal" or bg_of "NormalFloat",
   }
+end
+
+---Blend two colours, or give up gracefully.
+---
+---Wrapped because `volt.color` is only present when volt is, and because
+---`mix` returns its first argument unchanged when either input will not parse
+---as hex -- which is what a `nil` background looks like.
+---@param accent string|nil
+---@param onto string|nil
+---@param strength integer  0-100, percent of `onto` in the result.
+---@return string|nil
+local function blend(accent, onto, strength)
+  if not (accent and onto) then
+    return nil
+  end
+  local ok, color = pcall(require, "volt.color")
+  if not ok then
+    return nil
+  end
+  return color.mix(accent, onto, strength)
+end
+
+---Move a colour towards white (positive) or black (negative).
+---@param base string|nil
+---@param amount number  Absolute lightness points, 0-100.
+---@return string|nil
+local function shift(base, amount)
+  if not base then
+    return nil
+  end
+  local ok, color = pcall(require, "volt.color")
+  if not ok then
+    return nil
+  end
+  return color.change_hex_lightness(base, amount)
 end
 
 ---Define every `Paseo*` group. Idempotent, and re-run on `ColorScheme`.
 function M.setup()
   local c = palette()
+
+  -- A light theme has to DARKEN where a dark theme lightens, or every "raised"
+  -- surface comes out washed into the background. One sign, applied to every
+  -- lightness step below -- the same trick `volt/highlights.lua` uses.
+  local x = vim.o.bg == "dark" and 1 or -1
 
   -- `default = false`: a colourscheme that ships its own Paseo* groups is rare,
   -- but a user overriding one in their config should win, and they do that
@@ -128,6 +193,74 @@ function M.setup()
     PaseoAdd = { fg = c.green },
     PaseoDel = { fg = c.red },
   }
+
+  M.opaque = c.bg ~= nil
+
+  if M.opaque then
+    -- Two tiers, two steps apart. The surface sits just off `Normal` so the
+    -- dashboard reads as a sheet laid on the editor; a card sits a further
+    -- step up so it reads as raised off the sheet. More tiers than this and
+    -- the steps stop being distinguishable on low-contrast themes.
+    local surface = shift(c.bg, 2 * x) or c.bg
+    local card = shift(c.bg, 7 * x) or c.bg
+
+    -- On a LIGHT theme the accents themselves are often pale -- `morning`'s
+    -- "added" is #90ee90 -- and a pale foreground on a chip tinted with that
+    -- same pale colour is unreadable. Push the accent away from the
+    -- background before using it as text; on a dark theme it is already
+    -- pushed the right way and is left alone.
+    local function ink(accent)
+      return x < 0 and (shift(accent, -22) or accent) or accent
+    end
+
+    groups.PaseoNormal = { bg = surface }
+    -- fg == bg is the whole trick: `nvim_open_win`'s border glyphs render as
+    -- solid colour, so the border becomes a one-cell padding ring in the
+    -- surface's own colour instead of a drawn box.
+    groups.PaseoNormalBorder = { fg = surface, bg = surface }
+
+    groups.PaseoCard = { bg = card }
+    groups.PaseoCardBorder = { fg = card, bg = card }
+    groups.PaseoCardRule = { fg = c.border, bg = card }
+    groups.PaseoCardTitle = { fg = ink(c.blue), bg = card, bold = true }
+    groups.PaseoCardDim = { fg = c.grey, bg = card }
+    groups.PaseoCardText = { bg = card }
+
+    -- Chips. `mix(accent, bg, N)` is mostly background with a hint of the
+    -- accent, and the pure accent as the foreground on top -- legible on any
+    -- theme, which a raw accent background is not.
+    groups.PaseoChipOff = { fg = c.grey, bg = shift(card, 4 * x) or card }
+    groups.PaseoChipOn = { fg = ink(c.green), bg = blend(c.green, card, 82), bold = true }
+    groups.PaseoChipFocus = { fg = ink(c.blue), bg = blend(c.blue, card, 72), bold = true }
+    groups.PaseoChipWarn = { fg = ink(c.yellow), bg = blend(c.yellow, card, 80), bold = true }
+    groups.PaseoChipDanger = { fg = ink(c.red), bg = blend(c.red, card, 78), bold = true }
+
+    groups.PaseoKeycap = { fg = ink(c.blue), bg = blend(c.blue, surface, 76), bold = true }
+    groups.PaseoKeycapDim = { fg = c.grey, bg = surface }
+  else
+    -- Transparent theme. Every group above still has to EXIST -- the widgets
+    -- name them unconditionally -- so they become foreground-only, and the
+    -- card degrades to a drawn rule. Selection is then signalled by removing
+    -- dimming rather than by adding a background, which is exactly what typr
+    -- does on the same constraint.
+    groups.PaseoNormal = {}
+    groups.PaseoNormalBorder = { fg = c.border }
+    groups.PaseoCard = {}
+    groups.PaseoCardBorder = { fg = c.border }
+    groups.PaseoCardRule = { fg = c.border }
+    groups.PaseoCardTitle = { fg = c.blue, bold = true }
+    groups.PaseoCardDim = { fg = c.grey }
+    groups.PaseoCardText = {}
+
+    groups.PaseoChipOff = { fg = c.grey }
+    groups.PaseoChipOn = { fg = c.green, bold = true }
+    groups.PaseoChipFocus = { fg = c.blue, bold = true, reverse = true }
+    groups.PaseoChipWarn = { fg = c.yellow, bold = true }
+    groups.PaseoChipDanger = { fg = c.red, bold = true }
+
+    groups.PaseoKeycap = { fg = c.blue, bold = true }
+    groups.PaseoKeycapDim = { fg = c.grey }
+  end
 
   for name, spec in pairs(groups) do
     api.nvim_set_hl(0, name, spec)

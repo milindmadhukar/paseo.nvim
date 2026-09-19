@@ -1,4 +1,4 @@
---- Adjusting a running session: mode, thinking level, model, feature toggles.
+--- What a running session is set to, and how to change it.
 ---
 --- These are the controls under the composer in the Paseo app. They belong here
 --- for the same reason the composer does: needing the app to change permission
@@ -9,35 +9,182 @@
 --- auto/auto-review/full-access), thinking options are per MODEL, and features
 --- are per AGENT with their current values. Hardcoding any of it would be wrong
 --- on the next provider.
+---
+--- THIS FILE IS THE MODEL, NOT A VIEW. It used to be a second, parallel
+--- implementation of the Session panel -- four `vim.ui.select` prompts with
+--- their own copy of the apply-and-report logic, drifting against the panel's
+--- copy of the same thing. Now `M.groups` normalises the daemon's four
+--- differently-shaped lists into one shape, `M.apply` is the only place a
+--- change is written, and both the dashboard panel and the standalone popup
+--- draw from here.
 
 local bridge = require "paseo.bridge"
 
 local M = {}
 
----The agent to act on: the focused chat's, or the one for this directory.
----@param callback fun(agent_id: string|nil, chat: table|nil)
-local function target(callback)
-  local chat = require("paseo.ui.chat").current()
-  if chat and chat.agent_id then
-    return callback(chat.agent_id, chat)
+-- ------------------------------------------------------------------ the data
+
+---How loudly a mode should be drawn.
+---
+---Not decoration. Until now `bypassPermissions` rendered identically to
+---`plan`, and those two are the extreme ends of "how much can this thing do
+---without asking me". Matched on the id rather than listed literally, because
+---the set is per provider and codex spells its own version `full-access`.
+---@param id string
+---@return string|nil  A key of `widgets.CHIP`.
+local function mode_tone(id)
+  local lowered = id:lower()
+  if lowered:find "bypass" or lowered:find "full%-access" or lowered:find "danger" then
+    return "danger"
   end
-  vim.notify("paseo: no chat is open — <leader>aa first", vim.log.levels.WARN)
-  callback(nil, nil)
+  if lowered:find "accept" or lowered:find "^auto" then
+    return "warn"
+  end
+  return nil
 end
 
----@param callback fun(config: table|nil, agent_id: string|nil, chat: table|nil)
-local function with_config(callback)
-  target(function(agent_id, chat)
-    if not agent_id then
-      return
+---The mnemonic that jumps to each group.
+---
+---A constant rather than something read back off `M.groups`, because the
+---panel binds these keys the moment you arrive at the tab -- which is usually
+---before the daemon has answered. Deriving them from a config that has not
+---landed yet bound nothing, and nothing is what the keys then did for the
+---rest of the session.
+M.KEYS = { mode = "m", thinking = "t", features = "f", model = "s" }
+
+---The settings of a session, in ONE shape.
+---
+---The daemon reports four lists that agree about nothing: modes carry a
+---description, thinking options carry `isDefault`, models carry both, and
+---features are booleans with no selection at all. Normalising here is what
+---lets the renderer draw a group without knowing which group it is.
+---@param chat table
+---@return table[]|nil  nil when no config has been fetched yet.
+function M.groups(chat)
+  local config = chat and chat.config_snapshot
+  if not config then
+    return nil
+  end
+
+  local function entries(list, note)
+    local out = {}
+    for _, entry in ipairs(list or {}) do
+      out[#out + 1] = {
+        id = entry.id,
+        label = entry.label or entry.id,
+        description = entry.description,
+        note = note and note(entry) or nil,
+        value = entry.value,
+        tone = nil,
+      }
     end
-    bridge.request("agent.config", { agentId = agent_id }, function(err, config)
-      if err then
-        return vim.notify("paseo: " .. err, vim.log.levels.ERROR)
+    return out
+  end
+
+  local function default_note(entry)
+    return entry.isDefault and "default" or nil
+  end
+
+  local modes = entries(config.availableModes)
+  for _, entry in ipairs(modes) do
+    entry.tone = mode_tone(entry.id)
+  end
+
+  -- Only the toggles. A feature the provider reports as something other than a
+  -- boolean has no sensible checkbox, and drawing one that does nothing is
+  -- worse than leaving it out.
+  local toggles = {}
+  for _, feature in ipairs(config.features or {}) do
+    if feature.type == nil or feature.type == "toggle" then
+      toggles[#toggles + 1] = {
+        id = feature.id,
+        label = feature.label or feature.id,
+        description = feature.description,
+        value = feature.value and true or false,
+      }
+    end
+  end
+
+  return {
+    {
+      id = "mode",
+      key = M.KEYS.mode,
+      icon = "",
+      label = "Permission mode",
+      kind = "chips",
+      entries = modes,
+      current = config.modeId,
+      op = "agent.setMode",
+      arg = "modeId",
+    },
+    {
+      id = "thinking",
+      key = M.KEYS.thinking,
+      icon = "󰧑",
+      label = "Thinking",
+      kind = "chips",
+      entries = entries(config.thinkingOptions, default_note),
+      current = config.thinkingOptionId,
+      op = "agent.setThinking",
+      arg = "thinkingOptionId",
+    },
+    {
+      id = "features",
+      key = M.KEYS.features,
+      icon = "⚡",
+      label = "Features",
+      kind = "toggles",
+      entries = toggles,
+      op = "agent.setFeature",
+      arg = "featureId",
+    },
+    {
+      id = "model",
+      key = M.KEYS.model,
+      icon = "",
+      label = "Model",
+      kind = "radio",
+      entries = entries(config.models, default_note),
+      current = config.model,
+      op = "agent.setModel",
+      arg = "modelId",
+    },
+  }
+end
+
+---@param groups table[]|nil
+---@param id string
+---@return table|nil, integer|nil
+function M.group(groups, id)
+  for i, group in ipairs(groups or {}) do
+    if group.id == id then
+      return group, i
+    end
+  end
+  return nil, nil
+end
+
+-- -------------------------------------------------------------- round trips
+
+---Fetch `agent.config` into `chat.config_snapshot`.
+---
+---Cheap enough to call on every panel open: modes, models and thinking levels
+---are all per-provider and can change under us when the Paseo app switches
+---something.
+---@param chat table
+---@param done? fun(config: table|nil, err: string|nil)
+function M.load(chat, done)
+  done = done or function() end
+  if not (chat and chat.agent_id) then
+    return done(nil, "no agent")
+  end
+  bridge.request("agent.config", { agentId = chat.agent_id }, function(err, config)
+    vim.schedule(function()
+      if err or not config then
+        return done(nil, err or "no config")
       end
-      vim.schedule(function()
-        callback(config, agent_id, chat)
-      end)
+      chat.config_snapshot = config
+      done(config, nil)
     end)
   end)
 end
@@ -52,235 +199,198 @@ local function report(notice)
   end
 end
 
----Permission / operating mode.
-function M.mode()
-  with_config(function(config, agent_id, chat)
-    local modes = config.availableModes or {}
-    if #modes == 0 then
-      return vim.notify("paseo: this provider reports no modes", vim.log.levels.WARN)
-    end
+---Apply one change, then reload from what the daemon reports back.
+---
+---Not from what we asked for: a provider may accept a change and still have
+---something to say about it, and `agent.config` is the only honest answer.
+---@param chat table
+---@param group table
+---@param entry table
+---@param done? fun()
+function M.apply(chat, group, entry, done)
+  done = done or function() end
+  if not (chat and chat.agent_id and group and entry) then
+    return done()
+  end
 
-    vim.ui.select(modes, {
-      prompt = "Mode",
-      format_item = function(mode)
-        local marker = mode.id == config.modeId and "● " or "  "
-        return ("%s%-18s %s"):format(marker, mode.label or mode.id, mode.description or "")
-      end,
-    }, function(choice)
-      if not choice then
-        return
+  local args = { agentId = chat.agent_id }
+  args[group.arg] = entry.id
+  if group.kind == "toggles" then
+    args.value = not entry.value
+  end
+
+  bridge.request(group.op, args, function(err, result)
+    vim.schedule(function()
+      if err then
+        vim.notify("paseo: " .. err, vim.log.levels.ERROR)
+        return done()
       end
-      bridge.request(
-        "agent.setMode",
-        { agentId = agent_id, modeId = choice.id },
-        function(err, result)
-          if err then
-            return vim.notify("paseo: " .. err, vim.log.levels.ERROR)
-          end
-          vim.schedule(function()
-            report(result and result.notice)
-            if chat then
-              chat.mode = choice.label or choice.id
-              require("paseo.ui.chat").refresh(chat)
-            end
-            vim.notify("paseo: mode → " .. (choice.label or choice.id), vim.log.levels.INFO)
-          end)
-        end
-      )
+      report(result and result.notice)
+      M.load(chat, function()
+        -- The header, the winbar and `chat.features` all read their own
+        -- copies; this is what keeps them from disagreeing with the panel.
+        require("paseo.ui.chat").load_settings(chat)
+        done()
+      end)
     end)
   end)
+end
+
+-- ---------------------------------------------------------------- commands
+
+---The chat to act on: the focused one.
+---@return table|nil
+local function target()
+  local chat = require("paseo.ui.chat").current()
+  if chat and chat.agent_id then
+    return chat
+  end
+  vim.notify("paseo: no chat is open — <leader>aa first", vim.log.levels.WARN)
+  return nil
+end
+
+---Open the settings popup, focused on one group.
+---@param group_id? string
+local function popup(group_id)
+  local chat = target()
+  if not chat then
+    return
+  end
+  require("paseo.ui.settings").open(chat, group_id)
+end
+
+---Permission / operating mode.
+function M.mode()
+  popup "mode"
 end
 
 ---Reasoning level. Per MODEL, so the list changes with the model.
 function M.thinking()
-  with_config(function(config, agent_id, chat)
-    local options = config.thinkingOptions or {}
-    if #options == 0 then
-      return vim.notify(
-        ("paseo: %s reports no thinking levels"):format(config.model or "this model"),
-        vim.log.levels.WARN
-      )
-    end
-
-    vim.ui.select(options, {
-      prompt = "Thinking",
-      format_item = function(option)
-        local marker = option.id == config.thinkingOptionId and "● " or "  "
-        return ("%s%s%s"):format(
-          marker,
-          option.label or option.id,
-          option.isDefault and "  (default)" or ""
-        )
-      end,
-    }, function(choice)
-      if not choice then
-        return
-      end
-      bridge.request(
-        "agent.setThinking",
-        { agentId = agent_id, thinkingOptionId = choice.id },
-        function(err, result)
-          if err then
-            return vim.notify("paseo: " .. err, vim.log.levels.ERROR)
-          end
-          vim.schedule(function()
-            report(result and result.notice)
-            if chat then
-              chat.thinking = choice.label or choice.id
-              require("paseo.ui.chat").refresh(chat)
-            end
-            vim.notify("paseo: thinking → " .. (choice.label or choice.id), vim.log.levels.INFO)
-          end)
-        end
-      )
-    end)
-  end)
+  popup "thinking"
 end
 
 ---Switch model on the running session, without starting a new one.
 function M.model()
-  with_config(function(config, agent_id, chat)
-    local models = config.models or {}
-    if #models == 0 then
-      return vim.notify("paseo: no models reported for this provider", vim.log.levels.WARN)
-    end
+  popup "model"
+end
 
-    vim.ui.select(models, {
-      prompt = "Model",
-      format_item = function(model)
-        local marker = model.id == config.model and "● " or "  "
-        return ("%s%s"):format(marker, model.label or model.id)
-      end,
-    }, function(choice)
-      if not choice then
-        return
-      end
-      bridge.request("agent.setModel", { agentId = agent_id, modelId = choice.id }, function(err)
-        if err then
-          return vim.notify("paseo: " .. err, vim.log.levels.ERROR)
-        end
-        vim.schedule(function()
-          if chat then
-            chat.provider = (config.provider or "?") .. "/" .. choice.id
-            require("paseo.ui.chat").refresh(chat)
-          end
-          vim.notify("paseo: model → " .. (choice.label or choice.id), vim.log.levels.INFO)
-        end)
-      end)
-    end)
-  end)
+---Everything about the session, in one window.
+function M.status()
+  popup()
 end
 
 ---Toggle a boolean feature. Defaults to `fast_mode` -- the lightning bolt.
+---
+---Stays a direct toggle rather than a popup: `:Paseo fast` is a one-keystroke
+---convenience and putting a window in front of it would defeat the point. The
+---popup is the fallback for when this provider has no such feature.
 ---@param feature_id? string
 function M.toggle(feature_id)
-  with_config(function(config, agent_id, chat)
-    local features = config.features or {}
+  local chat = target()
+  if not chat then
+    return
+  end
+
+  M.load(chat, function(config)
+    if not config then
+      return vim.notify("paseo: could not read the session config", vim.log.levels.ERROR)
+    end
+
+    local groups = M.groups(chat)
+    local features = M.group(groups, "features")
     local wanted = feature_id or "fast_mode"
 
-    local target_feature
-    for _, feature in ipairs(features) do
-      if feature.id == wanted then
-        target_feature = feature
+    local entry
+    for _, candidate in ipairs(features and features.entries or {}) do
+      if candidate.id == wanted then
+        entry = candidate
       end
     end
 
-    if not target_feature then
+    if not entry then
       -- Not every provider has every feature, and `fast_mode` is Opus-specific.
-      -- Offer whatever this one does have rather than reporting nothing.
-      local toggles = vim.tbl_filter(function(feature)
-        return feature.type == "toggle"
-      end, features)
-      if #toggles == 0 then
+      -- Show what this one DOES have rather than reporting nothing.
+      if not features or #features.entries == 0 then
         return vim.notify("paseo: this session has no feature toggles", vim.log.levels.WARN)
       end
-      return vim.ui.select(toggles, {
-        prompt = "Toggle",
-        format_item = function(feature)
-          return ("%s %s"):format(feature.value and "[x]" or "[ ]", feature.label or feature.id)
-        end,
-      }, function(choice)
-        if choice then
-          M.toggle(choice.id)
-        end
-      end)
+      return require("paseo.ui.settings").open(chat, "features")
     end
 
-    local value = not target_feature.value
-    bridge.request(
-      "agent.setFeature",
-      { agentId = agent_id, featureId = wanted, value = value },
-      function(err)
-        if err then
-          return vim.notify("paseo: " .. err, vim.log.levels.ERROR)
-        end
-        vim.schedule(function()
-          if chat then
-            chat.features = chat.features or {}
-            chat.features[wanted] = value
-            require("paseo.ui.chat").refresh(chat)
-          end
-          vim.notify(
-            ("paseo: %s %s"):format(target_feature.label or wanted, value and "on" or "off"),
-            vim.log.levels.INFO
-          )
-        end)
-      end
-    )
+    M.apply(chat, features, entry, function()
+      vim.notify(
+        ("paseo: %s %s"):format(entry.label, (not entry.value) and "on" or "off"),
+        vim.log.levels.INFO
+      )
+    end)
   end)
 end
 
 ---Plan is a feature on Codex and a mode on Claude. Follow what this running
 ---agent actually advertises, while leaving its permission mode untouched when
 ---the feature form is available.
+---
+---Reads its config through `M.load` now that `with_config` is gone, but WRITES
+---the way it always did -- straight to `agent.setMode` rather than through
+---`M.apply`. `apply` reloads from the daemon on success, which would make the
+---last request on the wire an `agent.config` rather than the mode change, and
+---the mode here is only half the operation: `mode_before_plan` has to be
+---recorded in the same breath so leaving Plan knows where to go back to.
 function M.plan()
-  with_config(function(config, agent_id, chat)
+  local chat = target()
+  if not chat then
+    return
+  end
+
+  M.load(chat, function(config)
+    if not config then
+      return vim.notify("paseo: could not read the session config", vim.log.levels.ERROR)
+    end
+
     for _, feature in ipairs(config.features or {}) do
       if feature.id == "plan_mode" and feature.type == "toggle" then
         return M.toggle "plan_mode"
       end
     end
-    for _, mode in ipairs(config.availableModes or {}) do
-      if mode.id == "plan" then
-        local entering = config.modeId ~= "plan"
-        local target_mode = entering and "plan" or (chat and chat.mode_before_plan or "default")
-        local available = false
-        for _, candidate in ipairs(config.availableModes or {}) do
-          available = available or candidate.id == target_mode
+
+    local function has(id)
+      for _, mode in ipairs(config.availableModes or {}) do
+        if mode.id == id then
+          return true
         end
-        if not available then
-          return vim.notify("paseo: this provider cannot leave Plan through this command", vim.log.levels.WARN)
+      end
+      return false
+    end
+
+    if not has "plan" then
+      return vim.notify("paseo: this session has no Plan control", vim.log.levels.WARN)
+    end
+
+    -- Leaving Plan goes back to whatever you were in, remembered on the way
+    -- in -- not to a hardcoded mode, because the provider may not have one by
+    -- that name.
+    local entering = config.modeId ~= "plan"
+    local wanted = entering and "plan" or (chat.mode_before_plan or "default")
+    if not has(wanted) then
+      return vim.notify(
+        "paseo: this provider cannot leave Plan through this command",
+        vim.log.levels.WARN
+      )
+    end
+
+    bridge.request(
+      "agent.setMode",
+      { agentId = chat.agent_id, modeId = wanted },
+      function(err, result)
+        if err then
+          return vim.notify("paseo: " .. err, vim.log.levels.ERROR)
         end
-        return bridge.request("agent.setMode", { agentId = agent_id, modeId = target_mode }, function(err, result)
-          if err then
-            return vim.notify("paseo: " .. err, vim.log.levels.ERROR)
-          end
-          vim.schedule(function()
-            report(result and result.notice)
-            if chat then
-              chat.mode_before_plan = entering and config.modeId or nil
-              require("paseo.ui.chat").load_settings(chat)
-            end
-          end)
+        vim.schedule(function()
+          report(result and result.notice)
+          chat.mode_before_plan = entering and config.modeId or nil
+          require("paseo.ui.chat").load_settings(chat)
         end)
       end
-    end
-    vim.notify("paseo: this session has no Plan control", vim.log.levels.WARN)
-  end)
-end
-
----Everything about the session, in one notification.
-function M.status()
-  with_config(function(config)
-    local lines = {
-      ("provider  %s/%s"):format(config.provider or "?", config.model or "?"),
-      ("mode      %s"):format(config.modeId or "?"),
-      ("thinking  %s"):format(config.thinkingOptionId or "(provider default)"),
-    }
-    for _, feature in ipairs(config.features or {}) do
-      lines[#lines + 1] = ("%-9s %s"):format(feature.label or feature.id, tostring(feature.value))
-    end
-    vim.notify(table.concat(lines, "\n"), vim.log.levels.INFO, { title = "paseo: session" })
+    )
   end)
 end
 
