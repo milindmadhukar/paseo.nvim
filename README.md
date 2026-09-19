@@ -16,31 +16,6 @@ Two problems, one plugin:
 Agents run on [Paseo](https://github.com/getpaseo/paseo), which already
 abstracts claude / codex / opencode and owns sessions, status and terminals.
 
-## Status
-
-The review loop, explain bridge, `ws` CLI, workspace layer, and agent-facing
-skills are covered by the repository's test suite.
-
-| | |
-|---|---|
-| ✅ | `repos.lua` — the repo list, workspace-aware |
-| ✅ | `:checkhealth paseo` |
-| ✅ | `:Paseo` command surface |
-| ✅ | `git.lua` — status/diff parsing and hunk staging |
-| ✅ | changed-files picker, hunk quickfix, diff panel |
-| ✅ | Neovim and sidecar test suite (`tests/run.sh`) |
-| ✅ | explain bridge + Paseo sidecar (`sidecar/paseo-bridge.ts`) |
-| ✅ | tool calls, reasoning and todos rendered in the transcript |
-| ✅ | permission dialog — answer a prompt without the desktop app |
-| ✅ | questions answered, not approved — `AskUserQuestion` and friends |
-| ✅ | plan approval — pick the mode you implement in, and read the plan first |
-| ✅ | two surfaces: the full-screen dashboard (default) and the sidebar pane |
-| ✅ | workspace assembly — `ws`, a Go CLI |
-| ✅ | workspace picker with a live, push-driven agent status column |
-| ✅ | `workspace` / `workspace-commit` / `workspace-pr` skills |
-| ✅ | Paseo terminals — a real PTY in the dashboard, not a capture |
-| ✅ | permissions reconciled against the daemon, so answering elsewhere syncs |
-
 ## Install
 
 `lazy.nvim`:
