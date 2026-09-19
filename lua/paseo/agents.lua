@@ -64,6 +64,13 @@ function M.on_change(fn)
   listeners[#listeners + 1] = fn
 end
 
+---One agent from the directory, by id.
+---@param id string
+---@return table|nil
+function M.get(id)
+  return agents[id]
+end
+
 ---Agents whose cwd is at or below `root`.
 ---
 ---Matched by cwd rather than by workspace id because `ws` assembles the

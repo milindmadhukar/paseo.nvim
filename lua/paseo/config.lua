@@ -111,6 +111,16 @@ local defaults = {
   ui = {
     surface = "float",
 
+    -- How much of a tool card is open by default.
+    --
+    -- "running" -- the useful middle. A command is expanded WHILE it runs, so
+    -- you watch the output arrive, and folds to its one-line summary when it
+    -- succeeds; a failure stays open, because a failure is the one you wanted
+    -- to read. "always" and "never" are the two ends. `<Tab>` overrides
+    -- whichever it is, and a card you have toggled by hand is never folded
+    -- back under you.
+    expand = "running",
+
     float = {
       -- Percentages rather than a margin in cells: a margin that looks right
       -- on a 200-column monitor is most of a laptop screen.
@@ -160,6 +170,9 @@ function M.setup(opts)
   vim.validate("ui.sidebar.position", config.ui.sidebar.position, function(v)
     return v == "right" or v == "left"
   end, '"right" or "left"')
+  vim.validate("ui.expand", config.ui.expand, function(v)
+    return v == "running" or v == "always" or v == "never"
+  end, '"running", "always" or "never"')
   -- Clamped rather than merely validated: `nvim_open_win` rejects anything
   -- below 1 outright, and the backdrop sits five below this.
   vim.validate("ui.float.zindex", config.ui.float.zindex, "number")

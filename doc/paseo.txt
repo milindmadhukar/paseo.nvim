@@ -148,6 +148,16 @@ ui.surface                                        string, default `"float"`
     to the other one at any time, and a chat REMEMBERS the surface you last
     put it on. See |paseo-chat-float|.
 
+                                                    *paseo-config.ui.expand*
+ui.expand                                       string, default `"running"`
+
+    How much of a tool card is open before you touch it.
+
+    `"running"` expands a command WHILE it runs and folds it when it succeeds,
+    so you watch the output arrive; a failure stays open, because a failure is
+    the one you wanted to read. `"always"` and `"never"` are the two ends.
+    `<Tab>` overrides whichever it is. See |paseo-chat-timeline|.
+
                         *paseo-config.ui.float.width*
                         *paseo-config.ui.float.height*
 ui.float.width                                        number, default `94`
@@ -397,6 +407,13 @@ review.context                                          integer, default `0`
 :Paseo sessions                                          *:Paseo-sessions*
 
     Sessions in the workspace containing this directory.
+
+:Paseo terminals                                        *:Paseo-terminals*
+
+    The Paseo terminals in this workspace, on the dashboard's `7` tab. Opens
+    the dashboard if it is not already up, because a terminal is a live PTY
+    floated over the body and needs the surface that owns that space. See
+    |paseo-chat-terminals|.
 
 :Paseo ws [init|create|rm|ls|status]                           *:Paseo-ws*
 
@@ -668,8 +685,9 @@ tab for every other thing Paseo knows: >
     4 Changes     what is changed on disk -- click a file to open it
     5 Usage       context window, tokens and cost
     6 Workspaces  every workspace, and the repos in this unit of work
+    7 Terminals   the Paseo terminals here -- open one and type in it
 <
-`1`-`6` jump, `<M-1>`-`<M-6>` and `<Tab>`/`<S-Tab>` do the same, and
+`1`-`7` jump, `<M-1>`-`<M-7>` and `<Tab>`/`<S-Tab>` do the same, and
 everything on screen that does something responds to a CLICK -- the tab bar, a
 mode, a model, a session, a changed file. The keys are bound on the composer
 and the conversation as well as on the chrome, because the Chat tab puts your
@@ -753,8 +771,8 @@ In the composer ~
     <CR>      (normal mode) send
     <C-s>     send, from normal or insert mode
     p  P      paste -- an image if the clipboard has one, text otherwise
-    1-6       jump to a tab (full screen; see ui.float.tab_keys)
-    <M-1>..6  the same, without taking the count keys
+    1-7       jump to a tab (full screen; see ui.float.tab_keys)
+    <M-1>..7  the same, without taking the count keys
     <Tab>     next tab, <S-Tab> the previous one
     <C-f>     switch surface
     q         close the chat
@@ -763,8 +781,8 @@ In the conversation ~
 
     <Tab>     expand or collapse the item under the cursor
     <CR>      the same
-    1-6       jump to a tab (full screen; see ui.float.tab_keys)
-    <M-1>..6  the same, without taking the count keys
+    1-7       jump to a tab (full screen; see ui.float.tab_keys)
+    <M-1>..7  the same, without taking the count keys
     gp        reopen a pending permission prompt
     <C-f>     switch surface
     q         close the chat
@@ -820,6 +838,33 @@ exit code, an edit's diff, a read's line range, a search's matches. A failed
 call shows its error without being expanded.
 
 A card is updated IN PLACE when the call finishes; it does not appear twice.
+
+By default a command is ALREADY EXPANDED while it runs, and folds to its one
+line when it succeeds -- watching the output arrive is most of the reason to
+have the window open, and a card that hides it until you press a key tells you
+the agent is busy and nothing else. A failure stays open. `ui.expand` changes
+this: `"always"`, `"never"`, or the default `"running"`. A card you have
+toggled by hand is yours from then on and is never folded back under you.
+
+                                                       *paseo-chat-terminals*
+Paseo runs TERMINALS as well as agents -- the `claude` or `codex` sessions you
+started in the app are PTYs on the daemon -- and tab `7` is the list of the
+ones in this workspace: >
+
+    <CR>   open the terminal under the cursor
+    c      start a new one, optionally running a command
+    r      rename it
+    d      kill it (asked first; something is usually running in there)
+<
+Opening one floats a REAL terminal over the body. It is `nvim_open_term`, the
+same libvterm behind `:terminal`, fed the PTY's own bytes -- so colour, the
+cursor, and a TUI redrawing itself all work, and what you type goes back to
+the daemon. `<C-\><C-n>` leaves terminal mode as usual; `q` from normal mode
+closes the view and detaches. `<Esc>` belongs to the PTY, so vim running
+inside one can still leave insert mode.
+
+Scrollback comes with you on attach, when the daemon supports it --
+|:checkhealth| `paseo` says whether yours does.
 
                                                        *paseo-chat-history*
 The conversation is the agent's real timeline, fetched when the chat opens,

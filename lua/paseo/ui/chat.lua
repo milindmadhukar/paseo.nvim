@@ -161,6 +161,18 @@ function M.apply_settings(chat, payload)
     end
   end
 
+  -- The pending list rides this payload now, and it is AUTHORITATIVE -- it is
+  -- the daemon's own, it arrives on reconnect, and it is the only thing that
+  -- reports a request cleared by a session refresh or answered while the
+  -- socket was down. Nil means the sidecar is older than this field; an empty
+  -- table means "nothing is pending" and must still be acted on.
+  if payload.pendingPermissions then
+    if snapshot then
+      snapshot.pendingPermissions = payload.pendingPermissions
+    end
+    require("paseo.ui.permission").reconcile(chat, payload.pendingPermissions)
+  end
+
   set_winbar(chat)
   -- The dashboard draws the Session panel from the snapshot above, and nothing
   -- else asks it to redraw. Cheap when it is closed: `rebuild` returns early.
@@ -566,9 +578,11 @@ local function load_history(chat)
       -- `permission_requested` at us -- that event fired once, while we were
       -- not listening. Without this the session looks idle when it is actually
       -- waiting on an answer.
-      for _, request in ipairs(result.pendingPermissions or {}) do
-        require("paseo.ui.permission").offer(chat, request)
-      end
+      --
+      -- Reconciled rather than merely offered: this also runs on a `restored`
+      -- reconnect, where the interesting news is usually the opposite -- a
+      -- request we are still holding that was answered during the gap.
+      require("paseo.ui.permission").reconcile(chat, result.pendingPermissions or {})
     end)
   end)
 end
@@ -937,6 +951,26 @@ function M.attach_events()
     end
   end)
 
+  -- An agent needs a human, and it is not necessarily one you have open.
+  --
+  -- `by_agent` above returns nil for every agent without a chat window, and
+  -- both permission handlers then drop the payload silently -- so an agent
+  -- blocked in a workspace you are not looking at produced no sound at all.
+  -- This is the daemon's own "somebody is needed here" event; it was emitted
+  -- by the sidecar and listened to by nobody.
+  bridge.on("attention", function(payload)
+    if payload.reason ~= "permission" or by_agent(payload.agentId) then
+      return
+    end
+    local agent = require("paseo.agents").get(payload.agentId)
+    vim.notify(
+      ("paseo: %s needs permission — `:Paseo chat` in its worktree to answer"):format(
+        (agent and agent.title) or payload.agentId
+      ),
+      vim.log.levels.WARN
+    )
+  end)
+
   -- Mode, model and thinking can be changed from the Paseo app too -- and the
   -- daemon changes the mode ITSELF when a plan is approved. Without this the
   -- header shows whatever we last set from here and quietly lies.
@@ -961,6 +995,14 @@ function M.attach_events()
   bridge.on("turn", function(payload)
     local chat = by_agent(payload.agentId)
     if chat then
+      -- A turn STARTING is the other half of this, and it matters because the
+      -- turn need not have started here: the Paseo app, a schedule or a
+      -- heartbeat can all begin one, and until the sidecar forwarded it the
+      -- header stayed idle through the whole thing.
+      if payload.outcome == "turn_started" then
+        M.set_streaming(chat, true)
+        return
+      end
       M.set_streaming(chat, false)
       -- The open assistant block is finished; the next reply starts a new one
       -- rather than being appended to this answer.
@@ -982,12 +1024,21 @@ function M.attach_events()
     end
   end)
 
-  -- Reconnected, and nothing is replayed. Say so, rather than letting the
-  -- window look like the agent simply stopped talking.
+  -- Reconnected, and nothing is replayed.
+  --
+  -- Saying so is not enough, and this used to say so and stop. The events
+  -- missed during the gap are exactly the ones that cannot be reconstructed
+  -- from what is on screen -- above all a permission ANSWERED on the desktop
+  -- while the socket was down, which leaves a prompt here that is already
+  -- dead and that the daemon will refuse. `replaced`, twenty lines below,
+  -- always did the right thing; this is the same move, minus throwing the
+  -- transcript away, because the epoch is still valid.
   bridge.on("restored", function(payload)
     local chat = by_agent(payload.agentId)
     if chat then
       notice(chat, "reconnected — anything said during the gap was not replayed", "warning")
+      M.load_settings(chat)
+      load_history(chat)
     end
   end)
 
@@ -1040,9 +1091,7 @@ function M.load_settings(chat)
         chat.features[feature.id] = feature.value
       end
 
-      for _, request in ipairs(config.pendingPermissions or {}) do
-        require("paseo.ui.permission").offer(chat, request)
-      end
+      require("paseo.ui.permission").reconcile(chat, config.pendingPermissions or {})
 
       set_winbar(chat)
     end)

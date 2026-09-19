@@ -636,8 +636,21 @@ function M.offer(chat, request)
   -- The same request can reach us twice: once from `pendingPermissions` on
   -- open and once from the live event. Answering a request that is already
   -- answered is an error, so de-duplicate on id.
+  chat.permission_blocks = chat.permission_blocks or {}
   for _, existing in ipairs(chat.permissions) do
     if existing.id == request.id then
+      -- Held already -- but "held" and "drawn" are not the same thing. A
+      -- `replaced` epoch empties the block table out from under us, and this
+      -- early return then meant the inline card was never rebuilt: the winbar
+      -- went on saying `needs you`, `gp` went on opening a dialog, and the
+      -- conversation had no record of the request at all. So confirm the card
+      -- still exists before taking the shortcut.
+      local held = chat.permission_blocks[request.id]
+      if held and chat.blocks and chat.blocks[held] then
+        return
+      end
+      local redrawn = transcript.upsert(chat, { kind = "permission", request = request })
+      chat.permission_blocks[request.id] = redrawn.id
       return
     end
   end
@@ -646,7 +659,6 @@ function M.offer(chat, request)
   -- ALWAYS log it inline first. The request is then part of the conversation
   -- and survives dismissing the dialog.
   local block = transcript.upsert(chat, { kind = "permission", request = request })
-  chat.permission_blocks = chat.permission_blocks or {}
   chat.permission_blocks[request.id] = block.id
 
   -- Not thinking -- waiting. Through the setter, so the spinner's timer stops
@@ -710,6 +722,49 @@ function M.resolved(chat, request_id, resolution)
     -- the request that stopped it; nothing else says when it restarts, and a
     -- header frozen at idle through the rest of a long turn reads as a hang.
     require("paseo.ui.chat").set_streaming(chat, true)
+  end
+end
+
+---Make the held list match the daemon's, in both directions.
+---
+---`M.resolved` handles the one case the event stream covers: somebody answered
+---and the daemon said so. It is not the only case. The daemon replaces its
+---pending map wholesale on a session refresh and emits no resolution for what
+---vanished; a resolution that lands while the socket is down is never
+---replayed; and a request that arrived while no chat was open was dropped on
+---the floor. Each of those leaves this side holding a prompt that is already
+---dead -- `gp` reopens it, the winbar keeps saying `needs you`, and answering
+---it is an error, because it was answered on the desktop ten minutes ago.
+---
+---The fix is to stop treating the stream as the whole truth. The agent
+---snapshot carries the real list, it arrives on reconnect and on every
+---refresh, and this reconciles against it.
+---@param chat table
+---@param list table[]|nil the daemon's pending requests, authoritative
+function M.reconcile(chat, list)
+  chat.permissions = chat.permissions or {}
+  list = list or {}
+
+  local authoritative = {}
+  for _, request in ipairs(list) do
+    if request.id then
+      authoritative[request.id] = request
+    end
+  end
+
+  -- Gone: answered by somebody, somewhere, and we never heard.
+  for i = #chat.permissions, 1, -1 do
+    local request = chat.permissions[i]
+    if not authoritative[request.id] then
+      M.resolved(chat, request.id, { label = "answered elsewhere" })
+    end
+  end
+
+  -- Arrived: the two reads of this list used to be additive, which made them
+  -- half a reconciliation. Offering here is the other half, and `M.offer`
+  -- already de-duplicates, so a list that agrees with us costs nothing.
+  for _, request in ipairs(list) do
+    M.offer(chat, request)
   end
 end
 

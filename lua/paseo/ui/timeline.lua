@@ -153,6 +153,34 @@ local function detail_body(detail, width)
         { " " .. (action.summary or ""), "PaseoDim" },
       }
     end
+  elseif detail.type == "worktree_setup" then
+    -- The one detail type with no arm here, so an expanded worktree-setup card
+    -- was a header and nothing else -- on exactly the operation you most want
+    -- to watch, because it is the one that runs your own setup commands and
+    -- the one whose failure leaves a worktree you cannot build in.
+    lines[#lines + 1] = { { detail.worktreePath or "", "PaseoPath" } }
+    if detail.branchName then
+      lines[#lines + 1] = { { detail.branchName, "PaseoDim" } }
+    end
+    for _, command in ipairs(detail.commands or {}) do
+      local glyph, group = "·", "PaseoDim"
+      if command.status == "completed" then
+        glyph, group = "✓", "PaseoToolOk"
+      elseif command.status == "failed" then
+        glyph, group = "✗", "PaseoToolFail"
+      end
+      local line = {
+        { glyph .. " ", group },
+        { command.command or "", "PaseoToolName" },
+      }
+      if command.exitCode and command.exitCode ~= 0 then
+        line[#line + 1] = { (" exit %d"):format(command.exitCode), "PaseoToolFail" }
+      end
+      lines[#lines + 1] = render.truncate(line, inner)
+    end
+    if detail.truncated then
+      lines[#lines + 1] = { { "…truncated", "PaseoDim" } }
+    end
   elseif detail.type == "plan" or detail.type == "plain_text" then
     vim.list_extend(lines, render.wrap(detail.text or "", inner, "PaseoDim"))
   elseif detail.type == "unknown" then

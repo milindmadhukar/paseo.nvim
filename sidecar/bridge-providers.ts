@@ -46,6 +46,21 @@ export function describeSettings(snap: any): Record<string, unknown> {
             snap.lastUsage.contextWindowUsedTokens ?? null,
         }
       : null,
+
+    // THE AUTHORITATIVE PENDING LIST, and the reason cross-client answering
+    // used to desync.
+    //
+    // `permission_resolved` is a real event and it does fire -- but it is not
+    // the only way a request stops being pending. The daemon's
+    // `refreshSessionState` replaces this whole map wholesale and emits only
+    // the snapshot, with no `permission_resolved` for anything that vanished.
+    // A resolution that lands while the socket is down is never replayed
+    // either. In both cases the truth rides HERE, on a snapshot this sidecar
+    // was already subscribed to and was throwing away one line before it
+    // became useful, leaving Neovim holding a prompt the daemon would refuse.
+    pendingPermissions: (snap?.pendingPermissions ?? []).map(
+      withFallbackActions,
+    ),
   };
 }
 
@@ -137,12 +152,13 @@ export function providerOps(ctx: BridgeConnection): Ops {
       return {
         // The same reader the state subscription pushes through, so a pulled
         // config and a pushed one cannot disagree about a field name.
+        // `pendingPermissions` used to be spelled out again here, because the
+        // shared reader dropped it. It does not any more -- the pull and the
+        // push now genuinely carry the same fields, which is the whole point
+        // of the sentence above.
         ...describeSettings(snap),
         thinkingOptions,
         models,
-        pendingPermissions: (snap?.pendingPermissions ?? []).map(
-          withFallbackActions,
-        ),
       };
     },
 

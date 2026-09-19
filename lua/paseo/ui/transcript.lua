@@ -55,6 +55,18 @@ function M.reset(chat)
   chat.open_text = nil
   chat.seq, chat.epoch = nil, nil
 
+  -- The permission bookkeeping goes with the blocks it points at.
+  --
+  -- `chat.permission_blocks` maps a request id to a BLOCK id, and every block
+  -- just went away. Leaving the map behind left it naming blocks that no
+  -- longer exist, so the resolution badge could never be written again; and
+  -- leaving `chat.permissions` behind meant the re-offer that follows a reset
+  -- hit the de-duplicate and returned early, taking the inline card with it.
+  -- The requests themselves are not lost -- `reconcile` puts back whatever the
+  -- daemon still considers pending, which is the authority on that anyway.
+  chat.permissions = {}
+  chat.permission_blocks = {}
+
   if chat.conversation and api.nvim_buf_is_valid(chat.conversation) then
     vim.bo[chat.conversation].modifiable = true
     api.nvim_buf_set_lines(chat.conversation, 0, -1, false, {})
@@ -127,6 +139,30 @@ local function row_of(chat, block)
   return mark and mark[1]
 end
 
+---Whether an item draws open before anyone has touched it.
+---
+---A tool card that is collapsed by default shows `◐ Shell  ls -la` and hides
+---the output, which is precisely the thing you opened the window to watch. But
+---leaving every card open forever turns a long turn into a wall. So under the
+---default `"running"` a command is open WHILE it runs and folds when it
+---succeeds, and a failure stays open, because a failure is the one you wanted
+---to read.
+---@param item table
+---@return boolean
+local function default_expanded(item)
+  local mode = require("paseo.config").get().ui.expand
+  if mode == "never" then
+    return false
+  end
+  if mode == "always" then
+    return true
+  end
+  if item.kind ~= "tool" then
+    return false
+  end
+  return item.status == "running" or item.status == "failed"
+end
+
 ---Draw a block's lines at `row`, replacing `height` existing lines.
 ---@param chat table
 ---@param block table
@@ -172,7 +208,7 @@ function M.append(chat, item)
     kind = item.kind,
     call_id = item.callId,
     item = item,
-    expanded = false,
+    expanded = default_expanded(item),
     height = 0,
   }
   chat.next_id = chat.next_id + 1
@@ -206,6 +242,13 @@ end
 function M.rerender(chat, block, item, opts)
   if item then
     block.item = item
+    -- The running->completed replacement is where a card earns its fold. Only
+    -- re-derive it if you have not had an opinion: a card you opened by hand
+    -- must not snap shut the moment the command finishes, which is exactly
+    -- when you are reading it.
+    if not block.pinned then
+      block.expanded = default_expanded(item)
+    end
   end
   local row = row_of(chat, block)
   if not row then
@@ -304,6 +347,9 @@ function M.toggle_at_cursor(chat)
         return
       end
       block.expanded = not block.expanded
+      -- From here on this card is yours, and `default_expanded` stops having a
+      -- say in it.
+      block.pinned = true
       -- Explicitly NOT following. You are up in the history with the cursor on
       -- a card; scrolling to the bottom and then being yanked back by the two
       -- lines below is a flicker with no purpose.
