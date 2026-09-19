@@ -335,6 +335,13 @@ commands.fast = {
   end,
 }
 
+commands.plan = {
+  desc = "Toggle this session's planning mode",
+  run = function()
+    require("paseo.ui.session").plan()
+  end,
+}
+
 commands.session = {
   desc = "What this session is set to",
   run = function()
@@ -358,42 +365,14 @@ commands.image = {
 
 commands.model = {
   desc = "Choose the provider/model new agents are created with",
-  run = function()
-    local bridge = require "paseo.bridge"
-    bridge.ensure(function(err)
+  run = function(args)
+    require("paseo.ui.create").preference(args[1], function(selection, err)
       if err then
         return vim.notify("paseo: " .. err, vim.log.levels.ERROR)
       end
-      bridge.request("providers", {}, function(list_err, result)
-        if list_err then
-          return vim.notify("paseo: " .. list_err, vim.log.levels.ERROR)
-        end
-
-        -- Only what the daemon reports as ready. Installed providers and
-        -- configured models differ between hosts, so a hardcoded list would be
-        -- wrong on any machine but this one.
-        local choices = {}
-        for _, entry in ipairs(result.entries or {}) do
-          if entry.status == "ready" then
-            for _, model in ipairs(entry.models or {}) do
-              choices[#choices + 1] = ("%s/%s"):format(entry.provider, model.id)
-            end
-          end
-        end
-        if #choices == 0 then
-          return vim.notify("paseo: no provider is ready on this daemon", vim.log.levels.WARN)
-        end
-
-        vim.schedule(function()
-          vim.ui.select(choices, { prompt = "Provider/model for new agents" }, function(choice)
-            if not choice then
-              return
-            end
-            require("paseo.config").get().paseo.provider = choice
-            vim.notify("paseo: new agents will use " .. choice, vim.log.levels.INFO)
-          end)
-        end)
-      end)
+      if selection then
+        vim.notify("paseo: new agents will use " .. selection.provider, vim.log.levels.INFO)
+      end
     end)
   end,
 }

@@ -230,6 +230,45 @@ function M.toggle(feature_id)
   end)
 end
 
+---Plan is a feature on Codex and a mode on Claude. Follow what this running
+---agent actually advertises, while leaving its permission mode untouched when
+---the feature form is available.
+function M.plan()
+  with_config(function(config, agent_id, chat)
+    for _, feature in ipairs(config.features or {}) do
+      if feature.id == "plan_mode" and feature.type == "toggle" then
+        return M.toggle "plan_mode"
+      end
+    end
+    for _, mode in ipairs(config.availableModes or {}) do
+      if mode.id == "plan" then
+        local entering = config.modeId ~= "plan"
+        local target_mode = entering and "plan" or (chat and chat.mode_before_plan or "default")
+        local available = false
+        for _, candidate in ipairs(config.availableModes or {}) do
+          available = available or candidate.id == target_mode
+        end
+        if not available then
+          return vim.notify("paseo: this provider cannot leave Plan through this command", vim.log.levels.WARN)
+        end
+        return bridge.request("agent.setMode", { agentId = agent_id, modeId = target_mode }, function(err, result)
+          if err then
+            return vim.notify("paseo: " .. err, vim.log.levels.ERROR)
+          end
+          vim.schedule(function()
+            report(result and result.notice)
+            if chat then
+              chat.mode_before_plan = entering and config.modeId or nil
+              require("paseo.ui.chat").load_settings(chat)
+            end
+          end)
+        end)
+      end
+    end
+    vim.notify("paseo: this session has no Plan control", vim.log.levels.WARN)
+  end)
+end
+
 ---Everything about the session, in one notification.
 function M.status()
   with_config(function(config)

@@ -362,12 +362,26 @@ end
 ---@param callback fun(id: string|nil, err: string|nil)
 function M.new_session(ws, opts, callback)
   opts = opts or {}
-  bridge.request("agent.create", {
-    workspaceId = ws.id,
-    provider = require("paseo.config").get().paseo.provider,
-    title = opts.title,
-  }, function(err, result)
-    callback(result and result.id, err)
+  require("paseo.ui.create").review({
+    cwd = ws.directory,
+    preferred = require("paseo.config").get().paseo.provider,
+  }, function(draft, review_err)
+    if review_err or not draft then
+      return callback(nil, review_err or "cancelled")
+    end
+    bridge.request("agent.create", {
+      workspaceId = ws.id,
+      provider = draft.provider,
+      modeId = draft.modeId,
+      thinkingOptionId = draft.thinkingOptionId,
+      featureValues = draft.featureValues,
+      title = opts.title,
+    }, function(err, result)
+      if not err then
+        require("paseo.config").get().paseo.provider = draft.provider
+      end
+      callback(result and result.id, err)
+    end)
   end)
 end
 

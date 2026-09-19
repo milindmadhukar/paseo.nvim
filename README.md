@@ -18,9 +18,8 @@ abstracts claude / codex / opencode and owns sessions, status and terminals.
 
 ## Status
 
-Everything in the plan is built and tested: the review loop, the explain
-bridge, the `ws` CLI, the workspace layer, and the agent-facing skills.
-57 Lua assertions and 4 Go tests, all green.
+The review loop, explain bridge, `ws` CLI, workspace layer, and agent-facing
+skills are covered by the repository's test suite.
 
 | | |
 |---|---|
@@ -29,8 +28,8 @@ bridge, the `ws` CLI, the workspace layer, and the agent-facing skills.
 | ✅ | `:Paseo` command surface |
 | ✅ | `git.lua` — status/diff parsing and hunk staging |
 | ✅ | changed-files picker, hunk quickfix, diff panel |
-| ✅ | 48-assertion test suite (`tests/run.sh`) |
-| ✅ | explain bridge + Paseo sidecar (`bin/paseo-bridge.ts`) |
+| ✅ | Neovim and sidecar test suite (`tests/run.sh`) |
+| ✅ | explain bridge + Paseo sidecar (`sidecar/paseo-bridge.ts`) |
 | ✅ | tool calls, reasoning and todos rendered in the transcript |
 | ✅ | permission dialog — answer a prompt without the desktop app |
 | ✅ | questions answered, not approved — `AskUserQuestion` and friends |
@@ -56,8 +55,8 @@ bridge, the `ws` CLI, the workspace layer, and the agent-facing skills.
 }
 ```
 
-**No build step and no binary.** Everything is Lua, except the sidecar, which
-is a single TypeScript file run by `bun` (or node ≥ 22) — no bundling, no
+**No build step and no binary.** Everything is Lua, except the modular TypeScript
+sidecar run by `bun` (or node ≥ 22) — no bundling, no
 compilation, nothing to fetch from a releases page.
 
 `VeryLazy` rather than `cmd = "Paseo"` matters for one small reason: lazy.nvim
@@ -85,6 +84,7 @@ of time:
 
 ```sh
 cd ~/.local/share/nvim/lazy/paseo.nvim/sidecar && bun install
+# Without Bun: npm install
 ```
 
 ## Configuration
@@ -147,14 +147,15 @@ require("paseo").setup {
 | `:Paseo ask [kind]` | Attach the hunk/selection/file, then type your question |
 | `:Paseo qfask` | Attach every hunk in the quickfix list |
 | `:Paseo image [path]` | Attach an image — the clipboard, or a file |
-| `:Paseo mode` | Permission mode — plan, always ask, accept edits, auto, bypass |
+| `:Paseo mode` | This provider's permission or operating modes |
+| `:Paseo plan` | Toggle Plan: a Codex feature or Claude mode |
 | `:Paseo thinking` | Reasoning level for this session |
-| `:Paseo fast` | Toggle fast mode (⚡), or pick another feature toggle |
+| `:Paseo fast [feature_id]` | Toggle Fast, name another feature, or pick an available toggle |
 | `:Paseo switchmodel` | Change the running session's model |
 | `:Paseo session` | What this session is set to |
 | `:Paseo dash` | The chat full screen, with the session panels |
 | `:Paseo sidebar` | The chat in the pane beside your code |
-| `:Paseo model` | Choose the provider/model new agents get |
+| `:Paseo model [provider/model]` | Set the preference for new agents; no agent is created |
 | `:Paseo workspaces` | Workspace picker — open, sessions, create, archive |
 | `:Paseo wcreate` | Create a workspace here — the shape is worked out for you |
 | `:Paseo sessions` | Sessions in this workspace |
@@ -170,18 +171,21 @@ also bind in visual mode and send the live selection. Review: `ac` changes ·
 thinking · `az` fast · `am` model · `a?` settings. Then `aw` workspaces · `aW`
 new workspace · `aS` sessions · `at` agents · `aR` repos · `aH` health.
 
-Everything in those pickers is **discovered from the daemon**. Modes are per
-provider — claude has plan / always-ask / accept-edits / auto / bypass, codex
-has auto / auto-review / full-access. Thinking levels are per *model*. Feature
-toggles are per agent. Hardcoding any of it would be wrong on the next
-provider.
+The model picker chooses a provider, then one of its labeled models. When a new
+agent is needed, one review screen lets you set permissions, reasoning, and
+model-supported features before creation (`<CR>` edits a row, `c` creates,
+`q` cancels). Opening an existing chat reuses it only when it matches the
+selected provider and model. Modes are per provider: Codex reports Default,
+Auto-review, and Full Access; its Plan and Fast controls are separate features.
+Claude reports Plan as a mode. Reasoning and creation-time feature choices come
+from the selected model.
 
 ### The header
 
 While a turn is running the header spins and counts the seconds:
 
 ```
-⠹ 14s  claude/sonnet-5 · acceptEdits · 󰧑 think · ⚡ · 21%   ~/Code/paseo.nvim
+⠹ 14s  codex/gpt-5.6-sol · Auto-review · 󰧑 high · Fast · Plan · 21%   ~/Code/paseo.nvim
 ```
 
 The count is the point — a static dot looked identical at two seconds and at
@@ -389,6 +393,10 @@ back up. Paseo is the engine; you should not need to look at it.
 tests/run.sh
 ```
 
+The suite runs Neovim, the sidecar typecheck, and TypeScript tests. Install
+the sidecar dependencies first with `bun install` or `npm install`; the test
+harness uses Bun when present and Node plus the local TypeScript otherwise.
+
 ## Layout
 
 ```
@@ -396,7 +404,7 @@ lua/paseo/          the plugin
   workspace/        assembling N worktrees into one unit of work
   pickers/          changed files, workspaces
   backends/         the no-daemon fallback
-sidecar/            paseo-bridge.ts and its bun deps
+sidecar/            paseo-bridge.ts entry point, bridge-*.ts modules, SDK deps
 .agents/skills/     skills, symlinked from .claude/skills
 tests/              fixtures + spec, run by tests/run.sh
 doc/                :help paseo
@@ -421,7 +429,7 @@ others.
             │ in-process                   │ stdio JSON-lines
             │                              │ (push, ~1–10 ms)
 ┌───────────▼──────────────┐   ┌───────────▼───────────────────┐
-│ workspace/ (Lua)         │   │ paseo-bridge.ts (Bun sidecar) │
+│ workspace/ (Lua)         │   │ TypeScript sidecar (Bun/Node) │
 │ N worktrees + .env copy  │   │ @getpaseo/client              │
 │ + heavy-dir links        │   └───────────┬───────────────────┘
 │ + shared siblings        │               │ ws://127.0.0.1:6767/ws
