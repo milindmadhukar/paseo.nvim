@@ -11,6 +11,7 @@
 
 local bridge = require "paseo.bridge"
 local hl = require "paseo.ui.hl"
+local questions = require "paseo.ui.questions"
 local render = require "paseo.ui.render"
 local timeline = require "paseo.ui.timeline"
 local transcript = require "paseo.ui.transcript"
@@ -34,26 +35,151 @@ local function dimensions(lines)
   return w, h
 end
 
+-- ----------------------------------------------------------------- questions
+
+---Has this question an answer that is not one of its options?
+---@param question paseo.Question
+---@param picked string[]
+---@return string[]
+local function typed_answers(question, picked)
+  local labels, typed = {}, {}
+  for _, option in ipairs(question.options) do
+    labels[option.label] = true
+  end
+  for _, chosen in ipairs(picked) do
+    if not labels[chosen] then
+      typed[#typed + 1] = chosen
+    end
+  end
+  return typed
+end
+
+---The questions, as the dialog draws them.
+---
+---ALL of them, not one at a time: a request may carry four, and a dialog that
+---showed only the first would teach you that answering it was the whole reply.
+---The keys act on the question marked `▸`, and `<Tab>` moves the mark.
+---
+---The line COUNT is deliberately constant across redraws -- the free-text row
+---is drawn as a hint when nothing has been typed -- because volt lays sections
+---out by row and a section that grows writes over the one below it.
+---@param state paseo.QuestionState
+---@param inner integer
+---@return table[][]
+local function question_body(state, inner)
+  local lines = {}
+
+  for index, question in ipairs(state.questions) do
+    local here = index == state.current
+    local picked = state.picked[index]
+
+    if index > 1 then
+      lines[#lines + 1] = {}
+    end
+    vim.list_extend(
+      lines,
+      render.wrap(question.question, inner - 4, here and "PaseoHeader" or "PaseoDim", {
+        { here and "  ▸ " or "    ", "PaseoKey" },
+      })
+    )
+
+    for at, option in ipairs(question.options) do
+      local chosen = vim.tbl_contains(picked, option.label)
+      local row = {
+        { "    ", nil },
+        { here and at <= 9 and (" %d "):format(at) or "   ", "PaseoKey" },
+        { chosen and " ● " or " ○ ", chosen and "PaseoToolOk" or "PaseoDim" },
+        { option.label, chosen and "PaseoToolOk" or nil },
+      }
+      if option.description then
+        row[#row + 1] = { " — " .. option.description, "PaseoDim" }
+      end
+      lines[#lines + 1] = render.truncate(row, inner)
+    end
+
+    -- An answer typed rather than picked has to be visible, or `i` looks like
+    -- it did nothing. Drawn as the key hint until there is one.
+    if question.free then
+      local typed = typed_answers(question, picked)
+      lines[#lines + 1] = render.truncate(
+        #typed > 0 and {
+          { "       ● ", "PaseoToolOk" },
+          { table.concat(typed, ", "), "PaseoToolOk" },
+          { "  typed", "PaseoDim" },
+        } or {
+          { "     i ", "PaseoKey" },
+          { "something else — type it", "PaseoDim" },
+        },
+        inner
+      )
+    end
+
+    local notes = {}
+    if question.multi then
+      notes[#notes + 1] = "choose as many as apply"
+    end
+    if question.optional then
+      notes[#notes + 1] = "may be skipped"
+    end
+    if #notes > 0 then
+      lines[#lines + 1] = { { "       ", nil }, { table.concat(notes, " · "), "PaseoDim" } }
+    end
+  end
+
+  return lines
+end
+
 -- --------------------------------------------------------------------- lines
 
 ---Everything the dialog shows, as `{text, hl}` lines.
 ---@param chat table
 ---@param request table
 ---@param width integer
+---@param state paseo.QuestionState|nil  Set when the request is questions.
 ---@return table[][]
-local function build(chat, request, width)
+local function build(chat, request, width, state)
   local inner = width - 4
   local lines = {}
 
+  -- A question is not a danger: the agent is ASKING, not reaching for the
+  -- filesystem, and painting both red teaches you to dismiss the colour.
+  local group = state and "PaseoQuestion" or "PaseoDanger"
+  local title = request.title or request.name or "Permission required"
+  if state then
+    title = #state.questions > 1 and ("The agent is asking %d things"):format(#state.questions)
+      or "The agent is asking"
+  end
   lines[#lines + 1] = {
-    { "  ", "PaseoDanger" },
-    { request.title or request.name or "Permission required", "PaseoDanger" },
+    { state and "  " or "  ", group },
+    { title, group },
   }
-  if request.kind and request.kind ~= "tool" then
+  if request.kind and request.kind ~= "tool" and not state then
     lines[#lines + 1] = { { "  " .. request.kind, "PaseoDim" } }
   end
   lines[#lines + 1] = {}
 
+  if state then
+    vim.list_extend(lines, question_body(state, inner))
+    lines[#lines + 1] = {}
+    lines[#lines + 1] = {
+      { "  1-9", "PaseoKey" },
+      { " pick · ", "PaseoDim" },
+      { "<Tab>", "PaseoKey" },
+      { " next question · ", "PaseoDim" },
+      { "<CR>", "PaseoKey" },
+      { " send the answers", "PaseoDim" },
+    }
+    lines[#lines + 1] = {
+      { "  <Esc>", "PaseoKey" },
+      { " later (stays pending) · ", "PaseoDim" },
+      { "N", "PaseoKey" },
+      { " decline, and stop the turn", "PaseoDim" },
+    }
+    return lines
+  end
+
+  -- `description` for a question is the FIRST question and its labels, which
+  -- is why it is above the question branch and not below it.
   if request.description and request.description ~= "" then
     vim.list_extend(
       lines,
@@ -135,6 +261,52 @@ local function answer(chat, request, action)
   M.resolved(chat, request.id, { behavior = action.behavior, label = action.label })
 end
 
+---Send every answer, in the ONE response the request gets.
+---
+---A question is allowed AND answered in the same message: the answers ride in
+---`updatedInput`, and an allow without them reaches the agent as "The user did
+---not answer the questions" -- approved, and silent.
+---@param chat table
+---@param request table
+---@param state paseo.QuestionState
+---@return boolean sent
+local function send(chat, request, state)
+  -- Half a reply is not a smaller answer, it is a wrong one: the unanswered
+  -- question would come back as though you had nothing to say about it.
+  local missing = questions.missing(state)
+  if missing then
+    state.current = missing
+    vim.notify("paseo: that question still needs an answer", vim.log.levels.WARN)
+    return false
+  end
+
+  local answers = questions.answers(state)
+  M.close()
+
+  bridge.request("agent.respondToPermission", {
+    agentId = chat.agent_id,
+    requestId = request.id,
+    behavior = "allow",
+    updatedInput = questions.input(request, state.questions, answers),
+  }, function(err)
+    if err then
+      vim.schedule(function()
+        transcript.upsert(chat, {
+          kind = "notice",
+          level = "error",
+          message = "answer failed: " .. err,
+        })
+      end)
+    end
+  end)
+
+  M.resolved(chat, request.id, {
+    behavior = "allow",
+    label = questions.label(state.questions, answers),
+  })
+  return true
+end
+
 -- ---------------------------------------------------------------- the window
 
 function M.close()
@@ -166,8 +338,14 @@ end
 local function open(chat, request)
   M.close()
 
+  -- Questions are answered here, never approved: `state` is what the keys act
+  -- on, and its presence is what makes this a question dialog rather than a
+  -- permission one.
+  local asked = questions.parse(request)
+  local state = asked and questions.state(asked) or nil
+
   local width = math.min(100, math.max(50, vim.o.columns - 10))
-  local lines = build(chat, request, width)
+  local lines = build(chat, request, width, state)
   local w, h = dimensions(lines)
 
   -- A dimmed backdrop, so the dialog reads as modal. typr does the same for
@@ -206,6 +384,7 @@ local function open(chat, request)
     backdrop_win = backdrop_win,
     chat = chat,
     request = request,
+    state = state,
   }
 
   -- Volt owns this buffer entirely: it is chrome, nothing is typed into it,
@@ -225,7 +404,7 @@ local function open(chat, request)
             -- `table.remove(marks, 3)` on what it is handed, so a cached line
             -- list loses its actions after the first draw.
             lines = function()
-              return render.to_volt(build(chat, request, width))
+              return render.to_volt(build(chat, request, width, state))
             end,
           },
         },
@@ -241,15 +420,75 @@ local function open(chat, request)
     vim.bo[buf].modifiable = false
   end
 
+  -- Answering a question CHANGES the dialog -- a tick appears, the `▸` moves
+  -- on -- so unlike a permission it has to be drawn more than once. Volt
+  -- re-runs the section's `lines`; the plain fallback is rewritten by hand.
+  local function redraw()
+    if not api.nvim_buf_is_valid(buf) then
+      return
+    end
+    if ok then
+      pcall(function()
+        require("volt").redraw(buf, "permission")
+      end)
+      return
+    end
+    vim.bo[buf].modifiable = true
+    render.to_buffer(buf, hl.ns, 0, -1, build(chat, request, width, state))
+    vim.bo[buf].modifiable = false
+  end
+
   local map = function(key, fn)
     vim.keymap.set("n", key, fn, { buffer = buf, nowait = true, silent = true })
   end
 
-  for i, action in ipairs(request.actions or {}) do
-    if i <= 9 then
-      map(tostring(i), function()
-        answer(chat, request, action)
+  if state then
+    for at = 1, 9 do
+      map(tostring(at), function()
+        questions.choose(state, at)
+        redraw()
       end)
+    end
+
+    map("<Tab>", function()
+      questions.move(state, 1)
+      redraw()
+    end)
+    map("<S-Tab>", function()
+      questions.move(state, -1)
+      redraw()
+    end)
+
+    -- `i`, because it is the key that starts typing everywhere else. A
+    -- question that takes only its options says so rather than swallowing it.
+    map("i", function()
+      local question = state.questions[state.current]
+      if not question.free then
+        return vim.notify("paseo: that question takes one of its options", vim.log.levels.INFO)
+      end
+      vim.ui.input({ prompt = question.question .. " " }, function(typed)
+        questions.write(state, typed or "")
+        redraw()
+      end)
+    end)
+
+    -- `y` sends as well as `<CR>`: the muscle memory from every other dialog
+    -- is that `y` is the affirmative key, and on a question the affirmative
+    -- answer is the one you just picked.
+    for _, key in ipairs { "<CR>", "y" } do
+      map(key, function()
+        if not send(chat, request, state) then
+          redraw()
+        end
+      end)
+    end
+  else
+    for i, action in ipairs(request.actions or {}) do
+      if i <= 9 then
+        map(tostring(i), function()
+          answer(chat, request, action)
+        end)
+      end
     end
   end
 
@@ -262,12 +501,16 @@ local function open(chat, request)
     end
   end
 
-  map("y", function()
-    local action = first "allow"
-    if action then
-      answer(chat, request, action)
-    end
-  end)
+  -- Not on a question: `y` there sends the answers, and a bare allow -- which
+  -- is what this sends -- is exactly the bug. See the `state` branch above.
+  if not state then
+    map("y", function()
+      local action = first "allow"
+      if action then
+        answer(chat, request, action)
+      end
+    end)
+  end
   map("n", function()
     local action = first "deny"
     if action then

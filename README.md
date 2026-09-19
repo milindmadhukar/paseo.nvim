@@ -33,6 +33,7 @@ bridge, the `ws` CLI, the workspace layer, and the agent-facing skills.
 | ✅ | explain bridge + Paseo sidecar (`bin/paseo-bridge.ts`) |
 | ✅ | tool calls, reasoning and todos rendered in the transcript |
 | ✅ | permission dialog — answer a prompt without the desktop app |
+| ✅ | questions answered, not approved — `AskUserQuestion` and friends |
 | ✅ | two surfaces: the sidebar pane and the full-screen dashboard |
 | ✅ | workspace assembly — `ws`, a Go CLI |
 | ✅ | workspace picker with a live, push-driven agent status column |
@@ -165,6 +166,25 @@ The count is the point — a static dot looked identical at two seconds and at
 two minutes, so a wedged turn and a working one were the same picture. A
 pending permission replaces it with ` needs you`, because then the agent is
 not working, it is waiting for you.
+
+### Questions
+
+A question — Claude's `AskUserQuestion`, and the `ask_user` the other providers
+wrap the same way — arrives as a permission request like any other. Treating it
+like one is why an agent that asked you something got back *"The user did not
+answer the questions"*: allowing a question only consents to the **asking**. The
+answer rides back inside the tool input, so a bare allow is approval and
+silence, whichever button you pressed.
+
+So the dialog answers it instead. Every question in the request is shown at
+once — there is one response for the set, and a request may carry four —
+`1`-`9` picks for the question marked `▸`, `<Tab>` moves between them, `i`
+answers in your own words where the provider allows it, and `<CR>` sends. It
+refuses to send while a question that is not optional has no answer.
+
+Multi-select ticks as many as apply and is serialised the one way the provider
+parses back: `", "`-joined, quoting any label that contains the separator —
+otherwise `Rebase, then push` returns as two answers matching no option.
 
 ### Images
 
