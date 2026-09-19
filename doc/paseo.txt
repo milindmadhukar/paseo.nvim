@@ -361,11 +361,19 @@ review.context                                          integer, default `0`
     Put the chat in the sidebar, beside your code. The same conversation and
     the same draft; only the windows change.
 
-:Paseo model                                                *:Paseo-model*
+:Paseo model [provider/model]                               *:Paseo-model*
 
-    Choose the provider/model new agents are created with, from what the
-    daemon reports as ready. There is no hardcoded list: installed providers
-    and configured models differ between hosts.
+    Set the preference for agents this plugin creates; this command creates
+    no agent. Without an argument, choose a ready provider, then one of its
+    labeled models. An explicit provider/model is validated against the same
+    daemon catalog. A chat on another model stays intact. The next chat opens
+    a matching existing agent or reviews settings before creating a new one.
+
+:Paseo plan                                                  *:Paseo-plan*
+
+    Toggle Plan on the current session. Codex reports it as the plan_mode
+    feature; Claude reports it as the plan mode. Codex's permission setting
+    stays separate. :Paseo fast [feature_id] keeps its feature picker.
 
 :Paseo qfask                                                *:Paseo-qfask*
 
@@ -593,9 +601,10 @@ require("paseo.git").stage({hunk}, {callback})
 ==============================================================================
 9. THE AGENT BRIDGE                                             *paseo-bridge*
 
-Agents are reached through a sidecar: `bin/paseo-bridge.ts`, one Bun (or Node
+Agents are reached through a sidecar: `sidecar/paseo-bridge.ts`, one Bun (or Node
 >= 22) process per Neovim session, holding one WebSocket to the daemon and
-speaking newline-delimited JSON over stdio.
+speaking newline-delimited JSON over stdio. Its operations live in the
+`sidecar/bridge-*.ts` modules.
 
 It is not the `paseo` CLI because that boots Electron per invocation and costs
 about 2.4 seconds. It is not a raw WebSocket in Lua because the frame codec is
@@ -604,11 +613,10 @@ snapshot-then-update ordering, timeline epochs and cursors, `replacement`
 invalidation and `subscription_restored` after reconnect.
 
                                                           *paseo-bridge-agent*
-One agent per repository, reused. It is found again by the label
-`paseo.nvim = review`, which is namespaced because several tools may manage
-agents on one daemon. The provider is discovered from the daemon unless
-|paseo-config.paseo.provider| names one -- installed providers and configured
-models differ between hosts, so a hardcoded model id fails at creation.
+Review agents are reused when their directory and `paseo.nvim = review` label
+match. When |paseo-config.paseo.provider| names a provider/model, both must
+match too. If no agent matches, the new-session review presents the daemon's
+mode, model reasoning, and feature choices before creation.
 
                                                        *paseo-bridge-lifetime*
 The sidecar starts on the first request that needs it and is stopped on

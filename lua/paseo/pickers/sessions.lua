@@ -60,6 +60,9 @@ function M.open(ws, opts)
               ws,
               { title = title ~= "" and title or nil },
               function(id, create_err)
+                if create_err == "cancelled" then
+                  return
+                end
                 if create_err then
                   return vim.notify("paseo: " .. create_err, vim.log.levels.ERROR)
                 end

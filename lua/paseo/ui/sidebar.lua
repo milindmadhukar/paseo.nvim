@@ -77,9 +77,12 @@ function M.header(chat)
     line[#line + 1] = { " · ", "PaseoDim" }
     line[#line + 1] = { "󰧑 " .. chat.thinking, "PaseoThinking" }
   end
-  -- The lightning bolt, same as the app's.
-  if chat.features and chat.features.fast_mode then
-    line[#line + 1] = { " ⚡", "PaseoKey" }
+  -- The daemon supplies feature names; Codex Plan and Fast are separate
+  -- toggles, and future providers may add others.
+  for _, feature in ipairs(chat.feature_list or {}) do
+    if feature.type == "toggle" and chat.features and chat.features[feature.id] then
+      line[#line + 1] = { " · " .. (feature.label or feature.id), "PaseoKey" }
+    end
   end
 
   -- Context-window fill, once the daemon has reported any. This is the number

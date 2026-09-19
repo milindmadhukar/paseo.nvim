@@ -325,4 +325,73 @@ function M.toggle(feature_id)
   end)
 end
 
+---Plan is a feature on Codex and a mode on Claude. Follow what this running
+---agent actually advertises, while leaving its permission mode untouched when
+---the feature form is available.
+---
+---Reads its config through `M.load` now that `with_config` is gone, but WRITES
+---the way it always did -- straight to `agent.setMode` rather than through
+---`M.apply`. `apply` reloads from the daemon on success, which would make the
+---last request on the wire an `agent.config` rather than the mode change, and
+---the mode here is only half the operation: `mode_before_plan` has to be
+---recorded in the same breath so leaving Plan knows where to go back to.
+function M.plan()
+  local chat = target()
+  if not chat then
+    return
+  end
+
+  M.load(chat, function(config)
+    if not config then
+      return vim.notify("paseo: could not read the session config", vim.log.levels.ERROR)
+    end
+
+    for _, feature in ipairs(config.features or {}) do
+      if feature.id == "plan_mode" and feature.type == "toggle" then
+        return M.toggle "plan_mode"
+      end
+    end
+
+    local function has(id)
+      for _, mode in ipairs(config.availableModes or {}) do
+        if mode.id == id then
+          return true
+        end
+      end
+      return false
+    end
+
+    if not has "plan" then
+      return vim.notify("paseo: this session has no Plan control", vim.log.levels.WARN)
+    end
+
+    -- Leaving Plan goes back to whatever you were in, remembered on the way
+    -- in -- not to a hardcoded mode, because the provider may not have one by
+    -- that name.
+    local entering = config.modeId ~= "plan"
+    local wanted = entering and "plan" or (chat.mode_before_plan or "default")
+    if not has(wanted) then
+      return vim.notify(
+        "paseo: this provider cannot leave Plan through this command",
+        vim.log.levels.WARN
+      )
+    end
+
+    bridge.request(
+      "agent.setMode",
+      { agentId = chat.agent_id, modeId = wanted },
+      function(err, result)
+        if err then
+          return vim.notify("paseo: " .. err, vim.log.levels.ERROR)
+        end
+        vim.schedule(function()
+          report(result and result.notice)
+          chat.mode_before_plan = entering and config.modeId or nil
+          require("paseo.ui.chat").load_settings(chat)
+        end)
+      end
+    )
+  end)
+end
+
 return M

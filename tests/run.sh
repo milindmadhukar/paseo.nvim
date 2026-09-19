@@ -21,6 +21,21 @@ PASEO_FIXTURES="$fixtures" nvim --headless \
   2>&1
 status=$?
 
+sidecar="$here/../sidecar"
+if [ ! -d "$sidecar/node_modules/typescript" ]; then
+  echo "SETUP: install sidecar dependencies with bun install or npm install in sidecar/" >&2
+  status=2
+elif command -v bun >/dev/null 2>&1; then
+  (cd "$sidecar" && bun run typecheck && bun test)
+  [ $? -eq 0 ] || status=1
+elif command -v npx >/dev/null 2>&1; then
+  (cd "$sidecar" && npx --no-install tsc --noEmit && node --experimental-strip-types --test *.test.ts)
+  [ $? -eq 0 ] || status=1
+else
+  echo "SETUP: typecheck needs bun or npx (TypeScript is installed locally)" >&2
+  status=2
+fi
+
 echo
 if [ $status -eq 0 ]; then echo "PASS"; else echo "FAIL (exit $status)"; fi
 exit $status

@@ -146,6 +146,9 @@ function M.apply_settings(chat, payload)
     end
     panel = panel or not vim.deep_equal(chat.features, features)
     chat.features = features
+    -- The header draws each enabled toggle by its label, so it needs the list
+    -- and not just the id->value map.
+    chat.feature_list = payload.features
     if snapshot then
       snapshot.features = payload.features
     end
@@ -642,6 +645,7 @@ function M.open(opts, callback)
   -- never loaded the mode. You got an empty window onto a session with
   -- history.
   if chat.agent_id and chat.initialised then
+    M.load_settings(chat)
     return callback(chat, nil)
   end
 
@@ -670,28 +674,66 @@ function M.open(opts, callback)
       return callback(nil, err)
     end
 
-    bridge.request("agent.ensure", {
-      cwd = root,
-      provider = config.get().paseo.provider,
-      title = "paseo.nvim · " .. vim.fs.basename(root),
-    }, function(agent_err, result)
-      if agent_err then
-        vim.schedule(function()
-          notice(chat, agent_err, "error")
-        end)
-        return callback(nil, agent_err)
+    local preferred = config.get().paseo.provider
+    local function adopt(result)
+      local known = chats[result.id]
+      if known and known ~= chat then
+        chats[root] = nil
+        if current == chat then
+          M.close()
+          current = known
+          layout(known)
+          M.load_settings(known)
+        end
+        return callback(known, nil)
       end
-
       chat.agent_id = result.id
       chat.provider = result.provider
-      -- Re-key now that the agent is known, so a second session on the same
-      -- directory gets its own chat rather than replacing this one.
       chats[root] = nil
       chats[result.id] = chat
       vim.schedule(function()
         initialise(chat)
       end)
       callback(chat, nil)
+    end
+
+    bridge.request("agent.find", { cwd = root, provider = preferred }, function(find_err, found)
+      if find_err then
+        notice(chat, find_err, "error")
+        return callback(nil, find_err)
+      end
+      if found and found.id then
+        return adopt(found)
+      end
+      notice(chat, "choose session settings…")
+      require("paseo.ui.create").review({ cwd = root, preferred = preferred }, function(draft, review_err)
+        if review_err then
+          notice(chat, review_err, "error")
+          return callback(nil, review_err)
+        end
+        if not draft then
+          chats[root] = nil
+          if current == chat then
+            M.close()
+          end
+          return callback(nil, "cancelled")
+        end
+        bridge.request("agent.ensure", {
+          cwd = root,
+          provider = draft.provider,
+          modeId = draft.modeId,
+          thinkingOptionId = draft.thinkingOptionId,
+          featureValues = draft.featureValues,
+          title = "paseo.nvim · " .. vim.fs.basename(root),
+        }, function(agent_err, result)
+          if agent_err then
+            notice(chat, agent_err, "error")
+            return callback(nil, agent_err)
+          end
+          config.get().paseo.provider = draft.provider
+          adopt(result)
+        end)
+      end)
     end)
   end)
 end
@@ -993,6 +1035,7 @@ function M.load_settings(chat)
       chat.mode = labelled(config.availableModes, config.modeId) or chat.mode
       chat.thinking = labelled(config.thinkingOptions, config.thinkingOptionId) or chat.thinking
       chat.features = {}
+      chat.feature_list = config.features or {}
       for _, feature in ipairs(config.features or {}) do
         chat.features[feature.id] = feature.value
       end
