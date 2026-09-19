@@ -319,8 +319,10 @@ function M.offer(chat, request)
   chat.permission_blocks = chat.permission_blocks or {}
   chat.permission_blocks[request.id] = block.id
 
+  -- Not thinking -- waiting. Through the setter, so the spinner's timer stops
+  -- with it rather than ticking on against a flag that says otherwise.
   if chat.streaming ~= nil then
-    chat.streaming = false
+    require("paseo.ui.chat").set_streaming(chat, false)
   end
 
   -- Only steal focus if this chat is the window you are looking at. Yanking
@@ -373,6 +375,11 @@ function M.resolved(chat, request_id, resolution)
     vim.schedule(function()
       open(chat, next_request)
     end)
+  elseif resolution and resolution.behavior == "allow" then
+    -- Allowed means the turn carries on, so the agent is working again. It was
+    -- the request that stopped it; nothing else says when it restarts, and a
+    -- header frozen at idle through the rest of a long turn reads as a hang.
+    require("paseo.ui.chat").set_streaming(chat, true)
   end
 end
 

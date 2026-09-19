@@ -153,6 +153,19 @@ has auto / auto-review / full-access. Thinking levels are per *model*. Feature
 toggles are per agent. Hardcoding any of it would be wrong on the next
 provider.
 
+### The header
+
+While a turn is running the header spins and counts the seconds:
+
+```
+⠹ 14s  claude/sonnet-5 · acceptEdits · 󰧑 think · ⚡
+```
+
+The count is the point — a static dot looked identical at two seconds and at
+two minutes, so a wedged turn and a working one were the same picture. A
+pending permission replaces it with ` needs you`, because then the agent is
+not working, it is waiting for you.
+
 ### Images
 
 `<C-v>` in the composer pastes the image on the clipboard. Neovim's own
