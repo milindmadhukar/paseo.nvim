@@ -66,6 +66,7 @@ which reads like a broken install.
 | The pickers | telescope.nvim |
 | Staging and previews | gitsigns.nvim |
 | Agents | the Paseo daemon running, and `bun` or node ≥ 22 |
+| Pasting images | `wl-paste` (Wayland), `xclip` (X11) or `pngpaste` (macOS) |
 
 Without a daemon the review half works unchanged and the agent half degrades
 to the `local` backend rather than breaking. `:checkhealth paseo` reports
@@ -117,6 +118,7 @@ require("paseo").setup {
 | `:Paseo explain [kind]` | Explain the hunk/selection/file, using the rubric |
 | `:Paseo ask [kind]` | Attach the hunk/selection/file, then type your question |
 | `:Paseo qfask` | Attach every hunk in the quickfix list |
+| `:Paseo image [path]` | Attach an image — the clipboard, or a file |
 | `:Paseo mode` | Permission mode — plan, always ask, accept edits, auto, bypass |
 | `:Paseo thinking` | Reasoning level for this session |
 | `:Paseo fast` | Toggle fast mode (⚡), or pick another feature toggle |
@@ -143,6 +145,25 @@ provider — claude has plan / always-ask / accept-edits / auto / bypass, codex
 has auto / auto-review / full-access. Thinking levels are per *model*. Feature
 toggles are per agent. Hardcoding any of it would be wrong on the next
 provider.
+
+### Images
+
+`<C-v>` in the composer pastes the image on the clipboard. Neovim's own
+clipboard is text — a screenshot copied from a browser never reaches a
+register — so this shells out to `wl-paste`, `xclip` or `pngpaste` and reads
+the bytes directly.
+
+What lands in the buffer is a **placeholder**:
+
+```
+[Image #1] why is the right-hand panel empty here?
+```
+
+The bytes travel beside the prompt, not inside it, so the buffer stays
+something you can read and edit, and the number is how a sentence refers to
+one of several. `<C-v>` with no image on the clipboard does its ordinary job
+instead of swallowing the key. `:Paseo image ~/shot.png` attaches a file, from
+anywhere.
 
 ## Workspaces and sessions
 

@@ -74,6 +74,27 @@ function raw() {
   return daemon;
 }
 
+/**
+ * Images carried with a prompt.
+ *
+ * The daemon takes BARE base64 plus a mimeType beside it, not a data URL --
+ * and a data URL is exactly what anything else that handles images hands you,
+ * so one is unwrapped here rather than at every call site.
+ *
+ * Returns undefined for "no images", so the caller can leave the field off the
+ * request entirely: an empty array is still an array on the wire.
+ */
+function pictures(req: Request): Array<{ data: string; mimeType: string }> | undefined {
+  const given = req.images;
+  if (!Array.isArray(given) || given.length === 0) return undefined;
+  return given.map((image: any, index: number) => {
+    const data = String(need(image?.data, `images[${index}].data`));
+    const url = /^data:([^;,]+);base64,(.*)$/s.exec(data);
+    if (url) return { data: url[2]!, mimeType: url[1]! };
+    return { data, mimeType: String(need(image?.mimeType, `images[${index}].mimeType`)) };
+  });
+}
+
 const ops: Record<string, (req: Request) => Promise<unknown>> = {
   async connect(req) {
     if (daemon) await daemon.close().catch(() => {});
@@ -194,15 +215,18 @@ const ops: Record<string, (req: Request) => Promise<unknown>> = {
    */
   async "agent.send"(req) {
     const agent = connected().agents.ref(String(need(req.agentId, "agentId")));
-    await agent.send(String(need(req.prompt, "prompt")));
-    return { sent: true };
+    const images = pictures(req);
+    await agent.send(String(need(req.prompt, "prompt")), images ? { images } : undefined);
+    return { sent: true, images: images?.length ?? 0 };
   },
 
   /** Send and wait for the turn. */
   async "agent.run"(req) {
     const agent = connected().agents.ref(String(need(req.agentId, "agentId")));
+    const images = pictures(req);
     const result = await agent.run(String(need(req.prompt, "prompt")), {
       timeoutMs: Number(req.timeoutMs ?? 10 * 60_000),
+      ...(images ? { images } : {}),
     });
     return {
       status: result.status,
