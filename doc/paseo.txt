@@ -671,6 +671,65 @@ key that does not work.
 Both surfaces share the same buffers, so switching preserves your draft and
 your scroll position.
 
+                                                         *paseo-chat-session*
+The SESSION tab (`2`) is the one you drive from the keyboard. Every setting
+this session has is on it at once, grouped into cards, with what is currently
+set filled in rather than marked with a dot: >
+
+    ╭─ Permission mode   m  ──────────────────────────────╮
+    │   Plan   Always ask   Accept edits   Bypass         │
+    │  Edits are applied without asking.                  │
+    ╰─────────────────────────────────────────────────────╯
+
+    ╭─ 󰧑  Thinking   t  ────────╮  ╭─ ⚡  Features   f  ───╮
+    │   Off   Think             │  │    Fast mode         │
+    ╰───────────────────────────╯  ╰──────────────────────╯
+
+    ╭─ Model   s  ────────────────────────────────────────╮
+    │  ● Opus 5                                  default  │
+    │  ○ Sonnet 5                                         │
+    ╰─────────────────────────────────────────────────────╯
+<
+    h j k l   move to the next setting -- all four directions do, and
+              running off the end of a card lands on the next one
+    <CR>      apply what is focused (a Features entry toggles)
+    m t f s   jump to Mode, Thinking, Features or Model; the letter is
+              printed on the card so the key is where you are looking
+    r         re-ask the daemon
+
+A click does the same thing, and pointing at a setting lights it exactly as
+moving to it does -- hover and focus are the same paint, because they are the
+same state.
+
+`bypassPermissions` is drawn in red and `acceptEdits`-style modes in amber.
+Until now every mode was the same colour, which made "nothing asks, everything
+runs" look identical to "research and write a plan".
+
+The description under a card belongs to whatever is FOCUSED, not to every
+row -- one line that changes as you move, rather than five stacked lines you
+read once and then scroll past.
+
+On a short editor the cards drop their internal padding so the whole thing
+still fits; the layout is measured before it is drawn, not guessed at.
+
+                                                       *paseo-chat-settings*
+The same four cards open on their own, centred, without the dashboard: >
+
+    :Paseo mode          the permission modes
+    :Paseo thinking      the reasoning levels
+    :Paseo switchmodel   the models
+    :Paseo session       all of them
+<
+Same keys, plus `q`/`<Esc>` to close. These used to be `vim.ui.select` lists
+of strings with a `●` glued to the front of one of them; they are the Session
+tab's renderer in a window of its own, so there is no second implementation to
+drift.
+
+`:Paseo fast` stays a direct toggle rather than a window -- it is a one
+keystroke convenience and putting a window in front of it would defeat the
+point. It opens the Features card only when this provider has no `fast_mode`
+to toggle.
+
                                                           *paseo-chat-zindex*
 The dashboard sits BELOW the z-index a floating window gets by default, at
 `ui.float.zindex` -- 30 against 50. That is deliberate: a telescope picker, a
@@ -702,6 +761,17 @@ In the conversation ~
     <C-f>     switch surface
     q         close the chat
 
+On the Session tab ~
+
+    h j k l   move between settings
+    <CR>      apply the focused setting
+    m t f s   jump to a group of settings
+    r         re-fetch from the daemon
+
+These are bound only while that tab is showing, and whatever they displaced
+is put back on the way out -- the six panels share one buffer, so a `<CR>`
+left bound here would try to apply a session setting from the Changes tab.
+
 The composer is an ORDINARY buffer, so your insert-mode keymaps, completion,
 abbreviations and undo all work. That is the difference between writing a
 prompt and filling in a text field, and it is why |:Paseo-ask| does not go
@@ -710,6 +780,23 @@ through `vim.ui.input`.
 The conversation is an ordinary buffer too, on purpose: `y`, `/` and soft-wrap
 work on an agent's reply. Volt draws the chrome around it -- the header, the
 panels, the permission dialog -- because virtual text cannot be yanked.
+
+                                                          *paseo-colours*
+Every colour is DERIVED, never hardcoded, so the surfaces follow whatever
+colourscheme is loaded. Volt supplies the accents -- from base46's palette on
+NvChad, from `Normal`/`Comment`/`Function`/`added`/`removed` otherwise -- and
+the backgrounds are steps off `Normal`: the surface two points away, a card
+seven, a chip a little further still. On a light background every step goes
+the other way, and accents used as text are pushed away from the background
+before use, because a pale green on a green-tinted chip is not readable.
+
+On a TRANSPARENT theme -- `Normal` with no background -- no background is
+painted at all. Selection is then signalled by removing dimming rather than by
+adding a fill, which is better than an opaque rectangle over someone's
+wallpaper.
+
+Override any of it by setting the group again after `setup`; they are re-
+derived on `ColorScheme` and nowhere else.
 
                                                         *paseo-chat-timeline*
 The transcript shows what the agent is DOING, not only what it says: files

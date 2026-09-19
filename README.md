@@ -204,14 +204,14 @@ swaps to the sidebar and back.
 
 ```
   ⠹ 14s  claude/sonnet-5 · acceptEdits · 󰧑 think · ⚡ · 21%   ~/Code/paseo.nvim
-  1 Chat  2 Session  3 Sessions  4 Changes  5 Usage  6 Workspaces
+   1 Chat   2 Session   3 Sessions   4 Changes   5 Usage   6 Workspaces
   ──────────────────────────────────────────────────────────────────────────
 ```
 
 | | |
 |---|---|
 | `Chat` | the conversation and the composer, real buffers floated on top |
-| `Session` | mode, thinking level, model, feature toggles — all clickable |
+| `Session` | mode, thinking level, model, feature toggles — keyboard or click |
 | `Sessions` | the agents in this workspace, live; click one to switch to it |
 | `Changes` | what is changed on disk, per repo; click a file to open it |
 | `Usage` | context window, tokens, cost |
@@ -281,6 +281,84 @@ The chrome is four volt sections rather than one, which is not tidiness: the
 header repaints ten times a second while a turn runs, and a single section
 would drag the `Changes` panel — one `git status` per repo — through every
 frame.
+
+### The Session tab
+
+Everything this session is set to, at once, with the current value **filled in**
+rather than marked with a dot:
+
+```
+  ╭─ Permission mode   m  ──────────────────────────────╮
+  │   Plan   Always ask   Accept edits   Bypass         │
+  │  Edits are applied without asking.                  │
+  ╰─────────────────────────────────────────────────────╯
+
+  ╭─ 󰧑  Thinking   t  ────────╮  ╭─ ⚡  Features   f  ───╮
+  │   Off   Think             │  │    Fast mode         │
+  ╰───────────────────────────╯  ╰──────────────────────╯
+
+  ╭─ Model   s  ────────────────────────────────────────╮
+  │  ● Opus 5                                  default  │
+  │  ○ Sonnet 5                                         │
+  ╰─────────────────────────────────────────────────────╯
+
+   h j k l  move    ⏎  apply    m t f s  group    r  reload
+```
+
+`h`/`j`/`k`/`l` move — all four directions, and running off the end of a card
+lands on the next one, so there is one traversal rather than one per card.
+`m` `t` `f` `s` jump to a group, and the letter is printed **on the card** so
+the key is where you are already looking. `<CR>` applies.
+
+This panel previously had **no key bindings at all**: interaction was 100%
+volt click dispatch, so the only way to change a setting was to reach for the
+mouse or land the cursor on exactly the right row. The mouse still works, and
+pointing at a setting lights it exactly as moving to it does — hover and focus
+are the same paint, because they are the same state.
+
+Focus is *ours*, not the cursor's. Volt dispatches `<CR>` through a
+`CursorMoved` autocmd and resets the cursor to `{1,1}` after every click, so a
+selection living on the cursor is thrown away by the framework on each
+interaction.
+
+`bypassPermissions` is red and `acceptEdits` amber. Until now every mode was
+the same colour, so *"nothing asks, everything runs"* looked identical to
+*"research and write a plan"*.
+
+The description belongs to whatever is **focused**, not to every row — one line
+that changes as you move, rather than five stacked lines you read once. And the
+layout is measured before it is drawn: on a short editor the cards drop their
+internal padding so the whole thing still fits, which on 80×24 is exactly the
+difference between seeing the model list and not.
+
+The same cards open on their own — `:Paseo mode`, `:Paseo thinking`,
+`:Paseo switchmodel`, `:Paseo session` — centred, with `q` to close. Those used
+to be `vim.ui.select` lists of strings with a `●` glued to the front of one of
+them, formatted independently of the panel that drew the same four settings.
+There is one renderer now, and one place a change is written.
+
+### Colour
+
+Everything is derived, never hardcoded. Volt supplies the accents — base46's
+palette on NvChad, `Normal`/`Comment`/`Function`/`added`/`removed` otherwise —
+and the **backgrounds** are steps off `Normal`: the surface two points away, a
+card seven, a chip further still.
+
+That last part is new, and it is most of why the dashboard stopped looking
+flat. There were no background groups at all before: `hl.lua` computed
+`Normal`'s background and then never used it, so the whole surface was coloured
+text on an undifferentiated float. The float border is now drawn with
+`fg == bg` — nvzone's trick — so the box becomes a one-cell padding ring in the
+surface's own colour rather than a frame around it.
+
+Light themes step the other way (`vim.o.bg == "dark" and 1 or -1`, applied to
+every step), and an accent used as *text* is pushed away from the background
+first — `morning`'s "added" is `#90ee90`, which is illegible on a chip tinted
+with `#90ee90`.
+
+On a **transparent** theme — `Normal` with no background — nothing is painted
+at all, and selection is signalled by removing dimming rather than by adding a
+fill. An opaque rectangle over someone's wallpaper is worse than no card.
 
 ### Questions
 

@@ -50,7 +50,6 @@ local function check_core()
   for name, why in pairs {
     ["gitsigns"] = "the staging and preview surface",
     ["telescope"] = "the changed-files and workspace pickers",
-    ["volt"] = "the chat chrome, the session panels and the permission dialog",
   } do
     if pcall(require, name) then
       ok(("%s is available (%s)"):format(name, why))
@@ -59,11 +58,20 @@ local function check_core()
     end
   end
 
-  -- A partial volt install is its own failure mode: `volt` resolves but
-  -- `volt.ui` does not, and every panel comes up empty with no error anyone
-  -- sees. Probe the submodule the panels actually use.
-  if pcall(require, "volt") and not pcall(require, "volt.ui") then
-    warn "volt is present but volt.ui is not -- the panels will render without their components"
+  -- volt is REQUIRED, not recommended. Every surface but the transcript is
+  -- drawn as volt extmarks -- the dashboard chrome, the six panels, the
+  -- settings popup and the permission dialog -- and there is no longer a
+  -- plain-text fallback behind them, because a fallback that has to be kept in
+  -- step with the real renderer is a second renderer nobody tests.
+  if not pcall(require, "volt") then
+    err "nvzone/volt is not installed -- it is a hard dependency; no UI will open"
+  elseif not pcall(require, "volt.ui") then
+    -- A partial volt install is its own failure mode: `volt` resolves but
+    -- `volt.ui` does not, and every panel comes up empty with no error anyone
+    -- sees. Probe the submodule the panels actually use.
+    err "volt is present but volt.ui is not -- update nvzone/volt; the panels cannot draw"
+  else
+    ok "volt is available (every surface but the transcript is drawn with it)"
   end
 
   -- Which palette volt derives from, because it changes what the chat looks
