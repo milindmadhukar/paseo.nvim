@@ -41,6 +41,9 @@ Optional, for the Paseo backend:
   - the `paseo` daemon, running
   - `bun`, or node >= 22, for the sidecar
 
+Optional, for pasting images into the composer:
+  - `wl-paste` (Wayland), `xclip` (X11) or `pngpaste` (macOS)
+
 Run `:checkhealth paseo` to see what is present. Missing optional pieces
 degrade the plugin to the `local` backend; they do not break it.
 
@@ -226,6 +229,11 @@ review.context                                          integer, default `0`
 
     Attach every hunk in the quickfix list at once -- "explain this review"
     rather than "explain this hunk".
+
+:Paseo image [path]                                          *:Paseo-image*
+
+    Attach an image to the chat: the clipboard, or `path` if given. See
+    |paseo-chat-images|.
 
 :Paseo workspaces                                      *:Paseo-workspaces*
 
@@ -449,6 +457,7 @@ In the composer ~
 
     <CR>      (normal mode) send
     <C-s>     send, from normal or insert mode
+    <C-v>     paste the image on the clipboard
     q         close the chat
 
 The composer is an ORDINARY buffer, so your insert-mode keymaps, completion,
@@ -467,6 +476,26 @@ Context is ATTACHED AND VISIBLE. |:Paseo-ask| on a hunk puts a line like >
 <in the composer, so you can see exactly what is about to be sent and delete
 the line if you change your mind. Attached blocks are sent BEFORE your prose,
 so the agent reads the code first and the question second.
+
+                                                       *paseo-chat-images*
+Neovim's clipboard is TEXT. An image copied from a browser or a screenshot
+tool never reaches a register, so `<C-v>` in the composer does not paste it --
+it shells out to `wl-paste`, `xclip` or `pngpaste`, reads the bytes as binary,
+and carries them to the daemon as base64 beside the prompt.
+
+What lands in the BUFFER is a placeholder: >
+    [Image #1] why is the right-hand panel empty here?
+<The bytes are not in the text, which keeps the prompt something you can read
+and edit, and the number is how a sentence refers to one of several images.
+Deleting the placeholder does not detach the image -- clear the composer, or
+send and start again.
+
+`<C-v>` with no image on the clipboard does its ORDINARY job -- literal insert,
+blockwise visual -- rather than swallowing the key. |:Paseo-image| takes a path
+instead, and works with no clipboard reader installed at all.
+
+Images larger than 10 MB are refused here rather than after a round trip; no
+provider accepts one, and base64 makes it a third larger again.
 
                                                          *paseo-chat-agent*
 One agent per directory, reused across questions. A fresh agent per question

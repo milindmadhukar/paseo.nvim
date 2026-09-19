@@ -137,9 +137,35 @@ local function check_paseo()
   end
 end
 
+---Pasting an image needs a helper. Neovim's own clipboard is text, so a
+---missing reader is not a broken install -- it is the difference between
+---<C-v> working in the composer and `:Paseo image <path>` being the only way.
+local function check_images()
+  start "paseo.nvim: images"
+
+  local usable, installed = {}, {}
+  for _, reader in ipairs(require("paseo.image").readers()) do
+    installed[#installed + 1] = reader.name
+    if reader.available then
+      usable[#usable + 1] = reader.name
+    end
+  end
+
+  if #usable > 0 then
+    ok(("clipboard images via %s"):format(table.concat(usable, ", ")))
+  else
+    warn(
+      "no usable clipboard image reader: install wl-paste (Wayland), xclip (X11) "
+        .. "or pngpaste (macOS). `:Paseo image <path>` works regardless."
+    )
+    info(("looked for: %s"):format(table.concat(installed, ", ")))
+  end
+end
+
 function M.check()
   check_core()
   check_paseo()
+  check_images()
 end
 
 return M

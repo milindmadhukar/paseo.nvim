@@ -322,6 +322,13 @@ commands.switchmodel = {
   end,
 }
 
+commands.image = {
+  desc = "Attach an image to the chat: the clipboard, or a path",
+  run = function(args)
+    require("paseo.ui.chat").paste_image { path = args[1] }
+  end,
+}
+
 commands.model = {
   desc = "Choose the provider/model new agents are created with",
   run = function()

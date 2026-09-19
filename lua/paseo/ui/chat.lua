@@ -22,6 +22,7 @@ local M = {}
 ---@field win_composer integer|nil
 ---@field streaming boolean
 ---@field pending string[]   Context blocks queued for the next send.
+---@field images paseo.Image[] Pasted images, in placeholder order.
 ---@field seq integer|nil    Highest timeline seq rendered.
 ---@field epoch string|nil   The epoch those seqs belong to.
 ---@field initialised boolean  Subscribed, history fetched, settings loaded.
@@ -126,7 +127,7 @@ local function send(chat)
   local body = vim.api.nvim_buf_get_lines(chat.composer, 0, -1, false)
   local text = vim.trim(table.concat(body, "\n"))
 
-  if text == "" and #chat.pending == 0 then
+  if text == "" and #chat.pending == 0 and #chat.images == 0 then
     return
   end
 
@@ -139,16 +140,32 @@ local function send(chat)
   end
   local prompt = table.concat(parts, "\n\n")
 
+  -- Images travel BESIDE the text, never inside it. The prompt keeps the
+  -- `[Image #1]` placeholders -- which you can read, renumber by hand, or
+  -- delete -- and the bytes ride in the request's own field, in the order the
+  -- placeholders count.
+  local images = {}
+  for _, image in ipairs(chat.images) do
+    images[#images + 1] = { data = image.data, mimeType = image.mime }
+  end
+
   -- The prompt is NOT echoed locally. It comes back on the timeline as a
   -- user_message, and rendering it here as well would print it twice -- while
   -- a prompt typed in the Paseo app would appear only once. The timeline is
   -- the single source of truth for what was said, whoever said it.
   vim.api.nvim_buf_set_lines(chat.composer, 0, -1, false, { "" })
   chat.pending = {}
+  chat.images = {}
   chat.streaming = true
   set_winbar(chat)
 
-  bridge.request("agent.send", { agentId = chat.agent_id, prompt = prompt }, function(err)
+  bridge.request("agent.send", {
+    agentId = chat.agent_id,
+    prompt = prompt,
+    -- Absent rather than empty: an empty list is still a list on the wire, and
+    -- the daemon should see a plain text message as a plain text message.
+    images = #images > 0 and images or nil,
+  }, function(err)
     if err then
       chat.streaming = false
       vim.schedule(function()
@@ -157,6 +174,61 @@ local function send(chat)
       end)
     end
   end)
+end
+
+-- ------------------------------------------------------------------- images
+
+---Put an image in the composer.
+---
+---What lands in the BUFFER is a placeholder -- `[Image #1]` -- and not the
+---bytes. The prompt stays something you can read and edit, you can see how
+---many you attached, and the number is how a sentence refers to one of them:
+---"why is the second panel empty" needs the images to be numbered.
+---@param chat paseo.Chat
+---@param image paseo.Image
+local function attach_image(chat, image)
+  chat.images[#chat.images + 1] = image
+  local placeholder = ("[Image #%d]"):format(#chat.images)
+
+  -- At the cursor when the composer is where you are, appended when it is not
+  -- -- `:Paseo image` from a code buffer should not need the chat focused.
+  local win = chat.win_composer
+  if win and vim.api.nvim_win_is_valid(win) and vim.api.nvim_get_current_win() == win then
+    local row, col = unpack(vim.api.nvim_win_get_cursor(win))
+    vim.api.nvim_buf_set_text(chat.composer, row - 1, col, row - 1, col, { placeholder })
+    pcall(vim.api.nvim_win_set_cursor, win, { row, col + #placeholder })
+  else
+    local lines = vim.api.nvim_buf_get_lines(chat.composer, 0, -1, false)
+    local tail = lines[#lines] or ""
+    lines[#lines] = tail == "" and placeholder or (tail .. " " .. placeholder)
+    vim.api.nvim_buf_set_lines(chat.composer, 0, -1, false, lines)
+  end
+
+  vim.notify(
+    ("paseo: %s attached (%s)"):format(placeholder, require("paseo.image").describe(image)),
+    vim.log.levels.INFO
+  )
+end
+
+---The image, or nil and a word about why not.
+---
+---Reading is separate from attaching because |M.paste_image| has to read
+---BEFORE it opens a chat: a clipboard with no image in it should not leave a
+---window behind as the side effect of finding that out.
+---@param path? string  A file; the clipboard when absent.
+---@return paseo.Image|nil
+local function read_image(path)
+  local source = require "paseo.image"
+  local image, err
+  if path then
+    image, err = source.from_file(path)
+  else
+    image, err = source.from_clipboard()
+  end
+  if not image then
+    vim.notify("paseo: " .. (err or "no image"), vim.log.levels.WARN)
+  end
+  return image
 end
 
 -- ------------------------------------------------------------------- layout
@@ -201,6 +273,19 @@ local function make_buffers(chat)
     vim.keymap.set("n", "<C-s>", function()
       send(chat)
     end, vim.tbl_extend("force", opts, { desc = "paseo: send" }))
+    -- <C-v> is what "paste" means to anyone who has ever used a GUI, and an
+    -- image on the clipboard is INVISIBLE to Neovim's registers, so the
+    -- ordinary paste cannot reach it. When there is no image the key does its
+    -- usual job -- literal insert, blockwise visual -- rather than eating the
+    -- keystroke.
+    vim.keymap.set({ "n", "i" }, "<C-v>", function()
+      local image = read_image()
+      if image then
+        attach_image(chat, image)
+      else
+        vim.api.nvim_feedkeys(vim.keycode "<C-v>", "n", false)
+      end
+    end, vim.tbl_extend("force", opts, { desc = "paseo: paste image" }))
     vim.keymap.set("n", "q", function()
       M.close()
     end, vim.tbl_extend("force", opts, { desc = "paseo: close chat" }))
@@ -249,7 +334,7 @@ local function layout(chat)
   } do
     vim.wo[chat.win_composer][option] = value
   end
-  vim.wo[chat.win_composer].winbar = "  ↵ send · q close"
+  vim.wo[chat.win_composer].winbar = "  ↵ send · ^V image · q close"
 
   set_winbar(chat)
   vim.api.nvim_set_current_win(from)
@@ -359,8 +444,14 @@ function M.open(opts, callback)
   local key = opts.agent_id or root
   local chat = chats[key]
   if not chat then
-    chat =
-      { root = root, agent_id = opts.agent_id, title = opts.title, streaming = false, pending = {} }
+    chat = {
+      root = root,
+      agent_id = opts.agent_id,
+      title = opts.title,
+      streaming = false,
+      pending = {},
+      images = {},
+    }
     chats[key] = chat
   end
   current = chat
@@ -464,6 +555,27 @@ function M.attach(ref_text, opts)
       end
     end)
   end)
+end
+
+---Paste an image into the composer: the clipboard, or `opts.path`.
+---@param opts? { path?: string, root?: string }
+function M.paste_image(opts)
+  opts = opts or {}
+
+  local image = read_image(opts.path)
+  if not image then
+    return false
+  end
+
+  M.open({ root = opts.root, focus = false }, function(chat)
+    if not chat then
+      return
+    end
+    vim.schedule(function()
+      attach_image(chat, image)
+    end)
+  end)
+  return true
 end
 
 ---Send a prompt without opening the composer for editing.
