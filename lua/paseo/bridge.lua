@@ -16,6 +16,8 @@ local M = {}
 ---@field listeners table<string, fun(payload: table)[]>
 ---@field buffer string
 ---@field ready boolean
+---@field starting boolean a spawn is in flight; `handle` is not set yet
+---@field waiting fun(err: string|nil)[] callers queued behind that spawn
 local state = {
   handle = nil,
   next_id = 0,
@@ -23,7 +25,30 @@ local state = {
   listeners = {},
   buffer = "",
   ready = false,
+  starting = false,
+  waiting = {},
 }
+
+---Resolve everyone who queued behind a boot, exactly once.
+---
+---`state.handle` is nil for the WHOLE of an autostart -- daemon.start polls
+---every 400ms for up to 20 seconds -- and the old code guarded only on
+---`state.handle`. Every ensure() in that window saw "not running" and spawned
+---its own sidecar; the last assignment to state.handle won and the rest were
+---orphaned with their stdin still open, so nothing ever told them to exit.
+---That is how one leak per session became sixteen.
+---@param err string|nil
+local function settle(err)
+  if not state.starting then
+    return
+  end
+  state.starting = false
+  local waiting = state.waiting
+  state.waiting = {}
+  for _, fn in ipairs(waiting) do
+    pcall(fn, err)
+  end
+end
 
 ---Where the sidecar script lives.
 ---
@@ -192,6 +217,9 @@ local function spawn(endpoint, callback)
     -- a dead pipe.
     vim.schedule(function()
       state.handle, state.ready, state.buffer = nil, false, ""
+      -- A sidecar that dies DURING its own boot must not leave `starting` set:
+      -- every later ensure() would queue behind a spawn that is already over.
+      settle "sidecar exited"
       for id, pending in pairs(state.pending) do
         state.pending[id] = nil
         pcall(pending, "sidecar exited", nil)
@@ -201,6 +229,19 @@ local function spawn(endpoint, callback)
 
   if not ok then
     return callback("could not start the sidecar: " .. tostring(handle))
+  end
+
+  -- Belt and braces for the guard in M.start. Overwriting a live handle is
+  -- what orphaned the sidecars in the first place, so if one is somehow
+  -- already here, the NEWCOMER is the one that goes.
+  if state.handle then
+    pcall(function()
+      handle:write(nil)
+    end)
+    pcall(function()
+      handle:kill(15)
+    end)
+    return callback(nil)
   end
   state.handle = handle
 
@@ -218,17 +259,29 @@ end
 function M.start(callback)
   callback = callback or function() end
 
+  -- BEFORE the handle check, not after: `spawn` sets state.handle and only
+  -- then sends `connect`, so there is a window where the sidecar exists and
+  -- has not reached the daemon. Callers queue through that window rather than
+  -- being told everything is fine.
+  if state.starting then
+    table.insert(state.waiting, callback)
+    return
+  end
+
   if state.handle then
     return callback(nil)
   end
 
+  state.starting = true
+  state.waiting = { callback }
+
   local endpoint = select(1, daemon.resolve())
   if endpoint then
-    return spawn(endpoint, callback)
+    return spawn(endpoint, settle)
   end
 
   if config.get().paseo.autostart == false then
-    return callback "no Paseo daemon answered; see :checkhealth paseo"
+    return settle "no Paseo daemon answered; see :checkhealth paseo"
   end
 
   -- Nothing answered, so start one. This is why the plugin can be the only
@@ -237,10 +290,10 @@ function M.start(callback)
   vim.notify("paseo: no daemon answered — starting one…", vim.log.levels.INFO)
   daemon.start({}, function(started, err)
     if not started then
-      return callback(err or "could not start the daemon")
+      return settle(err or "could not start the daemon")
     end
     vim.notify("paseo: daemon up", vim.log.levels.INFO)
-    spawn(started, callback)
+    spawn(started, settle)
   end)
 end
 
@@ -280,16 +333,57 @@ function M.ensure(fn)
   M.start(fn)
 end
 
----Stop the sidecar.
-function M.stop()
-  if not state.handle then
+---Stop the sidecar, synchronously enough for VimLeavePre.
+---
+---The old version asked for a close and killed the process from the REPLY
+---callback. It is wired to VimLeavePre (lua/paseo/init.lua), which does not
+---come back: Neovim exits before any round trip completes, so the kill was
+---never reached and every session leaked a sidecar. Sixteen of them were found
+---at 90% of a core each, one per editor that had been closed that day.
+---
+---So: ask nicely, wait a LITTLE, then stop asking. Closing stdin is the part
+---that matters -- it is the EOF the sidecar exits on -- and it happens whether
+---or not the reply arrived.
+---@param timeout? integer ms to wait for the close reply before insisting (default 200)
+function M.stop(timeout)
+  local handle = state.handle
+  if not handle then
     return
   end
+
+  local replied = false
   M.request("close", {}, function()
-    if state.handle then
-      state.handle:kill(15)
-    end
+    replied = true
   end)
+
+  -- Nothing may write to or respawn onto this handle while it goes down.
+  state.handle, state.ready = nil, false
+
+  -- NOT fast_only: on_stdout hands its lines to the main loop with
+  -- vim.schedule, and a fast-only wait never runs them -- so the reply could
+  -- not be seen even when it is already sitting in the pipe.
+  vim.wait(timeout or 200, function()
+    return replied
+  end, 10)
+
+  pcall(function()
+    handle:write(nil)
+  end)
+  pcall(function()
+    handle:kill(15)
+  end)
+  -- SystemObj:wait sends SIGKILL itself when the timeout expires, so this is
+  -- the last resort and needs no explicit kill(9).
+  pcall(function()
+    handle:wait(500)
+  end)
+
+  state.buffer = ""
+  settle "sidecar stopped"
+  for id, pending in pairs(state.pending) do
+    state.pending[id] = nil
+    pcall(pending, "sidecar stopped", nil)
+  end
 end
 
 return M
