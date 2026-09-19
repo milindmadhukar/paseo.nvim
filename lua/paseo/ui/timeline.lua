@@ -9,6 +9,7 @@
 --- single place an `AgentTimelineItem` is flattened -- so live events and
 --- history render through this file identically, by construction.
 
+local plan = require "paseo.ui.plan"
 local questions = require "paseo.ui.questions"
 local render = require "paseo.ui.render"
 
@@ -297,9 +298,13 @@ function M.card(item, opts)
   -- even when the dialog was dismissed.
   if kind == "permission" then
     local request = item.request or {}
+    -- A plan is not a danger, here for the same reason it is not one in the
+    -- dialog: the agent is proposing, not reaching for the filesystem.
+    local planned = plan.parse(request)
+    local group = planned and "PaseoQuestion" or "PaseoDanger"
     local header = {
-      { "", "PaseoDanger" },
-      { " " .. (request.title or request.name or "permission"), "PaseoDanger" },
+      { "", group },
+      { " " .. (planned and "plan" or (request.title or request.name or "permission")), group },
     }
     if item.resolution then
       header[#header + 1] = { "  " .. item.resolution, "PaseoDim" }
@@ -315,11 +320,18 @@ function M.card(item, opts)
       for _, line in ipairs(questions.render(asked)) do
         vim.list_extend(body, render.wrap(line, width - 4, "PaseoDim"))
       end
+    elseif planned then
+      -- The plan lives in `input.plan` and the request has no `detail` at all,
+      -- so `description` -- a summary line, at best -- was the whole record of
+      -- what was approved.
+      for _, line in ipairs(plan.render(request)) do
+        vim.list_extend(body, render.wrap(line, width - 4, "PaseoDim"))
+      end
     elseif request.description and request.description ~= "" then
       vim.list_extend(body, render.wrap(request.description, width - 4, "PaseoDim"))
     end
     vim.list_extend(body, detail_body(request.detail, width))
-    return { lines = render.card(header, body, { width = width, hl = "PaseoDanger" }), collapsible = false }
+    return { lines = render.card(header, body, { width = width, hl = group }), collapsible = false }
   end
 
   return { lines = {}, collapsible = false }

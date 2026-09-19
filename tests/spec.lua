@@ -2063,6 +2063,297 @@ local function test_provider_setup()
   end
 end
 
+-- --------------------------------------------------------------------- plan
+--
+-- Approving a plan is TWO decisions -- build it, and with how much rope -- and
+-- the dialog only ever asked the first. The daemon answered the second itself,
+-- always `acceptEdits`, and there was no way to say otherwise from here.
+--
+-- The response cannot carry a mode (`AgentPermissionResponse` has no field for
+-- one), so every Implement button carries the daemon's OWN action id and
+-- differs only in the `mode` the sidecar sets afterwards. That is what these
+-- assert: one approval, several answers to "and then what".
+
+local function test_plan()
+  local plan = require "paseo.ui.plan"
+  local render = require "paseo.ui.render"
+  local timeline = require "paseo.ui.timeline"
+
+  -- What the daemon actually sends: kind "plan", NO detail, and the markdown
+  -- in `input.plan`.
+  local request = {
+    id = "req-1",
+    kind = "plan",
+    name = "ExitPlanMode",
+    title = "Ready to code?",
+    description = "Rip out the old permission dialog",
+    input = { plan = "## Step one\n\nRip out the old thing.\n\n## Step two\n\nPut a new one in." },
+    actions = {
+      { id = "reject", label = "Reject", behavior = "deny", variant = "danger", intent = "dismiss" },
+      { id = "implement", label = "Implement", behavior = "allow", variant = "primary", intent = "implement" },
+    },
+  }
+
+  local claude = {
+    { id = "plan", label = "Plan Mode" },
+    { id = "default", label = "Always Ask" },
+    { id = "acceptEdits", label = "Accept File Edits" },
+    { id = "auto", label = "Auto mode" },
+    { id = "bypassPermissions", label = "Bypass" },
+  }
+
+  truthy("plan: a plan request is recognised by kind", plan.parse(request))
+  -- By `kind`, not by `name`: mapping ExitPlanMode onto it is the daemon's
+  -- job, already done, for every provider rather than just for Claude.
+  truthy(
+    "plan: an ordinary tool permission is not one",
+    not plan.parse { kind = "tool", name = "Write", input = {} }
+  )
+  truthy("plan: and neither is a question", not plan.parse { kind = "question" })
+
+  -- The plan text. `detail` is nil for these, so a dialog rendering `detail`
+  -- showed an empty box and asked you to approve it.
+  truthy("plan: the text comes from input.plan", plan.text(request):find("Step one", 1, true) ~= nil)
+  eq(
+    "plan: metadata.planText is the fallback",
+    plan.text { kind = "plan", metadata = { planText = "from metadata" } },
+    "from metadata"
+  )
+  eq(
+    "plan: then description",
+    plan.text { kind = "plan", description = "from description" },
+    "from description"
+  )
+  eq("plan: and nothing at all is an empty string, not nil", plan.text { kind = "plan" }, "")
+
+  local actions = plan.actions(request, claude)
+  eq("plan: claude gets three Implement buttons and a Reject", #actions, 4)
+  eq("plan: least rope first, so `y` is the cautious key", {
+    actions[1].mode,
+    actions[2].mode,
+    actions[3].mode,
+  }, { "acceptEdits", "auto", "default" })
+  eq("plan: and the last one denies", actions[4].behavior, "deny")
+
+  -- THE POINT. The daemon keys its own behaviour off `selectedActionId` and
+  -- rejects an id it does not know, so all three Implements send its id and
+  -- differ only by the mode applied afterwards.
+  eq("plan: every Implement carries the daemon's own action id", {
+    actions[1].id,
+    actions[2].id,
+    actions[3].id,
+  }, { "implement", "implement", "implement" })
+
+  -- Modes are per PROVIDER. codex has auto/auto-review/full-access and no
+  -- `acceptEdits`, and offering it a button that cannot work would be worse
+  -- than offering nothing.
+  local codex = plan.actions(request, { { id = "auto", label = "Auto" }, { id = "full-access" } })
+  eq("plan: a mode the provider does not have is dropped", #codex, 2)
+  eq("plan: leaving the one that does exist", codex[1].mode, "auto")
+
+  -- No modes reported means nothing honest to offer: the request's own
+  -- Implement/Reject stands rather than a guess.
+  truthy("plan: no reported modes falls back to the request's buttons", plan.actions(request, {}) == nil)
+  truthy(
+    "plan: and so does a request with no allow action to build on",
+    plan.actions({ kind = "plan", actions = { { id = "reject", behavior = "deny" } } }, claude) == nil
+  )
+
+  -- The daemon offers this one only when the session was in bypassPermissions
+  -- before it entered plan mode, and restores that mode SERVER-side -- so it
+  -- must come through untouched, with no mode of ours attached.
+  local resumable = vim.deepcopy(request)
+  resumable.actions[#resumable.actions + 1] = {
+    id = "implement_resume",
+    label = "Implement with Bypass",
+    behavior = "allow",
+    intent = "implement_resume",
+  }
+  local resumed = plan.actions(resumable, claude)
+  eq("plan: the daemon's resume button survives", #resumed, 5)
+  eq("plan: with its own id", resumed[4].id, "implement_resume")
+  truthy("plan: and no mode of ours attached to it", resumed[4].mode == nil)
+
+  -- The badge otherwise reads "allowed", which for a plan is true and useless:
+  -- the whole point of the four buttons is that they differ.
+  eq("plan: the badge says which mode you landed in", plan.label(actions[2]), "implemented, auto")
+  eq("plan: and a reject says you are still planning", plan.label(actions[4]), "rejected, still planning")
+
+  -- Long plans are capped, and say so rather than just stopping.
+  local long = { kind = "plan", input = { plan = string.rep("a line\n", 40) } }
+  local capped = plan.render(long, 5)
+  eq("plan: a long plan is capped", #capped, 6)
+  truthy("plan: and admits what it cut", capped[6]:find("35 more lines", 1, true) ~= nil, capped[6])
+
+  -- The inline card showed `description` -- a summary line at best -- so the
+  -- record of what was approved did not contain the plan.
+  local card = timeline.card({ kind = "permission", request = request }, { width = 60 })
+  local text = {}
+  for _, line in ipairs(card.lines) do
+    text[#text + 1] = render.concat(line)
+  end
+  text = table.concat(text, "\n")
+  truthy("plan: the inline card shows the plan itself", text:find("Step two", 1, true) ~= nil, text)
+end
+
+-- ----------------------------------------------------------------- settings
+--
+-- Mode, model, thinking level and usage are NOT on the timeline: the daemon
+-- folds each into the agent snapshot and suppresses dispatch, so the sidecar's
+-- `mode_changed` case had never once fired and a mode set in the Paseo app
+-- never reached the header. These cover the Lua half -- what the plugin does
+-- with a settings payload once one finally arrives.
+
+local function test_settings()
+  local chat_mod = require "paseo.ui.chat"
+  local float = require "paseo.ui.float"
+  local render = require "paseo.ui.render"
+  local sidebar = require "paseo.ui.sidebar"
+
+  local modes = {
+    { id = "plan", label = "Plan Mode" },
+    { id = "default", label = "Always Ask" },
+    { id = "acceptEdits", label = "Accept File Edits" },
+    { id = "auto", label = "Auto mode" },
+  }
+  local chat = {
+    root = assert(vim.uv.cwd()),
+    agent_id = "spec-settings",
+    mode = "Always Ask",
+    config_snapshot = {
+      modeId = "default",
+      availableModes = modes,
+      thinkingOptions = {},
+      models = {},
+      features = {},
+    },
+  }
+
+  -- Rebuilding the dashboard is a full volt regeneration, so count the calls.
+  local rebuilds = 0
+  local real_rebuild = float.rebuild
+  float.rebuild = function()
+    rebuilds = rebuilds + 1
+  end
+
+  chat_mod.apply_settings(chat, { agentId = "spec-settings", modeId = "auto", availableModes = modes })
+
+  -- THE BUG: this stored the raw id, while `agent.config` stored the label, so
+  -- one session read "Plan Mode" or "plan" in the header depending on which
+  -- had spoken last.
+  eq("settings: a pushed mode is stored as its label", chat.mode, "Auto mode")
+  truthy(
+    "settings: and the header says so",
+    render.concat(sidebar.header(chat)):find("Auto mode", 1, true) ~= nil,
+    render.concat(sidebar.header(chat))
+  )
+  -- The Session panel draws its `●` from the snapshot, which nothing patched:
+  -- the header could report a mode the panel below it still marked elsewhere.
+  eq("settings: the panel's snapshot is patched too", chat.config_snapshot.modeId, "auto")
+  eq("settings: a real change redraws the panel", rebuilds, 1)
+
+  -- This payload arrives on every usage tick -- seven times in one short turn,
+  -- measured against a live daemon -- and the mode is in all of them. A panel
+  -- rebuild behind each would be a regeneration per token count.
+  for used = 1000, 2000, 1000 do
+    chat_mod.apply_settings(chat, {
+      agentId = "spec-settings",
+      modeId = "auto",
+      availableModes = modes,
+      usage = { contextWindowUsedTokens = used, contextWindowMaxTokens = 200000 },
+    })
+  end
+  eq("settings: an unchanged mode does not redraw it again", rebuilds, 1)
+  eq("settings: but the usage still lands", chat.usage.contextWindowUsedTokens, 2000)
+
+  -- Features are compared by VALUE, not by the table they arrived in.
+  chat_mod.apply_settings(chat, {
+    agentId = "spec-settings",
+    features = { { id = "fast_mode", value = true } },
+  })
+  eq("settings: a changed feature redraws the panel", rebuilds, 2)
+  chat_mod.apply_settings(chat, {
+    agentId = "spec-settings",
+    features = { { id = "fast_mode", value = true } },
+  })
+  eq("settings: the same feature again does not", rebuilds, 2)
+
+  -- A mode the provider did not report is still better shown than dropped.
+  chat_mod.apply_settings(chat, { agentId = "spec-settings", modeId = "invented", availableModes = modes })
+  eq("settings: an unknown id falls back to itself", chat.mode, "invented")
+
+  float.rebuild = real_rebuild
+end
+
+-- ------------------------------------------------------------------- follow
+--
+-- Auto-scroll existed and stopped working on the first block taller than three
+-- lines, which is every tool card. The old test was `cursor >= line_count - 3`
+-- on a window that is never focused, so the cursor was only ever where the
+-- previous scroll left it: once a block outgrew the gap, it could not catch up
+-- and the lock was gone for the rest of the session.
+
+local function test_follow()
+  local transcript = require "paseo.ui.transcript"
+
+  local buf = vim.api.nvim_create_buf(false, true)
+  local win = vim.api.nvim_open_win(buf, false, {
+    relative = "editor",
+    row = 0,
+    col = 0,
+    width = 60,
+    height = 10,
+    style = "minimal",
+  })
+  vim.wo[win].scrolloff = 0
+
+  local chat = { conversation = buf, win_conversation = win }
+  transcript.reset(chat)
+
+  -- Twelve lines, which is both realistic for a tool card and comfortably more
+  -- than the three the old heuristic allowed.
+  local lines = {}
+  for i = 1, 12 do
+    lines[i] = "line " .. i
+  end
+  local block = table.concat(lines, "\n")
+
+  local function showing_last()
+    return vim.fn.line("w$", win) >= vim.api.nvim_buf_line_count(buf)
+  end
+
+  transcript.upsert(chat, { kind = "text", text = block })
+  truthy("follow: the first block scrolls into view", showing_last())
+  -- The old code failed HERE and never recovered.
+  transcript.upsert(chat, { kind = "text", text = block })
+  truthy("follow: and so does a second taller than three lines", showing_last())
+  for _ = 1, 3 do
+    transcript.upsert(chat, { kind = "text", text = block })
+  end
+  truthy("follow: still following five blocks later", showing_last())
+
+  -- Streaming is the case that matters most: `stream` re-renders the open text
+  -- block on every chunk rather than appending, so following has to survive a
+  -- block that grows under it.
+  for i = 1, 10 do
+    transcript.stream(chat, ("chunk %d\n"):format(i))
+  end
+  truthy("follow: a streaming reply keeps the tail in view", showing_last())
+
+  -- Scrolling back to reread something must not be yanked away.
+  vim.api.nvim_win_set_cursor(win, { 1, 0 })
+  transcript.upsert(chat, { kind = "text", text = block })
+  truthy("follow: scrolled up, it stays where you put it", not showing_last())
+
+  -- And returning to the bottom resumes it, with no flag to reset.
+  vim.api.nvim_win_set_cursor(win, { vim.api.nvim_buf_line_count(buf), 0 })
+  transcript.upsert(chat, { kind = "text", text = block })
+  truthy("follow: and back at the bottom it picks up again", showing_last())
+
+  vim.api.nvim_win_close(win, true)
+  vim.api.nvim_buf_delete(buf, { force = true })
+end
+
 function M.run()
   local suites = {
     { "repos", test_repos },
@@ -2081,6 +2372,9 @@ function M.run()
     { "ui", test_ui },
     { "provider", test_provider_setup },
     { "questions", test_questions },
+    { "plan", test_plan },
+    { "follow", test_follow },
+    { "settings", test_settings },
     { "strategy", test_strategy },
   }
 

@@ -37,6 +37,96 @@ export function creationConfig(req: Request, provider: string) {
   };
 }
 
+/** One agent, as the directory column draws it. */
+export function describeAgent(agent: any): Record<string, unknown> {
+  return {
+    id: agent.id,
+    title: agent.title ?? null,
+    status: agent.status ?? null,
+    cwd: agent.cwd ?? null,
+    workspaceId: agent.workspaceId ?? null,
+    provider: agent.runtimeInfo?.provider ?? null,
+    requiresAttention: (agent.pendingPermissions?.length ?? 0) > 0,
+  };
+}
+
+/**
+ * Follow the agent directory, once.
+ *
+ * THIS IS ALSO THE DEMAND CHANNEL, which is not obvious and cost an afternoon.
+ * `agents.subscribe(handler)` and `agentHandle.subscribe(handler)` register
+ * LOCAL listeners over a stream the daemon is not sending yet; it is the
+ * `list({ subscribe: {} })` below that asks for it. A handle listener with no
+ * directory subscription behind it is silent -- measured, not assumed: a mode
+ * change produced nothing until this call had been made, and both listeners
+ * fired on the very next one.
+ *
+ * So `timeline.subscribe` calls this too, for the settings it could not
+ * otherwise see. It lives here because this module owns `ctx.directory`.
+ */
+export async function followDirectory(ctx: BridgeConnection): Promise<void> {
+  if (ctx.directory) return;
+
+  const api = ctx.connected();
+
+  const applyUpdate = guarded("agents", (message: any) => {
+    // Both shapes reach here: the wire message, and the bare update the local
+    // listener is handed.
+    const payload = message?.type === "agent_update" ? message.payload : message;
+    if (!payload?.kind) return;
+    if (payload.kind === "upsert") {
+      emit("agents", { kind: "upsert", agent: describeAgent(payload.agent) });
+    } else if (payload.kind === "remove") {
+      emit("agents", { kind: "remove", id: payload.agentId });
+    }
+  });
+
+  // TWO SDK GENERATIONS, and the installed one is the older.
+  //
+  // 0.9+ returns an owned `subscription` from list({ subscribe: {} }) whose
+  // snapshot callback fires before updates. 0.8 has no such object:
+  // `agents.subscribe(handler)` registers a LOCAL listener and the list call
+  // is what asks the daemon to start streaming. Writing only the documented
+  // 0.9 form failed at runtime with "undefined is not an object (evaluating
+  // 'result.subscription.subscribe')", so both are handled and the difference
+  // is confined here.
+  let localUnsubscribe: (() => void) | null = null;
+  if (typeof (api.agents as any).subscribe === "function") {
+    localUnsubscribe = (api.agents as any).subscribe(applyUpdate);
+  }
+
+  const result: any = await api.agents.list({
+    filter: { includeArchived: false },
+    subscribe: {},
+  });
+
+  if (result?.subscription?.subscribe) {
+    // 0.9+: the owned subscription supersedes the local listener, and delivers
+    // its own snapshot first.
+    localUnsubscribe?.();
+    localUnsubscribe = null;
+    result.subscription.subscribe({
+      snapshot: guarded("agents snapshot", ({ entries }: any) =>
+        emit("agents", {
+          kind: "snapshot",
+          entries: entries.map((e: any) => describeAgent(e.agent)),
+        }),
+      ),
+      update: applyUpdate,
+      error: (error: unknown) =>
+        emit("agents", { kind: "error", error: String(error) }),
+    });
+  } else {
+    // 0.8: the list result IS the snapshot.
+    emit("agents", {
+      kind: "snapshot",
+      entries: (result.entries ?? []).map((e: any) => describeAgent(e.agent)),
+    });
+  }
+
+  ctx.directory = { subscription: result?.subscription, localUnsubscribe };
+}
+
 export function agentOps(ctx: BridgeConnection): Ops {
   const connected = () => ctx.connected();
   async function reviewAgent(cwd: string, provider?: string | null) {
@@ -163,88 +253,32 @@ export function agentOps(ctx: BridgeConnection): Ops {
     },
 
     async "agents.subscribe"() {
-      if (ctx.directory) return { subscribed: true, already: true };
-
-      const api = connected();
-      const describe = (agent: any) => ({
-        id: agent.id,
-        title: agent.title ?? null,
-        status: agent.status ?? null,
-        cwd: agent.cwd ?? null,
-        workspaceId: agent.workspaceId ?? null,
-        provider: agent.runtimeInfo?.provider ?? null,
-        requiresAttention: (agent.pendingPermissions?.length ?? 0) > 0,
-      });
-
-      const applyUpdate = guarded("agents", (message: any) => {
-        // Both shapes reach here: the wire message, and the bare update the
-        // local listener is handed.
-        const payload =
-          message?.type === "agent_update" ? message.payload : message;
-        if (!payload?.kind) return;
-        if (payload.kind === "upsert") {
-          emit("agents", { kind: "upsert", agent: describe(payload.agent) });
-          // Feature values have no timeline event. The daemon publishes an
-          // agent-directory upsert when they change, including changes made in
-          // the Paseo app, so an open chat can refresh agent.config.
-          emit("agent_updated", { agentId: payload.agent.id });
-        } else if (payload.kind === "remove") {
-          emit("agents", { kind: "remove", id: payload.agentId });
-        }
-      });
-
-      // TWO SDK GENERATIONS, and the installed one is the older.
-      //
-      // 0.9+ returns an owned `subscription` from list({ subscribe: {} }) whose
-      // snapshot callback fires before updates. 0.8 has no such object:
-      // `agents.subscribe(handler)` registers a LOCAL listener and the list call
-      // is what asks the daemon to start streaming. Writing only the documented
-      // 0.9 form failed at runtime with "undefined is not an object
-      // (evaluating 'result.subscription.subscribe')", so both are handled and
-      // the difference is confined here.
-      let localUnsubscribe: (() => void) | null = null;
-      if (typeof (api.agents as any).subscribe === "function") {
-        localUnsubscribe = (api.agents as any).subscribe(applyUpdate);
-      }
-
-      const result: any = await api.agents.list({
-        filter: { includeArchived: false },
-        subscribe: {},
-      });
-
-      if (result?.subscription?.subscribe) {
-        // 0.9+: the owned subscription supersedes the local listener, and
-        // delivers its own snapshot first.
-        localUnsubscribe?.();
-        localUnsubscribe = null;
-        result.subscription.subscribe({
-          snapshot: guarded("agents snapshot", ({ entries }: any) =>
-            emit("agents", {
-              kind: "snapshot",
-              entries: entries.map((e: any) => describe(e.agent)),
-            }),
-          ),
-          update: applyUpdate,
-          error: (error: unknown) =>
-            emit("agents", { kind: "error", error: String(error) }),
+      // The directory may already be followed -- `timeline.subscribe` needs the
+      // same stream for its settings. A second subscriber still needs its
+      // SNAPSHOT, though: `agents.lua` renders from one and applies updates on
+      // top, so returning a bare `already` left the picker's table empty for
+      // good.
+      const already = ctx.directory !== null;
+      await followDirectory(ctx);
+      if (already) {
+        const page: any = await connected().agents.list({
+          filter: { includeArchived: false },
         });
-      } else {
-        // 0.8: the list result IS the snapshot.
         emit("agents", {
           kind: "snapshot",
-          entries: (result.entries ?? []).map((e: any) => describe(e.agent)),
+          entries: (page.entries ?? []).map((e: any) => describeAgent(e.agent)),
         });
       }
-
-      ctx.directory = { subscription: result?.subscription, localUnsubscribe };
-      return {
-        subscribed: true,
-        subscriptionId: result?.subscriptionId ?? null,
-      };
+      return { subscribed: true, already };
     },
 
     async "agents.unsubscribe"() {
       if (!ctx.directory) return { unsubscribed: false };
+      // Not while a chat is open. This stream is also what carries mode, model
+      // and thinking level to `timeline.subscribe`, so releasing it here would
+      // silently freeze every open header at whatever it last said.
+      if (ctx.timelines.size > 0)
+        return { unsubscribed: false, heldBy: ctx.timelines.size };
       const held = ctx.directory;
       ctx.directory = null;
       held.localUnsubscribe?.();
@@ -293,9 +327,8 @@ export function agentOps(ctx: BridgeConnection): Ops {
     },
 
     async "agent.respondToPermission"(req) {
-      const agent = connected().agents.ref(
-        String(need(req.agentId, "agentId")),
-      );
+      const agentId = String(need(req.agentId, "agentId"));
+      const agent = connected().agents.ref(agentId);
       const requestId = String(need(req.requestId, "requestId"));
       const behavior = String(need(req.behavior, "behavior"));
       // A synthetic id is ours, not the provider's, and sending it back is
@@ -322,6 +355,18 @@ export function agentOps(ctx: BridgeConnection): Ops {
             };
 
       await agent.respondToPermission({ requestId, response });
+
+      if (behavior === "allow" && req.thenModeId) {
+        const notice = await ctx
+          .raw()
+          .setAgentMode(agentId, String(req.thenModeId));
+        return {
+          requestId,
+          behavior,
+          modeId: req.thenModeId,
+          notice: notice ?? null,
+        };
+      }
       return { requestId, behavior };
     },
 

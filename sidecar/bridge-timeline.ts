@@ -2,6 +2,8 @@ import { buildToolCallDisplayModel } from "@getpaseo/protocol/tool-call-display"
 import { need, guarded, emit, type Ops } from "./bridge-io.ts";
 import { BridgeConnection } from "./bridge-connection.ts";
 import { withFallbackActions } from "./bridge-normalize.ts";
+import { followDirectory } from "./bridge-agents.ts";
+import { describeSettings } from "./bridge-providers.ts";
 
 /**
  * ONE timeline item, flattened for Lua. Used by BOTH the live subscription and
@@ -156,37 +158,13 @@ export function timelineOps(ctx: BridgeConnection): Ops {
               });
               break;
 
-            case "usage_updated":
-              // Context-window fill and cost, pushed. The usage panel would
-              // otherwise have to poll agent.config, which is a round trip per
-              // refresh for a number that arrives here for free.
-              emit("usage", { agentId: id, usage: event.usage });
-              break;
-
-            // Mode, model and thinking level can all be changed from the Paseo app
-            // or another client. Without these the header shows whatever we last
-            // set ourselves and quietly lies -- the same divergence that dropping
-            // user_message used to cause.
-            case "mode_changed":
-              emit("settings", {
-                agentId: id,
-                modeId: event.currentModeId ?? null,
-                availableModes: event.availableModes ?? [],
-              });
-              break;
-            case "model_changed":
-              emit("settings", {
-                agentId: id,
-                model: event.runtimeInfo?.model ?? null,
-                provider: event.runtimeInfo?.provider ?? null,
-              });
-              break;
-            case "thinking_option_changed":
-              emit("settings", {
-                agentId: id,
-                thinkingOptionId: event.thinkingOptionId ?? null,
-              });
-              break;
+            // NOTE: there are no cases here for mode_changed, model_changed,
+            // thinking_option_changed or usage_updated. Those four are on the
+            // PROVIDER's event union and not on the wire -- the daemon folds
+            // each into the agent snapshot and sets `shouldDispatchEvent =
+            // false`, so they never reach a client at all. There were cases for
+            // all four, and not one of them had ever fired. Those settings come
+            // from the state subscription below.
 
             case "attention_required":
               emit("attention", { agentId: id, reason: event.reason });
@@ -210,9 +188,52 @@ export function timelineOps(ctx: BridgeConnection): Ops {
         }),
       );
 
-      ctx.timelines.set(id, unsubscribe as any);
+      // THE SECOND SUBSCRIPTION, and the one that carries the mode.
+      //
+      // Mode, model, thinking level, feature toggles and live context-window
+      // fill are not on the timeline. The daemon consumes those provider events
+      // into the agent snapshot and suppresses dispatch, so the only way to see
+      // a mode set in the Paseo app -- or set by the daemon itself when a plan
+      // is approved, or a Codex Plan toggle flipped from the app -- is to watch
+      // the snapshot. Without this the header shows whatever we last set from
+      // here and quietly lies.
+      //
+      // Guarded like `agents.subscribe` is: the installed SDK may be 0.8, where
+      // the handle has no `subscribe`.
+      //
+      // It needs DEMAND to say anything, and that comes from the directory
+      // subscription rather than from registering here -- see followDirectory.
+      // Without this call the listener below is silent and the header goes on
+      // lying, which is exactly the bug.
+      await followDirectory(ctx);
+      //
+      // DEDUPLICATED, because this fires on every snapshot change -- a status
+      // transition, an activeTurn tick -- and almost none of them touch a
+      // setting. Emitting regardless would put a line on stdout and a header
+      // repaint behind every one of them for the length of a turn.
+      let last = "";
+      const stateOff =
+        typeof (agent as any).subscribe === "function"
+          ? (agent as any).subscribe(
+              guarded("settings", (update: any) => {
+                const snap: any =
+                  update?.payload?.agent ??
+                  update?.agent ??
+                  (agent as any).current?.() ??
+                  null;
+                if (!snap) return;
+                const settings = describeSettings(snap);
+                const seen = JSON.stringify(settings);
+                if (seen === last) return;
+                last = seen;
+                emit("settings", { agentId: id, ...settings });
+              }),
+            )
+          : null;
+
+      ctx.timelines.set(id, { timeline: unsubscribe as any, state: stateOff });
       await (unsubscribe as any).ready;
-      return { subscribed: true };
+      return { subscribed: true, settings: stateOff !== null };
     },
 
     async "timeline.history"(req) {
@@ -273,10 +294,11 @@ export function timelineOps(ctx: BridgeConnection): Ops {
 
     async "timeline.unsubscribe"(req) {
       const id = String(need(req.agentId, "agentId"));
-      const unsubscribe = ctx.timelines.get(id);
-      if (!unsubscribe) return { unsubscribed: false };
+      const entry = ctx.timelines.get(id);
+      if (!entry) return { unsubscribed: false };
       ctx.timelines.delete(id);
-      await ((unsubscribe as any).release?.() ?? unsubscribe());
+      entry.state?.();
+      await (entry.timeline.release?.() ?? entry.timeline());
       return { unsubscribed: true };
     },
   };

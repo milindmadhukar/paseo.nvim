@@ -2,12 +2,22 @@ import { createPaseoApi } from "@getpaseo/client";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { need, type Ops } from "./bridge-io.ts";
 
+export type Unsubscribe = { release?: () => Promise<void> } & (() => void);
+export type TimelineEntry = {
+  timeline: Unsubscribe;
+  state?: (() => void) | null;
+};
+
 // The typed SDK and raw setters share one socket. Subscriptions belong here so
 // a stopped sidecar releases everything before the bounded process exit.
 export class BridgeConnection {
   daemon: DaemonClient | null = null;
   client: ReturnType<typeof createPaseoApi> | null = null;
-  timelines = new Map<string, any>();
+  // Two subscriptions per agent, not one. The timeline carries what the agent
+  // SAYS; the state subscription carries what it IS -- mode, model, thinking
+  // level, usage -- and those are not on the timeline at all. See
+  // `timeline.subscribe` in bridge-timeline.ts.
+  timelines = new Map<string, TimelineEntry>();
   directory: {
     subscription?: { release: () => Promise<void> };
     localUnsubscribe?: (() => void) | null;
@@ -44,9 +54,10 @@ export class BridgeConnection {
       held.localUnsubscribe?.();
       await held.subscription?.release().catch(() => {});
     }
-    for (const unsubscribe of this.timelines.values()) {
+    for (const entry of this.timelines.values()) {
       try {
-        await (unsubscribe.release?.() ?? unsubscribe());
+        entry.state?.();
+        await (entry.timeline.release?.() ?? entry.timeline());
       } catch {
         /* teardown is best-effort */
       }

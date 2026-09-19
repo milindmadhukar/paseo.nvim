@@ -2,6 +2,53 @@ import { need, type Ops } from "./bridge-io.ts";
 import { BridgeConnection } from "./bridge-connection.ts";
 import { withFallbackActions } from "./bridge-normalize.ts";
 
+/**
+ * Everything adjustable about a session, read out of ONE agent snapshot.
+ *
+ * Shared by `agent.config` (a pull) and the state subscription in
+ * `timeline.subscribe` (a push), because the Lua reads both into the same
+ * fields -- a pushed update that spelled `modeId` differently from the pulled
+ * one would show up as a header that changes shape depending on who last
+ * touched it.
+ *
+ * `currentModeId` is the snapshot's own field; `runtimeInfo.modeId` is the
+ * daemon's mirror of it and the fallback.
+ */
+export function describeSettings(snap: any): Record<string, unknown> {
+  const runtime = snap?.runtimeInfo ?? {};
+  return {
+    provider: runtime.provider ?? null,
+    model: runtime.model ?? null,
+    modeId: snap?.currentModeId ?? runtime.modeId ?? runtime.mode ?? null,
+    thinkingOptionId: runtime.thinkingOptionId ?? null,
+    availableModes: (snap?.availableModes ?? []).map((m: any) => ({
+      id: m.id,
+      label: m.label,
+      description: m.description ?? null,
+    })),
+    features: (snap?.features ?? []).map((f: any) => ({
+      id: f.id,
+      type: f.type,
+      label: f.label,
+      description: f.description ?? null,
+      value: f.value,
+    })),
+    // What the usage panel draws. `contextWindowUsedTokens` over
+    // `contextWindowMaxTokens` is the fill bar; the rest is the table.
+    usage: snap?.lastUsage
+      ? {
+          inputTokens: snap.lastUsage.inputTokens ?? null,
+          cachedInputTokens: snap.lastUsage.cachedInputTokens ?? null,
+          outputTokens: snap.lastUsage.outputTokens ?? null,
+          totalCostUsd: snap.lastUsage.totalCostUsd ?? null,
+          contextWindowMaxTokens: snap.lastUsage.contextWindowMaxTokens ?? null,
+          contextWindowUsedTokens:
+            snap.lastUsage.contextWindowUsedTokens ?? null,
+        }
+      : null,
+  };
+}
+
 export function providerOps(ctx: BridgeConnection): Ops {
   const connected = () => ctx.connected();
   const raw = () => ctx.raw();
@@ -88,38 +135,11 @@ export function providerOps(ctx: BridgeConnection): Ops {
       }
 
       return {
-        provider: runtime.provider ?? null,
-        model: runtime.model ?? null,
-        modeId: runtime.modeId ?? runtime.mode ?? null,
-        thinkingOptionId: runtime.thinkingOptionId ?? null,
-        availableModes: (snap?.availableModes ?? []).map((m: any) => ({
-          id: m.id,
-          label: m.label,
-          description: m.description ?? null,
-        })),
+        // The same reader the state subscription pushes through, so a pulled
+        // config and a pushed one cannot disagree about a field name.
+        ...describeSettings(snap),
         thinkingOptions,
         models,
-        features: (snap?.features ?? []).map((f: any) => ({
-          id: f.id,
-          type: f.type,
-          label: f.label,
-          description: f.description ?? null,
-          value: f.value,
-        })),
-        // What the usage panel draws. `contextWindowUsedTokens` over
-        // `contextWindowMaxTokens` is the fill bar; the rest is the table.
-        usage: snap?.lastUsage
-          ? {
-              inputTokens: snap.lastUsage.inputTokens ?? null,
-              cachedInputTokens: snap.lastUsage.cachedInputTokens ?? null,
-              outputTokens: snap.lastUsage.outputTokens ?? null,
-              totalCostUsd: snap.lastUsage.totalCostUsd ?? null,
-              contextWindowMaxTokens:
-                snap.lastUsage.contextWindowMaxTokens ?? null,
-              contextWindowUsedTokens:
-                snap.lastUsage.contextWindowUsedTokens ?? null,
-            }
-          : null,
         pendingPermissions: (snap?.pendingPermissions ?? []).map(
           withFallbackActions,
         ),

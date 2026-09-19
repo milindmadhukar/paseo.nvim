@@ -851,4 +851,42 @@ single-select one replaces and moves on. Several answers to one question are
 sent as `", "`-joined labels, quoting any label that contains the separator,
 because that is the one form the provider parses back.
 
+
+                                                   *paseo-permission-plan*
+When the agent has a plan ~
+
+A finished plan -- Claude's `ExitPlanMode`, and whatever a provider maps onto
+`kind == "plan"` -- arrives as a permission request like any other, and
+approving one is TWO decisions, not one:
+
+    BUILD IT?             yes, or keep planning.
+
+    WITH HOW MUCH ROPE?   the mode the session runs in from here. The daemon
+                          decides this itself if you do not: every approved
+                          plan lands in `acceptEdits`, whether or not that is
+                          what you wanted.
+
+So the dialog offers one Implement per mode you could land in, least rope
+first, and applies the mode after the approval. The list is filtered against
+what the provider actually reports, so codex -- which has no `acceptEdits` --
+is offered the modes it has rather than the ones Claude has.
+
+                                              *paseo-permission-plan-keys*
+    1         implement, and accept file edits
+    2         implement, in auto mode
+    3         implement, and keep asking about everything
+    y         implement -- the same as `1`, the most cautious of them
+    n         reject, and keep planning
+    N         reject, and stop the turn
+    <Esc>, q  later; the request stays pending, `gp` reopens it
+
+Paseo adds a fourth Implement when the session was in `bypassPermissions`
+before it entered plan mode; that one restores it, and is the provider's own
+button rather than one of these.
+
+The plan itself is shown in the dialog. It has to be: a plan request carries
+no tool `detail` at all -- the markdown travels in the tool input -- so there
+is nothing else on screen that says what you are agreeing to. The transcript
+records it too, so which plan you approved is still readable tomorrow.
+
 `vim:tw=78:ts=8:ft=help:norl:`
