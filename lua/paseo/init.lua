@@ -66,7 +66,10 @@ local function project(args)
   local registry = require "paseo.registry"
   local root = registry.project_root(args and args.root)
   if not root then
-    return nil, nil, "no .ws/workspace.toml here or above; run `:Paseo ws init` first"
+    return nil,
+      nil,
+      "no .ws/workspace.toml here or above — `:Paseo wcreate` needs none, and "
+        .. "writes one if this project turns out to want one"
   end
   local m, err = require("paseo.workspace.manifest").load(root)
   if not m then
@@ -86,7 +89,7 @@ local function split(text)
 end
 
 commands.ws = {
-  desc = "Workspaces: init | create <name> [repos] | rm <name> [force] | ls | status",
+  desc = "Manifest-level: init | create <name> [repos] | rm <name> [force] | ls | status",
   run = function(args)
     local sub = args[1] or "ls"
     local workspace = require "paseo.workspace"
@@ -149,6 +152,13 @@ commands.ws = {
 
     local m, root, err = project { root = nil }
     if not m then
+      -- `create` is the one subcommand that does not need a manifest: the
+      -- unified path writes one when the project wants one, and skips assembly
+      -- entirely when Paseo's own worktree isolation applies. Only a subcommand
+      -- that must READ the manifest -- rm, ls, status -- fails here.
+      if sub == "create" and args[2] and not args[3] then
+        return require("paseo.pickers.workspaces").named(args[2])
+      end
       return vim.notify("paseo: " .. err, vim.log.levels.ERROR)
     end
 
@@ -246,7 +256,7 @@ commands.workspaces = {
 }
 
 commands.wcreate = {
-  desc = "Create a workspace here",
+  desc = "Create a workspace here — assembled, worktree or plain, worked out for you",
   run = function()
     require("paseo.pickers.workspaces").create()
   end,

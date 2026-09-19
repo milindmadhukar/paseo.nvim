@@ -480,6 +480,23 @@ local function test_bridge()
       "bridge: no op takes its agent under the reserved key `id`",
       source:find 'need%(req%.id, "id"%)' == nil
     )
+
+    -- The regression: `agent.ensure` created agents with a bare `cwd`, so the
+    -- daemon provisioned a workspace for the directory it was handed. Inside a
+    -- Paseo-cut WORKTREE -- itself a git repository -- that meant a second
+    -- PROJECT named after the worktree directory, holding a duplicate
+    -- workspace over the same files. Opening a chat in a workspace this plugin
+    -- had just made was enough, and the app showed the work twice.
+    --
+    -- Agents go through a workspace handle. Both of them, forever.
+    truthy(
+      "bridge: no agent is created off the bare api, only through a workspace",
+      source:find("api.agents.create", 1, true) == nil
+    )
+    truthy(
+      "bridge: and the owning workspace is looked up before one is opened",
+      source:find("function workspaceFor", 1, true) ~= nil
+    )
   end
 
   -- The sending code moved from explain.lua into the chat window when the
@@ -1234,6 +1251,94 @@ local function test_ui()
   )
 end
 
+-- --------------------------------------------------------- create strategy
+
+--- One entry point, three shapes, decided from the directory.
+---
+--- The regression this exists to prevent: `wcreate` in a plain git repo used to
+--- fall through to `workspace.open` on the PRIMARY checkout, so two
+--- "workspaces" were two names for the same files -- no isolation at all, and
+--- nothing said so. The other half is ordering: an explicit manifest has to win
+--- over "this is a git repo", or a member repo of a multi-repo project gets
+--- isolated on its own and the siblings are left behind.
+local function test_strategy()
+  local workspaces = require "paseo.workspaces"
+  local manifest = require "paseo.workspace.manifest"
+
+  local solo = workspaces.strategy(root .. "/solo")
+  eq("strategy: a git repo gets a worktree Paseo cuts itself", solo.kind, "worktree")
+  eq("strategy: cut from what is CHECKED OUT, not origin/HEAD", solo.base, "main")
+  truthy(
+    "strategy: cut from the repo toplevel",
+    (solo.repo or ""):find "/solo$" ~= nil,
+    solo.repo
+  )
+
+  eq(
+    "strategy: a member repo with no manifest above it is just a repo",
+    workspaces.strategy(root .. "/multi/clm").kind,
+    "worktree"
+  )
+
+  local multi = workspaces.strategy(root .. "/multi")
+  eq("strategy: a non-git parent holding repos discovers a manifest", multi.kind, "discover")
+  eq(
+    "strategy: and carries what it discovered, so create need not walk twice",
+    multi.manifest and manifest.names(multi.manifest),
+    { "clm", "clm_api" }
+  )
+
+  eq(
+    "strategy: a directory that is neither gets a workspace on itself",
+    workspaces.strategy(root .. "/plain").kind,
+    "local"
+  )
+
+  eq("describe: a worktree names its base", workspaces.describe(solo), "isolated worktree off main")
+  eq(
+    "describe: an assembly counts its members",
+    workspaces.describe { kind = "assemble", root = "", members = 5 },
+    "5 worktree(s)"
+  )
+
+  -- Writing the manifest is a ONE-TIME event: the same directory answers
+  -- `assemble` afterwards, rather than being rediscovered on every create.
+  local project = vim.fn.tempname()
+  local repo = vim.fs.joinpath(project, "repo")
+  vim.fn.mkdir(repo, "p")
+  for _, args in ipairs {
+    { "init", "-q", "-b", "main", "." },
+    { "config", "user.email", "t@example.com" },
+    { "config", "user.name", "t" },
+  } do
+    vim.system(vim.list_extend({ "git", "-C", repo }, args)):wait()
+  end
+  local fd = assert(io.open(vim.fs.joinpath(repo, "f.txt"), "w"))
+  fd:write "x\n"
+  fd:close()
+  vim.system({ "git", "-C", repo, "add", "-A" }):wait()
+  vim.system({ "git", "-C", repo, "-c", "commit.gpgsign=false", "commit", "-qm", "init" }):wait()
+
+  local fresh = workspaces.strategy(project)
+  eq("strategy: a fresh multi-repo project discovers", fresh.kind, "discover")
+  truthy("strategy: the discovered manifest saves", manifest.save(project, fresh.manifest, {}))
+  eq("strategy: and is `assemble` from then on", workspaces.strategy(project).kind, "assemble")
+
+  -- The ordering that matters: an explicit manifest beats "this is a repo".
+  eq(
+    "strategy: a manifest wins from inside a member repo",
+    workspaces.strategy(repo).kind,
+    "assemble"
+  )
+  eq(
+    "strategy: and points at the project, not the member",
+    workspaces.strategy(repo).project,
+    project
+  )
+
+  vim.fn.delete(project, "rf")
+end
+
 function M.run()
   local suites = {
     { "repos", test_repos },
@@ -1250,6 +1355,7 @@ function M.run()
     { "workspace", test_workspace },
     { "ws init", test_ws_init },
     { "ui", test_ui },
+    { "strategy", test_strategy },
   }
 
   for _, suite in ipairs(suites) do

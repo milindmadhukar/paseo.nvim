@@ -23,6 +23,8 @@
  * corrupts the stream and Lua sees a parse error rather than a reply.
  */
 
+import { resolve } from "node:path";
+
 import { createPaseoApi } from "@getpaseo/client";
 // DaemonClient is not on the package root -- only the typed API is. It lives on
 // the `internal/` subpath, which is where the setters this needs live too.
@@ -208,6 +210,39 @@ function describeItem(item: any, cwd?: string): { kind: string; [key: string]: u
   }
 }
 
+/** Trailing slashes and `..` segments, so two spellings of one path compare equal. */
+function canonical(path: string): string {
+  return resolve(path).replace(/\/+$/, "") || "/";
+}
+
+/**
+ * The workspace handle covering `cwd` -- the EXISTING one wherever there is
+ * one.
+ *
+ * Agents must be created through a workspace handle rather than by cwd, or the
+ * daemon provisions a workspace for the directory it was handed. That is right
+ * for a directory Paseo has never seen and badly wrong for one it already
+ * owns: a Paseo-cut worktree gets registered a second time, as its own project,
+ * because the worktree directory is itself a git repository.
+ *
+ * `workspaces.open()` is the fallback and not the first move: it is only
+ * reached when nothing covers the directory, which is the case where
+ * registering something new is what was actually wanted.
+ */
+async function workspaceFor(cwd: string): Promise<any> {
+  const api = connected();
+  const want = canonical(cwd);
+
+  const page: any = await api.workspaces.list({ page: { limit: 200 } });
+  const owner = (page.entries ?? []).find((ws: any) => {
+    if (ws.archivingAt) return false;
+    const dir = ws.workspaceDirectory ?? ws.project?.checkout?.cwd ?? null;
+    return dir ? canonical(String(dir)) === want : false;
+  });
+
+  return owner ? api.workspaces.ref(owner.id) : await api.workspaces.open(cwd);
+}
+
 const ops: Record<string, (req: Request) => Promise<unknown>> = {
   async connect(req) {
     if (daemon) await daemon.close().catch(() => {});
@@ -281,6 +316,14 @@ const ops: Record<string, (req: Request) => Promise<unknown>> = {
    * Reuse matters more than it looks. Creating a fresh agent per question
    * throws away the context that makes the second question cheap, and leaves a
    * trail of one-shot sessions in the Paseo app.
+   *
+   * PLACED IN THE WORKSPACE THAT ALREADY OWNS THE DIRECTORY, never by bare cwd.
+   * `agents.create({ cwd })` on a directory the daemon has no workspace for
+   * provisions one -- and for a Paseo-owned WORKTREE that means a whole second
+   * PROJECT, named after the worktree directory, holding a duplicate workspace
+   * pointed at the same files as the real one. Opening a chat inside a
+   * worktree workspace this plugin had just created was enough to do it, and
+   * the app then showed the same work twice under two different projects.
    */
   async "agent.ensure"(req) {
     const api = connected();
@@ -307,9 +350,9 @@ const ops: Record<string, (req: Request) => Promise<unknown>> = {
       provider = `${entry.provider}/${model.id}`;
     }
 
-    const agent = await api.agents.create({
+    const workspace = await workspaceFor(cwd);
+    const agent = await workspace.agents.create({
       config: { provider },
-      cwd,
       title: req.title ? String(req.title) : "paseo.nvim review",
       // Namespaced, per the SDK's own guidance: several tools may manage agents
       // on one daemon, and this is how we find ours again.
