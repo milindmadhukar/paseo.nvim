@@ -49,7 +49,12 @@ type Request = { id?: number; op: string; [key: string]: unknown };
 // second connection for four calls.
 let daemon: DaemonClient | null = null;
 let client: ReturnType<typeof createPaseoApi> | null = null;
-const timelines = new Map<string, { release?: () => Promise<void> } & (() => void)>();
+type Unsubscribe = { release?: () => Promise<void> } & (() => void);
+// Two subscriptions per agent, not one. The timeline carries what the agent
+// SAYS; the state subscription carries what it IS -- mode, model, thinking
+// level, usage -- and those are not on the timeline at all. See
+// `timeline.subscribe`.
+const timelines = new Map<string, { timeline: Unsubscribe; state?: (() => void) | null }>();
 let directory: {
   subscription?: { release: () => Promise<void> };
   localUnsubscribe?: (() => void) | null;
@@ -210,6 +215,137 @@ function describeItem(item: any, cwd?: string): { kind: string; [key: string]: u
   }
 }
 
+/**
+ * Everything adjustable about a session, read out of ONE agent snapshot.
+ *
+ * Shared by `agent.config` (a pull) and the state subscription in
+ * `timeline.subscribe` (a push), because the Lua reads both into the same
+ * fields -- a pushed update that spelled `modeId` differently from the pulled
+ * one would show up as a header that changes shape depending on who last
+ * touched it.
+ *
+ * `currentModeId` is the snapshot's own field; `runtimeInfo.modeId` is the
+ * daemon's mirror of it and the fallback.
+ */
+function describeSettings(snap: any): Record<string, unknown> {
+  const runtime = snap?.runtimeInfo ?? {};
+  return {
+    provider: runtime.provider ?? null,
+    model: runtime.model ?? null,
+    modeId: snap?.currentModeId ?? runtime.modeId ?? runtime.mode ?? null,
+    thinkingOptionId: runtime.thinkingOptionId ?? null,
+    availableModes: (snap?.availableModes ?? []).map((m: any) => ({
+      id: m.id,
+      label: m.label,
+      description: m.description ?? null,
+    })),
+    features: (snap?.features ?? []).map((f: any) => ({
+      id: f.id,
+      type: f.type,
+      label: f.label,
+      description: f.description ?? null,
+      value: f.value,
+    })),
+    // What the usage panel draws. `contextWindowUsedTokens` over
+    // `contextWindowMaxTokens` is the fill bar; the rest is the table.
+    usage: snap?.lastUsage
+      ? {
+          inputTokens: snap.lastUsage.inputTokens ?? null,
+          cachedInputTokens: snap.lastUsage.cachedInputTokens ?? null,
+          outputTokens: snap.lastUsage.outputTokens ?? null,
+          totalCostUsd: snap.lastUsage.totalCostUsd ?? null,
+          contextWindowMaxTokens: snap.lastUsage.contextWindowMaxTokens ?? null,
+          contextWindowUsedTokens: snap.lastUsage.contextWindowUsedTokens ?? null,
+        }
+      : null,
+  };
+}
+
+/** One agent, as the directory column draws it. */
+function describeAgent(agent: any): Record<string, unknown> {
+  return {
+    id: agent.id,
+    title: agent.title ?? null,
+    status: agent.status ?? null,
+    cwd: agent.cwd ?? null,
+    workspaceId: agent.workspaceId ?? null,
+    provider: agent.runtimeInfo?.provider ?? null,
+    requiresAttention: (agent.pendingPermissions?.length ?? 0) > 0,
+  };
+}
+
+/**
+ * Follow the agent directory, once.
+ *
+ * THIS IS ALSO THE DEMAND CHANNEL, which is not obvious and cost an afternoon.
+ * `agents.subscribe(handler)` and `agentHandle.subscribe(handler)` register
+ * LOCAL listeners over a stream the daemon is not sending yet; it is the
+ * `list({ subscribe: {} })` below that asks for it. A handle listener with no
+ * directory subscription behind it is silent -- measured, not assumed: a mode
+ * change produced nothing until this call had been made, and both listeners
+ * fired on the very next one.
+ *
+ * So `timeline.subscribe` calls this too, for the settings it could not
+ * otherwise see.
+ */
+async function followDirectory(): Promise<void> {
+  if (directory) return;
+
+  const api = connected();
+
+  const applyUpdate = (message: any) => {
+    // Both shapes reach here: the wire message, and the bare update the local
+    // listener is handed.
+    const payload = message?.type === "agent_update" ? message.payload : message;
+    if (!payload?.kind) return;
+    if (payload.kind === "upsert") {
+      emit("agents", { kind: "upsert", agent: describeAgent(payload.agent) });
+    } else if (payload.kind === "remove") {
+      emit("agents", { kind: "remove", id: payload.agentId });
+    }
+  };
+
+  // TWO SDK GENERATIONS, and the installed one is the older.
+  //
+  // 0.9+ returns an owned `subscription` from list({ subscribe: {} }) whose
+  // snapshot callback fires before updates. 0.8 has no such object:
+  // `agents.subscribe(handler)` registers a LOCAL listener and the list call
+  // is what asks the daemon to start streaming. Writing only the documented
+  // 0.9 form failed at runtime with "undefined is not an object (evaluating
+  // 'result.subscription.subscribe')", so both are handled and the difference
+  // is confined here.
+  let localUnsubscribe: (() => void) | null = null;
+  if (typeof (api.agents as any).subscribe === "function") {
+    localUnsubscribe = (api.agents as any).subscribe(applyUpdate);
+  }
+
+  const result: any = await api.agents.list({
+    filter: { includeArchived: false },
+    subscribe: {},
+  });
+
+  if (result?.subscription?.subscribe) {
+    // 0.9+: the owned subscription supersedes the local listener, and delivers
+    // its own snapshot first.
+    localUnsubscribe?.();
+    localUnsubscribe = null;
+    result.subscription.subscribe({
+      snapshot: ({ entries }: any) =>
+        emit("agents", { kind: "snapshot", entries: entries.map((e: any) => describeAgent(e.agent)) }),
+      update: applyUpdate,
+      error: (error: unknown) => emit("agents", { kind: "error", error: String(error) }),
+    });
+  } else {
+    // 0.8: the list result IS the snapshot.
+    emit("agents", {
+      kind: "snapshot",
+      entries: (result.entries ?? []).map((e: any) => describeAgent(e.agent)),
+    });
+  }
+
+  directory = { subscription: result?.subscription, localUnsubscribe };
+}
+
 /** Trailing slashes and `..` segments, so two spellings of one path compare equal. */
 function canonical(path: string): string {
   return resolve(path).replace(/\/+$/, "") || "/";
@@ -264,9 +400,10 @@ const ops: Record<string, (req: Request) => Promise<unknown>> = {
       held.localUnsubscribe?.();
       await held.subscription?.release().catch(() => {});
     }
-    for (const [, unsubscribe] of timelines) {
+    for (const [, entry] of timelines) {
       try {
-        await (unsubscribe.release?.() ?? unsubscribe());
+        entry.state?.();
+        await (entry.timeline.release?.() ?? entry.timeline());
       } catch {
         /* teardown is best-effort */
       }
@@ -452,34 +589,13 @@ const ops: Record<string, (req: Request) => Promise<unknown>> = {
           });
           break;
 
-        case "usage_updated":
-          // Context-window fill and cost, pushed. The usage panel would
-          // otherwise have to poll agent.config, which is a round trip per
-          // refresh for a number that arrives here for free.
-          emit("usage", { agentId: id, usage: event.usage });
-          break;
-
-        // Mode, model and thinking level can all be changed from the Paseo app
-        // or another client. Without these the header shows whatever we last
-        // set ourselves and quietly lies -- the same divergence that dropping
-        // user_message used to cause.
-        case "mode_changed":
-          emit("settings", {
-            agentId: id,
-            modeId: event.currentModeId ?? null,
-            availableModes: event.availableModes ?? [],
-          });
-          break;
-        case "model_changed":
-          emit("settings", {
-            agentId: id,
-            model: event.runtimeInfo?.model ?? null,
-            provider: event.runtimeInfo?.provider ?? null,
-          });
-          break;
-        case "thinking_option_changed":
-          emit("settings", { agentId: id, thinkingOptionId: event.thinkingOptionId ?? null });
-          break;
+        // NOTE: there are no cases here for mode_changed, model_changed,
+        // thinking_option_changed or usage_updated. Those four are on the
+        // PROVIDER's event union and not on the wire -- the daemon folds each
+        // into the agent snapshot and sets `shouldDispatchEvent = false`, so
+        // they never reach a client at all. There were cases for all four, and
+        // not one of them had ever fired. Those settings come from the state
+        // subscription below.
 
         case "attention_required":
           emit("attention", { agentId: id, reason: event.reason });
@@ -499,9 +615,46 @@ const ops: Record<string, (req: Request) => Promise<unknown>> = {
       }
     });
 
-    timelines.set(id, unsubscribe as any);
+    // THE SECOND SUBSCRIPTION, and the one that carries the mode.
+    //
+    // Mode, model, thinking level and live context-window fill are not on the
+    // timeline. The daemon consumes those provider events into the agent
+    // snapshot and suppresses dispatch, so the only way to see a mode set in
+    // the Paseo app -- or set by the daemon itself when a plan is approved --
+    // is to watch the snapshot. Without this the header shows whatever we last
+    // set from here and quietly lies.
+    //
+    // Guarded like `agents.subscribe` is: the installed SDK may be 0.8, where
+    // the handle has no `subscribe`.
+    //
+    // It needs DEMAND to say anything, and that comes from the directory
+    // subscription rather than from registering here -- see followDirectory.
+    // Without this call the listener below is silent and the header goes on
+    // lying, which is exactly the bug.
+    await followDirectory();
+    //
+    // DEDUPLICATED, because this fires on every snapshot change -- a status
+    // transition, an activeTurn tick -- and almost none of them touch a
+    // setting. Emitting regardless would put a line on stdout and a header
+    // repaint behind every one of them for the length of a turn.
+    let last = "";
+    const stateOff =
+      typeof (agent as any).subscribe === "function"
+        ? (agent as any).subscribe((update: any) => {
+            const snap: any =
+              update?.payload?.agent ?? update?.agent ?? (agent as any).current?.() ?? null;
+            if (!snap) return;
+            const settings = describeSettings(snap);
+            const seen = JSON.stringify(settings);
+            if (seen === last) return;
+            last = seen;
+            emit("settings", { agentId: id, ...settings });
+          })
+        : null;
+
+    timelines.set(id, { timeline: unsubscribe as any, state: stateOff });
     await (unsubscribe as any).ready;
-    return { subscribed: true };
+    return { subscribed: true, settings: stateOff !== null };
   },
 
   /**
@@ -516,75 +669,29 @@ const ops: Record<string, (req: Request) => Promise<unknown>> = {
    * new ID and a new snapshot; nothing is replayed.
    */
   async "agents.subscribe"() {
-    if (directory) return { subscribed: true, already: true };
-
-    const api = connected();
-    const describe = (agent: any) => ({
-      id: agent.id,
-      title: agent.title ?? null,
-      status: agent.status ?? null,
-      cwd: agent.cwd ?? null,
-      workspaceId: agent.workspaceId ?? null,
-      provider: agent.runtimeInfo?.provider ?? null,
-      requiresAttention: (agent.pendingPermissions?.length ?? 0) > 0,
-    });
-
-    const applyUpdate = (message: any) => {
-      // Both shapes reach here: the wire message, and the bare update the
-      // local listener is handed.
-      const payload = message?.type === "agent_update" ? message.payload : message;
-      if (!payload?.kind) return;
-      if (payload.kind === "upsert") {
-        emit("agents", { kind: "upsert", agent: describe(payload.agent) });
-      } else if (payload.kind === "remove") {
-        emit("agents", { kind: "remove", id: payload.agentId });
-      }
-    };
-
-    // TWO SDK GENERATIONS, and the installed one is the older.
-    //
-    // 0.9+ returns an owned `subscription` from list({ subscribe: {} }) whose
-    // snapshot callback fires before updates. 0.8 has no such object:
-    // `agents.subscribe(handler)` registers a LOCAL listener and the list call
-    // is what asks the daemon to start streaming. Writing only the documented
-    // 0.9 form failed at runtime with "undefined is not an object
-    // (evaluating 'result.subscription.subscribe')", so both are handled and
-    // the difference is confined here.
-    let localUnsubscribe: (() => void) | null = null;
-    if (typeof (api.agents as any).subscribe === "function") {
-      localUnsubscribe = (api.agents as any).subscribe(applyUpdate);
-    }
-
-    const result: any = await api.agents.list({
-      filter: { includeArchived: false },
-      subscribe: {},
-    });
-
-    if (result?.subscription?.subscribe) {
-      // 0.9+: the owned subscription supersedes the local listener, and
-      // delivers its own snapshot first.
-      localUnsubscribe?.();
-      localUnsubscribe = null;
-      result.subscription.subscribe({
-        snapshot: ({ entries }: any) =>
-          emit("agents", { kind: "snapshot", entries: entries.map((e: any) => describe(e.agent)) }),
-        update: applyUpdate,
-        error: (error: unknown) => emit("agents", { kind: "error", error: String(error) }),
-      });
-    } else {
-      // 0.8: the list result IS the snapshot.
+    // The directory may already be followed -- `timeline.subscribe` needs the
+    // same stream for its settings. A second subscriber still needs its
+    // SNAPSHOT, though: `agents.lua` renders from one and applies updates on
+    // top, so returning a bare `already` left the picker's table empty for
+    // good.
+    const already = directory !== null;
+    await followDirectory();
+    if (already) {
+      const page: any = await connected().agents.list({ filter: { includeArchived: false } });
       emit("agents", {
         kind: "snapshot",
-        entries: (result.entries ?? []).map((e: any) => describe(e.agent)),
+        entries: (page.entries ?? []).map((e: any) => describeAgent(e.agent)),
       });
     }
-
-    directory = { subscription: result?.subscription, localUnsubscribe };
-    return { subscribed: true, subscriptionId: result?.subscriptionId ?? null };
+    return { subscribed: true, already };
   },
 
   async "agents.unsubscribe"() {
     if (!directory) return { unsubscribed: false };
+    // Not while a chat is open. This stream is also what carries mode, model
+    // and thinking level to `timeline.subscribe`, so releasing it here would
+    // silently freeze every open header at whatever it last said.
+    if (timelines.size > 0) return { unsubscribed: false, heldBy: timelines.size };
     const held = directory;
     directory = null;
     held.localUnsubscribe?.();
@@ -821,36 +928,11 @@ const ops: Record<string, (req: Request) => Promise<unknown>> = {
     }
 
     return {
-      provider: runtime.provider ?? null,
-      model: runtime.model ?? null,
-      modeId: runtime.modeId ?? runtime.mode ?? null,
-      thinkingOptionId: runtime.thinkingOptionId ?? null,
-      availableModes: (snap?.availableModes ?? []).map((m: any) => ({
-        id: m.id,
-        label: m.label,
-        description: m.description ?? null,
-      })),
+      // The same reader the state subscription pushes through, so a pulled
+      // config and a pushed one cannot disagree about a field name.
+      ...describeSettings(snap),
       thinkingOptions,
       models,
-      features: (snap?.features ?? []).map((f: any) => ({
-        id: f.id,
-        type: f.type,
-        label: f.label,
-        description: f.description ?? null,
-        value: f.value,
-      })),
-      // What the usage panel draws. `contextWindowUsedTokens` over
-      // `contextWindowMaxTokens` is the fill bar; the rest is the table.
-      usage: snap?.lastUsage
-        ? {
-            inputTokens: snap.lastUsage.inputTokens ?? null,
-            cachedInputTokens: snap.lastUsage.cachedInputTokens ?? null,
-            outputTokens: snap.lastUsage.outputTokens ?? null,
-            totalCostUsd: snap.lastUsage.totalCostUsd ?? null,
-            contextWindowMaxTokens: snap.lastUsage.contextWindowMaxTokens ?? null,
-            contextWindowUsedTokens: snap.lastUsage.contextWindowUsedTokens ?? null,
-          }
-        : null,
       pendingPermissions: (snap?.pendingPermissions ?? []).map(withFallbackActions),
     };
   },
@@ -902,9 +984,17 @@ const ops: Record<string, (req: Request) => Promise<unknown>> = {
    * `selectedActionId` is the provider's OWN action id, from request.actions --
    * "allow once" and "allow for this session" are both behavior:"allow" and
    * differ only by that id, so dropping it silently downgrades the answer.
+   *
+   * `thenModeId` is OURS, and is not part of the response at all.
+   * `AgentPermissionResponse` has no field for a mode, so "implement this plan,
+   * and put me in auto" cannot be said in one message. It has to be a second
+   * call, and it has to come AFTER the first: approving a plan makes the daemon
+   * run its own `setMode("acceptEdits")` inside respondToPermission, so a mode
+   * set beforehand is simply overwritten. See lua/paseo/ui/plan.lua.
    */
   async "agent.respondToPermission"(req) {
-    const agent = connected().agents.ref(String(need(req.agentId, "agentId")));
+    const agentId = String(need(req.agentId, "agentId"));
+    const agent = connected().agents.ref(agentId);
     const requestId = String(need(req.requestId, "requestId"));
     const behavior = String(need(req.behavior, "behavior"));
     // A synthetic id is ours, not the provider's, and sending it back is
@@ -929,6 +1019,11 @@ const ops: Record<string, (req: Request) => Promise<unknown>> = {
           };
 
     await agent.respondToPermission({ requestId, response });
+
+    if (behavior === "allow" && req.thenModeId) {
+      const notice = await raw().setAgentMode(agentId, String(req.thenModeId));
+      return { requestId, behavior, modeId: req.thenModeId, notice: notice ?? null };
+    }
     return { requestId, behavior };
   },
 
@@ -948,10 +1043,11 @@ const ops: Record<string, (req: Request) => Promise<unknown>> = {
 
   async "timeline.unsubscribe"(req) {
     const id = String(need(req.agentId, "agentId"));
-    const unsubscribe = timelines.get(id);
-    if (!unsubscribe) return { unsubscribed: false };
+    const entry = timelines.get(id);
+    if (!entry) return { unsubscribed: false };
     timelines.delete(id);
-    await ((unsubscribe as any).release?.() ?? unsubscribe());
+    entry.state?.();
+    await (entry.timeline.release?.() ?? entry.timeline());
     return { unsubscribed: true };
   },
 };

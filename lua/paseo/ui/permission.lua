@@ -11,6 +11,7 @@
 
 local bridge = require "paseo.bridge"
 local hl = require "paseo.ui.hl"
+local plan = require "paseo.ui.plan"
 local questions = require "paseo.ui.questions"
 local render = require "paseo.ui.render"
 local timeline = require "paseo.ui.timeline"
@@ -135,25 +136,29 @@ end
 ---@param chat table
 ---@param request table
 ---@param width integer
----@param state paseo.QuestionState|nil  Set when the request is questions.
+---@param view paseo.PermissionView
 ---@return table[][]
-local function build(chat, request, width, state)
+local function build(chat, request, width, view)
+  local state = view.state
   local inner = width - 4
   local lines = {}
 
-  -- A question is not a danger: the agent is ASKING, not reaching for the
-  -- filesystem, and painting both red teaches you to dismiss the colour.
-  local group = state and "PaseoQuestion" or "PaseoDanger"
+  -- Neither a question nor a plan is a danger: the agent is ASKING, not
+  -- reaching for the filesystem, and painting all three red teaches you to
+  -- dismiss the colour.
+  local group = (state or view.plan) and "PaseoQuestion" or "PaseoDanger"
   local title = request.title or request.name or "Permission required"
   if state then
     title = #state.questions > 1 and ("The agent is asking %d things"):format(#state.questions)
       or "The agent is asking"
+  elseif view.plan then
+    title = "The agent has a plan"
   end
   lines[#lines + 1] = {
-    { state and "  " or "  ", group },
+    { "  ", group },
     { title, group },
   }
-  if request.kind and request.kind ~= "tool" and not state then
+  if request.kind and request.kind ~= "tool" and not (state or view.plan) then
     lines[#lines + 1] = { { "  " .. request.kind, "PaseoDim" } }
   end
   lines[#lines + 1] = {}
@@ -178,51 +183,82 @@ local function build(chat, request, width, state)
     return lines
   end
 
-  -- `description` for a question is the FIRST question and its labels, which
-  -- is why it is above the question branch and not below it.
-  if request.description and request.description ~= "" then
-    vim.list_extend(
-      lines,
-      render.wrap(request.description, inner, "PaseoDim", { { "  ", nil } })
-    )
-    lines[#lines + 1] = {}
-  end
-
-  -- THE POINT OF THE DIALOG. The same builder the transcript uses, so what you
-  -- are approving is shown rather than named.
-  local body = timeline.detail_body(request.detail, inner)
-  if #body > 0 then
-    local card = render.card(
-      { { request.name or "tool", "PaseoToolName" } },
-      body,
-      { width = inner }
-    )
+  -- A plan carries no `detail` AT ALL -- the daemon leaves it undefined and
+  -- puts the markdown in `input.plan` -- so the card below drew an empty box
+  -- and asked you to approve it. This is the thing being decided; it has to be
+  -- on screen while you decide.
+  if view.plan then
+    -- Budgeted against the screen rather than the request, because
+    -- `dimensions` sizes the window to these lines and volt draws exactly `h`
+    -- of them: a plan longer than the terminal would push the buttons off the
+    -- bottom and leave nothing to press.
+    local body = {}
+    for _, line in ipairs(plan.render(request, math.max(6, vim.o.lines - 16))) do
+      body[#body + 1] = { { line, nil } }
+    end
+    local card = render.card({ { "the plan", "PaseoToolName" } }, body, { width = inner })
     for _, line in ipairs(card) do
       local row = { { "  ", nil } }
       vim.list_extend(row, line)
       lines[#lines + 1] = row
     end
     lines[#lines + 1] = {}
+  else
+    -- `description` for a question is the FIRST question and its labels, which
+    -- is why it is above the question branch and not below it.
+    if request.description and request.description ~= "" then
+      vim.list_extend(
+        lines,
+        render.wrap(request.description, inner, "PaseoDim", { { "  ", nil } })
+      )
+      lines[#lines + 1] = {}
+    end
+
+    -- THE POINT OF THE DIALOG. The same builder the transcript uses, so what
+    -- you are approving is shown rather than named.
+    local body = timeline.detail_body(request.detail, inner)
+    if #body > 0 then
+      local card = render.card(
+        { { request.name or "tool", "PaseoToolName" } },
+        body,
+        { width = inner }
+      )
+      for _, line in ipairs(card) do
+        local row = { { "  ", nil } }
+        vim.list_extend(row, line)
+        lines[#lines + 1] = row
+      end
+      lines[#lines + 1] = {}
+    end
   end
 
   -- Actions. The sidecar guarantees this is non-empty -- a provider that sends
-  -- none gets a synthesised Allow/Deny -- so there is no empty-list branch.
+  -- none gets a synthesised Allow/Deny -- so there is no empty-list branch. For
+  -- a plan they are `plan.actions`, which is the same list with one Implement
+  -- per mode you could land in.
   local buttons = { { "  ", nil } }
-  for i, action in ipairs(request.actions or {}) do
+  for i, action in ipairs(view.actions) do
     local group = action.variant == "danger" and "PaseoDanger"
       or action.behavior == "allow" and "PaseoToolOk"
       or "PaseoDim"
     buttons[#buttons + 1] = { (" %d "):format(i), "PaseoKey" }
     buttons[#buttons + 1] = { action.label or action.id, group }
     buttons[#buttons + 1] = { "   ", nil }
+    -- Four Implement buttons plus a Reject do not fit on one 100-column row.
+    if i % 2 == 0 and i < #view.actions then
+      lines[#lines + 1] = render.truncate(buttons, width)
+      buttons = { { "  ", nil } }
+    end
   end
-  lines[#lines + 1] = buttons
+  if #buttons > 1 then
+    lines[#lines + 1] = render.truncate(buttons, width)
+  end
   lines[#lines + 1] = {}
   lines[#lines + 1] = {
     { "  y", "PaseoKey" },
-    { " allow · ", "PaseoDim" },
+    { view.plan and " implement · " or " allow · ", "PaseoDim" },
     { "n", "PaseoKey" },
-    { " deny · ", "PaseoDim" },
+    { view.plan and " reject · " or " deny · ", "PaseoDim" },
     { "<Esc>", "PaseoKey" },
     { " later (stays pending)", "PaseoDim" },
   }
@@ -234,8 +270,9 @@ end
 
 ---@param chat table
 ---@param request table
----@param action table
-local function answer(chat, request, action)
+---@param action paseo.PlanAction|table
+---@param view paseo.PermissionView
+local function answer(chat, request, action, view)
   M.close()
 
   bridge.request("agent.respondToPermission", {
@@ -243,22 +280,36 @@ local function answer(chat, request, action)
     requestId = request.id,
     behavior = action.behavior,
     selectedActionId = action.id,
-  }, function(err)
-    if err then
-      vim.schedule(function()
-        transcript.upsert(chat, {
+    -- The second half of a plan approval. It cannot ride in the response --
+    -- `AgentPermissionResponse` has no field for a mode -- so the sidecar
+    -- applies it after the daemon has finished applying its own. See
+    -- |paseo.ui.plan|.
+    thenModeId = action.mode,
+  }, function(err, result)
+    vim.schedule(function()
+      if err then
+        return transcript.upsert(chat, {
           kind = "notice",
           level = "error",
           message = "permission answer failed: " .. err,
         })
-      end)
-    end
+      end
+      -- A provider may accept a mode and still have something to say about it.
+      local notice = result and result.notice
+      notice = type(notice) == "table" and notice.message or notice
+      if type(notice) == "string" and notice ~= "" then
+        vim.notify("paseo: " .. notice, vim.log.levels.WARN)
+      end
+    end)
   end)
 
   -- Mark it locally straight away. `permission_resolved` will confirm, but the
   -- round trip is visible and leaving the card reading "awaiting" in the
   -- meantime makes the keypress look ignored.
-  M.resolved(chat, request.id, { behavior = action.behavior, label = action.label })
+  M.resolved(chat, request.id, {
+    behavior = action.behavior,
+    label = view.plan and plan.label(action) or action.label,
+  })
 end
 
 ---Send every answer, in the ONE response the request gets.
@@ -333,19 +384,52 @@ function M.close()
   end
 end
 
+---Which of the three dialogs this request wants.
+---
+---A question is answered, never approved; a plan is approved with a choice of
+---what happens next; everything else is the plain allow/deny. `state` and
+---`plan` are what the keys branch on, and building them ONCE here rather than
+---re-deriving them per redraw is what keeps the three from drifting apart.
+---@class paseo.PermissionView
+---@field actions table[]                   The buttons, in key order.
+---@field state paseo.QuestionState|nil     Set when the request is questions.
+---@field plan boolean|nil                  Set when the request is a plan.
+
+---@param chat table
+---@param request table
+---@return paseo.PermissionView
+local function viewer(chat, request)
+  local view = { actions = request.actions or {} }
+
+  local asked = questions.parse(request)
+  if asked then
+    view.state = questions.state(asked)
+    return view
+  end
+
+  if plan.parse(request) then
+    view.plan = true
+    -- `availableModes` is per PROVIDER and loaded with the rest of the session
+    -- settings, so the buttons are the modes this agent can actually be put
+    -- into. Without a snapshot there is nothing honest to offer and the
+    -- request's own Implement/Reject stands.
+    local config = chat.config_snapshot or {}
+    view.actions = plan.actions(request, config.availableModes) or view.actions
+  end
+
+  return view
+end
+
 ---@param chat table
 ---@param request table
 local function open(chat, request)
   M.close()
 
-  -- Questions are answered here, never approved: `state` is what the keys act
-  -- on, and its presence is what makes this a question dialog rather than a
-  -- permission one.
-  local asked = questions.parse(request)
-  local state = asked and questions.state(asked) or nil
+  local view = viewer(chat, request)
+  local state = view.state
 
   local width = math.min(100, math.max(50, vim.o.columns - 10))
-  local lines = build(chat, request, width, state)
+  local lines = build(chat, request, width, view)
   local w, h = dimensions(lines)
 
   -- A dimmed backdrop, so the dialog reads as modal. typr does the same for
@@ -404,7 +488,7 @@ local function open(chat, request)
             -- `table.remove(marks, 3)` on what it is handed, so a cached line
             -- list loses its actions after the first draw.
             lines = function()
-              return render.to_volt(build(chat, request, width, state))
+              return render.to_volt(build(chat, request, width, view))
             end,
           },
         },
@@ -434,7 +518,7 @@ local function open(chat, request)
       return
     end
     vim.bo[buf].modifiable = true
-    render.to_buffer(buf, hl.ns, 0, -1, build(chat, request, width, state))
+    render.to_buffer(buf, hl.ns, 0, -1, build(chat, request, width, view))
     vim.bo[buf].modifiable = false
   end
 
@@ -483,10 +567,10 @@ local function open(chat, request)
       end)
     end
   else
-    for i, action in ipairs(request.actions or {}) do
+    for i, action in ipairs(view.actions) do
       if i <= 9 then
         map(tostring(i), function()
-          answer(chat, request, action)
+          answer(chat, request, action, view)
         end)
       end
     end
@@ -494,7 +578,7 @@ local function open(chat, request)
 
   ---@param behavior string
   local function first(behavior)
-    for _, action in ipairs(request.actions or {}) do
+    for _, action in ipairs(view.actions) do
       if action.behavior == behavior then
         return action
       end
@@ -503,18 +587,21 @@ local function open(chat, request)
 
   -- Not on a question: `y` there sends the answers, and a bare allow -- which
   -- is what this sends -- is exactly the bug. See the `state` branch above.
+  --
+  -- On a plan this takes the FIRST Implement, which `plan.actions` orders
+  -- least-rope-first: the reflex key is the cautious one.
   if not state then
     map("y", function()
       local action = first "allow"
       if action then
-        answer(chat, request, action)
+        answer(chat, request, action, view)
       end
     end)
   end
   map("n", function()
     local action = first "deny"
     if action then
-      answer(chat, request, action)
+      answer(chat, request, action, view)
     end
   end)
   -- Deny AND stop the turn, for "no, and don't try something else either".
