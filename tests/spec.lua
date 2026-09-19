@@ -1119,6 +1119,235 @@ local function test_ui()
   eq("ui: the float leaves no windows behind", #vim.api.nvim_list_wins(), wins_before)
   eq("ui: the float leaves no buffers behind", #vim.api.nvim_list_bufs(), bufs_before)
 
+  -- THE "1-5 JUMP DOES NOT WORK" BUG. The tab keys were mapped on the chrome
+  -- buffer alone, and on the Chat tab -- the tab it opens on -- the chrome
+  -- never holds the cursor, because `show_chat_panes` enters the composer. So
+  -- every one of those keystrokes went to a buffer with no such mapping, while
+  -- the footer advertised them.
+  ---@param buf integer
+  ---@param key string
+  local function mapping(buf, key)
+    for _, m in ipairs(vim.api.nvim_buf_get_keymap(buf, "n")) do
+      if m.lhs == key then
+        return m.desc or "(no desc)"
+      end
+    end
+    return nil
+  end
+
+  float.open(surface_chat)
+  eq(
+    "ui: the cursor lands in the composer",
+    vim.api.nvim_get_current_buf(),
+    surface_chat.composer
+  )
+  truthy(
+    "ui: so the tab keys are bound THERE, not only on the chrome",
+    mapping(surface_chat.composer, "1") ~= nil and mapping(surface_chat.composer, "5") ~= nil
+  )
+  truthy(
+    "ui: and on the conversation, which is the other pane you read from",
+    mapping(surface_chat.conversation, "5") ~= nil
+  )
+  -- Pressed where the cursor actually is.
+  vim.api.nvim_feedkeys("5", "x", false)
+  eq("ui: pressing 5 in the composer jumps to the fifth tab", float.tab(), float.TABS[5])
+  vim.api.nvim_feedkeys("1", "x", false)
+  eq("ui: and 1 comes back to the conversation", float.tab(), "Chat")
+
+  -- The conversation keeps its own `<Tab>`, which expands a tool card to show
+  -- what the command printed. That is worth more there than a second way to
+  -- cycle tabs, and `1`-`6` reach every tab from the conversation anyway.
+  truthy(
+    "ui: the float does not take <Tab> from the conversation",
+    mapping(surface_chat.conversation, "<Tab>") ~= "paseo: next tab",
+    mapping(surface_chat.conversation, "<Tab>")
+  )
+  eq(
+    "ui: but the composer, which had no <Tab>, cycles with it",
+    mapping(surface_chat.composer, "<Tab>"),
+    "paseo: next tab"
+  )
+
+  -- These are buffers you KEEP -- the sidebar shows the same two -- so a
+  -- mapping left behind would go on swallowing digits with no dashboard open.
+  float.close()
+  truthy(
+    "ui: closing the float gives the composer its digits back",
+    mapping(surface_chat.composer, "1") == nil and mapping(surface_chat.composer, "<Tab>") == nil
+  )
+  truthy(
+    "ui: and the conversation's",
+    mapping(surface_chat.conversation, "1") == nil
+  )
+
+  -- Z-INDEX. The surface used to sit at 100, above the 50 that `nvim_open_win`
+  -- and plenary's popup hand out by default -- so every telescope picker and
+  -- `vim.ui.select` opened FROM the dashboard rendered underneath it, and
+  -- looked like nothing had happened.
+  float.open(surface_chat)
+  local highest = 0
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    local win_config = vim.api.nvim_win_get_config(win)
+    if win_config.relative ~= "" then
+      highest = math.max(highest, win_config.zindex or 0)
+    end
+  end
+  truthy(
+    "ui: the dashboard stacks below a default float, so pickers open on top",
+    highest < 50,
+    highest
+  )
+  float.close()
+
+  -- GEOMETRY IS CONFIGURABLE, and the box is the whole reason: a margin in
+  -- cells that looks right on a 200-column monitor is most of a laptop screen,
+  -- and someone whose terminal float is already a known size wants this one to
+  -- match it rather than to be near it.
+  local config = require "paseo.config"
+  ---@return table
+  local function box()
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+      local win_config = vim.api.nvim_win_get_config(win)
+      if win_config.relative ~= "" and win_config.zindex == config.get().ui.float.zindex then
+        return win_config
+      end
+    end
+    return {}
+  end
+
+  -- THE UNIT IS A PERCENTAGE, 1-100. Fractions were the first attempt: `0.92`
+  -- and `92` are each obvious once you know which convention you are in, and
+  -- nothing on the page tells you which. floaterm's `size` is percentages, so
+  -- percentages are what a number copied between the two configs means.
+  config.setup { ui = { float = { width = 50, height = 50 } } }
+  float.open(surface_chat)
+  local half = box()
+  eq("ui: a number is a percentage of the editor", {
+    half.width,
+    half.height,
+  }, {
+    math.max(60, math.floor(vim.o.columns * 50 / 100)),
+    math.max(20, math.floor(vim.o.lines * 50 / 100)),
+  })
+  eq("ui: and with no row/col it centres", {
+    half.row,
+    half.col,
+  }, {
+    math.floor((vim.o.lines - half.height) / 2),
+    math.floor((vim.o.columns - half.width) / 2),
+  })
+  float.close()
+
+  -- The same arithmetic, in the same order, as floaterm's -- so the two agree
+  -- to the cell rather than to within a rounding error, and a config that
+  -- gives them one size gets them one place.
+  local floaterm_h = math.floor(vim.o.lines * (90 / 100))
+  local floaterm_w = math.floor(vim.o.columns * (92 / 100))
+  config.setup { ui = { float = { width = 92, height = 90 } } }
+  float.open(surface_chat)
+  local matched = box()
+  eq("ui: a percentage matches floaterm's, box and position", {
+    matched.width,
+    matched.height,
+    matched.row,
+    matched.col,
+  }, {
+    floaterm_w,
+    floaterm_h,
+    math.floor(vim.o.lines / 2 - floaterm_h / 2),
+    math.floor(vim.o.columns / 2 - floaterm_w / 2),
+  })
+  float.close()
+
+  -- `row`/`col` are CELLS: they are window coordinates, not sizes. A function
+  -- is the escape hatch for a size no percentage can express, and returns
+  -- cells too. Neither may put the border off screen.
+  config.setup {
+    ui = {
+      float = {
+        width = function(columns)
+          return columns
+        end,
+        height = 100,
+        row = -5,
+        col = 9999,
+      },
+    },
+  }
+  float.open(surface_chat)
+  local pinned = box()
+  eq("ui: a function returns cells, row/col are cells, and both are clamped", {
+    pinned.width,
+    pinned.height,
+    pinned.row,
+    pinned.col,
+  }, { vim.o.columns, vim.o.lines, 0, 0 })
+  float.close()
+
+  -- The composer is measured from the bottom, and the conversation gets what
+  -- is left -- so a composer taller than the box would hand the conversation a
+  -- negative height rather than merely looking wrong.
+  config.setup { ui = { float = { composer = 999 } } }
+  float.open(surface_chat)
+  local squeezed = vim.api.nvim_win_get_config(surface_chat.win_conversation)
+  truthy(
+    "ui: an absurd composer height still leaves the conversation a window",
+    squeezed.height >= 5,
+    squeezed.height
+  )
+  float.close()
+  config.setup {}
+
+  float.open(surface_chat)
+
+  -- FEATURE PARITY. The header used to be the conversation window's winbar,
+  -- and the conversation window only exists on the Chat tab -- so every other
+  -- tab had no header at all and the dashboard could not tell you which model
+  -- it was on. It is a volt section in the chrome now.
+  float.select "Usage"
+  eq("ui: the panels do not keep a conversation window", surface_chat.win_conversation, nil)
+  local chrome_buf
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    local buf = vim.api.nvim_win_get_buf(win)
+    if pcall(require, "volt") and require("volt.state")[buf] then
+      chrome_buf = buf
+    end
+  end
+  if chrome_buf then
+    local marks =
+      vim.api.nvim_buf_get_extmarks(chrome_buf, -1, { 0, 0 }, { 1, -1 }, { details = true })
+    local drawn = {}
+    for _, mark in ipairs(marks) do
+      for _, cell in ipairs(mark[4].virt_text or {}) do
+        drawn[#drawn + 1] = cell[1]
+      end
+    end
+    drawn = table.concat(drawn)
+    truthy(
+      "ui: the header is drawn in the chrome, so it survives leaving the Chat tab",
+      drawn:find("test", 1, true) ~= nil,
+      drawn
+    )
+    truthy(
+      "ui: and the tab bar is numbered, so 1-6 is a hint you can read",
+      drawn:find("5 Usage", 1, true) ~= nil,
+      drawn
+    )
+
+    -- Clicking a tab is the other half of "1-5 jump": volt dispatches a click
+    -- through the cell's third element, and `volt.events.enable` -- which this
+    -- surface never called, because it drives gen_data/redraw itself rather
+    -- than going through `volt.run` -- is what routes LeftMouse to it.
+    local targets = 0
+    for _, row in pairs(require("volt.state")[chrome_buf].clickables) do
+      targets = targets + #row
+    end
+    truthy("ui: the tab bar and header carry click targets", targets >= #float.TABS, targets)
+    truthy("ui: and volt's mouse dispatch is switched on", vim.g.extmarks_events == true)
+  end
+  float.close()
+
   -- Volt keys its state by buffer and never clears it; ours must.
   if pcall(require, "volt") then
     local entries = 0
@@ -1157,9 +1386,78 @@ local function test_ui()
   local through = render.to_volt { render.truncate({ { "x", "PaseoDim", action } }, 40) }
   eq("ui: click actions survive truncate and to_volt", through[1][1][3], action)
 
+  -- The dashboard is the DEFAULT surface: it is the one with everything on it,
+  -- and the sidebar is what `<C-f>` switches to.
+  local defaults = config.defaults()
+  eq("ui: the configured default surface is the dashboard", defaults.ui.surface, "float")
+  truthy(
+    "ui: whose z-index is below the 50 a float gets by default",
+    defaults.ui.float.zindex < 50
+  )
+
+  -- Pasting an image is what `p` does now -- read the clipboard, fall through
+  -- to an ordinary paste when it holds no picture -- so the composer no longer
+  -- spends four columns of a narrow pane teaching you `^V`.
+  local sidebar = require "paseo.ui.sidebar"
+  local wins_at_hint = #vim.api.nvim_list_wins()
+  sidebar.open(surface_chat)
+  local hint = vim.wo[surface_chat.win_composer].winbar
+  truthy("ui: the composer's hint does not advertise ^V", hint:find("^V", 1, true) == nil, hint)
+  truthy("ui: it still says how to send", hint:find("send", 1, true) ~= nil, hint)
+  sidebar.close(surface_chat)
+  eq("ui: and the sidebar closes both its windows", #vim.api.nvim_list_wins(), wins_at_hint)
+
+  -- The sidebar is configurable in the same units as the float, which is the
+  -- point of the units: one number means one thing everywhere.
+  config.setup {
+    ui = { sidebar = { width = 30, min_width = 20, composer = 4, position = "left" } },
+  }
+  sidebar.open(surface_chat)
+  eq(
+    "ui: the sidebar takes a percentage too",
+    vim.api.nvim_win_get_width(surface_chat.win_conversation),
+    math.max(20, math.floor(vim.o.columns * 30 / 100))
+  )
+  eq(
+    "ui: and an explicit composer height",
+    vim.api.nvim_win_get_height(surface_chat.win_composer),
+    4
+  )
+  truthy(
+    "ui: `position = left` puts it on the left",
+    vim.api.nvim_win_get_position(surface_chat.win_conversation)[2] == 0,
+    vim.inspect(vim.api.nvim_win_get_position(surface_chat.win_conversation))
+  )
+  sidebar.close(surface_chat)
+
+  -- min_width is in CELLS and wins over the percentage: 40% of a small
+  -- terminal is a pane too narrow to read a tool card in, and the percentage
+  -- has no way to know that.
+  config.setup { ui = { sidebar = { width = 1, min_width = 30 } } }
+  sidebar.open(surface_chat)
+  eq(
+    "ui: min_width floors the percentage, in cells",
+    vim.api.nvim_win_get_width(surface_chat.win_conversation),
+    30
+  )
+  sidebar.close(surface_chat)
+
+  -- And the cap is `winwidth`, not the editor: Neovim gives the window you
+  -- came back to its minimum width and takes the difference out of ours, so
+  -- asking for more than that is a number that quietly does not happen. Asking
+  -- for the whole editor should land on the widest pane that actually holds.
+  config.setup { ui = { sidebar = { width = 100, min_width = 1 } } }
+  sidebar.open(surface_chat)
+  eq(
+    "ui: and the cap is what 'winwidth' leaves, so the number asked for holds",
+    vim.api.nvim_win_get_width(surface_chat.win_conversation),
+    math.max(20, vim.o.columns - math.max(vim.o.winwidth, 10) - 1)
+  )
+  sidebar.close(surface_chat)
+  config.setup {}
+
   -- Both surfaces draw the header from ONE builder, so they cannot drift into
   -- disagreeing about which mode the session is in.
-  local sidebar = require "paseo.ui.sidebar"
   surface_chat.mode = "acceptEdits"
   surface_chat.permissions = { { id = "x" } }
   local header = render.concat(sidebar.header(surface_chat))

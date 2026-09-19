@@ -238,8 +238,12 @@ end
 ---BEFORE it opens a chat: a clipboard with no image in it should not leave a
 ---window behind as the side effect of finding that out.
 ---@param path? string  A file; the clipboard when absent.
+---@param quiet? boolean  Say nothing when there is no image. Set by the keys
+---                       that have an ordinary job to fall back to: `p` on a
+---                       clipboard holding text must paste the text, not
+---                       complain that it is not a picture.
 ---@return paseo.Image|nil
-local function read_image(path)
+local function read_image(path, quiet)
   local source = require "paseo.image"
   local image, err
   if path then
@@ -247,7 +251,7 @@ local function read_image(path)
   else
     image, err = source.from_clipboard()
   end
-  if not image then
+  if not image and not quiet then
     vim.notify("paseo: " .. (err or "no image"), vim.log.levels.WARN)
   end
   return image
@@ -324,19 +328,43 @@ local function make_buffers(chat)
     vim.keymap.set("n", "<C-s>", function()
       send(chat)
     end, vim.tbl_extend("force", opts, { desc = "paseo: send" }))
-    -- <C-v> is what "paste" means to anyone who has ever used a GUI, and an
-    -- image on the clipboard is INVISIBLE to Neovim's registers, so the
-    -- ordinary paste cannot reach it. When there is no image the key does its
-    -- usual job -- literal insert, blockwise visual -- rather than eating the
-    -- keystroke.
-    vim.keymap.set({ "n", "i" }, "<C-v>", function()
-      local image = read_image()
-      if image then
-        attach_image(chat, image)
-      else
-        vim.api.nvim_feedkeys(vim.keycode "<C-v>", "n", false)
+    -- PASTE IS PASTE. An image on the clipboard is invisible to Neovim's
+    -- registers -- `"+p` yields nothing for a screenshot -- so the ordinary
+    -- paste cannot reach it without help. The help used to be a key of its
+    -- own, `<C-v>`, advertised in the composer's winbar; but a paste key you
+    -- have to be taught is a worse answer than `p` simply working. So `p`,
+    -- `P` and `<C-v>` all look at the clipboard for a picture first and do
+    -- their ordinary job when there is not one.
+    --
+    -- Falling through preserves the count and the register: `3p` and `"ap` are
+    -- still `3p` and `"ap`, which they would not be if this just fed the bare
+    -- key back.
+    ---@param key string
+    local function paste(key)
+      return function()
+        local image = read_image(nil, true)
+        if image then
+          return attach_image(chat, image)
+        end
+        local prefix = ""
+        if vim.fn.mode() == "n" then
+          -- Only in normal mode: `"` and a digit typed in INSERT mode are just
+          -- a quote and a digit, and prepending them there would write them
+          -- into the prompt.
+          prefix = (vim.v.register ~= '"' and ('"' .. vim.v.register) or "")
+            .. (vim.v.count > 0 and tostring(vim.v.count) or "")
+        end
+        vim.api.nvim_feedkeys(prefix .. vim.keycode(key), "n", false)
       end
-    end, vim.tbl_extend("force", opts, { desc = "paseo: paste image" }))
+    end
+    for _, key in ipairs { "p", "P" } do
+      vim.keymap.set("n", key, paste(key), vim.tbl_extend("force", opts, {
+        desc = "paseo: paste (an image, if the clipboard has one)",
+      }))
+    end
+    vim.keymap.set({ "n", "i" }, "<C-v>", paste "<C-v>", vim.tbl_extend("force", opts, {
+      desc = "paseo: paste (an image, if the clipboard has one)",
+    }))
     vim.keymap.set("n", "q", function()
       M.close()
     end, vim.tbl_extend("force", opts, { desc = "paseo: close chat" }))
@@ -353,10 +381,16 @@ local function make_buffers(chat)
 end
 
 ---Put the chat on screen, on whichever surface it belongs to.
+---
+---`chat.surface` is where this chat WAS -- reopening keeps the surface you
+---switched it to. With no answer there it is the configured default, which is
+---the full-screen dashboard: that is the surface with everything on it, and
+---`<C-f>` is how you get the narrow one beside your code.
 ---@param chat paseo.Chat
 local function layout(chat)
   make_buffers(chat)
-  if chat.surface == "float" then
+  local surface = chat.surface or require("paseo.config").get().ui.surface
+  if surface == "float" then
     require("paseo.ui.float").open(chat)
   else
     sidebar.open(chat)
@@ -481,7 +515,10 @@ function M.open(opts, callback)
   current = chat
 
   layout(chat)
-  if opts.focus ~= false then
+  if opts.focus ~= false and chat.win_composer and vim.api.nvim_win_is_valid(chat.win_composer) then
+    -- Not unconditional: the dashboard on any tab but Chat has no composer
+    -- window at all, and `nvim_set_current_win(nil)` is an error rather than a
+    -- no-op.
     vim.api.nvim_set_current_win(chat.win_composer)
   end
 
@@ -638,22 +675,23 @@ function M.toggle()
   M.open {}
 end
 
----Swap surface, keeping the conversation and the draft.
+---Put the chat on a named surface, keeping the conversation and the draft.
 ---
 ---Both live on the chat rather than in a window, so this is genuinely just a
 ---matter of closing one set of windows and opening another.
-function M.fullscreen()
+---@param name "float"|"sidebar"
+function M.surface(name)
   local chat = current
   if not chat then
     return M.open({}, function(opened)
       if opened then
-        M.fullscreen()
+        M.surface(name)
       end
     end)
   end
 
   local float = require "paseo.ui.float"
-  if float.is_open(chat) then
+  if name == "sidebar" then
     float.close()
     chat.surface = "sidebar"
     sidebar.open(chat)
@@ -662,6 +700,15 @@ function M.fullscreen()
     chat.surface = "float"
     float.open(chat)
   end
+end
+
+---`<C-f>`: swap to the other surface.
+function M.fullscreen()
+  local chat = current
+  if chat and require("paseo.ui.float").is_open(chat) then
+    return M.surface "sidebar"
+  end
+  return M.surface "float"
 end
 
 ---@type boolean

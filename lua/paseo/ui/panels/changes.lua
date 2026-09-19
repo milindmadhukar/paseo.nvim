@@ -39,10 +39,21 @@ function M.lines(chat, width)
       }
       for _, change in ipairs(changes) do
         total = total + 1
+        -- `change.path` is relative to the repo's worktree, and with several
+        -- repos in one unit of work the cwd is not any of them.
+        local file = vim.fs.joinpath(repo.worktree, change.path)
+        -- The dashboard closes on the way. A file opened underneath a
+        -- full-screen float is a file you cannot see, and this panel exists to
+        -- answer "what did it just edit" -- an answer you then want to READ.
+        local click = function()
+          require("paseo.ui.float").close()
+          vim.cmd.edit(vim.fn.fnameescape(file))
+        end
+        local status = status_cell(change)
         lines[#lines + 1] = {
-          { "    " },
-          status_cell(change),
-          { repos.relative(repo, change.path) or change.path, "PaseoPath" },
+          { "    ", nil, click },
+          { status[1], status[2], click },
+          { repos.relative(repo, change.path) or change.path, "PaseoPath", click },
         }
       end
       lines[#lines + 1] = {}

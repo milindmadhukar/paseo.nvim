@@ -34,7 +34,7 @@ bridge, the `ws` CLI, the workspace layer, and the agent-facing skills.
 | ✅ | tool calls, reasoning and todos rendered in the transcript |
 | ✅ | permission dialog — answer a prompt without the desktop app |
 | ✅ | questions answered, not approved — `AskUserQuestion` and friends |
-| ✅ | two surfaces: the sidebar pane and the full-screen dashboard |
+| ✅ | two surfaces: the full-screen dashboard (default) and the sidebar pane |
 | ✅ | workspace assembly — `ws`, a Go CLI |
 | ✅ | workspace picker with a live, push-driven agent status column |
 | ✅ | `workspace` / `workspace-commit` / `workspace-pr` skills |
@@ -102,6 +102,27 @@ require("paseo").setup {
     cli = "paseo",
   },
 
+  ui = {
+    surface = "float",            -- where `:Paseo chat` opens. Or "sidebar".
+
+    float = {
+      width = 94,                 -- percent of the editor, 1-100
+      height = 86,
+      -- row and col are absent: absent means centred
+      composer = 7,               -- rows the composer gets
+      zindex = 30,                -- BELOW the 50 a float gets by default
+      backdrop = true,
+      tab_keys = true,            -- bare 1-6 switch tabs; see below
+    },
+
+    sidebar = {
+      width = 40,                 -- percent of the editor's columns
+      min_width = 60,             -- ...but never narrower than this, in cells
+      composer = 8,               -- rows the composer gets
+      position = "right",         -- or "left"
+    },
+  },
+
   workspaces = {
     dir = ".workspaces",          -- relative to a project root
     branch_prefix = "ws/",        -- used when there is no manifest to ask
@@ -121,7 +142,7 @@ require("paseo").setup {
 | `:Paseo hunks` | Every hunk in the unit of work, as a quickfix list |
 | `:Paseo stage` | Stage the hunk the quickfix list is on, then advance |
 | `:Paseo review [unified]` | Diff panel, one tab per repo |
-| `:Paseo chat` | Open/close the chat — conversation above, composer below |
+| `:Paseo chat` | Open/close the chat, on whichever surface `ui.surface` names |
 | `:Paseo explain [kind]` | Explain the hunk/selection/file, using the rubric |
 | `:Paseo ask [kind]` | Attach the hunk/selection/file, then type your question |
 | `:Paseo qfask` | Attach every hunk in the quickfix list |
@@ -132,6 +153,7 @@ require("paseo").setup {
 | `:Paseo switchmodel` | Change the running session's model |
 | `:Paseo session` | What this session is set to |
 | `:Paseo dash` | The chat full screen, with the session panels |
+| `:Paseo sidebar` | The chat in the pane beside your code |
 | `:Paseo model` | Choose the provider/model new agents get |
 | `:Paseo workspaces` | Workspace picker — open, sessions, create, archive |
 | `:Paseo wcreate` | Create a workspace here — the shape is worked out for you |
@@ -159,13 +181,105 @@ provider.
 While a turn is running the header spins and counts the seconds:
 
 ```
-⠹ 14s  claude/sonnet-5 · acceptEdits · 󰧑 think · ⚡
+⠹ 14s  claude/sonnet-5 · acceptEdits · 󰧑 think · ⚡ · 21%   ~/Code/paseo.nvim
 ```
 
 The count is the point — a static dot looked identical at two seconds and at
 two minutes, so a wedged turn and a working one were the same picture. A
 pending permission replaces it with ` needs you`, because then the agent is
 not working, it is waiting for you.
+
+On the sidebar it is the conversation window's winbar. On the full-screen
+surface it is **not**: a winbar belongs to a window, the conversation window
+only exists on the Chat tab, and every other tab therefore had no header and
+could not tell you which model it was on. There it is a volt section in the
+chrome, drawn above the tab bar, true on all six tabs — and clicking it takes
+you to the panel that can change what it says.
+
+### The full-screen surface
+
+The default. `:Paseo chat` opens it, `:Paseo chat` again closes it, `<C-f>`
+swaps to the sidebar and back.
+
+```
+  ⠹ 14s  claude/sonnet-5 · acceptEdits · 󰧑 think · ⚡ · 21%   ~/Code/paseo.nvim
+  1 Chat  2 Session  3 Sessions  4 Changes  5 Usage  6 Workspaces
+  ──────────────────────────────────────────────────────────────────────────
+```
+
+| | |
+|---|---|
+| `Chat` | the conversation and the composer, real buffers floated on top |
+| `Session` | mode, thinking level, model, feature toggles — all clickable |
+| `Sessions` | the agents in this workspace, live; click one to switch to it |
+| `Changes` | what is changed on disk, per repo; click a file to open it |
+| `Usage` | context window, tokens, cost |
+| `Workspaces` | every workspace Paseo knows, plus the repos in this unit of work |
+
+`1`–`6` jump, `<M-1>`–`<M-6>` and `<Tab>`/`<S-Tab>` do the same, and
+everything that does something responds to a click.
+
+A bare digit is also a **count**, and the two panes these are bound on are
+ordinary buffers — so while the dashboard is open, `3p` and `5j` in the
+conversation and the composer go to the tab bar. That is the right default for
+a seven-line prompt box, but it is a trade: `tab_keys = false` buys the counts
+back and leaves the `<M-…>` forms and `<Tab>`, which collide with nothing.
+
+Two things had to be true for that, and neither was. The number keys were
+bound on the **chrome** buffer, and the Chat tab puts your cursor in the
+composer — so the footer advertised keys that went to a buffer with no such
+mapping. And the click targets were all there, on the cell's third element the
+way volt wants them, but `volt.events.enable()` — which routes `LeftMouse` to
+them, and which `volt.run` calls — was never reached, because this surface
+drives `gen_data`/`redraw` itself to keep the conversation buffer out of
+volt's hands.
+
+**The box is yours**, under `ui.float`. `width` and `height` are **percentages
+of the editor, 1–100** — the same unit
+[floaterm](https://github.com/nvzone/floaterm)'s `size` takes, computed with
+the same arithmetic in the same order, so a number means the same thing in
+either config and the two agree to the cell rather than to within a rounding
+error. `row` and `col` are absolute cells, because they are window coordinates
+rather than sizes; absent means centred, with the same `(total - size) / 2`
+floaterm centres with. So floaterm's `size = { h = 90, w = 92 }` is:
+
+```lua
+ui = { float = { width = 92, height = 90 } }
+```
+
+and the two windows land in the same place — switching between them does not
+move the frame under you.
+
+Percentages rather than a margin in cells because a margin that looks right on
+a 200-column monitor is most of a laptop screen; and 1–100 rather than
+fractions because `0.92` and `92` are each obvious once you know which
+convention you are in, and nothing on the page tells you which. A function is
+the escape hatch for a size no percentage can express, and returns cells.
+
+Whatever you ask for is clamped to 60×20 — below that the tab bar and the
+composer stop fitting — and to the editor, so no setting can put the border
+off screen.
+
+**The sidebar takes the same units**, under `ui.sidebar`: `width` as a
+percentage, `min_width` as a floor in cells (40% of a 100-column terminal is a
+pane too narrow to read a tool card in, and a percentage has no way to know
+that), `composer` in rows, and `position` for which side it opens on. Its
+width is also capped at what `'winwidth'` leaves for the window you came back
+from — Neovim claws the difference back the instant focus returns there, so a
+bigger number is not a wider sidebar, it is a number that quietly does not
+happen.
+
+**Z-index is 30, not 100.** The default for a floating window is 50, and
+plenary's popup — so every telescope picker — takes it. A dashboard above that
+number renders `:Paseo changes`, a diff preview and every `vim.ui.select`
+*underneath itself*, which looks exactly like the command doing nothing. The
+permission dialog is the one exception and sits above everything, because it
+is the one window that must not be covered.
+
+The chrome is four volt sections rather than one, which is not tidiness: the
+header repaints ten times a second while a turn runs, and a single section
+would drag the `Changes` panel — one `git status` per repo — through every
+frame.
 
 ### Questions
 
@@ -188,10 +302,16 @@ otherwise `Rebase, then push` returns as two answers matching no option.
 
 ### Images
 
-`<C-v>` in the composer pastes the image on the clipboard. Neovim's own
-clipboard is text — a screenshot copied from a browser never reaches a
-register — so this shells out to `wl-paste`, `xclip` or `pngpaste` and reads
-the bytes directly.
+`p` in the composer pastes the image on the clipboard. Neovim's own clipboard
+is text — a screenshot copied from a browser never reaches a register — so
+this shells out to `wl-paste`, `xclip` or `pngpaste` and reads the bytes
+directly.
+
+It used to be `<C-v>`, with `^V image` in the composer's winbar to tell you
+so. A paste key you have to be taught is a worse answer than paste working,
+and the hint cost four columns of a narrow pane. `p`, `P` and `<C-v>` all look
+at the clipboard for a picture first now, and the winbar says nothing about
+it.
 
 What lands in the buffer is a **placeholder**:
 
@@ -201,9 +321,10 @@ What lands in the buffer is a **placeholder**:
 
 The bytes travel beside the prompt, not inside it, so the buffer stays
 something you can read and edit, and the number is how a sentence refers to
-one of several. `<C-v>` with no image on the clipboard does its ordinary job
-instead of swallowing the key. `:Paseo image ~/shot.png` attaches a file, from
-anywhere.
+one of several. With no image on the clipboard the key does its ordinary job —
+and does it properly: the count and the register are carried through, so `3p`
+is still `3p` and `"ap` is still `"ap`. `:Paseo image ~/shot.png` attaches a
+file, from anywhere.
 
 ## Workspaces and sessions
 

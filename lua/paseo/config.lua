@@ -9,6 +9,7 @@ local M = {}
 ---@class paseo.Config
 ---@field backend "paseo"|"local"  Where agents run. See README, "Backend seam".
 ---@field paseo paseo.Config.Paseo
+---@field ui paseo.Config.UI
 ---@field workspaces paseo.Config.Workspaces
 ---@field review paseo.Config.Review
 
@@ -32,6 +33,56 @@ local M = {}
 --- (There is no `cli` key. `/usr/bin/paseo` is a perfectly good headless CLI,
 --- but it still pays Node startup -- about 1s against 8ms for the socket -- so
 --- nothing here shells out to it. The daemon is reached over its WebSocket.)
+
+---@class paseo.Config.UI
+---@field surface "float"|"sidebar"  Which surface `:Paseo chat` opens on.
+---                       "float" is the default: the full-screen dashboard is
+---                       the one with everything on it, and the sidebar is the
+---                       narrower thing you switch TO with <C-f>.
+---@field float paseo.Config.UI.Float
+---@field sidebar paseo.Config.UI.Sidebar
+
+---@class paseo.Config.UI.Float
+---@field width number|fun(columns: integer): integer   PERCENT of the editor,
+---@field height number|fun(lines: integer): integer    1-100 -- the same unit
+---                       floaterm's `size` takes, so a number means the same
+---                       thing in either config. A function is the escape
+---                       hatch for a size a percentage cannot express, and it
+---                       returns CELLS.
+---@field row integer?    Absolute editor cells; these are window coordinates,
+---@field col integer?    not sizes. Absent means CENTRED, with the same
+---                       `(total - size) / 2` floaterm centres with -- so the
+---                       two at one size land in one place.
+---@field composer integer  Rows the composer gets. The rest of the box, less
+---                       the header, tab bar and footer, is the conversation.
+---@field zindex integer  Base z-index of the surface. DELIBERATELY BELOW 50,
+---                       which is what floating windows and plenary popups get
+---                       by default: a dashboard that outranks them hides the
+---                       telescope picker, the diff preview and every
+---                       `vim.ui.select` opened on top of it. Our own modal --
+---                       the permission dialog -- is exempt and stays above
+---                       everything, because it is the one window that must not
+---                       be covered.
+---@field backdrop boolean  Dim the editor behind the surface.
+---@field tab_keys boolean  Bind bare `1`-`6` to the tabs in the conversation
+---                       and composer as well as in the chrome. They have to be
+---                       bound there or they do nothing: the Chat tab puts your
+---                       cursor in the composer. The cost is that a bare digit
+---                       is also a COUNT, so `3p` and `5j` in those two buffers
+---                       go to the tab bar instead while the dashboard is open.
+---                       Set false to keep the counts; `<M-1>`-`<M-6>` and
+---                       `<Tab>` still switch tabs.
+
+---@class paseo.Config.UI.Sidebar
+---@field width number|fun(columns: integer): integer  PERCENT of the editor's
+---                       columns, read the same way as the float's.
+---@field min_width integer  ...but never narrower than this, in CELLS. A
+---                       percentage of a small terminal is a pane too narrow to
+---                       read a tool card in, and unlike the float -- whose
+---                       floor is a hard layout requirement -- how narrow is
+---                       too narrow here is a matter of taste.
+---@field composer integer  Rows the composer gets, under the conversation.
+---@field position "right"|"left"  Which side the pane opens on.
 
 ---@class paseo.Config.Workspaces
 ---@field dir string      Directory, relative to a project root, holding the
@@ -57,6 +108,29 @@ local defaults = {
     -- right on a host that moved the daemon. Set `url` to pin it.
   },
 
+  ui = {
+    surface = "float",
+
+    float = {
+      -- Percentages rather than a margin in cells: a margin that looks right
+      -- on a 200-column monitor is most of a laptop screen.
+      width = 94,
+      height = 86,
+      -- row and col are deliberately absent: absent means centred.
+      composer = 7,
+      zindex = 30,
+      backdrop = true,
+      tab_keys = true,
+    },
+
+    sidebar = {
+      width = 40,
+      min_width = 60,
+      composer = 8,
+      position = "right",
+    },
+  },
+
   workspaces = {
     dir = ".workspaces",
     branch_prefix = "ws/",
@@ -80,8 +154,61 @@ function M.setup(opts)
     return v == "paseo" or v == "local"
   end, '"paseo" or "local"')
   vim.validate("review.context", config.review.context, "number")
+  vim.validate("ui.surface", config.ui.surface, function(v)
+    return v == "float" or v == "sidebar"
+  end, '"float" or "sidebar"')
+  vim.validate("ui.sidebar.position", config.ui.sidebar.position, function(v)
+    return v == "right" or v == "left"
+  end, '"right" or "left"')
+  -- Clamped rather than merely validated: `nvim_open_win` rejects anything
+  -- below 1 outright, and the backdrop sits five below this.
+  vim.validate("ui.float.zindex", config.ui.float.zindex, "number")
+  config.ui.float.zindex = math.max(10, math.floor(config.ui.float.zindex))
+  -- Validated here rather than at the window, where a bad value would surface
+  -- as `nvim_open_win` complaining about a width -- true, and no help at all in
+  -- finding the key that caused it.
+  for where, keys in pairs {
+    float = { "width", "height", "row", "col", "composer" },
+    sidebar = { "width", "min_width", "composer" },
+  } do
+    for _, key in ipairs(keys) do
+      vim.validate(("ui.%s.%s"):format(where, key), config.ui[where][key], function(v)
+        return v == nil or type(v) == "number" or type(v) == "function"
+      end, "a percentage of the editor (1-100), or a function returning cells")
+    end
+  end
 
   return config
+end
+
+---A configured extent, in cells.
+---
+---The unit is a PERCENTAGE of the editor, 1-100 -- the same unit floaterm's
+---`size` takes, so a number copied from one config means the same thing in the
+---other. Fractions were the first attempt and they are worse: `0.92` and `92`
+---are both obvious once you know which convention you are in, and nothing on
+---the page tells you which.
+---
+---A function is the escape hatch for a size no percentage can express, and it
+---is handed the editor's total and returns CELLS.
+---@param value number|fun(total: integer): integer|nil
+---@param total integer   `vim.o.columns` or `vim.o.lines`.
+---@param fallback number  A percentage, used when `value` is unusable.
+---@return integer
+function M.cells(value, total, fallback)
+  if type(value) == "function" then
+    local ok, computed = pcall(value, total)
+    if ok and type(computed) == "number" then
+      return math.floor(computed)
+    end
+    value = nil
+  end
+  if type(value) ~= "number" or value <= 0 then
+    value = fallback
+  end
+  -- The same arithmetic floaterm does, in the same order, so the two agree to
+  -- the cell rather than to within a rounding error.
+  return math.floor(total * math.min(100, value) / 100)
 end
 
 ---The live config. Safe to call before `setup()`; you get the defaults.

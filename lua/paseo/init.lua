@@ -279,7 +279,17 @@ commands.chat = {
 commands.dash = {
   desc = "Open the chat full screen, with the session panels",
   run = function()
-    require("paseo.ui.chat").fullscreen()
+    -- Not `fullscreen()`, which is the `<C-f>` TOGGLE: `:Paseo dash` asked for
+    -- the dashboard, and with the dashboard already the default surface a
+    -- toggle would have answered by closing it.
+    require("paseo.ui.chat").surface "float"
+  end,
+}
+
+commands.sidebar = {
+  desc = "Open the chat in the sidebar, beside your code",
+  run = function()
+    require("paseo.ui.chat").surface "sidebar"
   end,
 }
 

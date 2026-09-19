@@ -1,4 +1,4 @@
---- The sidebar: a pane on the right, the conversation above its composer.
+--- The sidebar: a pane beside your code, the conversation above its composer.
 ---
 --- One of the plugin's two surfaces. This is the everyday one -- narrow, beside
 --- your code, always answerable. The other is `ui/float.lua`, which trades the
@@ -106,8 +106,18 @@ function M.header(chat)
 end
 
 ---Repaint the header of whichever windows this chat currently has.
+---
+---On the full-screen surface the header is not a winbar at all -- it is a volt
+---section in the chrome, so that it is drawn on every tab rather than only on
+---the one that has a conversation window. Route to it rather than writing a
+---winbar nobody would see.
 ---@param chat table
 function M.refresh(chat)
+  local float = require "paseo.ui.float"
+  if float.is_open(chat) then
+    return float.refresh_header(chat)
+  end
+
   local bar = render.to_winbar(M.header(chat))
   for _, win in ipairs { chat.win_conversation } do
     if win and api.nvim_win_is_valid(win) then
@@ -131,25 +141,39 @@ function M.open(chat)
   end
 
   local from = api.nvim_get_current_win()
-  local width = math.max(60, math.floor(vim.o.columns * 0.4))
+  local config = require "paseo.config"
+  local ui = config.get().ui.sidebar
 
-  vim.cmd("botright " .. width .. "vsplit")
+  -- A percentage of the editor, read exactly as the float's is -- but floored
+  -- in CELLS, because 40% of a 100-column terminal is a pane too narrow to
+  -- read a tool card in, and a percentage has no way to know that.
+  local floor = math.floor(type(ui.min_width) == "number" and ui.min_width or 60)
+  local width = math.max(floor, config.cells(ui.width, vim.o.columns, 40))
+  -- ...and never more than `winwidth` leaves for the window you came from.
+  -- Neovim claws the difference back the instant focus returns there, so a
+  -- bigger number is not a wider sidebar -- it is a number that quietly does
+  -- not happen, and a 64 that silently becomes 59 is the kind of thing you
+  -- spend an evening on.
+  width = math.min(width, math.max(20, vim.o.columns - math.max(vim.o.winwidth, 10) - 1))
+
+  vim.cmd(("%s %dvsplit"):format(ui.position == "left" and "topleft" or "botright", width))
   chat.win_conversation = api.nvim_get_current_win()
   api.nvim_win_set_buf(chat.win_conversation, chat.conversation)
   style(chat.win_conversation)
 
   -- The composer sits under the conversation, small: it is where you type one
   -- question, not where you write a document.
-  vim.cmd "belowright 8split"
+  vim.cmd(("belowright %dsplit"):format(math.max(3, math.floor(ui.composer or 8))))
   chat.win_composer = api.nvim_get_current_win()
   api.nvim_win_set_buf(chat.win_composer, chat.composer)
   style(chat.win_composer)
+  -- No `^V image` hint. Pasting an image is now what `p` does, so it is not a
+  -- key you have to be told about -- and a hint you do not need is a hint that
+  -- costs you the width it occupies.
   vim.wo[chat.win_composer].winbar = render.to_winbar {
     { "  ", "PaseoDim" },
     { "↵", "PaseoKey" },
     { " send · ", "PaseoDim" },
-    { "^V", "PaseoKey" },
-    { " image · ", "PaseoDim" },
     { "<C-f>", "PaseoKey" },
     { " full screen · ", "PaseoDim" },
     { "q", "PaseoKey" },

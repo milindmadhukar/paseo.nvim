@@ -69,6 +69,27 @@ Defaults: >lua
         -- url and home are absent by default: absent means "discover it".
       },
 
+      ui = {
+        surface = "float",        -- or "sidebar"
+
+        float = {
+          width = 94,             -- percent of the editor, 1-100
+          height = 86,
+          -- row and col are absent: absent means centred
+          composer = 7,           -- rows the composer gets
+          zindex = 30,            -- below the 50 a float gets by default
+          backdrop = true,
+          tab_keys = true,
+        },
+
+        sidebar = {
+          width = 40,             -- percent of the editor's columns
+          min_width = 60,         -- ...but never narrower, in cells
+          composer = 8,           -- rows the composer gets
+          position = "right",     -- or "left"
+        },
+      },
+
       workspaces = {
         dir = ".workspaces",
         branch_prefix = "ws/",
@@ -117,6 +138,105 @@ paseo.autostart                                       boolean, default true
     running daemon that command exits 1 and prints a wall of daemon logs, so
     "start it just in case" is not an option. It also refuses to run the
     desktop binary; see |paseo-no-cli|.
+
+                                                   *paseo-config.ui.surface*
+ui.surface                                        string, default `"float"`
+
+    Which surface |:Paseo-chat| opens on -- `"float"`, the full-screen
+    dashboard, or `"sidebar"`, the pane beside your code. The dashboard is the
+    default because it is the surface with everything on it; `<C-f>` switches
+    to the other one at any time, and a chat REMEMBERS the surface you last
+    put it on. See |paseo-chat-float|.
+
+                        *paseo-config.ui.float.width*
+                        *paseo-config.ui.float.height*
+ui.float.width                                        number, default `94`
+ui.float.height                                       number, default `86`
+
+    The full-screen surface's box, as a PERCENTAGE of the editor, 1-100.
+
+    That is the unit nvzone/floaterm's `size` takes, computed with the same
+    arithmetic in the same order -- so a number means the same thing in either
+    config, and the two windows agree to the cell rather than to within a
+    rounding error. floaterm's `size = { h = 90, w = 92 }` is: >lua
+        ui = { float = { width = 92, height = 90 } }
+<
+    Percentages rather than a margin in cells because a margin that looks
+    right on a 200-column monitor is most of a laptop screen. 1-100 rather
+    than fractions because `0.92` and `92` are each obvious once you know
+    which convention you are in, and nothing on the page tells you which.
+
+    Either may instead be a FUNCTION -- the escape hatch for a size no
+    percentage can express. It is handed `vim.o.columns` or `vim.o.lines` and
+    returns CELLS.
+
+    Clamped to 60x20, below which the tab bar and the composer stop fitting,
+    and to the editor, so no setting can put the border off screen.
+
+                        *paseo-config.ui.float.row*
+                        *paseo-config.ui.float.col*
+ui.float.row                                          number, unset
+ui.float.col                                          number, unset
+
+    Where the box sits, in absolute editor CELLS -- these are window
+    coordinates, not sizes, and "row 3" is what you mean when you pin a
+    window.
+
+    Unset means centred, with the same `(total - size) / 2` floaterm centres
+    with. So giving the two the same size puts them in the same place, and
+    switching between them does not move the frame under you.
+
+                                              *paseo-config.ui.float.composer*
+ui.float.composer                                     number, default `7`
+
+    Rows the composer gets. The conversation gets what is left of the box
+    after the header, the tab bar, the footer and this.
+
+                                                *paseo-config.ui.float.zindex*
+ui.float.zindex                                       number, default `30`
+
+    Base z-index of the full-screen surface. Below 50 on purpose -- see
+    |paseo-chat-zindex|. The dimmed backdrop sits five below this and the
+    conversation and composer five above; the permission dialog ignores it
+    entirely and stays on top of everything.
+
+                                              *paseo-config.ui.float.backdrop*
+ui.float.backdrop                                 boolean, default true
+
+    Dim the editor behind the full-screen surface.
+
+                                              *paseo-config.ui.float.tab_keys*
+ui.float.tab_keys                                 boolean, default true
+
+    Bind bare `1`-`6` to the dashboard's tabs in the conversation and the
+    composer as well as in the chrome. They have to be bound there or they do
+    nothing, because the Chat tab puts your cursor in the composer.
+
+    The cost is that a bare digit is also a COUNT: while the dashboard is open,
+    `3p` and `5j` in those two buffers go to the tab bar. Set this false to
+    keep the counts -- `<M-1>`-`<M-6>` and `<Tab>` still switch tabs, and
+    collide with nothing.
+
+                                                 *paseo-config.ui.sidebar*
+ui.sidebar                                                          table
+
+    The sidebar, in the same units as the float. >lua
+        sidebar = {
+          width = 40,        -- percent of the editor's columns, or a function
+          min_width = 60,    -- ...but never narrower than this, in CELLS
+          composer = 8,      -- rows the composer gets
+          position = "right" -- or "left"
+        }
+<
+    `min_width` exists because a percentage cannot know when it has produced a
+    pane too narrow to read a tool card in: 40% of a 100-column terminal is 40
+    columns. The float's equivalent floor is fixed at 60x20 instead, because
+    there it is a hard layout requirement rather than a matter of taste.
+
+    The width is also capped at what 'winwidth' leaves for the window you came
+    back from. Neovim claws the difference back the instant focus returns
+    there, so a bigger number is not a wider sidebar -- it is a number that
+    quietly does not happen.
 
                                                  *paseo-config.paseo.password*
 paseo.password                                            string, unset
@@ -226,7 +346,20 @@ review.context                                          integer, default `0`
 
 :Paseo chat                                                  *:Paseo-chat*
 
-    Open, or close, the chat for this directory. See |paseo-chat|.
+    Open, or close, the chat for this directory, on whichever surface
+    |paseo-config.ui.surface| names -- the full-screen dashboard by default.
+    See |paseo-chat|.
+
+:Paseo dash                                                  *:Paseo-dash*
+
+    Put the chat on the full-screen surface. Not a toggle -- you asked for the
+    dashboard, and with the dashboard already the default a toggle would have
+    answered by closing it. See |paseo-chat-float|.
+
+:Paseo sidebar                                            *:Paseo-sidebar*
+
+    Put the chat in the sidebar, beside your code. The same conversation and
+    the same draft; only the windows change.
 
 :Paseo model                                                *:Paseo-model*
 
@@ -492,12 +625,15 @@ rather than an outage.
 ==============================================================================
 10. THE CHAT WINDOW                                              *paseo-chat*
 
-Two surfaces onto one conversation.
+Two surfaces onto one conversation. `:Paseo chat` toggles whichever one
+`ui.surface` names, and that is the FULL SCREEN one by default: it is the
+surface with everything on it, and the sidebar is what you switch TO.
 
                                                          *paseo-chat-sidebar*
 The SIDEBAR is a pane on the right: the conversation above, the composer
-below. `:Paseo chat` toggles it. This is the everyday surface -- narrow,
-beside your code.
+below -- `:Paseo sidebar`, or `<C-f>` from the dashboard. Narrow, beside your
+code, for when the conversation is a thing you glance at rather than the thing
+you are doing.
 
                                                           *paseo-chat-header*
 The header ~
@@ -514,24 +650,45 @@ only way to tell was to open the app. A pending permission replaces the
 spinner with `` needs you``.
 
                                                            *paseo-chat-float*
-The FULL SCREEN surface is `:Paseo dash`, or `<C-f>` from the sidebar. Same
-conversation, plus tabs for everything about the session: >
+The FULL SCREEN surface -- the DEFAULT -- is `:Paseo chat`, `:Paseo dash`, or
+`<C-f>` from the sidebar. The same conversation, under the same header, plus a
+tab for every other thing Paseo knows: >
 
-    Chat       the conversation and composer
-    Session    mode, thinking level, model and feature toggles
-    Sessions   the agents in this workspace, live
-    Changes    what is changed on disk, across every repo
-    Usage      context window, tokens and cost
+    1 Chat        the conversation and composer
+    2 Session     mode, thinking level, model and feature toggles
+    3 Sessions    the agents in this workspace, live -- click one to switch
+    4 Changes     what is changed on disk -- click a file to open it
+    5 Usage       context window, tokens and cost
+    6 Workspaces  every workspace, and the repos in this unit of work
 <
+`1`-`6` jump, `<M-1>`-`<M-6>` and `<Tab>`/`<S-Tab>` do the same, and
+everything on screen that does something responds to a CLICK -- the tab bar, a
+mode, a model, a session, a changed file. The keys are bound on the composer
+and the conversation as well as on the chrome, because the Chat tab puts your
+cursor in the composer, and a key bound only to a window you are never in is a
+key that does not work.
+
 Both surfaces share the same buffers, so switching preserves your draft and
-your scroll position. `<C-f>` switches back.
+your scroll position.
+
+                                                          *paseo-chat-zindex*
+The dashboard sits BELOW the z-index a floating window gets by default, at
+`ui.float.zindex` -- 30 against 50. That is deliberate: a telescope picker, a
+diff preview or a `vim.ui.select` opened from the dashboard has to render ON
+TOP of it, and at the z-index this used to use they rendered underneath and
+looked like nothing had happened. The one window exempt from this is the
+permission dialog, which asks for a z-index above everything, because it is
+the one window that must not be covered.
 
                                                           *paseo-chat-keys*
 In the composer ~
 
     <CR>      (normal mode) send
     <C-s>     send, from normal or insert mode
-    <C-v>     paste the image on the clipboard
+    p  P      paste -- an image if the clipboard has one, text otherwise
+    1-6       jump to a tab (full screen; see ui.float.tab_keys)
+    <M-1>..6  the same, without taking the count keys
+    <Tab>     next tab, <S-Tab> the previous one
     <C-f>     switch surface
     q         close the chat
 
@@ -539,6 +696,8 @@ In the conversation ~
 
     <Tab>     expand or collapse the item under the cursor
     <CR>      the same
+    1-6       jump to a tab (full screen; see ui.float.tab_keys)
+    <M-1>..6  the same, without taking the count keys
     gp        reopen a pending permission prompt
     <C-f>     switch surface
     q         close the chat
@@ -582,9 +741,14 @@ so the agent reads the code first and the question second.
 
                                                        *paseo-chat-images*
 Neovim's clipboard is TEXT. An image copied from a browser or a screenshot
-tool never reaches a register, so `<C-v>` in the composer does not paste it --
-it shells out to `wl-paste`, `xclip` or `pngpaste`, reads the bytes as binary,
-and carries them to the daemon as base64 beside the prompt.
+tool never reaches a register, so an ordinary paste cannot see it. `p`, `P`
+and `<C-v>` in the composer therefore look at the real clipboard first --
+`wl-paste`, `xclip` or `pngpaste` -- read the bytes as binary, and carry them
+to the daemon as base64 beside the prompt.
+
+PASTE IS JUST PASTE. This used to be a key of its own, `<C-v>`, advertised in
+the composer's winbar; a paste key you have to be taught is a worse answer
+than `p` working, and the hint cost four columns of a narrow pane.
 
 What lands in the BUFFER is a placeholder: >
     [Image #1] why is the right-hand panel empty here?
@@ -593,9 +757,10 @@ and edit, and the number is how a sentence refers to one of several images.
 Deleting the placeholder does not detach the image -- clear the composer, or
 send and start again.
 
-`<C-v>` with no image on the clipboard does its ORDINARY job -- literal insert,
-blockwise visual -- rather than swallowing the key. |:Paseo-image| takes a path
-instead, and works with no clipboard reader installed at all.
+With no image on the clipboard the key does its ORDINARY job -- `3p` is still
+`3p` and `"ap` is still `"ap`, because the count and the register are carried
+through. |:Paseo-image| takes a path instead, and works with no clipboard
+reader installed at all.
 
 Images larger than 10 MB are refused here rather than after a round trip; no
 provider accepts one, and base64 makes it a third larger again.
