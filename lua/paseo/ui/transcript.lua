@@ -64,23 +64,60 @@ function M.reset(chat)
   end
 end
 
----Scroll to the bottom, but ONLY if we were already there.
+---Is the window showing the END of the transcript?
 ---
----Scrolling back to reread something must not be yanked away by the next
----chunk. This is the one behaviour worth keeping verbatim from the old UI.
+---By VIEWPORT, not by cursor. This window is never the focused one -- the
+---dashboard opens it with `enter = false` and the sidebar hands focus straight
+---to the composer -- so its cursor is not where you are looking. It is only
+---ever wherever `to_bottom` last parked it.
+---
+---The old test was `cursor >= line_count - 3`, and that is why following
+---stopped working: once `to_bottom` puts the cursor on line N, the next append
+---makes the count `N + h`, and `N >= N + h - 3` holds only while `h <= 3`. One
+---tool card is taller than three lines, and after it the cursor can never
+---catch up on its own -- the lock was gone for the rest of the session, which
+---looked exactly like there being no auto-scroll at all.
+---
+---MUST be called before the buffer is written. Afterwards the answer is always
+---"no", because the new lines are the ones below the fold.
 ---@param chat table
-local function follow(chat)
+---@return boolean
+local function at_bottom(chat)
+  local win = chat.win_conversation
+  if not (win and api.nvim_win_is_valid(win)) then
+    return false
+  end
+  -- `w$` is the last line VISIBLE in the window. A buffer shorter than the
+  -- window has it equal to the count, so a fresh chat follows from the start.
+  return vim.fn.line("w$", win) >= api.nvim_buf_line_count(chat.conversation)
+end
+
+---Scroll to the bottom. Unconditional -- the caller decides.
+---@param chat table
+local function to_bottom(chat)
   local win = chat.win_conversation
   if not (win and api.nvim_win_is_valid(win)) then
     return
   end
-  local total = api.nvim_buf_line_count(chat.conversation)
-  if api.nvim_win_get_cursor(win)[1] >= total - 3 then
-    pcall(api.nvim_win_set_cursor, win, { total, 0 })
+  pcall(api.nvim_win_set_cursor, win, { api.nvim_buf_line_count(chat.conversation), 0 })
+end
+
+---Scroll to the bottom, but ONLY if we were already there.
+---
+---Scrolling back to reread something must not be yanked away by the next
+---chunk. Kept for callers outside this file; inside it the two halves are used
+---separately, because the question has to be asked before the write and
+---answered after it.
+---@param chat table
+local function follow(chat)
+  if at_bottom(chat) then
+    to_bottom(chat)
   end
 end
 
 M.follow = follow
+M.at_bottom = at_bottom
+M.to_bottom = to_bottom
 
 ---@param chat table
 ---@param block table
@@ -119,6 +156,10 @@ function M.append(chat, item)
     return {}
   end
 
+  -- Asked BEFORE the write: afterwards the new lines are below the fold and
+  -- the answer is always no.
+  local stick = at_bottom(chat)
+
   local row = api.nvim_buf_line_count(buf)
   -- A brand-new scratch buffer reports one line that is actually empty;
   -- appending after it would leave a blank first row forever.
@@ -151,7 +192,9 @@ function M.append(chat, item)
     chat.by_call[block.call_id] = block.id
   end
 
-  follow(chat)
+  if stick then
+    to_bottom(chat)
+  end
   return block
 end
 
@@ -159,7 +202,8 @@ end
 ---@param chat table
 ---@param block table
 ---@param item table|nil  New item data; keeps the old if omitted.
-function M.rerender(chat, block, item)
+---@param opts? { follow?: boolean }  `follow = false` to leave the view alone.
+function M.rerender(chat, block, item, opts)
   if item then
     block.item = item
   end
@@ -167,8 +211,14 @@ function M.rerender(chat, block, item)
   if not row then
     return
   end
+  -- Before the draw, for the same reason as in `append`. This is the call that
+  -- matters most: `M.stream` re-renders the open text block on every chunk, so
+  -- it is the one doing the following during a reply.
+  local stick = (not opts or opts.follow ~= false) and at_bottom(chat)
   draw(chat, block, row, block.height)
-  follow(chat)
+  if stick then
+    to_bottom(chat)
+  end
 end
 
 ---The single entry point for an incoming item.
@@ -254,7 +304,10 @@ function M.toggle_at_cursor(chat)
         return
       end
       block.expanded = not block.expanded
-      M.rerender(chat, block)
+      -- Explicitly NOT following. You are up in the history with the cursor on
+      -- a card; scrolling to the bottom and then being yanked back by the two
+      -- lines below is a flicker with no purpose.
+      M.rerender(chat, block, nil, { follow = false })
       -- Put the cursor back on the card's header, so repeated <Tab> toggles the
       -- same card rather than walking off the end of a shrinking one.
       local at = row_of(chat, block)
@@ -273,11 +326,18 @@ function M.redraw(chat)
   if not (chat.conversation and api.nvim_buf_is_valid(chat.conversation)) then
     return
   end
+  -- Once around the whole loop, not per block: every block but the last is
+  -- re-rendered somewhere above the fold, so a per-block test would answer
+  -- "no" for all of them and a resize would lose your place.
+  local stick = at_bottom(chat)
   for _, id in ipairs(chat.order) do
     local block = chat.blocks[id]
     if block then
-      M.rerender(chat, block)
+      M.rerender(chat, block, nil, { follow = false })
     end
+  end
+  if stick then
+    to_bottom(chat)
   end
 end
 

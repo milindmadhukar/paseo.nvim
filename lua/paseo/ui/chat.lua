@@ -31,6 +31,8 @@ local M = {}
 ---@field seq integer|nil    Highest timeline seq rendered.
 ---@field epoch string|nil   The epoch those seqs belong to.
 ---@field initialised boolean  Subscribed, history fetched, settings loaded.
+---@field config_snapshot table|nil  Last `agent.config`; the Session panel draws it.
+---@field available_modes table[]|nil  `{id, label}`, per provider. Ids to labels.
 
 ---Chats are keyed by AGENT, falling back to the directory until the agent is
 ---known. A workspace can hold several sessions, so keying on the directory
@@ -54,6 +56,116 @@ local initialise
 ---@param chat paseo.Chat
 local function set_winbar(chat)
   sidebar.refresh(chat)
+end
+
+---The human name for an id, out of a list of `{id, label}`.
+---
+---The header shows LABELS -- "Plan Mode", not "plan" -- and there are two
+---routes into it, a pulled `agent.config` and a pushed `settings` event. The
+---pushed one used to store the raw id, so the same session read "Plan Mode"
+---or "plan" in the header depending on which had spoken last.
+---@param entries table[]|nil
+---@param id any
+---@return string|nil
+local function labelled(entries, id)
+  if id == nil then
+    return nil
+  end
+  for _, entry in ipairs(entries or {}) do
+    if entry.id == id then
+      return entry.label or entry.id
+    end
+  end
+  return nil
+end
+
+---Fold a settings payload into a chat, and repaint.
+---
+---Also patches `config_snapshot`, which the Session panel draws its `●` from.
+---Leaving that stale meant the header could report a mode the panel below it
+---still marked as something else.
+---
+---Public because the `settings` event is the ONLY route mode, model and
+---thinking level take into this plugin -- the daemon suppresses them on the
+---wire and the sidecar reconstructs them from the agent snapshot -- so what
+---this does with one is worth being able to assert directly.
+---@param chat paseo.Chat
+---@param payload table
+function M.apply_settings(chat, payload)
+  local snapshot = chat.config_snapshot
+  -- The Session panel draws modes, thinking levels, models and features, and
+  -- redrawing it is a full volt regeneration. It is gated on a real CHANGE
+  -- rather than on a field being present, because this payload arrives on
+  -- every usage tick -- seven times in one short turn, measured -- and the
+  -- mode is in all of them.
+  local panel = false
+
+  if payload.availableModes and #payload.availableModes > 0 then
+    chat.available_modes = payload.availableModes
+    if snapshot then
+      snapshot.availableModes = payload.availableModes
+    end
+  end
+
+  if payload.modeId ~= nil then
+    local mode = labelled(payload.availableModes or chat.available_modes, payload.modeId)
+      or payload.modeId
+    panel = panel or chat.mode ~= mode
+    chat.mode = mode
+    if snapshot then
+      snapshot.modeId = payload.modeId
+    end
+  end
+
+  if payload.thinkingOptionId ~= nil then
+    local thinking = labelled(snapshot and snapshot.thinkingOptions, payload.thinkingOptionId)
+      or payload.thinkingOptionId
+    panel = panel or chat.thinking ~= thinking
+    chat.thinking = thinking
+    if snapshot then
+      snapshot.thinkingOptionId = payload.thinkingOptionId
+    end
+  end
+
+  if payload.model then
+    local provider = (payload.provider or (snapshot and snapshot.provider) or "?")
+      .. "/"
+      .. payload.model
+    panel = panel or chat.provider ~= provider
+    chat.provider = provider
+    if snapshot then
+      snapshot.model = payload.model
+      snapshot.provider = payload.provider or snapshot.provider
+    end
+  end
+
+  if payload.features then
+    local features = {}
+    for _, feature in ipairs(payload.features) do
+      features[feature.id] = feature.value
+    end
+    panel = panel or not vim.deep_equal(chat.features, features)
+    chat.features = features
+    if snapshot then
+      snapshot.features = payload.features
+    end
+  end
+
+  if payload.usage then
+    chat.usage = payload.usage
+    if snapshot then
+      snapshot.usage = payload.usage
+    end
+  end
+
+  set_winbar(chat)
+  -- The dashboard draws the Session panel from the snapshot above, and nothing
+  -- else asks it to redraw. Cheap when it is closed: `rebuild` returns early.
+  if panel then
+    pcall(function()
+      require("paseo.ui.float").rebuild()
+    end)
+  end
 end
 
 -- ------------------------------------------------------------------ spinner
@@ -783,23 +895,15 @@ function M.attach_events()
     end
   end)
 
-  -- Mode, model and thinking can be changed from the Paseo app too. Without
-  -- this the header shows whatever we last set ourselves and quietly lies.
+  -- Mode, model and thinking can be changed from the Paseo app too -- and the
+  -- daemon changes the mode ITSELF when a plan is approved. Without this the
+  -- header shows whatever we last set from here and quietly lies.
   bridge.on("settings", function(payload)
     local chat = by_agent(payload.agentId)
     if not chat then
       return
     end
-    if payload.modeId then
-      chat.mode = payload.modeId
-    end
-    if payload.thinkingOptionId then
-      chat.thinking = payload.thinkingOptionId
-    end
-    if payload.model then
-      chat.provider = (payload.provider or chat.provider or "?") .. "/" .. payload.model
-    end
-    set_winbar(chat)
+    M.apply_settings(chat, payload)
   end)
 
   bridge.on("usage", function(payload)
@@ -884,17 +988,10 @@ function M.load_settings(chat)
       end
       chat.usage = config.usage or chat.usage
       chat.config_snapshot = config
+      chat.available_modes = config.availableModes
 
-      for _, mode in ipairs(config.availableModes or {}) do
-        if mode.id == config.modeId then
-          chat.mode = mode.label or mode.id
-        end
-      end
-      for _, option in ipairs(config.thinkingOptions or {}) do
-        if option.id == config.thinkingOptionId then
-          chat.thinking = option.label or option.id
-        end
-      end
+      chat.mode = labelled(config.availableModes, config.modeId) or chat.mode
+      chat.thinking = labelled(config.thinkingOptions, config.thinkingOptionId) or chat.thinking
       chat.features = {}
       for _, feature in ipairs(config.features or {}) do
         chat.features[feature.id] = feature.value

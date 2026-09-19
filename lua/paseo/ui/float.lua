@@ -419,6 +419,10 @@ local function show_chat_panes()
       number = false,
       relativenumber = false,
       signcolumn = "no",
+      -- Following the agent means the last line sits ON the last row. With a
+      -- global `scrolloff` of 8 it cannot: the view stops eight rows early and
+      -- the transcript never looks like it reached the bottom.
+      scrolloff = 0,
       -- The header lives in the chrome now. A winbar here would draw it
       -- twice, one row apart.
       winbar = "",

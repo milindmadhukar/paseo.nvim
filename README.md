@@ -34,6 +34,7 @@ bridge, the `ws` CLI, the workspace layer, and the agent-facing skills.
 | ✅ | tool calls, reasoning and todos rendered in the transcript |
 | ✅ | permission dialog — answer a prompt without the desktop app |
 | ✅ | questions answered, not approved — `AskUserQuestion` and friends |
+| ✅ | plan approval — pick the mode you implement in, and read the plan first |
 | ✅ | two surfaces: the full-screen dashboard (default) and the sidebar pane |
 | ✅ | workspace assembly — `ws`, a Go CLI |
 | ✅ | workspace picker with a live, push-driven agent status column |
@@ -299,6 +300,38 @@ refuses to send while a question that is not optional has no answer.
 Multi-select ticks as many as apply and is serialised the one way the provider
 parses back: `", "`-joined, quoting any label that contains the separator —
 otherwise `Rebase, then push` returns as two answers matching no option.
+
+### Plans
+
+Approving a finished plan is two decisions, and the dialog only ever asked one.
+`ExitPlanMode` arrives as a permission request with an Implement and a Reject;
+press Implement and the daemon picks the mode for you, always `acceptEdits`:
+
+```js
+if (pending.request.kind === "plan") {
+    const targetMode = shouldResumePriorMode ? "bypassPermissions" : "acceptEdits";
+    await this.setMode(targetMode);
+```
+
+The second decision cannot ride along with the first — `AgentPermissionResponse`
+has no field for a mode — so it is a follow-up `setAgentMode`, and it has to come
+*after* the approval or the daemon's own call overwrites it. The dialog offers
+one Implement per mode, least rope first, so `y` is the cautious key:
+
+```
+   1 Implement, accept edits    2 Implement, auto
+   3 Implement, always ask      4 Reject, keep planning
+```
+
+Every one of them sends the **daemon's** action id and differs only in the mode
+applied afterwards — an invented id is rejected outright. The modes are filtered
+against what the provider reports, so codex, which has no `acceptEdits`, is
+offered the ones it has.
+
+The plan itself is now on screen while you decide. A plan request carries no
+tool `detail` at all — the markdown travels in the tool input — so the dialog,
+which renders `detail` for everything else, was drawing an empty box and asking
+you to approve it.
 
 ### Images
 
