@@ -641,4 +641,41 @@ A request answered in the Paseo desktop app closes the dialog here too. To
 avoid being asked at all, set a more permissive mode with |:Paseo-mode|; to be
 asked about everything, set `default`.
 
+                                               *paseo-permission-questions*
+When the agent asks YOU ~
+
+A question -- Claude's `AskUserQuestion`, and the `ask_user` the other
+providers wrap in the same envelope -- arrives as a permission request like
+any other, and it is NOT the same act:
+
+    A request to ACT      the provider's actions are the answer. Allowing it
+                          is the whole reply.
+
+    A QUESTION            the answer travels back inside the tool input.
+                          Allowing it only consents to the ASKING. An allow
+                          with no answers attached reaches the agent as "The
+                          user did not answer the questions" -- approved, and
+                          silent. Whichever button was pressed.
+
+So the dialog answers a question rather than approving it, and `y` there sends
+your answers instead of a bare allow.
+
+                                          *paseo-permission-question-keys*
+    1-9       pick that option, for the question marked `▸`
+    <Tab>     the next question · <S-Tab> the previous
+    i         answer in your own words, where the question allows it
+    <CR>, y   send the answers
+    n, N      decline to answer (N also stops the turn)
+    <Esc>, q  later; the request stays pending, `gp` reopens it
+
+Every question in the request is shown at once, because there is ONE response
+for the set: a request may carry four, and answering the first is not the
+reply. `<CR>` refuses to send while a question that is not optional has no
+answer -- half a reply is not a smaller answer, it is a wrong one.
+
+A multi-select question ticks as many options as apply and stays put; a
+single-select one replaces and moves on. Several answers to one question are
+sent as `", "`-joined labels, quoting any label that contains the separator,
+because that is the one form the provider parses back.
+
 `vim:tw=78:ts=8:ft=help:norl:`

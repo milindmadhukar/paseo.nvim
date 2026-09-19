@@ -9,6 +9,7 @@
 --- single place an `AgentTimelineItem` is flattened -- so live events and
 --- history render through this file identically, by construction.
 
+local questions = require "paseo.ui.questions"
 local render = require "paseo.ui.render"
 
 local M = {}
@@ -306,7 +307,15 @@ function M.card(item, opts)
       header[#header + 1] = { "  awaiting", "PaseoBadge" }
     end
     local body = {}
-    if request.description and request.description ~= "" then
+    -- A question's `title` is its FIRST question and `description` its labels,
+    -- so a request carrying four rendered here as one. Render the questions
+    -- themselves when there are any.
+    local asked = questions.parse(request)
+    if asked then
+      for _, line in ipairs(questions.render(asked)) do
+        vim.list_extend(body, render.wrap(line, width - 4, "PaseoDim"))
+      end
+    elseif request.description and request.description ~= "" then
       vim.list_extend(body, render.wrap(request.description, width - 4, "PaseoDim"))
     end
     vim.list_extend(body, detail_body(request.detail, width))

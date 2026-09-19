@@ -120,6 +120,9 @@ function M.setup()
     -- "run this shell command" cannot be mistaken for "read this file".
     PaseoDanger = { fg = c.red, bold = true },
     PaseoBadge = { fg = c.yellow, bold = true },
+    -- A question shares the dialog but not the alarm: the agent is asking,
+    -- not reaching for the filesystem.
+    PaseoQuestion = { fg = c.blue, bold = true },
 
     -- Expanded diffs inside an edit card.
     PaseoAdd = { fg = c.green },
