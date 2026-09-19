@@ -50,7 +50,14 @@ end
 function M.header(chat)
   local line = {}
 
-  if chat.streaming then
+  -- A spinner and an elapsed count rather than a static dot: `●` looked the
+  -- same at two seconds and at two minutes, so a wedged turn was
+  -- indistinguishable from a working one without opening the app to check.
+  local frame, seconds = require("paseo.ui.chat").progress(chat)
+  if frame then
+    line[#line + 1] = { " " .. frame .. " ", "PaseoToolRunning" }
+    line[#line + 1] = { seconds .. "s ", "PaseoDim" }
+  elseif chat.streaming then
     line[#line + 1] = { " ● ", "PaseoToolRunning" }
   else
     line[#line + 1] = { "  ", "PaseoDim" }

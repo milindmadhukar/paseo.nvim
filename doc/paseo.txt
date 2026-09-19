@@ -499,6 +499,20 @@ The SIDEBAR is a pane on the right: the conversation above, the composer
 below. `:Paseo chat` toggles it. This is the everyday surface -- narrow,
 beside your code.
 
+                                                          *paseo-chat-header*
+The header ~
+
+The line above the conversation, drawn by both surfaces from one builder so
+they cannot disagree about which mode the session is in. While a turn is
+running it spins and counts: >
+
+    ⠹ 14s  claude/sonnet-5 · acceptEdits · 󰧑 think · ⚡
+<
+The count is the point. A static dot looked the same at two seconds and at
+two minutes, so a wedged turn and a working one were the same picture and the
+only way to tell was to open the app. A pending permission replaces the
+spinner with `` needs you``.
+
                                                            *paseo-chat-float*
 The FULL SCREEN surface is `:Paseo dash`, or `<C-f>` from the sidebar. Same
 conversation, plus tabs for everything about the session: >
@@ -611,6 +625,10 @@ transcript uses.
 `<Esc>` deliberately does not deny. Silently denying on a stray keypress
 throws away whatever the agent was doing. The request stays pending, the
 header shows `` needs you``, and `gp` in the conversation reopens it.
+
+A pending request also stops the spinner (see |paseo-chat-header|): the agent
+is not working, it is waiting for YOU, and a spinner there would blame it for
+a delay that is yours.
 
 The actions are the PROVIDER'S own -- "allow once" and "allow for this
 session" are different answers, not the same one. A provider that offers none

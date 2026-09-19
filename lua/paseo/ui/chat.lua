@@ -23,6 +23,9 @@ local M = {}
 ---@field win_conversation integer|nil
 ---@field win_composer integer|nil
 ---@field streaming boolean
+---@field spinner uv.uv_timer_t|nil  Ticking only while `streaming`.
+---@field frame integer|nil     Index into FRAMES.
+---@field since integer|nil     `vim.uv.now()` when the turn began.
 ---@field pending string[]   Context blocks queued for the next send.
 ---@field images paseo.Image[] Pasted images, in placeholder order.
 ---@field seq integer|nil    Highest timeline seq rendered.
@@ -51,6 +54,82 @@ local initialise
 ---@param chat paseo.Chat
 local function set_winbar(chat)
   sidebar.refresh(chat)
+end
+
+-- ------------------------------------------------------------------ spinner
+
+---@type string[]
+local FRAMES = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
+
+---@param chat paseo.Chat
+local function stop_spinner(chat)
+  if not chat.spinner then
+    return
+  end
+  chat.spinner:stop()
+  if not chat.spinner:is_closing() then
+    chat.spinner:close()
+  end
+  chat.spinner = nil
+  chat.frame = nil
+end
+
+---Working, and visibly so.
+---
+---The header used to say `●` and nothing else, so a turn that had been running
+---for two minutes looked exactly like one that had died. The elapsed count is
+---the other half of the answer: a spinner says "busy", `⠹ 14s` says "busy, and
+---you have been waiting 14 seconds", which is the thing you actually wanted to
+---know before reaching for the app.
+---@param chat paseo.Chat
+local function start_spinner(chat)
+  if chat.spinner then
+    return
+  end
+  chat.frame = 1
+  chat.since = vim.uv.now()
+  chat.spinner = vim.uv.new_timer()
+  chat.spinner:start(
+    0,
+    100,
+    vim.schedule_wrap(function()
+      -- A timer outliving its turn is the leak that matters: it would redraw
+      -- the header forever on a chat nobody is looking at.
+      if not chat.streaming then
+        return stop_spinner(chat)
+      end
+      chat.frame = (chat.frame % #FRAMES) + 1
+      set_winbar(chat)
+    end)
+  )
+end
+
+---The single place `streaming` changes, so the timer can never disagree with
+---the flag it is following.
+---
+---Exposed because `ui/permission.lua` clears it too: the agent asking a
+---question is not the agent working, and a spinner left up there blames it for
+---a delay that is entirely yours.
+---@param chat paseo.Chat
+---@param on boolean
+function M.set_streaming(chat, on)
+  chat.streaming = on
+  if on then
+    start_spinner(chat)
+  else
+    stop_spinner(chat)
+  end
+  set_winbar(chat)
+end
+
+---The spinner frame and how long this turn has been running, for the header.
+---@param chat paseo.Chat
+---@return string|nil frame, integer|nil seconds
+function M.progress(chat)
+  if not (chat.streaming and chat.frame) then
+    return nil, nil
+  end
+  return FRAMES[chat.frame], math.floor((vim.uv.now() - (chat.since or vim.uv.now())) / 1000)
 end
 
 ---A status line in the transcript -- "connecting…", "send failed: …".
@@ -101,8 +180,7 @@ local function send(chat)
   vim.api.nvim_buf_set_lines(chat.composer, 0, -1, false, { "" })
   chat.pending = {}
   chat.images = {}
-  chat.streaming = true
-  set_winbar(chat)
+  M.set_streaming(chat, true)
 
   bridge.request("agent.send", {
     agentId = chat.agent_id,
@@ -112,10 +190,9 @@ local function send(chat)
     images = #images > 0 and images or nil,
   }, function(err)
     if err then
-      chat.streaming = false
       vim.schedule(function()
+        M.set_streaming(chat, false)
         notice(chat, "send failed: " .. err, "error")
-        set_winbar(chat)
       end)
     end
   end)
@@ -627,8 +704,7 @@ function M.attach_events()
       return
     end
     transcript.upsert(chat, { kind = "user", text = payload.text or "" })
-    chat.streaming = true
-    set_winbar(chat)
+    M.set_streaming(chat, true)
   end)
 
   bridge.on("text", function(payload)
@@ -692,26 +768,24 @@ function M.attach_events()
   bridge.on("turn", function(payload)
     local chat = by_agent(payload.agentId)
     if chat then
-      chat.streaming = false
+      M.set_streaming(chat, false)
       -- The open assistant block is finished; the next reply starts a new one
       -- rather than being appended to this answer.
       chat.open_text = nil
       if payload.error then
         transcript.upsert(chat, { kind = "notice", level = "error", message = payload.error })
       end
-      set_winbar(chat)
     end
   end)
 
   bridge.on("stream_error", function(payload)
     local chat = by_agent(payload.agentId)
     if chat then
-      chat.streaming = false
+      M.set_streaming(chat, false)
       transcript.upsert(
         chat,
         { kind = "notice", level = "error", message = "stream error: " .. tostring(payload.error) }
       )
-      set_winbar(chat)
     end
   end)
 

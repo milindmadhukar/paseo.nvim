@@ -1166,6 +1166,25 @@ local function test_ui()
   truthy("ui: the header shows the mode", header:find("acceptEdits", 1, true) ~= nil)
   truthy("ui: and shouts when something is waiting on you", header:find("needs you", 1, true) ~= nil)
 
+  -- The spinner. A static `●` looked identical at two seconds and at two
+  -- minutes, so a wedged turn and a working one were the same picture; the
+  -- elapsed count is the half that tells them apart.
+  local chat = require "paseo.ui.chat"
+  surface_chat.permissions = {}
+  chat.set_streaming(surface_chat, true)
+  local frame, seconds = chat.progress(surface_chat)
+  local busy = render.concat(sidebar.header(surface_chat))
+  truthy("ui: a running turn reports a frame", frame ~= nil, frame)
+  truthy("ui: which the header draws", frame and busy:find(frame, 1, true) ~= nil, busy)
+  eq("ui: alongside the seconds it has been running", seconds, 0)
+
+  -- The invariant that keeps the timer honest: `streaming` is only ever set
+  -- through the setter, so a timer can never outlive the turn it belongs to
+  -- and redraw a header forever on a chat nobody is looking at.
+  chat.set_streaming(surface_chat, false)
+  truthy("ui: and the timer is closed when the turn ends", surface_chat.spinner == nil)
+  eq("ui: an idle turn reports no frame", (chat.progress(surface_chat)), nil)
+
   -- `%` is the statusline escape character: a path or command containing one
   -- would be read as a format item and eat the rest of the bar.
   local escaped = render.to_winbar { { "50% done", "PaseoDim" } }
