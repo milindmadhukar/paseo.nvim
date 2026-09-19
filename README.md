@@ -38,6 +38,8 @@ skills are covered by the repository's test suite.
 | ✅ | workspace assembly — `ws`, a Go CLI |
 | ✅ | workspace picker with a live, push-driven agent status column |
 | ✅ | `workspace` / `workspace-commit` / `workspace-pr` skills |
+| ✅ | Paseo terminals — a real PTY in the dashboard, not a capture |
+| ✅ | permissions reconciled against the daemon, so answering elsewhere syncs |
 
 ## Install
 

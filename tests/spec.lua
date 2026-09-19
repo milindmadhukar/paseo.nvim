@@ -1089,6 +1089,23 @@ local function test_ui()
     render.concat(failed.lines[1]):find("exit 1", 1, true) ~= nil
   )
 
+  -- The one detail type with no arm, on exactly the operation you most want to
+  -- watch: an expanded worktree-setup card used to be a header and nothing
+  -- else, so a setup command that failed left a worktree you cannot build in
+  -- and no way to see which command did it.
+  local setup = table.concat(vim.tbl_map(render.concat, timeline.detail_body({
+    type = "worktree_setup",
+    worktreePath = "/tmp/wt",
+    branchName = "ws/thing",
+    commands = {
+      { index = 1, command = "bun install", status = "completed", exitCode = 0 },
+      { index = 2, command = "bun run build", status = "failed", exitCode = 2 },
+    },
+  }, 60)), "\n")
+  truthy("ui: a worktree setup names its branch", setup:find("ws/thing", 1, true) ~= nil)
+  truthy("ui: and each command it ran", setup:find("bun run build", 1, true) ~= nil)
+  truthy("ui: and how the failing one failed", setup:find("exit 2", 1, true) ~= nil)
+
   -- ----------------------------------------------------------- transcript
 
   local chat = { conversation = vim.api.nvim_create_buf(false, true) }
@@ -1109,6 +1126,15 @@ local function test_ui()
   transcript.stream(chat, "Run")
   transcript.stream(chat, "ning.")
 
+  -- A command is open WHILE it runs, under the default `ui.expand = "running"`.
+  -- Watching the output arrive is the whole reason to have this window open;
+  -- a card that hides it until you press <Tab> is a card that tells you the
+  -- agent is busy and nothing else.
+  truthy(
+    "ui: a running command shows its output as it arrives",
+    chat.blocks[chat.by_call["call-1"]].expanded
+  )
+
   local before = vim.api.nvim_buf_line_count(chat.conversation)
   transcript.upsert(chat, {
     kind = "tool",
@@ -1121,9 +1147,16 @@ local function test_ui()
 
   -- The regression this guards: a tool call arrives TWICE, running then
   -- completed. Appending the second one prints every command in the
-  -- transcript twice.
-  eq("ui: a completing tool call replaces its card rather than appending", before,
-    vim.api.nvim_buf_line_count(chat.conversation))
+  -- transcript twice. The transcript must therefore get SHORTER here -- the
+  -- card folds on success -- and never longer.
+  truthy(
+    "ui: a completing tool call replaces its card rather than appending",
+    vim.api.nvim_buf_line_count(chat.conversation) < before
+  )
+  truthy(
+    "ui: and folds once it has succeeded",
+    not chat.blocks[chat.by_call["call-1"]].expanded
+  )
   local blocks = 0
   for _ in pairs(chat.blocks) do
     blocks = blocks + 1
@@ -1151,11 +1184,48 @@ local function test_ui()
   eq("ui: anchors survive a block changing height", #vim.api.nvim_buf_get_extmarks(
     chat.conversation, require("paseo.ui.hl").ns_anchor, 0, -1, {}), 4)
 
+  -- THE BUG THAT MADE EVERY TOOL CARD INVISIBLE, at the only place it was
+  -- observable: the shape of the line the sidecar actually writes.
+  --
+  -- Every other assertion in this file hand-builds an item with `kind` set,
+  -- which is exactly why the suite stayed green while the live transcript
+  -- rendered nothing at all -- the sidecar used `kind` as the event NAME and
+  -- destructured it off the payload, and the renderer dispatches on
+  -- `item.kind`. So this one asserts against the wire and not against a
+  -- convenient fixture.
+  local wire = vim.json.decode(
+    '{"event":"tool","agentId":"a","kind":"tool","callId":"wire-1","name":"Bash",'
+      .. '"status":"completed","display":{"displayName":"Shell","summary":"echo hi"},'
+      .. '"detail":{"type":"shell","command":"echo hi","output":"hi","exitCode":0}}'
+  )
+  local wire_before = vim.api.nvim_buf_line_count(chat.conversation)
+  transcript.upsert(chat, wire)
+  truthy(
+    "ui: an item in the sidecar's own wire shape renders",
+    vim.api.nvim_buf_line_count(chat.conversation) > wire_before
+  )
+
+  -- A card you opened by hand is yours. It must not snap shut under you the
+  -- moment the command finishes, which is precisely when you are reading it.
+  local pinned = chat.blocks[chat.by_call["wire-1"]]
+  pinned.expanded = true
+  pinned.pinned = true
+  transcript.rerender(chat, pinned, vim.tbl_extend("force", wire, { status = "completed" }))
+  truthy("ui: a card you opened by hand stays open", pinned.expanded)
+
   -- `replaced` invalidates the epoch. It was emitted by the sidecar and
   -- listened to by nobody, so a replacement left stale messages on screen.
+  chat.permissions = { { id = "req-1" } }
+  chat.permission_blocks = { ["req-1"] = 99 }
   transcript.reset(chat)
   eq("ui: reset empties the transcript", vim.api.nvim_buf_line_count(chat.conversation), 1)
   eq("ui: and drops the callId map", next(chat.by_call), nil)
+  -- The permission bookkeeping points at blocks that just went away. Left
+  -- behind, it named block ids that no longer exist -- so the resolution badge
+  -- could never be written -- and made the re-offer that follows a reset hit
+  -- the de-duplicate and drop the inline card for good.
+  eq("ui: reset drops the held permissions", next(chat.permissions), nil)
+  eq("ui: and the blocks they pointed at", next(chat.permission_blocks), nil)
 
   -- --------------------------------------------------------------- surfaces
 
@@ -2472,6 +2542,112 @@ end
 -- never reached the header. These cover the Lua half -- what the plugin does
 -- with a settings payload once one finally arrives.
 
+--- Answering somewhere else must not desync this side.
+---
+--- `permission_resolved` is a real event and it does fire, but it is not the
+--- only way a request stops being pending: the daemon replaces its pending map
+--- wholesale on a session refresh with no resolution for what vanished, and a
+--- resolution that lands while the socket is down is never replayed. The list
+--- held here used to have exactly one add and one remove and no way to be told
+--- it was wrong, so any of those left a prompt that `gp` would reopen and the
+--- daemon would refuse.
+local function test_permission_sync()
+  local permission = require "paseo.ui.permission"
+  local transcript = require "paseo.ui.transcript"
+
+  local chat = { conversation = vim.api.nvim_create_buf(false, true) }
+  transcript.reset(chat)
+
+  local function request(id)
+    return { id = id, kind = "tool", name = "Bash", title = "Run " .. id, actions = {} }
+  end
+
+  permission.reconcile(chat, { request "a", request "b" })
+  eq("sync: a pending list we did not have is offered", #chat.permissions, 2)
+  truthy("sync: and each one is in the conversation", chat.permission_blocks["a"] ~= nil)
+
+  -- The case the event stream never reports: answered on the desktop while we
+  -- were not listening, so it is simply absent from the next snapshot.
+  permission.reconcile(chat, { request "b" })
+  eq("sync: one answered elsewhere is dropped", #chat.permissions, 1)
+  eq("sync: and the one still pending is kept", chat.permissions[1].id, "b")
+
+  local badge = chat.blocks[chat.permission_blocks["a"]]
+  eq("sync: the inline card says so rather than going quiet", badge.item.resolution,
+    "answered elsewhere")
+
+  -- Agreement must cost nothing -- this runs on every snapshot tick.
+  permission.reconcile(chat, { request "b" })
+  eq("sync: a list that agrees changes nothing", #chat.permissions, 1)
+
+  permission.reconcile(chat, {})
+  eq("sync: an empty list clears the queue", #chat.permissions, 0)
+
+  -- A `replaced` epoch empties the block table. The re-offer that follows used
+  -- to hit the de-duplicate and return early, so the request stayed held with
+  -- no card anywhere -- the winbar said `needs you` and the conversation had
+  -- no record of why.
+  permission.reconcile(chat, { request "c" })
+  local before = chat.permission_blocks["c"]
+  chat.blocks = {}
+  permission.offer(chat, request "c")
+  truthy(
+    "sync: a held request whose card was thrown away is redrawn",
+    chat.permission_blocks["c"] ~= before and chat.blocks[chat.permission_blocks["c"]] ~= nil
+  )
+  eq("sync: and is not held twice", #chat.permissions, 1)
+end
+
+--- The terminal directory: the list half of Paseo terminals.
+---
+--- The subtlety worth a test is that `terminals_changed` is a full list FOR
+--- ONE CWD and never a delta, so the naive "replace everything" that the agent
+--- directory can get away with would drop every terminal under every other
+--- root the moment one workspace reported in.
+local function test_terminals()
+  local terminals = require "paseo.terminals"
+  local apply = terminals._apply
+
+  local root = "/tmp/paseo-spec-a"
+  local other = "/tmp/paseo-spec-b"
+
+  apply {
+    kind = "snapshot",
+    cwd = root,
+    entries = {
+      { id = "t1", name = "zsh" },
+      { id = "t2", name = "claude", activity = { state = "attention", attentionReason = "needs_input" } },
+    },
+  }
+  apply { kind = "snapshot", cwd = other, entries = { { id = "t3", name = "codex" } } }
+
+  eq("terminals: a root lists its own", #terminals.for_root(root), 2)
+  eq("terminals: and not another's", #terminals.for_root(other), 1)
+  eq("terminals: sorted by name", terminals.for_root(root)[1].name, "claude")
+
+  -- THE BUG A FULL-LIST-PER-CWD PAYLOAD INVITES: one root reporting must not
+  -- empty the others.
+  apply { kind = "snapshot", cwd = root, entries = { { id = "t1", name = "zsh" } } }
+  eq("terminals: a changed root drops what it no longer lists", #terminals.for_root(root), 1)
+  eq("terminals: and leaves other roots alone", #terminals.for_root(other), 1)
+
+  eq("terminals: one waiting on you is marked", terminals.glyph({
+    activity = { state = "attention" },
+  })[2], "PaseoDanger")
+  eq("terminals: a working one is not", terminals.glyph({ activity = { state = "working" } })[2],
+    "PaseoAgent")
+  eq("terminals: nor an idle one", terminals.glyph({})[2], "PaseoDim")
+
+  apply { kind = "snapshot", cwd = root, entries = {} }
+  eq("terminals: an empty list empties the root", #terminals.for_root(root), 0)
+
+  -- The panel is a tab like any other, so the surface must actually offer it.
+  truthy(
+    "terminals: the dashboard has a tab for them",
+    vim.tbl_contains(require("paseo.ui.float").TABS, "Terminals")
+  )
+end
+
 local function test_settings()
   local chat_mod = require "paseo.ui.chat"
   local float = require "paseo.ui.float"
@@ -2641,6 +2817,8 @@ function M.run()
     { "provider", test_provider_setup },
     { "questions", test_questions },
     { "plan", test_plan },
+    { "sync", test_permission_sync },
+    { "terminals", test_terminals },
     { "follow", test_follow },
     { "settings", test_settings },
     { "strategy", test_strategy },

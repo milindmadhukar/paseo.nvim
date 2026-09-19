@@ -119,8 +119,17 @@ export function timelineOps(ctx: BridgeConnection): Ops {
             case "timeline": {
               const described = describeItem(event.item);
               if (described) {
-                const { kind, ...rest } = described;
-                emit(kind, { agentId: id, ...rest, ...at });
+                // `kind` is the event NAME and it stays on the PAYLOAD. The Lua
+                // renderer dispatches on `item.kind`, so destructuring it out
+                // here -- which is what this did -- left every tool call,
+                // reasoning block, todo, notice and compaction falling through
+                // to the silent `{ lines = {} }` default and drawing literally
+                // nothing. Only `text` and `user` survived, because those two
+                // rebuild `kind` themselves on the Lua side. History always
+                // carried it, which is why reopening a chat showed the work
+                // that never appeared live.
+                const { kind } = described;
+                emit(kind, { agentId: id, ...described, ...at });
               }
               break;
             }
@@ -142,6 +151,14 @@ export function timelineOps(ctx: BridgeConnection): Ops {
                 requestId: event.requestId,
                 resolution: event.resolution ?? null,
               });
+              break;
+            case "turn_started":
+              // A turn can start somewhere else -- the Paseo app, a schedule, a
+              // heartbeat. Until this case existed, only a prompt typed HERE
+              // put the header into its working state, so an agent driven from
+              // the desktop sat at `idle` in Neovim for the whole turn and read
+              // as a hang.
+              emit("turn", { agentId: id, outcome: "turn_started" });
               break;
             case "turn_completed":
             case "turn_failed":
@@ -223,7 +240,17 @@ export function timelineOps(ctx: BridgeConnection): Ops {
                   null;
                 if (!snap) return;
                 const settings = describeSettings(snap);
-                const seen = JSON.stringify(settings);
+                // The pending list is hashed by ID, not by value. The request
+                // objects are large and carry fields that move on their own,
+                // so hashing them whole would defeat the deduplication this
+                // exists for -- while hashing nothing about them would swallow
+                // the one update that matters: a request appearing or being
+                // answered.
+                const { pendingPermissions, ...rest } = settings as any;
+                const seen = JSON.stringify([
+                  rest,
+                  (pendingPermissions ?? []).map((r: any) => r?.id).sort(),
+                ]);
                 if (seen === last) return;
                 last = seen;
                 emit("settings", { agentId: id, ...settings });

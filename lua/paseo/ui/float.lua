@@ -31,7 +31,7 @@ local ns = api.nvim_create_namespace "paseo.float"
 ---@type table|nil
 local state
 
-M.TABS = { "Chat", "Session", "Sessions", "Changes", "Usage", "Workspaces" }
+M.TABS = { "Chat", "Session", "Sessions", "Changes", "Usage", "Workspaces", "Terminals" }
 
 -- ------------------------------------------------------------------ geometry
 
@@ -134,22 +134,44 @@ local function tab_lines()
   end
   -- One pill per tab, number and name inside the same background, so a tab is
   -- a shape you can aim at rather than two differently-coloured words that
-  -- happen to sit next to each other. Six pills plus gaps is ~68 columns,
-  -- which still fits the inner width of an 80-column terminal.
+  -- happen to sit next to each other.
+  --
+  -- Truncation is not a neutral failure here: the bar is the only place that
+  -- says which number is which tab, and the tab that falls off the end is
+  -- always the last one, which is the one you had not discovered yet. Six
+  -- pills fit an 80-column terminal with two columns to spare; a SEVENTH does
+  -- not. So when they do not fit, the pills you are not on keep their number
+  -- and lose their name -- which still says which key goes where, and is the
+  -- one thing this row exists to say. The row count never changes, because
+  -- `g.height - 4` and the composer geometry are both measured against it.
+  local inner = state.geometry.width - 2
+
+  ---@param named boolean  name every tab, or only the active one
+  ---@return integer
+  local function measure(named)
+    local width = 0
+    for i, name in ipairs(M.TABS) do
+      width = width + (i > 1 and 1 or 0) + #tostring(i) + 2
+      if named or name == state.tab then
+        width = width + 1 + vim.fn.strwidth(name)
+      end
+    end
+    return width
+  end
+
+  local named = measure(true) <= inner
+
   local tabs = {}
   for i, name in ipairs(M.TABS) do
     local active = name == state.tab
     local id = "paseo:tab:" .. name
     local hovered = vim.g.nvmark_hovered == id
-    -- Gap BEFORE each pill but the first, never after the last. Six pills and
-    -- six gaps is exactly two columns more than an 80-column terminal has
-    -- room for, and the two columns it loses are the end of "Workspaces" --
-    -- the tab you had not discovered yet.
+    -- Gap BEFORE each pill but the first, never after the last.
     if i > 1 then
       tabs[#tabs + 1] = { " ", nil }
     end
     tabs[#tabs + 1] = {
-      (" %d %s "):format(i, name),
+      (named or active) and (" %d %s "):format(i, name) or (" %d "):format(i),
       (active or hovered) and "PaseoChipFocus" or "PaseoChipOff",
       -- Hover paints a tab exactly as focus does, so pointing at one and
       -- being on one look like the same state, because they are.
@@ -157,7 +179,7 @@ local function tab_lines()
     }
   end
   return {
-    render.truncate(tabs, state.geometry.width - 2),
+    render.truncate(tabs, inner),
     { { string.rep("─", state.geometry.width - 2), "PaseoBorder" } },
   }
 end
@@ -224,6 +246,17 @@ end
 ---anything first. A panel whose content changed height therefore has to go all
 ---the way back through `gen_data`, or rows from the previous draw survive
 ---underneath the new ones.
+---Where the surface currently is, or nil when it is closed.
+---
+---Exposed for the one panel that puts a window of its own over the body: a
+---Paseo terminal is a real PTY buffer and cannot be drawn as cells, so it has
+---to be floated at the body's coordinates the way the conversation is on the
+---Chat tab.
+---@return table|nil
+function M.geometry_of()
+  return state and state.geometry or nil
+end
+
 function M.rebuild()
   if not state or not api.nvim_buf_is_valid(state.buf) then
     return

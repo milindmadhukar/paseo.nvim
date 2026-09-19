@@ -136,6 +136,19 @@ local function check_paseo()
       local version = probe.info and probe.info.version or "?"
       local host = probe.info and probe.info.hostname or "?"
       ok(("%s -> up, Paseo %s on %s"):format(label, version, host))
+
+      -- The terminal surface degrades rather than failing, so say which half
+      -- you are getting. Without `terminal-restore-modes` a terminal opens on
+      -- a blank screen and fills as it produces output, instead of showing you
+      -- the session you just joined -- which looks like a broken attach and is
+      -- really an old daemon.
+      local features = (probe.info and probe.info.features) or {}
+      if features["terminal-restore-modes"] then
+        ok "terminals restore their scrollback on attach"
+      else
+        info "this daemon has no terminal-restore-modes; attaching falls back to a plain capture"
+      end
+
       found = true
       break
     else

@@ -38,6 +38,7 @@ import { providerOps } from "./bridge-providers.ts";
 import { agentOps } from "./bridge-agents.ts";
 import { workspaceOps } from "./bridge-workspaces.ts";
 import { timelineOps } from "./bridge-timeline.ts";
+import { terminalOps } from "./bridge-terminals.ts";
 
 const ctx = new BridgeConnection();
 const ops: Ops = {
@@ -46,6 +47,7 @@ const ops: Ops = {
   ...agentOps(ctx),
   ...workspaceOps(ctx),
   ...timelineOps(ctx),
+  ...terminalOps(ctx),
 };
 setShutdown(() => ops.close({ op: "close" }));
 
