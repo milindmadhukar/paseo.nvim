@@ -385,6 +385,8 @@ review.agents                                       boolean, default `true`
     That also means it works over `:grep`, LSP references, or anything else
     you happen to have in there.
 
+    Opens the ask box -- see |paseo-ask-box|.
+
 :Paseo image [path]                                          *:Paseo-image*
 
     Attach an image to the chat: the clipboard, or `path` if given. See
@@ -457,9 +459,12 @@ got.
     split rather than an agent terminal -- switching to a terminal to read it
     is the context switch that breaks the review loop.
 
+    WHAT IS SENT IS A LOCATION, NOT THE CODE. See |paseo-ref|.
+
 :Paseo ask [kind]                                              *:Paseo-ask*
 
-    The same, with your own question instead of the rubric.
+    The same, with your own question instead of the rubric. Opens the ask box
+    -- see |paseo-ask-box|.
 
 :Paseo agent [stop]                                          *:Paseo-agent*
 
@@ -506,6 +511,57 @@ require("paseo.repos").invalidate()
 
     Drop the resolved-path cache. Called automatically on `DirChanged`; call it
     by hand after creating or removing a worktree under the current tree.
+
+                                                               *paseo-ask-box*
+|:Paseo-ask| and |:Paseo-qfask| open a small float, take your question, send
+it, and let the chat come up behind the answer. They used to open the entire
+chat surface with the reference queued in its composer, which is a lot of
+window for one sentence and puts you in the conversation before you have said
+anything.
+
+    <CR>        send (normal mode)
+    <C-s>       send (normal or insert)
+    <Esc>, q    cancel, throwing the draft away
+
+An EMPTY box cancels: sending nothing costs a turn and gets you "what would
+you like to know?". The box grows with the question, to a cap.
+
+It is a REAL BUFFER, not `vim.ui.input`, for the same reason the composer is
+one -- a one-line field throws away your insert-mode keymaps, completion,
+abbreviations and undo, and cannot hold a question with a blank line in it.
+<CR> is therefore not bound in insert mode; that is how you write a second
+paragraph.
+
+|:Paseo-explain| does NOT open the box. It has a question already -- the
+rubric -- so there is nothing to type.
+
+                                                                   *paseo-ref*
+A REFERENCE IS A LOCATION, NOT A QUOTATION.
+
+|:Paseo-explain|, |:Paseo-ask| and |:Paseo-qfask| send the agent a path and a
+line range and let it open the file. They used to paste the lines in. That
+made the prompt scale with the size of whatever you asked about -- and the
+worst case is not a long hunk, it is a NEWLY CREATED FILE, which gitsigns
+reports as one all-added hunk and which therefore pasted the file in whole.
+Reading also gets the agent the file's current state and the lines around it,
+where a paste is a snapshot from when you pressed the key.
+
+The path it is told to open is ABSOLUTE, and that is not cosmetic. A ref's
+`path` is relative to the WORKSPACE so it disambiguates across member repos
+(`clm_api/app/main.py`), while `root` -- the agent's cwd -- is the member
+worktree. Resolve one against the other and you get
+`.../clm_api/clm_api/app/main.py`. While the code was inlined the path was
+only a label and nobody noticed; the moment the agent has to open it, it has
+to be absolute.
+
+ONE CARVE-OUT: a pure deletion. Its lines are not in the file to read, and a
+deletion's line number is the line ABOVE the removed block, so "go and read
+it" would show the agent the code that SURVIVED and get a confident answer
+about the wrong lines. Those hunks are still quoted, fenced as `diff`, and
+labelled so the agent does not go looking for them.
+
+If the buffer has unsaved changes the reference says so, since the agent reads
+disk and you are looking at the buffer.
 
                                                                   *paseo.Repo*
 A repo is: >lua
@@ -957,7 +1013,8 @@ Context is ATTACHED AND VISIBLE. |:Paseo-ask| on a hunk puts a line like >
     > attached: clm_api/app/main.py:42 (clm_api)
 <in the composer, so you can see exactly what is about to be sent and delete
 the line if you change your mind. Attached blocks are sent BEFORE your prose,
-so the agent reads the code first and the question second.
+so the agent gets the location first and the question second. What is attached
+is a reference, not the code -- see |paseo-ref|.
 
                                                        *paseo-chat-images*
 Neovim's clipboard is TEXT. An image copied from a browser or a screenshot

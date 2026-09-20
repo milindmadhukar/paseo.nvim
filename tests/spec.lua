@@ -309,9 +309,12 @@ local function test_explain_quickfix()
     local real_chat = package.loaded["paseo.ui.chat"]
     package.loaded["paseo.ui.chat"] = {
       attach = function(text, opts)
-        attached = { text = text, opts = opts }
+        attached = { text = text, opts = opts, via = "attach" }
       end,
-      ask = function() end,
+      -- What `qfask` uses now: the box takes the question, then this sends.
+      ask = function(prompt, opts)
+        attached = { text = opts and opts.context, opts = opts, prompt = prompt, via = "ask" }
+      end,
       attach_events = function() end,
     }
     -- The directory too, and not only for isolation: `siblings()` calls
@@ -348,11 +351,25 @@ local function test_explain_quickfix()
 
       require("paseo.explain").quickfix()
 
-      truthy("explain: a list with entries is attached", attached ~= nil)
+      -- The box, not the chat: `qfask` asks what you want to know before it
+      -- opens anything. Nothing is sent until it is answered.
+      truthy("explain: the ask box opens rather than the chat", require("paseo.ui.prompt").is_open())
+      truthy("explain: and nothing is sent until it is answered", attached == nil)
+
+      vim.api.nvim_buf_set_lines(vim.api.nvim_get_current_buf(), 0, -1, false, { "what broke?" })
+      vim.cmd "stopinsert"
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "x", false)
+      vim.wait(300, function()
+        return attached ~= nil
+      end)
+
+      truthy("explain: answering the box sends", attached ~= nil)
+      eq("explain: the question is the prompt", attached and attached.prompt, "what broke?")
+      eq("explain: and the list rides along as context", attached and attached.via, "ask")
       if attached then
         truthy(
-          "explain: paths are repo-relative, not absolute",
-          attached.text:find "\n%- f%.txt:%d+" ~= nil,
+          "explain: paths are ABSOLUTE, so entries from sibling worktrees resolve",
+          attached.text:find "\n%- /.*f%.txt:%d+" ~= nil,
           attached.text
         )
         truthy(
@@ -374,11 +391,12 @@ local function test_explain_quickfix()
         )
       end
 
-      -- An empty list must not attach anything at all.
+      -- An empty list must not even open the box.
       attached = nil
       vim.fn.setqflist({}, " ", { title = "spec", items = {} })
       require("paseo.explain").quickfix()
-      truthy("explain: an empty quickfix list attaches nothing", attached == nil)
+      truthy("explain: an empty quickfix list sends nothing", attached == nil)
+      truthy("explain: and does not open the box either", not require("paseo.ui.prompt").is_open())
     end)
 
     package.loaded["paseo.agents"] = real_agents
@@ -389,6 +407,95 @@ local function test_explain_quickfix()
       error(err, 0)
     end
   end)
+end
+
+-- ---------------------------------------------------------------- prompt
+
+--- The ask box. It is a WINDOW, not a blocking prompt, so every exit has to
+--- answer the caller exactly once -- including the ones nobody chose.
+local function test_prompt()
+  local prompt = require "paseo.ui.prompt"
+
+  local function box(fn)
+    local got, calls = "unset", 0
+    prompt.open({ title = "app/main.py:42" }, function(q)
+      calls = calls + 1
+      got = q
+    end)
+    local buf = vim.api.nvim_get_current_buf()
+    fn(buf)
+    vim.wait(200, function()
+      return calls > 0
+    end)
+    return got, calls
+  end
+
+  -- NOT `vim.ui.input`: a one-line field cannot hold a question with a blank
+  -- line in it and throws away your insert-mode keymaps and undo.
+  prompt.open({ title = "x" }, function() end)
+  local buf = vim.api.nvim_get_current_buf()
+  truthy("prompt: the box is a real, modifiable buffer", vim.bo[buf].modifiable)
+  eq("prompt: with the composer's filetype, so your keymaps work", vim.bo[buf].filetype, "markdown")
+  local cfg = vim.api.nvim_win_get_config(0)
+  eq("prompt: floating over the editor", cfg.relative, "editor")
+  -- Above the dashboard's 30, below the permission dialog's 200: a permission
+  -- request must never come up behind a box you are typing in.
+  truthy("prompt: z-index sits above the dashboard, below the dialog",
+    cfg.zindex > 30 and cfg.zindex < 200, tostring(cfg.zindex))
+  vim.api.nvim_win_close(0, true)
+  vim.wait(100)
+
+  local text, calls = box(function(b)
+    vim.api.nvim_buf_set_lines(b, 0, -1, false, { "why is this here?", "", "second paragraph" })
+    vim.cmd "stopinsert"
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "x", false)
+  end)
+  eq("prompt: <CR> sends the question, blank lines and all", text,
+    "why is this here?\n\nsecond paragraph")
+  eq("prompt: and answers the caller exactly once", calls, 1)
+
+  -- Grows with the question: "why?" and a paragraph are different shapes, and
+  -- a fixed height makes one of them unreadable.
+  prompt.open({ title = "x" }, function() end)
+  local grow = vim.api.nvim_get_current_buf()
+  local before = vim.api.nvim_win_get_config(0).height
+  vim.api.nvim_buf_set_lines(grow, 0, -1, false, vim.split(("l\n"):rep(40), "\n"))
+  vim.api.nvim_exec_autocmds("TextChanged", { buffer = grow })
+  local after = vim.api.nvim_win_get_config(0).height
+  truthy("prompt: the box grows with the question", after > before, ("%d -> %d"):format(before, after))
+  truthy("prompt: but is capped, not unbounded", after <= 14, tostring(after))
+  vim.api.nvim_win_close(0, true)
+  vim.wait(100)
+
+  -- An empty box is a cancel. Sending one costs a turn and gets you "what
+  -- would you like to know?".
+  local empty, empty_calls = box(function(b)
+    vim.api.nvim_buf_set_lines(b, 0, -1, false, { "", "   " })
+    vim.cmd "stopinsert"
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "x", false)
+  end)
+  eq("prompt: an empty box cancels rather than sending nothing", empty, nil)
+  eq("prompt: and still answers the caller", empty_calls, 1)
+
+  local escaped, esc_calls = box(function(b)
+    vim.api.nvim_buf_set_lines(b, 0, -1, false, { "never mind" })
+    vim.cmd "stopinsert"
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "x", false)
+  end)
+  eq("prompt: <Esc> cancels and throws the draft away", escaped, nil)
+  eq("prompt: answering the caller, not leaving it hanging", esc_calls, 1)
+
+  -- THE ONE THAT BITES: closed by `:q` or a window command rather than by a
+  -- key we bound. Without the WinClosed guard the reference is queued and
+  -- nothing ever sends it.
+  local closed, closed_calls = box(function()
+    vim.cmd "stopinsert"
+    vim.api.nvim_win_close(0, true)
+  end)
+  eq("prompt: a window closed from outside still cancels", closed, nil)
+  eq("prompt: exactly once", closed_calls, 1)
+
+  truthy("prompt: nothing is left open", not prompt.is_open())
 end
 
 -- ---------------------------------------------------------------- daemon
@@ -670,8 +777,8 @@ local function test_ref()
   fd:write "alpha\nbeta\ngamma\ndelta\n"
   fd:close()
 
-  -- A fresh tab: the review suite leaves a gitsigns diff panel current, and
-  -- those windows set 'winfixbuf', which makes :edit fail with E1513.
+  -- A fresh tab, so nothing another suite left current can set 'winfixbuf' on
+  -- us -- that makes :edit fail with E1513.
   vim.cmd "tabnew"
   vim.cmd.edit(vim.fn.fnameescape(loose))
   local file = ref.file()
@@ -680,7 +787,19 @@ local function test_ref()
   eq("ref: its root is the file's directory", file and file.root, vim.fs.dirname(loose))
   truthy(
     "ref: render() does not require a repo",
-    file and ref.render(file):find("alpha", 1, true) ~= nil
+    file and ref.render(file):find(loose, 1, true) ~= nil
+  )
+  -- The prompt names the file and stops. Inlining made it scale with whatever
+  -- you asked about -- a long hunk, or a new file, which gitsigns reports as
+  -- one all-added hunk and which therefore pasted the file in whole.
+  truthy(
+    "ref: render() points at the file rather than quoting it",
+    file and ref.render(file):find("alpha", 1, true) == nil,
+    file and ref.render(file)
+  )
+  truthy(
+    "ref: and gives an ABSOLUTE path -- `path` is workspace-relative, `root` is not",
+    file and ref.render(file):find(vim.fn.fnamemodify(loose, ":p"), 1, true) ~= nil
   )
 
   -- A <cmd> mapping fires while visual mode is STILL ACTIVE, so '< and '> hold
@@ -699,6 +818,42 @@ local function test_ref()
   eq("ref: and its text is the selected line", visual and visual.lines[1], "delta")
 
   vim.cmd [[execute "normal! \<Esc>"]]
+
+  -- THE ONE CARVE-OUT, tested on a hand-built ref because driving a real
+  -- deletion needs gitsigns attached asynchronously to a fixture repo.
+  --
+  -- A pure deletion's lines are not in the file, so "go and read it" sends the
+  -- agent to the code that SURVIVED -- `lnum` is the line ABOVE the removed
+  -- block -- and it explains the wrong thing confidently. Those lines are the
+  -- one thing that must still be quoted.
+  local deleted = {
+    repo = nil,
+    root = "/tmp",
+    path = "app/main.py",
+    abs = "/tmp/app/main.py",
+    lnum = 42,
+    end_lnum = 42,
+    lines = { "@@ -42,2 +42,0 @@", "-gone", "-also gone" },
+    detached = true,
+    modified = false,
+    kind = "hunk",
+  }
+  local rendered = ref.render(deleted)
+  truthy("ref: a deleted hunk is still quoted -- it is not in the file to read", 
+    rendered:find("-also gone", 1, true) ~= nil, rendered)
+  truthy("ref: and is fenced as a diff, not as the file's language",
+    rendered:find("```diff", 1, true) ~= nil, rendered)
+  truthy("ref: and says the line is ABOVE the removed block, not the removal",
+    rendered:find("ABOVE", 1, true) ~= nil, rendered)
+
+  deleted.detached = false
+  deleted.modified = true
+  local live = ref.render(deleted)
+  truthy("ref: an attached hunk is a location, not a quotation",
+    live:find("gone", 1, true) == nil, live)
+  truthy("ref: an unsaved buffer is declared, since the agent reads disk",
+    live:find("unsaved changes", 1, true) ~= nil, live)
+
   vim.cmd "tabclose"
   os.remove(loose)
 end
@@ -2815,6 +2970,7 @@ function M.run()
     { "git.hunks", test_hunks },
     { "git.stage", test_stage },
     { "explain", test_explain_quickfix },
+    { "prompt", test_prompt },
     { "daemon", test_daemon },
     { "bridge", test_bridge },
     { "image", test_image },

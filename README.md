@@ -123,8 +123,8 @@ require("paseo").setup {
 |---|---|
 | `:Paseo chat` | Open/close the chat, on whichever surface `ui.surface` names |
 | `:Paseo explain [kind]` | Explain the hunk/selection/file, using the rubric |
-| `:Paseo ask [kind]` | Attach the hunk/selection/file, then type your question |
-| `:Paseo qfask` | Attach every entry in the quickfix list — whoever built it |
+| `:Paseo ask [kind]` | Ask about the hunk/selection/file — a box takes the question |
+| `:Paseo qfask` | Ask about every entry in the quickfix list — whoever built it |
 | `:Paseo image [path]` | Attach an image — the clipboard, or a file |
 | `:Paseo mode` | This provider's permission or operating modes |
 | `:Paseo plan` | Toggle Plan: a Codex feature or Claude mode |
@@ -146,8 +146,8 @@ require("paseo").setup {
 Default keys, all under `<leader>a`. `aa` chat · `ae` explain · `ak` ask · `af`
 ask about the file · `aQ` ask about the whole quickfix list — `ae` and `ak`
 also bind in visual mode and send the live selection. The review keys (`ac`
-changes · `aq` hunks · `as` stage) are config-side now and build on
-[the data layer](#driving-review-from-your-own-config). Session controls, the row under the composer in the app: `ap` mode · `ah`
+changes · `aq` hunks · `as` stage · `ar`/`au` diff panel) are config-side now
+and build on [the data layer](#driving-review-from-your-own-config). Session controls, the row under the composer in the app: `ap` mode · `ah`
 thinking · `az` fast · `am` model · `a?` settings. Then `aw` workspaces · `aW`
 new workspace · `aS` sessions · `at` agents · `aR` repos · `aH` health.
 
@@ -420,6 +420,53 @@ and does it properly: the count and the register are carried through, so `3p`
 is still `3p` and `"ap` is still `"ap`. `:Paseo image ~/shot.png` attaches a
 file, from anywhere.
 
+### The ask box
+
+`:Paseo ask` and `:Paseo qfask` open a small float, take your question, send
+it, and let the chat come up behind the answer. They used to open the whole
+chat surface with the reference queued in its composer — a lot of window for
+one sentence, and it put you in the conversation before you had said anything.
+
+| | |
+|---|---|
+| `<CR>` | send (normal mode) |
+| `<C-s>` | send (normal or insert) |
+| `<Esc>` / `q` | cancel, throwing the draft away |
+
+An empty box cancels. The box grows with the question, to a cap.
+
+It is a **real buffer**, not `vim.ui.input`, for the same reason the composer
+is one: a one-line field throws away your insert-mode keymaps, completion,
+abbreviations and undo, and cannot hold a question with a blank line in it.
+`<CR>` is therefore not bound in insert mode — that is how you write a second
+paragraph.
+
+`:Paseo explain` does not open the box; it already has a question, the rubric.
+
+### References are locations, not quotations
+
+`explain` / `ask` / `qfask` send the agent a path and a line range and let it
+open the file. Pasting the lines in made the prompt scale with whatever you
+asked about, and the worst case is not a long hunk — it is a **newly created
+file**, which gitsigns reports as one all-added hunk, so the whole file went
+into the prompt. Reading also gets the current file and its surroundings, where
+a paste is a snapshot from when you pressed the key.
+
+The path is **absolute**, which is not cosmetic. A ref's `path` is relative to
+the *workspace* so it disambiguates across member repos (`clm_api/app/main.py`),
+while `root` — the agent's cwd — is the member worktree. Resolve one against
+the other and you get `…/clm_api/clm_api/app/main.py`. While the code was
+inlined the path was only a label and nobody noticed.
+
+**One carve-out: a pure deletion.** Its lines are not in the file to read, and
+a deletion's line number is the line *above* the removed block — so "go read
+it" would show the agent the code that survived and get a confident answer
+about the wrong lines. Those are still quoted, fenced as `diff`, and labelled
+so the agent does not go hunting for them (`lua/paseo/ref.lua`, `detached`).
+
+If the buffer has unsaved changes the reference says so, since the agent reads
+disk and you are looking at the buffer.
+
 ## Driving review from your own config
 
 The plugin does not own your review workflow. It owns the git knowledge the
@@ -463,6 +510,14 @@ end
 -- files, both of which gitsigns structurally cannot.
 git.stage(hunk, function(err) ... end)
 ```
+
+A worked implementation of exactly this — the picker with its diff previewer,
+a `quickfixtextfunc` rendering `clm_api  app/main.py  L34-L69  +7 -2` while
+keeping real `filename`/`lnum`/`end_lnum` values, staging from the list, and
+the per-member-repo diff panel — lives in the author's config as
+[`lua/utils/review.lua`](https://github.com/milindmadhukar/nvim/blob/main/lua/utils/review.lua).
+Its keys are bound on paseo.nvim's own lazy spec, so pressing one loads the
+plugin before the module's top-level `require "paseo.git"` runs.
 
 Two things to know before you write this:
 

@@ -17,6 +17,8 @@ local M = {}
 M.RUBRIC = table.concat({
   "Explain this change. Be specific and brief.",
   "",
+  "Read the reference below first — the code is not quoted for you, on purpose.",
+  "",
   "1. What changed, in one or two sentences.",
   "2. What invariant or assumption it altered — what was true before that is not true now.",
   "3. The call sites or callers affected. Name files and lines.",
@@ -105,22 +107,40 @@ function M.explain(kind)
   })
 end
 
----Attach the hunk, selection or file and let you type the question.
+---Ask about the hunk, selection or file: a box, your question, then send.
 ---
----This is the common case and it deliberately does NOT prompt through
----`vim.ui.input`: a one-line input box is the wrong shape for a question you
----want to think about, and it throws away your keymaps and completion. The
----composer is a real buffer.
+---This is the common case, and it used to open the entire chat surface with
+---the reference queued in its composer -- a lot of window for one sentence,
+---and it put you in the conversation before you had said anything. Now the
+---box takes the question and the chat opens behind the answer.
+---
+---Still NOT `vim.ui.input`. |paseo.ui.prompt| is a real buffer for the same
+---reason the composer is one: a one-line field throws away your keymaps,
+---completion and undo, and cannot hold a question with a blank line in it.
 ---@param kind? "cursor"|"visual"|"hunk"|"file"
 function M.ask(kind)
   local location = locate(kind)
   if not location then
     return
   end
-  chat.attach(with_siblings(ref.render(location), location.root), { root = location.root })
+
+  -- Rendered NOW, not in the callback. The box is a window and you may be in
+  -- it for a while; by the time you send, the cursor has moved off the hunk
+  -- and `ref.get()` would answer about wherever it now sits.
+  local context = with_siblings(ref.render(location), location.root)
+
+  require("paseo.ui.prompt").open({
+    title = ref.format(location),
+    root = location.root,
+  }, function(question)
+    if not question then
+      return
+    end
+    chat.ask(question, { root = location.root, context = context })
+  end)
 end
 
----Attach the whole quickfix list -- every location under review at once.
+---Ask about the whole quickfix list -- every location under review at once.
 ---
 ---Reads the PLAIN quickfix list, not one this plugin built. The hunk list is
 ---your config's to populate now, so the only contract here is the one every
@@ -135,7 +155,10 @@ function M.quickfix()
   end
 
   local repos = require "paseo.repos"
-  local lines, root = { "The changes currently under review:" }, nil
+  local lines, root = {
+    "The changes currently under review. The code is not quoted -- open the",
+    "files and read them:",
+  }, nil
 
   for _, item in ipairs(items) do
     local name = item.bufnr ~= 0 and vim.api.nvim_buf_get_name(item.bufnr) or (item.filename or "")
@@ -144,25 +167,37 @@ function M.quickfix()
       local repo = repos.resolve(absolute)
       root = root or (repo and repo.worktree)
 
-      -- The repo-relative path where there is a repo, because the agent runs
-      -- in a worktree and an absolute path is noise it has to strip.
-      local path = repo and repos.relative(repo, absolute) or vim.fn.fnamemodify(absolute, ":~")
+      -- ABSOLUTE, for the same reason |paseo.Ref| carries `abs`: `root` is the
+      -- FIRST entry's worktree, and in a workspace the rest of the list comes
+      -- from sibling worktrees that nothing relative to `root` can name. A
+      -- repo-relative path resolves for entry one and silently misses the
+      -- others.
       local text = (item.text or ""):gsub("^%s+", ""):gsub("%s+$", "")
       lines[#lines + 1] = ("- %s:%d%s"):format(
-        path,
+        absolute,
         item.lnum or 0,
         text ~= "" and ("  " .. text) or ""
       )
     end
   end
 
-  if #lines == 1 then
+  if #lines == 2 then
     vim.notify("paseo: no quickfix entry names a file", vim.log.levels.WARN)
     return
   end
 
   root = root or assert(vim.uv.cwd())
-  chat.attach(with_siblings(table.concat(lines, "\n"), root), { root = root })
+  local context = with_siblings(table.concat(lines, "\n"), root)
+
+  require("paseo.ui.prompt").open({
+    title = ("quickfix · %d entries"):format(#lines - 2),
+    root = root,
+  }, function(question)
+    if not question then
+      return
+    end
+    chat.ask(question, { root = root, context = context })
+  end)
 end
 
 function M.attach()
