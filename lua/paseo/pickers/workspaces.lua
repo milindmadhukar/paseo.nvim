@@ -217,15 +217,22 @@ function M.open(opts)
             end
           end)
 
-          -- Review it without leaving this window: the repo list widens to the
-          -- member worktrees on its own.
+          -- Review it without leaving this window: tcd into the workspace so
+          -- the repo list widens to the member worktrees, then hand off.
+          --
+          -- WHAT "review" MEANS IS NOT OURS TO DECIDE. The quickfix list and
+          -- the changed-files picker live in your config now, so this fires a
+          -- `User PaseoReview` autocmd with the root in `data` and stops there.
           map({ "i", "n" }, "<C-r>", function()
             local entry = state.get_selected_entry()
             actions.close(bufnr)
             if entry and entry.value.directory then
               vim.cmd.tcd(vim.fn.fnameescape(entry.value.directory))
               require("paseo.repos").invalidate()
-              require("paseo.qf").all()
+              vim.api.nvim_exec_autocmds("User", {
+                pattern = "PaseoReview",
+                data = { root = entry.value.directory },
+              })
             end
           end)
 

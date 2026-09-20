@@ -1,4 +1,5 @@
---- paseo.nvim -- review every hunk by hand, and ask an agent when one is opaque.
+--- paseo.nvim -- drive Paseo agents from Neovim, and ask one about the code
+--- under your cursor.
 ---
 --- Entry point. Holds `setup()`, the `:Paseo` command, and nothing else:
 --- submodules are required lazily from the dispatch table below so that loading
@@ -25,38 +26,6 @@ commands.repos = {
       lines[#lines + 1] = ("%d. %s  %s"):format(i, repo.name, where)
     end
     vim.notify(table.concat(lines, "\n"), vim.log.levels.INFO, { title = "paseo: repos" })
-  end,
-}
-
-commands.changes = {
-  desc = "Changed-files picker for this unit of work",
-  run = function()
-    require("paseo.pickers.changes").open()
-  end,
-}
-
-commands.hunks = {
-  desc = "Every hunk in this unit of work, as a quickfix list",
-  run = function()
-    require("paseo.qf").all()
-  end,
-}
-
-commands.stage = {
-  desc = "Stage the hunk the quickfix list is on, then advance",
-  run = function()
-    require("paseo.qf").stage()
-  end,
-}
-
-commands.review = {
-  desc = "Diff panel, one tab per repo",
-  run = function(args)
-    require("paseo.review").open({ unified = args[1] == "unified" }, function(opened)
-      if opened == 0 then
-        vim.notify("paseo: no diff panel opened", vim.log.levels.WARN)
-      end
-    end)
   end,
 }
 

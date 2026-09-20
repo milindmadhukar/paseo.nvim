@@ -1,4 +1,5 @@
-*paseo.txt*    Review every hunk by hand; ask an agent when one is opaque
+*paseo.txt*    Drive Paseo agents from Neovim; ask one about the code under
+               your cursor
 
                                                                        *paseo*
 ==============================================================================
@@ -19,8 +20,14 @@ CONTENTS                                                      *paseo-contents*
 ==============================================================================
 1. INTRODUCTION                                           *paseo-introduction*
 
-paseo.nvim makes reviewing your own diff the path of least resistance, and
-hands the confusing parts to an agent without leaving Neovim.
+paseo.nvim hands the confusing parts of your own diff to an agent without
+leaving Neovim -- including the question of WHICH agent wrote a hunk and what
+it was asked to do.
+
+The review workflow itself -- the changed-files picker, the hunk quickfix
+list, staging -- is deliberately NOT here. It is ordinary Neovim plumbing with
+no Paseo in it, so it belongs in your config, built on the git data layer this
+plugin does own. See |paseo-git|.
 
 It is built around a `workspace`: one named unit of work spanning N git
 worktrees, plus the untracked context they need. A worktree is per-repo; a
@@ -36,7 +43,8 @@ claude / codex / opencode.
 Hard:
   - Neovim 0.10+
   - `git`
-  - gitsigns.nvim, telescope.nvim
+  - telescope.nvim, for the workspace and session pickers
+  - gitsigns.nvim, for finding the hunk under the cursor (|:Paseo-ask|)
   - nvzone/volt, for the chat chrome, the panels and the permission dialog
 
 Optional, for the Paseo backend:
@@ -317,13 +325,15 @@ workspaces.branch_prefix                           string, default `"ws/"`
     `branch_prefix` and that wins; this covers the case with no manifest -- a
     plain git repo, where Paseo cuts the worktree. See |paseo-workspace-kinds|.
 
-                                                 *paseo-config.review.context*
-review.context                                          integer, default `0`
+                                                  *paseo-config.review.agents*
+review.agents                                       boolean, default `true`
 
-    Context lines asked of `git diff` when building the hunk quickfix list.
-    Keep it at 0: a hunk header's line numbers only delimit the hunk itself at
-    `-U0`, and a delete hunk's quickfix entry has to land on exactly the line
-    `gitsigns.stage_hunk()` acts on.
+    Whether |:Paseo-explain| and |:Paseo-ask| append the other Paseo agents
+    working in this tree to the prompt -- their ids, titles, providers and
+    status -- so the review agent can call `get_agent_activity` on one and
+    report who made a change and what they were told to do. Agents this plugin
+    created are excluded: asking the agent you are talking to what it did is a
+    loop. Set `false` and the prompt is the reference and nothing else.
 
 ==============================================================================
 5. COMMANDS                                                   *paseo-commands*
@@ -332,27 +342,6 @@ review.context                                          integer, default `0`
 :Paseo [subcommand]
 
     Without an argument, equivalent to `:Paseo repos`.
-
-:Paseo changes                                              *:Paseo-changes*
-
-    Changed-files picker across every repo in the unit of work. The previewer
-    shows `git diff HEAD` -- staged and unstaged together -- not the file.
-    `<CR>` opens the file on its FIRST HUNK; `<C-q>` expands the selection
-    into a hunk quickfix list; `<C-a>` expands everything.
-
-:Paseo hunks                                                  *:Paseo-hunks*
-
-    Every hunk in the unit of work as a quickfix list, one entry per hunk.
-
-:Paseo stage                                                  *:Paseo-stage*
-
-    Stage the hunk the quickfix list is on, then advance to the next.
-
-:Paseo review [unified]                                      *:Paseo-review*
-
-    A `:Gitsigns diff` panel per repo, each in its own tab, `tcd`'d to that
-    repo. `unified` starts in the unified layout, which shows deleted lines
-    inline.
 
 :Paseo chat                                                  *:Paseo-chat*
 
@@ -387,8 +376,14 @@ review.context                                          integer, default `0`
 
 :Paseo qfask                                                *:Paseo-qfask*
 
-    Attach every hunk in the quickfix list at once -- "explain this review"
+    Attach every entry in the quickfix list at once -- "explain this review"
     rather than "explain this hunk".
+
+    Reads the PLAIN quickfix list, whoever built it. The hunk list is your
+    config's to populate (see |paseo-git|), so the only contract here is the
+    one every quickfix entry already honours: a buffer, a line and some text.
+    That also means it works over `:grep`, LSP references, or anything else
+    you happen to have in there.
 
 :Paseo image [path]                                          *:Paseo-image*
 
@@ -578,7 +573,9 @@ In the workspace picker (|:Paseo-workspaces|) ~
     <C-n>     create a workspace
     <C-d>     archive it -- refuses, and says what it would lose, if a member
               holds work that exists nowhere else
-    <C-r>     review it here: hunks from every member into the quickfix list
+    <C-r>     review it here: `tcd` into the workspace so the repo list widens
+              to every member, then fire |paseo-review-autocmd| -- what
+              "review" means is your config's to say
 
 In the sessions picker (|:Paseo-sessions|) ~
 
@@ -589,32 +586,115 @@ In the sessions picker (|:Paseo-sessions|) ~
 ==============================================================================
 8. GIT                                                             *paseo-git*
 
-`paseo.git` is the only module that shells out to git. Two notes matter to
-anyone reading hunks out of it.
+`paseo.git` is the only module that shells out to git, and together with
+|paseo.repos.list| it is THE PUBLIC DATA LAYER your review workflow is built
+on. It has no UI in it and never opens a window: the changed-files picker, the
+hunk quickfix list and the staging keymap live in your config now, and these
+four functions are what they call.
+
+Two types flow through it.
+
+                                                                *paseo.Change*
+A changed file: >lua
+    {
+      repo      = <paseo.Repo>,
+      path      = "app/main.py",              -- relative to repo.worktree
+      orig_path = nil,                        -- rename source, when there is one
+      index     = "M",                        -- X of the XY status code, "?" untracked
+      worktree  = " ",                        -- Y of the XY status code
+      untracked = false,
+    }
+<
+                                                                  *paseo.Hunk*
+One hunk of one file: >lua
+    {
+      repo         = <paseo.Repo>,
+      path         = "app/main.py",
+      lnum         = 42,                      -- see hunks() below
+      added        = 7,
+      removed      = 2,
+      kind         = "change",                -- add | change | delete | new
+      file_deleted = false,                   -- the whole file is gone
+      lines        = { "@@ -40,2 +42,7 @@", "-old", "+new" },
+    }
+<
+`lines` is the hunk verbatim -- its `@@` header, its `-`/`+` body, and any
+`\ No newline at end of file` marker. That is what `stage()` applies, so it
+has to survive intact if you pass hunks around.
+
+                                                            *paseo-git-status*
+require("paseo.git").status({repo})                    -> |paseo.Change|[]
+
+    Every changed file in one repo -- staged, unstaged and untracked -- in one
+    pass, sorted by path. Ignored files are never included.
+
+    Reads `--porcelain=v2 -z`, whose rename records are a PARSING TRAP: a `2 `
+    record is TWO NUL-terminated fields, the record and then `origPath`, so a
+    naive split on NUL reads the rename source as the next record and desyncs
+    everything after it. This handles that; a parser of your own must too.
 
                                                              *paseo-git-hunks*
 require("paseo.git").hunks({repo}, {changes})            -> |paseo.Hunk|[]
 
-    Every hunk, as quickfix-ready positions. A hunk's `lnum` is the line
-    `gitsigns.stage_hunk()` acts on. For a deletion, `@@ -a,b +c,0 @@` gives
-    `c` -- NOT `c + 1` -- because stage_hunk() acts on `added.start`, and for
-    a pure deletion that is the line ABOVE the removed block. A deletion at
-    the top of a file yields `c = 0` and clamps to 1.
+    Every hunk, as quickfix-ready positions. {changes} restricts it to those
+    files; omitted, it covers the whole repo.
+
+    `-U0` IS PART OF THE CONTRACT. A hunk header's line numbers only delimit
+    the hunk itself at zero context, so `lnum` is only meaningful there -- ask
+    git for context elsewhere and reuse these numbers and you are off by the
+    context width.
+
+    For a deletion, `@@ -a,b +c,0 @@` gives `lnum = c` -- NOT `c + 1` --
+    because `gitsigns.stage_hunk()` acts on `added.start`, and for a pure
+    deletion that is the line ABOVE the removed block. A deletion at the top of
+    a file yields `c = 0` and clamps to 1. A hunk header also OMITS a count of
+    1: `@@ -2 +2 @@` means `-2,1 +2,1`, and reading the missing count as 0
+    turns every single-line change into a phantom deletion.
 
     Untracked files never reach `git diff`; each becomes one synthetic
     `kind = "new"` entry.
 
+                                                         *paseo-git-diff_text*
+require("paseo.git").diff_text({change}, {opts})             -> string[]
+
+    The diff of one file, for a previewer. Working tree against `HEAD`, so
+    staged and unstaged changes appear together -- which is what you are
+    reviewing. `opts.context` defaults to 3.
+
+    An untracked file has no `HEAD` side and goes through `--no-index` against
+    /dev/null, which exits 1 BY DESIGN ("the files differ"). This handles that;
+    a previewer that shells out directly must too, or every new file previews
+    as an error.
+
                                                              *paseo-git-stage*
 require("paseo.git").stage({hunk}, {callback})
 
-    Stages one hunk, routing around the case gitsigns structurally cannot do.
+    Stages one hunk, and needs no buffer to do it. {callback} receives an error
+    string or nil.
+
+    It applies a reconstructed patch with `git apply --cached --unidiff-zero`
+    rather than driving `gitsigns.stage_hunk()`, for two reasons found in
+    testing. THE RACE: staging from a list means opening the file first, and
+    gitsigns attaches asynchronously -- called straight after `:edit` it finds
+    no cache for the buffer and returns SILENTLY. Four of six hunks vanished
+    that way. THE BUFFER: staging from a list should not drag a window onto a
+    file you were only reading about.
 
     A WHOLE-FILE DELETION (`hunk.file_deleted`) has no file on disk, so no
-    buffer can open on it and gitsigns can never attach -- staging through the
-    hunk UI silently does nothing. Those, and untracked files, go through
-    `git add` instead, which records a removal correctly. Everything else goes
-    to `gitsigns.stage_hunk()`.
+    buffer can open on it and gitsigns can never attach. Those, and untracked
+    files, go through `git add` instead, which records a removal correctly.
 
+                                                         *paseo-review-autocmd*
+The workspace picker's `<C-r>` (|paseo-workspaces-keys|) does not build a list
+itself. It `tcd`s into the workspace, invalidates the repo cache, and fires: >lua
+
+    vim.api.nvim_create_autocmd("User", {
+      pattern = "PaseoReview",
+      callback = function(ev)
+        -- ev.data.root is the workspace directory
+      end,
+    })
+<
 ==============================================================================
 9. THE AGENT BRIDGE                                             *paseo-bridge*
 

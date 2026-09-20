@@ -47,6 +47,10 @@ export function describeAgent(agent: any): Record<string, unknown> {
     workspaceId: agent.workspaceId ?? null,
     provider: agent.runtimeInfo?.provider ?? null,
     requiresAttention: (agent.pendingPermissions?.length ?? 0) > 0,
+    // Carried through so the Lua side can tell OUR agents apart from the ones
+    // that did the work. `explain` lists the latter for the review agent to
+    // interrogate, and listing itself would be a loop.
+    labels: agent.labels ?? null,
   };
 }
 
@@ -152,6 +156,7 @@ export function agentOps(ctx: BridgeConnection): Ops {
         workspaceId: agent.workspaceId ?? null,
         provider: agent.runtimeInfo?.provider ?? null,
         requiresAttention: (agent.pendingPermissions?.length ?? 0) > 0,
+        labels: agent.labels ?? null,
       }));
       return {
         entries: req.cwd ? entries.filter((e) => e.cwd === req.cwd) : entries,

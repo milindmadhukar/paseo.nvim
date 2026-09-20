@@ -58,7 +58,7 @@ local M = {}
 ---@field zindex integer  Base z-index of the surface. DELIBERATELY BELOW 50,
 ---                       which is what floating windows and plenary popups get
 ---                       by default: a dashboard that outranks them hides the
----                       telescope picker, the diff preview and every
+---                       telescope picker, its previewer and every
 ---                       `vim.ui.select` opened on top of it. Our own modal --
 ---                       the permission dialog -- is exempt and stays above
 ---                       everything, because it is the one window that must not
@@ -94,9 +94,10 @@ local M = {}
 ---                       a plain git repo, where Paseo cuts the worktree.
 
 ---@class paseo.Config.Review
----@field context integer Lines of context asked of `git diff` when building the
----                       hunk quickfix list. 0 is required: a hunk header's
----                       line numbers only mean "the hunk" at -U0.
+---@field agents boolean  Whether `:Paseo explain` and `:Paseo ask` list the
+---                       other Paseo agents working in this tree, so the review
+---                       agent can interrogate them about who made a change.
+---                       Off means the prompt is the reference and nothing else.
 
 ---@type paseo.Config
 local defaults = {
@@ -147,7 +148,7 @@ local defaults = {
   },
 
   review = {
-    context = 0,
+    agents = true,
   },
 }
 
@@ -163,7 +164,7 @@ function M.setup(opts)
   vim.validate("backend", config.backend, function(v)
     return v == "paseo" or v == "local"
   end, '"paseo" or "local"')
-  vim.validate("review.context", config.review.context, "number")
+  vim.validate("review.agents", config.review.agents, "boolean")
   vim.validate("ui.surface", config.ui.surface, function(v)
     return v == "float" or v == "sidebar"
   end, '"float" or "sidebar"')

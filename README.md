@@ -1,12 +1,16 @@
 # paseo.nvim
 
-Read every hunk you ship. Ask an agent when one is opaque. Never leave Neovim.
+Drive agents from Neovim. Ask one about the hunk under your cursor. Never
+leave the editor.
 
 Two problems, one plugin:
 
-- **Reviewing.** Stage every hunk by hand, fuzzy-find what changed, drive it
-  from a quickfix list, and ask an agent "explain this" when a hunk is
-  unreadable — without a context switch, and without being tied to one vendor.
+- **Reviewing.** Put the cursor on a hunk you cannot account for and ask an
+  agent to explain it — including *which* agent wrote it and what it was told
+  to do — without a context switch, and without being tied to one vendor. The
+  review workflow itself (the picker, the quickfix list, staging) is yours to
+  build; this plugin gives you [the data layer](#driving-review-from-your-own-config)
+  and the agent.
 - **Writing.** Agents step on each other. Git worktrees are the standard fix,
   but a worktree is *per repo*, and a real unit of work often spans several
   repos under a parent that is not itself a repo (`~/Code/openfin` → `clm`,
@@ -46,8 +50,8 @@ which reads like a broken install.
 |---|---|
 | Everything | Neovim 0.10+, `git` |
 | The chat UI | nvzone/volt |
-| The pickers | telescope.nvim |
-| Staging and previews | gitsigns.nvim |
+| The workspace and session pickers | telescope.nvim |
+| The hunk under the cursor | gitsigns.nvim |
 | Agents | the Paseo daemon running, and `bun` or node ≥ 22 |
 | Pasting images | `wl-paste` (Wayland), `xclip` (X11) or `pngpaste` (macOS) |
 
@@ -107,7 +111,8 @@ require("paseo").setup {
   },
 
   review = {
-    context = 0,                  -- `git diff -U0`; see "Delete hunks" below
+    agents = true,                -- list the other Paseo agents working here,
+                                  -- so the review agent can ask what they did
   },
 }
 ```
@@ -116,14 +121,10 @@ require("paseo").setup {
 
 | | |
 |---|---|
-| `:Paseo changes` | Changed-files picker; `<C-q>` expands into hunks |
-| `:Paseo hunks` | Every hunk in the unit of work, as a quickfix list |
-| `:Paseo stage` | Stage the hunk the quickfix list is on, then advance |
-| `:Paseo review [unified]` | Diff panel, one tab per repo |
 | `:Paseo chat` | Open/close the chat, on whichever surface `ui.surface` names |
 | `:Paseo explain [kind]` | Explain the hunk/selection/file, using the rubric |
 | `:Paseo ask [kind]` | Attach the hunk/selection/file, then type your question |
-| `:Paseo qfask` | Attach every hunk in the quickfix list |
+| `:Paseo qfask` | Attach every entry in the quickfix list — whoever built it |
 | `:Paseo image [path]` | Attach an image — the clipboard, or a file |
 | `:Paseo mode` | This provider's permission or operating modes |
 | `:Paseo plan` | Toggle Plan: a Codex feature or Claude mode |
@@ -144,8 +145,9 @@ require("paseo").setup {
 
 Default keys, all under `<leader>a`. `aa` chat · `ae` explain · `ak` ask · `af`
 ask about the file · `aQ` ask about the whole quickfix list — `ae` and `ak`
-also bind in visual mode and send the live selection. Review: `ac` changes ·
-`aq` hunks · `as` stage · `ar`/`au` diff panel. Session controls, the row under the composer in the app: `ap` mode · `ah`
+also bind in visual mode and send the live selection. The review keys (`ac`
+changes · `aq` hunks · `as` stage) are config-side now and build on
+[the data layer](#driving-review-from-your-own-config). Session controls, the row under the composer in the app: `ap` mode · `ah`
 thinking · `az` fast · `am` model · `a?` settings. Then `aw` workspaces · `aW`
 new workspace · `aS` sessions · `at` agents · `aR` repos · `aH` health.
 
@@ -253,7 +255,7 @@ happen.
 
 **Z-index is 30, not 100.** The default for a floating window is 50, and
 plenary's popup — so every telescope picker — takes it. A dashboard above that
-number renders `:Paseo changes`, a diff preview and every `vim.ui.select`
+number renders every telescope picker, its previewer and every `vim.ui.select`
 *underneath itself*, which looks exactly like the command doing nothing. The
 permission dialog is the one exception and sits above everything, because it
 is the one window that must not be covered.
@@ -418,6 +420,70 @@ and does it properly: the count and the register are carried through, so `3p`
 is still `3p` and `"ap` is still `"ap`. `:Paseo image ~/shot.png` attaches a
 file, from anywhere.
 
+## Driving review from your own config
+
+The plugin does not own your review workflow. It owns the git knowledge the
+workflow needs, and the agent you ask when a hunk is opaque. `paseo.repos` and
+`paseo.git` are public and stable, contain no UI, and are the seam the
+changed-files picker and the hunk quickfix list are built on in your config:
+
+```lua
+local repos, git = require "paseo.repos", require "paseo.git"
+
+-- Every changed file, across every repo in the unit of work. In a `ws`
+-- workspace that is all six worktrees; in a plain repo it is just that repo.
+local function changed()
+  local out = {}
+  for _, repo in ipairs(repos.list()) do
+    vim.list_extend(out, git.status(repo))       -- paseo.Change[]
+  end
+  return out
+end
+
+-- Telescope: finder over changed(), previewer over
+--   git.diff_text(change, { context = 3 })      -- string[]
+
+-- Quickfix: expand the files you picked into hunks. `hunk.lnum` is already the
+-- line to jump to, including the delete-hunk case that is NOT `c + 1`.
+local function to_quickfix(repo, picked)
+  local items = {}
+  for _, hunk in ipairs(git.hunks(repo, picked)) do  -- paseo.Hunk[]
+    items[#items + 1] = {
+      -- Absolute: the list outlives the cwd that built it, and in a workspace
+      -- the entries come from several different worktrees.
+      filename = vim.fs.joinpath(hunk.repo.worktree, hunk.path),
+      lnum = hunk.lnum,
+      text = ("%s  +%d -%d"):format(hunk.path, hunk.added, hunk.removed),
+    }
+  end
+  vim.fn.setqflist({}, " ", { title = "hunks", items = items })
+end
+
+-- Staging: needs no buffer, and handles whole-file deletions and untracked
+-- files, both of which gitsigns structurally cannot.
+git.stage(hunk, function(err) ... end)
+```
+
+Two things to know before you write this:
+
+- **`git.hunks()` is `-U0` by contract.** The `lnum` it returns only means "the
+  hunk" at zero context; asking git for context elsewhere and reusing these
+  numbers puts you off by the context width.
+- **`git.diff_text()` uses `--no-index` for untracked files**, which exits 1 by
+  design ("the files differ"). It handles that; a previewer of your own that
+  shells out directly must too.
+
+`:Paseo qfask` reads whatever is in the quickfix list, so it works over yours.
+The workspace picker's `<C-r>` fires a `User PaseoReview` autocmd with the
+workspace root in `data.root` instead of building a list itself:
+
+```lua
+vim.api.nvim_create_autocmd("User", {
+  pattern = "PaseoReview",
+  callback = function(ev) my_hunk_list(ev.data.root) end,
+})
+```
+
 ## Workspaces and sessions
 
 Paseo's model, used directly:
@@ -490,7 +556,7 @@ harness uses Bun when present and Node plus the local TypeScript otherwise.
 ```
 lua/paseo/          the plugin
   workspace/        assembling N worktrees into one unit of work
-  pickers/          changed files, workspaces
+  pickers/          workspaces, sessions
   backends/         the no-daemon fallback
 sidecar/            paseo-bridge.ts entry point, bridge-*.ts modules, SDK deps
 .agents/skills/     skills, symlinked from .claude/skills
@@ -502,8 +568,7 @@ Builds real git fixtures and runs the suite in a real Neovim — no plenary, no
 busted. Every assertion corresponds to something that was actually wrong at
 some point, not to a line that wanted covering: the porcelain-v2 rename record,
 beginning- and end-of-file deletions, a whole-file deletion, a pure rename, a
-non-ASCII path, partial staging of one hunk among three, and the async-cwd race
-in the diff panel.
+non-ASCII path, and partial staging of one hunk among three.
 
 ## Architecture
 
@@ -512,7 +577,7 @@ others.
 
 ```
 ┌ paseo.nvim ──────────────────────────────────────────────────┐
-│  pickers · hunk quickfix · diff panel · explain bridge       │
+│  paseo.repos · paseo.git · paseo.ref · explain bridge · UI   │
 └───────────┬──────────────────────────────┬───────────────────┘
             │ in-process                   │ stdio JSON-lines
             │                              │ (push, ~1–10 ms)
@@ -601,7 +666,10 @@ feature.
 ## Notes from the source
 
 Things that are true of gitsigns and git, checked rather than assumed, and
-several of which contradict the obvious approach.
+several of which contradict the obvious approach. The ones about hunks, staging
+and the diff panel are kept even though those surfaces moved into the config —
+they are exactly what you need when you rebuild them, and `paseo.git` already
+encodes the first four.
 
 **Delete hunks are the whole problem.** `stage_hunk()` *does* work on a pure
 deletion: `hunks.lua:51` sets `vend = added.start + max(added.count - 1, 0)`, so
@@ -611,11 +679,12 @@ visibility, not capability. The consequence for us is sharp: a delete hunk's
 quickfix `lnum` must be `c` from `@@ -a,b +c,0 @@`, **not `c + 1`**, or
 `stage_hunk()` misses every deletion.
 
-**`setqflist('all')` cannot be merged across repos.** It ends in
+**`gitsigns.setqflist('all')` cannot be merged across repos.** It ends in
 `vim.fn.setqflist({}, ' ', …)` — a replace — and collects repos from attached
 buffers plus `uv.cwd()` only (`actions/qflist.lua`). At review start, with no
-buffers open, it sees one repo. We build the quickfix from `git diff -U0`
-instead.
+buffers open, it sees one repo, and a workspace has six. That is why
+`paseo.git.hunks()` exists and is public: it reads `git diff -U0` per repo, so
+your list can span the whole unit of work.
 
 **`:Gitsigns diff` is per-tab and single-repo by design.** It resolves its repo
 from `fn.getcwd()` (`actions/diff.lua:1118`) and names its buffer
@@ -675,16 +744,16 @@ everything after it.
   `word_diff`, `diff_opts.linematch`, `nav_hunk`-based motions, the `ih` text
   object, `preview_hunk_inline` and the diff panel on the preview/diff keys,
   and a deduplicated `<leader>g` group.
-- **Phase 1 — the review loop, end to end.** *(in progress)* Review and explain
-  are one phase, not two, because they are halves of a single loop: *find the
-  hunk → read it → stage it, or ask about it → next hunk*. Splitting them ships
-  half a loop twice — a quickfix list of hunks you cannot interrogate is the
-  same dead end as an agent chat with no diff in front of it. So: changed-files
-  picker, per-hunk quickfix, diff panel in a fresh tab with `tcd`, references
-  from cursor / selection / hunk / file, the Bun sidecar, and a shared
-  `explain-change` skill whose rubric ends in *what the reviewer should push
-  back on*. The acceptance test is that the whole loop runs without leaving the
-  quickfix list.
+- **Phase 1 — the review loop, end to end.** *(done, then split)* Review and
+  explain shipped as one phase because they are halves of a single loop: *find
+  the hunk → read it → stage it, or ask about it → next hunk*. The loop works;
+  what changed is where each half lives. The **navigation** half — changed-files
+  picker, per-hunk quickfix, staging keys, diff panel — turned out to be
+  ordinary Neovim plumbing with no Paseo in it, and moved to the nvim config on
+  top of `paseo.repos` / `paseo.git`. The **interrogation** half is what this
+  plugin keeps: references from cursor / selection / hunk / file, the Bun
+  sidecar, and a shared `explain-change` skill whose rubric ends in *what the
+  reviewer should push back on* — and now asks *which agent wrote this*.
 - **Phase 2 — workspace assembly.** Started as a Go CLI and is now
   `lua/paseo/workspace/`. The only argument for Go was concurrency across ~66
   git invocations, and `vim.system` gives that natively — so the binary bought

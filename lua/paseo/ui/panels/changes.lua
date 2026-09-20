@@ -1,7 +1,9 @@
 --- What is changed on disk, across every repo in the unit of work.
 ---
---- The review half of the plugin, visible from the agent half: after a turn
---- that edited files, this is the answer to "what did it actually do".
+--- The one review surface the plugin still owns, and it earns its place from
+--- the agent half: after a turn that edited files, this is the answer to "what
+--- did it actually do". Everything else -- the changed-files picker, the hunk
+--- quickfix list, staging -- is yours to build on |paseo-git|.
 
 local git = require "paseo.git"
 local repos = require "paseo.repos"
@@ -66,13 +68,9 @@ function M.lines(chat, width)
   end
 
   lines[#lines + 1] = {
-    { "  ", "PaseoDim" },
-    { ":Paseo changes", "PaseoKey" },
-    { " to open one · ", "PaseoDim" },
-    { ":Paseo hunks", "PaseoKey" },
-    { " for the quickfix list · ", "PaseoDim" },
-    { ":Paseo review", "PaseoKey" },
-    { " for the diff panel", "PaseoDim" },
+    { "  click a file to open it · ", "PaseoDim" },
+    { ":Paseo ask hunk", "PaseoKey" },
+    { " on a hunk to ask about it", "PaseoDim" },
   }
   return lines
 end

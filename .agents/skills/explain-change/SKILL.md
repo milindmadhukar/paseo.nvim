@@ -9,7 +9,7 @@ Someone is reviewing a diff and has stopped on a hunk they cannot account for.
 They are not asking for a summary. They are trying to get to the point where
 they could defend this change to somebody else.
 
-## Answer in four parts, in this order
+## Answer in five parts, in this order
 
 **1. What changed.** One or two sentences. Say it in terms of behaviour, not
 syntax: "retries are now capped at three" rather than "added a `max_retries`
@@ -33,7 +33,14 @@ cover it. **Name files and lines.** If you have not looked, say you have not
 looked rather than guessing — a plausible-sounding wrong file name costs the
 reviewer more time than an admission.
 
-**4. What to push back on.** Not optional, and not a formality.
+**4. Who made it.** If the prompt lists sibling Paseo agents, they are the
+agents that have been working in this tree, and you can ask what they did:
+call `get_agent_activity` on an id before you answer. Report which one made
+this change and what it was asked to do — the task it was given is usually the
+missing half of "why is this here". If no agents are listed, or none of them
+touched this code, say so and move on; do not guess from the diff.
+
+**5. What to push back on.** Not optional, and not a formality.
 
 This is the part that turns reading into reviewing. List the things a careful
 reviewer should refuse to accept on trust:
@@ -50,8 +57,8 @@ that. "Nothing to push back on" with no reasoning is worth nothing.
 
 ## How to write it
 
-- **Brief.** Four short sections. This is read next to the diff, not instead of
-  it.
+- **Brief.** Five short sections, and the attribution one is a line unless it
+  found something. This is read next to the diff, not instead of it.
 - **Concrete.** Names, paths, line numbers. Never "the relevant function".
 - **Do not narrate the diff.** They can see the `+` and `-` lines. Tell them
   what those lines mean.

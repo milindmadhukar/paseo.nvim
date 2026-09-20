@@ -297,86 +297,96 @@ local function test_stage()
   end)
 end
 
--- --------------------------------------------------------------------- qf
+-- ---------------------------------------------------------------- explain
 
-local function test_qf()
+--- `:Paseo qfask` reads the PLAIN quickfix list now -- the hunk list moved out
+--- to the user's config -- so the only thing it may assume is what every
+--- quickfix entry has: a buffer, a line and some text. The chat is stubbed
+--- because this is about what gets rendered, not about opening a window.
+local function test_explain_quickfix()
   in_dir(root .. "/multi/.workspaces/otp", function()
-    local qf = require "paseo.qf"
-    local n = qf.all { open = false }
-    truthy("qf: spans both repos of the workspace", n >= 3, "entries: " .. n)
+    local attached
+    local real_chat = package.loaded["paseo.ui.chat"]
+    package.loaded["paseo.ui.chat"] = {
+      attach = function(text, opts)
+        attached = { text = text, opts = opts }
+      end,
+      ask = function() end,
+      attach_events = function() end,
+    }
+    -- The directory too, and not only for isolation: `siblings()` calls
+    -- `agents.watch()`, which would spawn the real sidecar here and break the
+    -- bridge suite's "not running before it is started".
+    local real_agents = package.loaded["paseo.agents"]
+    package.loaded["paseo.agents"] = {
+      watch = function() end,
+      for_root = function()
+        return {
+          { id = "ag_theirs", title = "otp flow", provider = "p/m", status = "idle" },
+          { id = "ag_ours", title = "paseo.nvim review", labels = { ["paseo.nvim"] = "review" } },
+        }
+      end,
+    }
+    package.loaded["paseo.explain"] = nil
 
-    vim.cmd "copen"
-    local buf = vim.fn.getqflist({ qfbufnr = 1 }).qfbufnr
-    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-    truthy(
-      "qf: renders a repo column when there is more than one repo",
-      (lines[1] or ""):find "^clm" ~= nil,
-      lines[1]
-    )
-    truthy(
-      "qf: renders path:lnum and counts",
-      (lines[1] or ""):find "f%.txt:%d+%s+[+]%d+ %-%d+" ~= nil,
-      lines[1]
-    )
-    vim.cmd "cclose"
+    local ok, err = pcall(function()
+      local repos = require "paseo.repos"
+      local git = require "paseo.git"
 
-    local items = vim.fn.getqflist()
-    truthy(
-      "qf: filenames are absolute, so entries from two worktrees both open",
-      vim.api.nvim_buf_get_name(items[1].bufnr):sub(1, 1) == "/"
-    )
-    truthy("qf: the hunk behind an entry is retrievable", qf.hunk(1) ~= nil)
-  end)
-
-  in_dir(root .. "/solo", function()
-    local qf = require "paseo.qf"
-    qf.all { open = false }
-    vim.cmd "copen"
-    local buf = vim.fn.getqflist({ qfbufnr = 1 }).qfbufnr
-    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-    truthy("qf: no repo column for a single repo", (lines[1] or ""):find "^solo" == nil, lines[1])
-    vim.cmd "cclose"
-  end)
-end
-
--- ----------------------------------------------------------------- review
-
-local function test_review()
-  in_dir(root .. "/multi/.workspaces/otp", function()
-    local before = #vim.api.nvim_list_tabpages()
-    local opened
-    require("paseo.review").open({}, function(n)
-      opened = n
-    end)
-    vim.wait(20000, function()
-      return opened ~= nil
-    end)
-
-    eq("review: one panel per member repo", opened, 2)
-    -- The bug this guards: the panels were launched in a loop, and because
-    -- gitsigns resolves its repo from getcwd() INSIDE its async body, both
-    -- raced on the last tab's cwd and neither opened.
-    eq(
-      "review: one tab per panel, staging tabs discarded",
-      #vim.api.nvim_list_tabpages(),
-      before + 2
-    )
-
-    local gitdirs = {}
-    for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
-      for _, win in ipairs(vim.api.nvim_tabpage_list_wins(tab)) do
-        local name = vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(win))
-        local member = name:match "gitsigns%-diff://.*/worktrees/([^/]+)"
-        if member then
-          gitdirs[#gitdirs + 1] = member
+      local items = {}
+      for _, repo in ipairs(repos.list()) do
+        for _, hunk in ipairs(git.hunks(repo)) do
+          items[#items + 1] = {
+            filename = vim.fs.joinpath(repo.worktree, hunk.path),
+            lnum = hunk.lnum,
+            text = ("+%d -%d"):format(hunk.added, hunk.removed),
+          }
         end
       end
-    end
-    table.sort(gitdirs)
-    eq("review: each panel is pinned to its own worktree gitdir", gitdirs, { "clm", "clm_api" })
+      truthy("explain: the fixture produced hunks to list", #items >= 2, "items: " .. #items)
+      vim.fn.setqflist({}, " ", { title = "spec", items = items })
 
-    while #vim.api.nvim_list_tabpages() > 1 do
-      vim.cmd.tabclose()
+      require("paseo.explain").quickfix()
+
+      truthy("explain: a list with entries is attached", attached ~= nil)
+      if attached then
+        truthy(
+          "explain: paths are repo-relative, not absolute",
+          attached.text:find "\n%- f%.txt:%d+" ~= nil,
+          attached.text
+        )
+        truthy(
+          "explain: the root is a worktree the entries came from",
+          attached.opts and attached.opts.root ~= nil
+              and vim.startswith(attached.opts.root, root)
+            or false,
+          vim.inspect(attached.opts)
+        )
+        truthy(
+          "explain: sibling agents are listed for the review agent to ask",
+          attached.text:find "ag_theirs" ~= nil,
+          attached.text
+        )
+        truthy(
+          "explain: but not paseo.nvim's own agents -- that would be a loop",
+          attached.text:find "ag_ours" == nil,
+          attached.text
+        )
+      end
+
+      -- An empty list must not attach anything at all.
+      attached = nil
+      vim.fn.setqflist({}, " ", { title = "spec", items = {} })
+      require("paseo.explain").quickfix()
+      truthy("explain: an empty quickfix list attaches nothing", attached == nil)
+    end)
+
+    package.loaded["paseo.agents"] = real_agents
+    package.loaded["paseo.ui.chat"] = real_chat
+    package.loaded["paseo.explain"] = nil
+    vim.fn.setqflist({}, " ", { title = "spec", items = {} })
+    if not ok then
+      error(err, 0)
     end
   end)
 end
@@ -2804,8 +2814,7 @@ function M.run()
     { "git.status", test_status },
     { "git.hunks", test_hunks },
     { "git.stage", test_stage },
-    { "qf", test_qf },
-    { "review", test_review },
+    { "explain", test_explain_quickfix },
     { "daemon", test_daemon },
     { "bridge", test_bridge },
     { "image", test_image },
