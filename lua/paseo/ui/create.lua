@@ -98,257 +98,154 @@ function M.select_model(opts, callback)
   end)
 end
 
-local function default_id(entries, explicit)
-  if explicit then
-    return explicit
-  end
-  for _, item in ipairs(entries or {}) do
-    if item.isDefault then
-      return item.id
-    end
-  end
-  return entries and entries[1] and entries[1].id or nil
-end
-
+---@deprecated  Use |paseo.ui.draft|.new. Kept because the spec drives it.
+---@param selection table
+---@return paseo.Draft
 function M.draft(selection)
-  return {
-    provider = selection.provider,
-    entry = selection.entry,
-    model = selection.model,
-    modeId = default_id(selection.entry.modes, selection.entry.defaultModeId),
-    thinkingOptionId = default_id(
-      selection.model.thinkingOptions,
-      selection.model.defaultThinkingOptionId
-    ),
-    features = {},
-    featureValues = {},
-  }
+  return require("paseo.ui.draft").new(current_root(), {}, selection)
 end
 
----Show provider, model, permissions, reasoning, and all reported toggles in one
----floating buffer. <CR> edits a row; c creates and q/Esc cancels.
+---The provider catalogue, as `providers` reports it.
+---
+---Public because the terminal presets list one entry per provider the daemon
+---has, and a second copy of this call is a second thing to keep in step.
+---@param cwd string
+---@param callback fun(entries: table[]|nil, err: string|nil)
+function M.catalogue(cwd, callback)
+  fetch_catalogue(cwd, callback)
+end
+
+---Everything a new session is set to, before it exists, on one screen.
+---
+---This used to be a plain buffer -- `("%-15s %s"):format(label, value)`, no
+---highlights, a `vim.ui.select` for every choice -- while the Session tab drew
+---the same settings as cards. It is now the SAME VIEW as that tab, over a
+---draft instead of a running agent, so the screen you set a session up on and
+---the screen you change it on are one renderer.
+---
+---Which also retires the picker: a cold open lands on the Provider card with
+---the first ready provider selected, rather than opening two `vim.ui.select`
+---prompts before you see anything. The screen IS the picker.
 ---@param opts { cwd: string, preferred?: string }
 ---@param callback fun(draft: table|nil, err: string|nil)
 function M.review(opts, callback)
-  local state = { done = false, loading = false, request = 0, win = nil, buf = nil, draft = nil, actions = {} }
+  local draft_model = require "paseo.ui.draft"
+  local panel = require "paseo.ui.panels.session"
+  local popup = require "paseo.ui.popup"
+  local render = require "paseo.ui.render"
+  local widgets = require "paseo.ui.widgets"
 
-  local function finish(draft, err)
-    if state.done then
+  local handle
+  local done = false
+
+  ---Exactly once, whatever got us here: `q`, `<Esc>`, `c`, a `WinClosed`, or
+  ---a failure before there was ever a window. volt's own `q` routes through
+  ---`after_close`, which is `handle.close`, which is `on_close`, which is
+  ---this -- so the cancel path and the create path meet in one place.
+  local function finish(result, err)
+    if done then
       return
     end
-    state.done = true
-    if state.win and vim.api.nvim_win_is_valid(state.win) then
-      vim.api.nvim_win_close(state.win, true)
+    done = true
+    if handle then
+      handle.close()
     end
-    if state.buf and vim.api.nvim_buf_is_valid(state.buf) then
-      vim.api.nvim_buf_delete(state.buf, { force = true })
-    end
-    callback(draft, err)
-  end
-
-  local render
-  local function refresh_features(keep_values)
-    local draft = state.draft
-    if not draft then
-      return
-    end
-    state.request = state.request + 1
-    local request = state.request
-    state.loading = true
-    render()
-    bridge.request("providers.features", {
-      provider = draft.provider,
-      cwd = opts.cwd,
-      modeId = draft.modeId,
-    }, function(err, result)
-      if state.done or request ~= state.request then
-        return
-      end
-      if err then
-        return finish(nil, err)
-      end
-      vim.schedule(function()
-        if state.done or request ~= state.request or state.draft ~= draft then
-          return
-        end
-        local previous = keep_values and draft.featureValues or {}
-        draft.features = result.features or {}
-        draft.featureValues = {}
-        for _, feature in ipairs(draft.features) do
-          if feature.type == "toggle" then
-            local value = previous[feature.id]
-            draft.featureValues[feature.id] = value == nil and feature.value or value
-          end
-        end
-        state.loading = false
-        render()
-      end)
-    end)
-  end
-
-  local function set_selection(selection)
-    state.draft = M.draft(selection)
-    refresh_features(false)
-  end
-
-  local function choose_selection()
-    M.select_model({ cwd = opts.cwd }, function(selection, err)
-      if err then
-        return finish(nil, err)
-      end
-      if selection then
-        vim.schedule(function()
-          if not state.done then
-            set_selection(selection)
-          end
-        end)
-      elseif not state.draft then
-        finish(nil, nil)
-      end
-    end)
-  end
-
-  render = function()
-    local draft = state.draft
-    if state.done or not draft then
-      return
-    end
-    if not state.buf then
-      state.buf = vim.api.nvim_create_buf(false, true)
-      vim.bo[state.buf].bufhidden = "wipe"
-      vim.keymap.set("n", "<CR>", function()
-        local action = state.actions[vim.api.nvim_win_get_cursor(0)[1]]
-        if action then
-          action()
-        end
-      end, { buffer = state.buf, silent = true })
-      vim.keymap.set("n", "c", function()
-        local selected = state.draft
-        if not selected or state.loading then
-          return
-        end
-        finish({
-          provider = selected.provider,
-          modeId = selected.modeId,
-          thinkingOptionId = selected.thinkingOptionId,
-          featureValues = selected.featureValues,
-        }, nil)
-      end, { buffer = state.buf, silent = true })
-      for _, key in ipairs { "q", "<Esc>" } do
-        vim.keymap.set("n", key, function()
-          finish(nil, nil)
-        end, { buffer = state.buf, silent = true })
-      end
-    end
-
-    local lines, actions = {}, {}
-    local function row(label, value, action)
-      lines[#lines + 1] = ("%-15s %s"):format(label, value or "(provider default)")
-      actions[#lines] = action
-    end
-    lines[#lines + 1] = "New Paseo session · <CR> edit · c create · q cancel"
-    lines[#lines + 1] = ""
-    row("Provider", draft.entry.label or draft.entry.provider, choose_selection)
-    row("Model", draft.model.label or draft.model.id, choose_selection)
-    row("Permissions", (function()
-      for _, mode in ipairs(draft.entry.modes or {}) do
-        if mode.id == draft.modeId then
-          return mode.label or mode.id
-        end
-      end
-    end)(), function()
-      vim.ui.select(draft.entry.modes or {}, {
-        prompt = "Permissions / mode",
-        format_item = function(mode)
-          return ("%s  %s"):format(mode.label or mode.id, mode.description or "")
-        end,
-      }, function(mode)
-        if mode and not state.done then
-          draft.modeId = mode.id
-          refresh_features(true)
-        end
-      end)
-    end)
-    local thinking_label = draft.thinkingOptionId
-    for _, option in ipairs(draft.model.thinkingOptions or {}) do
-      if option.id == draft.thinkingOptionId then
-        thinking_label = option.label or option.id
-      end
-    end
-    row("Reasoning", thinking_label, function()
-      vim.ui.select(draft.model.thinkingOptions or {}, {
-        prompt = "Reasoning",
-        format_item = function(option)
-          return option.label or option.id
-        end,
-      }, function(option)
-        if option and not state.done then
-          draft.thinkingOptionId = option.id
-          render()
-        end
-      end)
-    end)
-    lines[#lines + 1] = ""
-    lines[#lines + 1] = "Features"
-    if state.loading then
-      lines[#lines + 1] = "  Loading model features…"
-    end
-    for _, feature in ipairs(draft.features) do
-      if feature.type == "toggle" then
-        local item = feature
-        row("  " .. (item.label or item.id), draft.featureValues[item.id] and "[x]" or "[ ]", function()
-          draft.featureValues[item.id] = not draft.featureValues[item.id]
-          render()
-        end)
-      end
-    end
-    lines[#lines + 1] = ""
-    row("Create", "<CR> or c", function()
-      if state.loading then
-        return
-      end
-      finish({
-        provider = draft.provider,
-        modeId = draft.modeId,
-        thinkingOptionId = draft.thinkingOptionId,
-        featureValues = draft.featureValues,
-      }, nil)
-    end)
-    state.actions = actions
-    vim.bo[state.buf].modifiable = true
-    vim.api.nvim_buf_set_lines(state.buf, 0, -1, false, lines)
-    vim.bo[state.buf].modifiable = false
-    local width = math.max(1, math.min(vim.o.columns - 4, 72))
-    local height = math.max(1, math.min(vim.o.lines - 4, #lines))
-    if not state.win or not vim.api.nvim_win_is_valid(state.win) then
-      state.win = vim.api.nvim_open_win(state.buf, true, {
-        relative = "editor",
-        width = width,
-        height = height,
-        row = math.max(0, math.floor((vim.o.lines - height) / 2)),
-        col = math.max(0, math.floor((vim.o.columns - width) / 2)),
-        style = "minimal",
-        border = "rounded",
-        zindex = 40,
-        title = "New session",
-      })
-    else
-      vim.api.nvim_win_set_height(state.win, height)
-    end
+    callback(result, err)
   end
 
   fetch_catalogue(opts.cwd, function(entries, err)
     if err then
       return finish(nil, err)
     end
-    local selected = M.find(entries, opts.preferred)
-    if selected then
-      vim.schedule(function()
-        set_selection(selected)
-      end)
-    else
-      choose_selection()
+
+    local selection = M.find(entries, opts.preferred) or draft_model.first(entries)
+    if not selection then
+      -- No window for this. There is nothing on the screen to choose between.
+      return finish(nil, "no provider on this daemon has a model ready")
     end
+
+    vim.schedule(function()
+      if done then
+        return
+      end
+      local draft = draft_model.new(opts.cwd, entries, selection)
+
+      local function create()
+        -- The features are part of what is being created, so creating before
+        -- they land would create something other than what the screen says.
+        if draft.loading then
+          return
+        end
+        finish(draft_model.result(draft), nil)
+      end
+
+      local view = panel.new(draft_model.source(draft), {
+        section = "session",
+        hints = { { "c", "create" }, { "q", "cancel" } },
+        redraw = function()
+          if handle then
+            handle.rebuild()
+          end
+        end,
+      })
+
+      -- `create` is not a settings group -- a card that is not a setting reads
+      -- as one -- so it is a row of its own under the cards, clickable the way
+      -- `widgets.radio` is clickable: the action on every cell, so the target
+      -- is the row and not the two words on it.
+      view.footer = function(w)
+        local label = draft.loading and "waiting for this model's features…" or "create session"
+        local line = widgets.row(
+          { widgets.keycap "c", { "  " .. label, draft.loading and "PaseoDim" or nil } },
+          { { draft.provider, "PaseoDim" } },
+          w
+        )
+        for _, cell in ipairs(line) do
+          cell[3] = cell[3] or create
+        end
+        return { line, {} }
+      end
+
+      handle = popup.open {
+        view = view,
+        width = function()
+          return math.max(52, math.min(92, vim.o.columns - 8))
+        end,
+        zindex = 60,
+        filetype = "paseo-create",
+        title = function(h)
+          local inner = h.w - 4
+          return {
+            render.truncate(
+              widgets.row(
+                { { "  New session", "PaseoHeader" } },
+                { { vim.fn.fnamemodify(opts.cwd, ":~"), "PaseoDim" } },
+                inner,
+                "PaseoNormal"
+              ),
+              inner
+            ),
+            { { string.rep("─", inner), "PaseoBorder" } },
+            {},
+          }
+        end,
+        keys = {
+          { "c", create, "paseo: create this session" },
+        },
+        -- volt owns `q` and `<Esc>`; both land here.
+        on_close = function()
+          finish(nil, nil)
+        end,
+      }
+
+      -- Opened first, then asked: the screen appears in its loading state
+      -- rather than after a round trip.
+      draft_model.refresh_features(draft, false, function()
+        if handle and not done then
+          handle.rebuild()
+        end
+      end)
+    end)
   end)
 end
 

@@ -31,7 +31,7 @@ local ns = api.nvim_create_namespace "paseo.float"
 ---@type table|nil
 local state
 
-M.TABS = { "Chat", "Session", "Sessions", "Changes", "Usage", "Workspaces", "Terminals" }
+M.TABS = { "Chat", "Session", "Sessions", "Changes", "Usage", "Workspaces" }
 
 -- ------------------------------------------------------------------ geometry
 
@@ -224,6 +224,17 @@ local function body_lines()
   return lines
 end
 
+---The buffer line a panel's first line is drawn on.
+---
+---Header, tab bar, rule -- so body row 1 is buffer line 4. Exposed rather than
+---re-derived by the panel that needs it: the Sessions panel maps cursor rows
+---to sessions, and the panel this replaced hardcoded the sum as `row - 5`,
+---which meant adding a heading line silently retargeted its kill key.
+---@return integer
+function M.body_row_offset()
+  return 3
+end
+
 ---@return table[][]
 local function footer_lines()
   -- One builder for every hint bar in the plugin. This row had been copied
@@ -246,17 +257,6 @@ end
 ---anything first. A panel whose content changed height therefore has to go all
 ---the way back through `gen_data`, or rows from the previous draw survive
 ---underneath the new ones.
----Where the surface currently is, or nil when it is closed.
----
----Exposed for the one panel that puts a window of its own over the body: a
----Paseo terminal is a real PTY buffer and cannot be drawn as cells, so it has
----to be floated at the body's coordinates the way the conversation is on the
----Chat tab.
----@return table|nil
-function M.geometry_of()
-  return state and state.geometry or nil
-end
-
 function M.rebuild()
   if not state or not api.nvim_buf_is_valid(state.buf) then
     return

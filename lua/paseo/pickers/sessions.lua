@@ -147,21 +147,12 @@ end
 
 ---Sessions in whichever workspace contains the cwd.
 function M.here()
-  local here = vim.fn.resolve(assert(vim.uv.cwd()))
-  workspaces.list(function(list, err)
-    if err then
-      return vim.notify("paseo: " .. err, vim.log.levels.ERROR)
-    end
-    for _, ws in ipairs(list) do
-      local dir = vim.fn.resolve(ws.directory or "")
-      if dir ~= "" and (here == dir or vim.startswith(here, dir .. "/")) then
-        return vim.schedule(function()
-          M.open(ws)
-        end)
-      end
-    end
+  workspaces.for_dir(assert(vim.uv.cwd()), function(ws, err)
     vim.schedule(function()
-      vim.notify("paseo: this directory is not in a Paseo workspace yet", vim.log.levels.WARN)
+      if not ws then
+        return vim.notify("paseo: " .. tostring(err), vim.log.levels.WARN)
+      end
+      M.open(ws)
     end)
   end)
 end

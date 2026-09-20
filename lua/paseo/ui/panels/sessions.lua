@@ -1,15 +1,23 @@
---- The agents in this workspace, live.
+--- Everything running in this workspace: the agents and the terminals.
 ---
---- Fed by the push-driven directory in `paseo.agents`, so the status column is
---- current rather than polled -- which matters because a CLI call to get it
---- costs ~2.4s.
+--- ONE LIST, because that is what Paseo has. A workspace holds agent sessions
+--- and PTYs side by side, they show up in the app together, and splitting them
+--- across two tabs here meant the Sessions tab was quietly a lie about what was
+--- running -- it could say "no agents here yet" on a workspace with three
+--- `claude` terminals in it. The kind glyph is what tells them apart.
 ---
---- A row is a SWITCH, not a label: clicking one points this surface at that
---- agent, which is the thing the list is for. Everything else about sessions --
---- creating, archiving, searching -- still hands off to the telescope picker
---- rather than being reimplemented here.
+--- Both halves are fed by push -- |paseo.agents| and |paseo.terminals| -- so
+--- the status column is current rather than polled, which matters because a CLI
+--- call to get an agent's status costs ~2.4s.
+---
+--- A row is an ACTION, not a label: an agent row points this surface at that
+--- agent, a terminal row opens |paseo.ui.termfloat| on it. Everything else
+--- about sessions -- searching, archiving in bulk -- still hands off to the
+--- telescope picker rather than being reimplemented here.
 
 local agents = require "paseo.agents"
+local terminals = require "paseo.terminals"
+local widgets = require "paseo.ui.widgets"
 
 local M = {}
 
@@ -22,27 +30,53 @@ local GLYPH = {
   error = { "✗", "PaseoToolFail" },
 }
 
+---Buffer line -> what is on it, rebuilt on every draw.
+---
+---Deliberately a map rather than arithmetic on the cursor row. The panel this
+---absorbed computed `row - 5` from the number of heading rows it happened to
+---have, so adding a line to the heading silently retargeted `d`.
+---@type table<integer, { kind: "agent"|"terminal", id: string, root: string|nil }>
+M._rows = {}
+
+---@return integer  The buffer line the panel's first line is drawn on.
+local function offset()
+  return require("paseo.ui.float").body_row_offset()
+end
+
 ---@param chat table
 ---@param width integer
 ---@return table[][]
 function M.lines(chat, width)
-  -- The directory is push-fed. Without a subscription the panel shows an empty
-  -- list and calls it "no agents here yet", which is a lie about a workspace
-  -- with three running.
+  -- Both directories are push-fed. Without a subscription an empty table reads
+  -- as "nothing here", which is a lie about a workspace with three running.
   agents.watch()
-  local list = agents.for_root(chat.root)
+  terminals.watch(chat.root)
+
+  local agent_list = agents.for_root(chat.root)
+  local terminal_list = terminals.for_root(chat.root)
+  M._rows = {}
 
   local lines = {
     { { "  Sessions in ", "PaseoHeader" }, { vim.fn.fnamemodify(chat.root, ":~"), "PaseoDim" } },
     {},
   }
 
-  if #list == 0 then
-    lines[#lines + 1] = { { "  no agents here yet", "PaseoDim" } }
-    return lines
+  ---Record which entity the line just appended belongs to.
+  local function claim(kind, id, root)
+    M._rows[#lines + offset()] = { kind = kind, id = id, root = root }
   end
 
-  for _, agent in ipairs(list) do
+  if #agent_list == 0 and #terminal_list == 0 then
+    lines[#lines + 1] = {
+      { "  ", "PaseoDim" },
+      {
+        terminals.ready(chat.root) and "nothing running here yet" or "loading…",
+        "PaseoDim",
+      },
+    }
+  end
+
+  for _, agent in ipairs(agent_list) do
     local glyph = agent.requiresAttention and GLYPH.permission
       or GLYPH[agent.status or "idle"]
       or GLYPH.idle
@@ -60,22 +94,189 @@ function M.lines(chat, width)
       or nil
     lines[#lines + 1] = {
       { mine and "  ▌ " or "    ", mine and "PaseoAgent" or nil, click },
+      { "  ", "PaseoDim", click },
       { glyph[1] .. " ", glyph[2], click },
       { agent.title or agent.id, mine and "PaseoAgent" or nil, click },
       { agent.provider and ("   " .. agent.provider) or "", "PaseoDim", click },
       { agent.requiresAttention and "   needs you" or "", "PaseoDanger", click },
     }
+    claim("agent", agent.id, agent.cwd or chat.root)
+  end
+
+  if #terminal_list > 0 then
+    if #agent_list > 0 then
+      lines[#lines + 1] = {}
+    end
+    lines[#lines + 1] = {
+      { "  Terminals", "PaseoHeader" },
+      { "  " .. terminals.summary(chat.root), "PaseoDim" },
+    }
+    lines[#lines + 1] = {}
+  end
+
+  for _, item in ipairs(terminal_list) do
+    local glyph = terminals.glyph(item)
+    local click = function()
+      require("paseo.ui.termfloat").open { root = chat.root, id = item.id }
+    end
+    local reason = item.activity and item.activity.attentionReason
+    lines[#lines + 1] = {
+      { "    ", nil, click },
+      { "  ", "PaseoDim", click },
+      { glyph[1] .. " ", glyph[2], click },
+      { terminals.label(item), nil, click },
+      { reason == "needs_input" and "   needs input" or "", "PaseoDanger", click },
+      { reason == "finished" and "   finished" or "", "PaseoDim", click },
+    }
+    claim("terminal", item.id, chat.root)
   end
 
   lines[#lines + 1] = {}
-  lines[#lines + 1] = {
-    { "  ", "PaseoDim" },
-    { ":Paseo sessions", "PaseoKey" },
-    { " to switch · ", "PaseoDim" },
-    { ":Paseo workspaces", "PaseoKey" },
-    { " for the rest", "PaseoDim" },
+  lines[#lines + 1] = widgets.hints {
+    { "⏎", "open" },
+    { "c", "terminal" },
+    { "a", "agent" },
+    { "r", "rename" },
+    { "d", "kill" },
   }
   return lines
+end
+
+---What the cursor is on.
+---@return table|nil
+local function under_cursor()
+  local win = vim.api.nvim_get_current_win()
+  return M._rows[vim.api.nvim_win_get_cursor(win)[1]]
+end
+
+---What this panel has bound on the shared chrome buffer.
+---@type table[]|nil
+local bound
+
+---@param chat table
+---@param buf integer
+function M.attach(chat, buf)
+  local function row_kind(kind)
+    local row = under_cursor()
+    return row and row.kind == kind and row or nil
+  end
+
+  -- Through |paseo.ui.keys|, which gives back what it displaced. The six
+  -- panels share one chrome buffer and volt binds `<CR>` on it at open, so a
+  -- panel that merely DELETED its own `<CR>` would leave the key dead on all
+  -- five of the others.
+  bound = require("paseo.ui.keys").take(buf, {
+    {
+      "<CR>",
+      function()
+        local row = under_cursor()
+        if not row then
+          return
+        end
+        if row.kind == "terminal" then
+          return require("paseo.ui.termfloat").open { root = chat.root, id = row.id }
+        end
+        if row.id ~= chat.agent_id then
+          require("paseo.ui.chat").open { root = row.root, agent_id = row.id }
+        end
+      end,
+      "paseo: open this session",
+    },
+    -- `c` makes a terminal and `a` makes an agent. One key for both would have
+    -- to ask which, and a list holding two kinds is exactly where that
+    -- question is most annoying.
+    {
+      "c",
+      function()
+        local termfloat = require "paseo.ui.termfloat"
+        termfloat.open { root = chat.root }
+        termfloat.new()
+      end,
+      "paseo: new terminal",
+    },
+    {
+      "a",
+      function()
+        -- Through the workspace, because `agent.create` is addressed by
+        -- workspace id: the directory is where the agent RUNS, not what it
+        -- belongs to.
+        require("paseo.workspaces").for_dir(chat.root, function(ws, err)
+          vim.schedule(function()
+            if not ws then
+              return vim.notify("paseo: " .. tostring(err), vim.log.levels.WARN)
+            end
+            require("paseo.workspaces").new_session(ws, {}, function(id, create_err)
+              if create_err and create_err ~= "cancelled" then
+                return vim.notify("paseo: " .. create_err, vim.log.levels.ERROR)
+              end
+              if not id then
+                return
+              end
+              vim.schedule(function()
+                require("paseo.ui.chat").open { root = ws.directory, agent_id = id }
+              end)
+            end)
+          end)
+        end)
+      end,
+      "paseo: new agent",
+    },
+    {
+      "r",
+      function()
+        local row = row_kind "terminal"
+        if row then
+          require("paseo.ui.termfloat").rename(row.id)
+        end
+      end,
+      "paseo: rename this terminal",
+    },
+    {
+      "d",
+      function()
+        local row = under_cursor()
+        if not row then
+          return
+        end
+        if row.kind == "terminal" then
+          return require("paseo.ui.termfloat").kill(row.id)
+        end
+        -- Archiving an agent is not killing it -- the session survives on the
+        -- daemon -- but it does take it off every list, so it is asked for too.
+        vim.ui.select({ "no", "yes" }, { prompt = "Archive this session?" }, function(choice)
+          if choice ~= "yes" then
+            return
+          end
+          require("paseo.bridge").request("agent.archive", { agentId = row.id }, function(err)
+            vim.schedule(function()
+              vim.notify(
+                err and ("paseo: " .. err) or "paseo: archived",
+                err and vim.log.levels.ERROR or vim.log.levels.INFO
+              )
+            end)
+          end)
+        end)
+      end,
+      "paseo: kill or archive this session",
+    },
+  })
+end
+
+---@param _chat table
+---@param buf integer
+function M.detach(_chat, buf)
+  local saved = bound
+  bound = nil
+  require("paseo.ui.keys").release(buf, saved)
+end
+
+---@param chat table
+function M.load(chat)
+  terminals.watch(chat.root, function()
+    vim.schedule(function()
+      require("paseo.ui.float").rebuild()
+    end)
+  end)
 end
 
 return M

@@ -238,25 +238,17 @@ commands.sessions = {
   end,
 }
 
-commands.terminals = {
-  desc = "The Paseo terminals in this workspace",
+commands.term = {
+  desc = "The Paseo terminals in this workspace (toggle)",
   run = function()
-    -- Through the dashboard rather than a picker: a terminal is a live PTY
-    -- floated over the body, so it needs the surface that owns that space.
-    local float = require "paseo.ui.float"
-    if float.geometry_of() then
-      return float.select "Terminals"
-    end
-    require("paseo.ui.chat").open({}, function(_, err)
-      if err then
-        return
-      end
-      vim.schedule(function()
-        float.select "Terminals"
-      end)
-    end)
+    require("paseo.ui.termfloat").toggle()
   end,
 }
+
+-- The old name. It used to mean "the tab listing them", and that tab is gone:
+-- the list is on the Sessions tab now and the terminals are their own surface.
+-- Kept because the help tag is published.
+commands.terminals = commands.term
 
 commands.chat = {
   desc = "Open the chat for this directory (toggle)",

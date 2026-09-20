@@ -1608,6 +1608,53 @@ local function test_ui()
   -- and the conversation window only exists on the Chat tab -- so every other
   -- tab had no header at all and the dashboard could not tell you which model
   -- it was on. It is a volt section in the chrome now.
+  -- The Sessions tab maps CURSOR ROWS to sessions, and the only thing between
+  -- a panel's own line numbering and the buffer's is `body_row_offset`. It is
+  -- a constant, so it is checked against a real open dashboard rather than
+  -- against itself -- the panel this replaced hardcoded the same sum and was
+  -- wrong about it.
+  do
+    local agents = require "paseo.agents"
+    local old_for_root, old_watch = agents.for_root, agents.watch
+    agents.watch = function() end
+    agents.for_root = function()
+      return { { id = "row-probe", title = "row-probe", status = "idle" } }
+    end
+    float.select "Sessions"
+    local probe
+    for line, row in pairs(require("paseo.ui.panels.sessions")._rows) do
+      if row.id == "row-probe" then
+        probe = line
+      end
+    end
+    local chrome
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+      local buf = vim.api.nvim_win_get_buf(win)
+      if require("volt.state")[buf] then
+        chrome = buf
+      end
+    end
+    local on_that_row = ""
+    if chrome and probe then
+      local marks = vim.api.nvim_buf_get_extmarks(
+        chrome, -1, { probe - 1, 0 }, { probe - 1, -1 }, { details = true }
+      )
+      local parts = {}
+      for _, mark in ipairs(marks) do
+        for _, cell in ipairs(mark[4].virt_text or {}) do
+          parts[#parts + 1] = cell[1]
+        end
+      end
+      on_that_row = table.concat(parts)
+    end
+    truthy(
+      "ui: a Sessions row is on the buffer line its map claims",
+      on_that_row:find("row-probe", 1, true) ~= nil,
+      ("row %s holds %q"):format(tostring(probe), on_that_row)
+    )
+    agents.for_root, agents.watch = old_for_root, old_watch
+  end
+
   float.select "Usage"
   eq("ui: the panels do not keep a conversation window", surface_chat.win_conversation, nil)
   local chrome_buf
@@ -1781,7 +1828,7 @@ local function test_ui()
 
   -- Keyboard, not just mouse: the panel used to have no mappings at all, so
   -- the only way to change a setting was to aim at it.
-  local view = session_panel.new(surface_chat)
+  local view = session_panel.new(require("paseo.ui.session").source(surface_chat))
   local _, focused = view:resolve()
   eq("session: focus starts on what is set", focused.id, "default")
   view:move(1)
@@ -1895,7 +1942,7 @@ local function test_ui()
       features = {},
     },
   }
-  local stable = session_panel.new(tall)
+  local stable = session_panel.new(require("paseo.ui.session").source(tall))
   local on_short = #stable:lines(60)
   stable:move(1)
   local on_long = #stable:lines(60)
@@ -2719,6 +2766,140 @@ local function test_questions()
   truthy("questions: and the options under it", text:find("A", 1, true) ~= nil, text)
 end
 
+--- The new-session draft: the model behind the screen that sets a session up
+--- before it exists.
+---
+--- All of this used to live inside the rendering function of a plain buffer,
+--- which is why none of it was tested and why the race below was only ever
+--- found by changing a mode twice quickly.
+local function test_draft()
+  local draft_model = require "paseo.ui.draft"
+  local bridge = require "paseo.bridge"
+  local old_request = bridge.request
+  local held = {}
+  local hold = false
+
+  local entries = {
+    {
+      provider = "claude", status = "ready", label = "Claude", defaultModeId = "default",
+      modes = { { id = "default", label = "Ask" }, { id = "bypassPermissions", label = "Bypass" } },
+      models = { { id = "opus", label = "Opus", isDefault = true, thinkingOptions = {
+        { id = "think", label = "Think", isDefault = true },
+      } } },
+    },
+    {
+      provider = "codex", status = "ready", label = "Codex", defaultModeId = "auto",
+      modes = { { id = "auto", label = "Auto" } },
+      models = { { id = "gpt", label = "GPT", isDefault = true, thinkingOptions = {} } },
+    },
+    -- Neither offerable: one is not ready, the other has no model to run.
+    { provider = "pi", status = "unavailable", models = {} },
+    { provider = "omp", status = "ready", models = {} },
+  }
+
+  local ok, err = pcall(function()
+    bridge.request = function(op, args, callback)
+      if op == "providers.features" then
+        if hold then
+          held[#held + 1] = callback
+          return
+        end
+        return callback(nil, { features = {
+          { id = "fast_mode", type = "toggle", label = "Fast", value = false },
+          { id = "plan_mode", type = "toggle", label = "Plan", value = false },
+        } })
+      end
+      callback(nil, {})
+    end
+
+    local selection = draft_model.first(entries)
+    eq("draft: the first offerable provider is chosen", selection.entry.provider, "claude")
+    local draft = draft_model.new("/work", entries, selection)
+    eq("draft: its default mode comes from the daemon", draft.modeId, "default")
+    eq("draft: its default reasoning comes from the model", draft.thinkingOptionId, "think")
+
+    local groups = draft_model.groups(draft)
+    eq("draft: five cards, not four", #groups, 5)
+    local by_id = {}
+    for i, group in ipairs(groups) do
+      by_id[group.id] = group
+      by_id[group.id].at = i
+    end
+    eq("draft: provider comes first", groups[1].id, "provider")
+    eq("draft: a provider with no model is not offered", #by_id.provider.entries, 2)
+    eq("draft: the provider card knows what is set", by_id.provider.current, "claude")
+    eq("draft: and the model card does", by_id.model.current, "opus")
+    eq("draft: bypassing permissions is still drawn as danger", by_id.mode.entries[2].tone, "danger")
+
+    -- Switching provider takes its modes and models with it, and carries no
+    -- feature values across: a feature id means what the provider saying it
+    -- means, and `fast_mode` on claude is not `fast_mode` on codex.
+    draft_model.refresh_features(draft, false, function() end)
+    vim.wait(200, function()
+      return not draft.loading
+    end)
+    draft.featureValues.fast_mode = true
+    draft_model.apply(draft, by_id.provider, { id = "codex" }, function() end)
+    vim.wait(200, function()
+      return not draft.loading
+    end)
+    eq("draft: switching provider switches model", draft.model.id, "gpt")
+    eq("draft: and mode", draft.modeId, "auto")
+    eq("draft: and carries no feature value across", draft.featureValues.fast_mode, false)
+
+    -- THE RACE. Two mode changes in flight, and the first to come back is not
+    -- the first that was sent. A stale reply must be dropped, not applied.
+    hold = true
+    local codex = draft_model.groups(draft)[3]
+    draft_model.apply(draft, codex, { id = "auto" }, function() end)
+    draft.modeId = "default"
+    draft_model.refresh_features(draft, true, function() end)
+    draft_model.refresh_features(draft, true, function() end)
+    eq("draft: every change in flight is counted", #held, 2)
+    truthy("draft: and the card holds its height meanwhile", draft_model.groups(draft)[5].rows >= 1)
+    held[1](nil, { features = { { id = "stale", type = "toggle", label = "Stale", value = true } } })
+    vim.wait(100)
+    eq("draft: the stale reply is dropped", draft.featureValues.stale, nil)
+    truthy("draft: and it is still waiting", draft.loading)
+    held[2](nil, { features = { { id = "live", type = "toggle", label = "Live", value = true } } })
+    vim.wait(200, function()
+      return not draft.loading
+    end)
+    eq("draft: the reply that was asked for lands", draft.featureValues.live, true)
+    hold = false
+
+    local result = draft_model.result(draft)
+    eq("draft: the result carries provider and model together", result.provider, "codex/gpt")
+    eq("draft: and the mode", result.modeId, "default")
+    eq("draft: and the feature values", result.featureValues.live, true)
+    -- A model with no thinking options reports no reasoning, rather than
+    -- inventing one for `agent.create` to reject.
+    eq("draft: and no reasoning when the model has none", result.thinkingOptionId, nil)
+  end)
+
+  bridge.request = old_request
+  truthy("draft: the cases ran", ok, err)
+end
+
+---What a volt-drawn buffer actually says.
+---
+---Never `nvim_buf_get_lines`: volt draws with extmark virtual text over a
+---buffer of blank rows, so the lines are spaces and a check against them
+---passes whatever is on screen. Two assertions about the new-session screen
+---were vacuous for exactly that reason.
+---@param buf integer
+---@return string
+local function volt_text(buf)
+  local out = {}
+  for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, -1, 0, -1, { details = true })) do
+    for _, cell in ipairs(mark[4] and mark[4].virt_text or {}) do
+      out[#out + 1] = cell[1]
+    end
+    out[#out + 1] = "\n"
+  end
+  return table.concat(out)
+end
+
 local function test_provider_setup()
   local bridge = require "paseo.bridge"
   local create = require "paseo.ui.create"
@@ -2815,18 +2996,33 @@ local function test_provider_setup()
       return request.op ~= "agent.ensure" and request.op ~= "agent.create"
     end))
 
+    -- The review screen is the Session tab's view over a DRAFT, so it is
+    -- driven the way that view is driven -- through the model and the bound
+    -- handlers -- rather than by aiming feedkeys at a row of plain text. The
+    -- old screen was `nvim_buf_set_lines` and these assertions read it back.
     local reviewed
     create.review({ cwd = "/work", preferred = "codex/gpt-5.6-sol" }, function(value)
       reviewed = value
     end)
     truthy("provider: review screen opens", vim.wait(1000, function()
-      local buf = vim.api.nvim_get_current_buf()
-      return table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
-        :find("New Paseo session", 1, true) ~= nil
+      return vim.bo[vim.api.nvim_get_current_buf()].filetype == "paseo-create"
     end))
-    chosen_model = "gpt-5.6-luna"
+    local review_buf = vim.api.nvim_get_current_buf()
+    truthy(
+      "provider: with a Provider card the Session tab does not have",
+      volt_text(review_buf):find("Provider", 1, true) ~= nil
+    )
+    truthy(
+      "provider: and its footer survives a short editor",
+      volt_text(review_buf):find("create", 1, true) ~= nil
+    )
+
+    -- Changing model refetches that model's features, and the draft is the
+    -- thing that knows it.
     hold_features = true
-    vim.api.nvim_win_set_cursor(0, { 4, 0 })
+    chosen_model = "gpt-5.6-luna"
+    vim.api.nvim_feedkeys(vim.keycode "s", "x", false)
+    vim.api.nvim_feedkeys("j", "x", false)
     vim.api.nvim_feedkeys(vim.keycode "<CR>", "x", false)
     truthy("provider: changing model re-fetches its features", vim.wait(1000, function()
       local found = 0
@@ -2840,13 +3036,14 @@ local function test_provider_setup()
     vim.api.nvim_feedkeys("c", "x", false)
     eq("provider: cannot create before the model features arrive", reviewed, nil)
     hold_features = false
+    truthy("provider: the features card says so while it waits", vim.wait(1000, function()
+      return volt_text(review_buf):find("loading", 1, true) ~= nil
+    end))
     held_feature_callback(nil, { features = {
       { id = "plan_mode", type = "toggle", label = "Plan", value = false },
     } })
     truthy("provider: model features finish loading", vim.wait(1000, function()
-      local buf = vim.api.nvim_get_current_buf()
-      return table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
-        :find("Loading model features", 1, true) == nil
+      return volt_text(review_buf):find("loading", 1, true) == nil
     end))
     vim.api.nvim_feedkeys("c", "x", false)
     truthy("provider: review creates a draft", vim.wait(1000, function()
@@ -2854,17 +3051,37 @@ local function test_provider_setup()
     end))
     eq("provider: reviewed model is the changed model", reviewed and reviewed.provider, "codex/gpt-5.6-luna")
     eq("provider: changed model drops absent features", reviewed and reviewed.featureValues.fast_mode, nil)
+    eq("provider: and closes its window", vim.api.nvim_buf_is_valid(review_buf), false)
 
-    vim.ui.select = function(_, _, callback)
-      callback(nil)
-    end
+    -- Cancel. `q` is volt's, routed through `after_close`, so the callback has
+    -- to be answered from the teardown rather than from a keymap of ours --
+    -- otherwise closing the window creates nothing AND reports nothing.
     local cancelled = false
     create.review({ cwd = "/work" }, function(selection, review_err)
       cancelled = selection == nil and review_err == nil
     end)
+    truthy("provider: the cancel screen opens", vim.wait(1000, function()
+      return vim.bo[vim.api.nvim_get_current_buf()].filetype == "paseo-create"
+    end))
+    vim.api.nvim_feedkeys("q", "x", false)
     truthy("provider: cancel creates nothing", vim.wait(1000, function()
       return cancelled
     end))
+
+    -- A daemon with no ready provider has nothing to put on a screen, so it
+    -- must not open one.
+    local ready = catalogue.entries
+    catalogue.entries = { { provider = "pi", status = "unavailable", models = {} } }
+    local wins_before_empty = #vim.api.nvim_list_wins()
+    local empty_err
+    create.review({ cwd = "/work" }, function(selection, review_err)
+      empty_err = review_err
+    end)
+    truthy("provider: no ready provider is an error", vim.wait(1000, function()
+      return empty_err ~= nil
+    end))
+    eq("provider: and opens no window to say so", #vim.api.nvim_list_wins(), wins_before_empty)
+    catalogue.entries = ready
 
     local fake_chat = { agent_id = "agent", root = "/work" }
     chat.current = function()
@@ -3503,11 +3720,123 @@ local function test_terminals()
   apply { kind = "snapshot", cwd = root, entries = {} }
   eq("terminals: an empty list empties the root", #terminals.for_root(root), 0)
 
-  -- The panel is a tab like any other, so the surface must actually offer it.
+  -- Terminals are SESSIONS now, listed beside the agents the way Paseo lists
+  -- them, and the surface is `:Paseo term`. A seventh tab holding a list is
+  -- the thing that was replaced, so its absence is the assertion.
+  local float = require "paseo.ui.float"
+  eq("terminals: the dashboard is back to six tabs", #float.TABS, 6)
   truthy(
-    "terminals: the dashboard has a tab for them",
-    vim.tbl_contains(require("paseo.ui.float").TABS, "Terminals")
+    "terminals: and none of them is a Terminals tab",
+    not vim.tbl_contains(float.TABS, "Terminals")
   )
+
+  -- The registry: several terminals alive at once is the whole point, and one
+  -- `terminal_output` listener routing by id is how they are fed.
+  local view = require "paseo.ui.terminal"
+  local bridge = require "paseo.bridge"
+  local old_request = bridge.request
+  local attaches = {}
+  bridge.request = function(op, args, callback)
+    if op == "terminals.attach" then
+      attaches[#attaches + 1] = args.terminalId
+    end
+    ;(callback or function() end)(nil, {})
+  end
+  local ok_registry, registry_err = pcall(function()
+    apply {
+      kind = "snapshot",
+      cwd = root,
+      entries = { { id = "r1", name = "one" }, { id = "r2", name = "two" } },
+    }
+    local a = view.ensure(terminals.get "r1")
+    local again = view.ensure(terminals.get "r1")
+    eq("terminals: ensure is idempotent", a, again)
+    eq("terminals: so the scrollback is replayed once", #attaches, 1)
+
+    local b = view.ensure(terminals.get "r2")
+    truthy("terminals: two are alive at once", a.buf ~= b.buf)
+    eq("terminals: and both are attached", #attaches, 2)
+
+    -- One listener, routed by id: bytes for r2 must not land in r1.
+    vim.api.nvim_chan_send(b.chan, "hello from two")
+    vim.wait(200)
+    local text = table.concat(vim.api.nvim_buf_get_lines(b.buf, 0, -1, false), "")
+    truthy("terminals: output reaches the terminal it belongs to", text:find("hello from two", 1, true) ~= nil)
+    local other = table.concat(vim.api.nvim_buf_get_lines(a.buf, 0, -1, false), "")
+    truthy("terminals: and not the other one", other:find("hello", 1, true) == nil)
+
+    -- Death arrives as a snapshot that no longer lists it.
+    view.detach "r2"
+    eq("terminals: a detached one is gone", view.view "r2", nil)
+    truthy("terminals: and leaves the other alone", view.view "r1" ~= nil)
+    view.detach_all()
+    eq("terminals: detach_all empties the registry", vim.tbl_count(view.views()), 0)
+  end)
+  bridge.request = old_request
+  apply { kind = "snapshot", cwd = root, entries = {} }
+  truthy("terminals: the registry cases ran", ok_registry, registry_err)
+
+  -- The merged list. `under_cursor` resolves through a map rebuilt on every
+  -- draw, never by arithmetic on the cursor row -- which is the regression the
+  -- panel this replaced could not survive, because its `row - 5` was the
+  -- number of heading lines it happened to have that week.
+  local panel = require "paseo.ui.panels.sessions"
+  local agents = require "paseo.agents"
+  local old_for_root, old_watch = agents.for_root, agents.watch
+  agents.watch = function() end
+  agents.for_root = function()
+    return { { id = "a1", title = "reviewer", provider = "claude", status = "idle" } }
+  end
+  local ok_merged, merged_err = pcall(function()
+    apply {
+      kind = "snapshot",
+      cwd = root,
+      entries = { { id = "t1", name = "shell" }, { id = "t2", name = "zzz-last" } },
+    }
+    local chat = { root = root, agent_id = nil }
+    local text = {}
+    for _, line in ipairs(panel.lines(chat, 80)) do
+      local parts = {}
+      for _, cell in ipairs(line) do
+        parts[#parts + 1] = cell[1]
+      end
+      text[#text + 1] = table.concat(parts)
+    end
+    local joined = table.concat(text, "\n")
+    truthy("sessions: agents are listed", joined:find("reviewer", 1, true) ~= nil)
+    truthy("sessions: and terminals beside them", joined:find("shell", 1, true) ~= nil)
+
+    local rows = panel._rows
+    local at_agent, at_terminal
+    for line, row in pairs(rows) do
+      if row.kind == "agent" then
+        at_agent = line
+      elseif row.kind == "terminal" and row.id == "t1" then
+        at_terminal = line
+      end
+    end
+    truthy("sessions: the row map carries both kinds", at_agent and at_terminal)
+    truthy("sessions: and they are on different rows", at_agent ~= at_terminal)
+
+    -- Reorder, redraw, and the map must follow. Sorted by name, so renaming
+    -- `shell` to `aaa` moves it above `zzz-last`.
+    apply {
+      kind = "snapshot",
+      cwd = root,
+      entries = { { id = "t1", title = "zzz-renamed" }, { id = "t2", name = "aaa" } },
+    }
+    panel.lines(chat, 80)
+    local moved
+    for line, row in pairs(panel._rows) do
+      if row.id == "t1" then
+        moved = line
+      end
+    end
+    truthy("sessions: a reordered list retargets its rows", moved ~= at_terminal)
+  end)
+  agents.for_root, agents.watch = old_for_root, old_watch
+  apply { kind = "snapshot", cwd = root, entries = {} }
+  truthy("sessions: the merged-list cases ran", ok_merged, merged_err)
 end
 
 local function test_settings()
@@ -3682,6 +4011,7 @@ function M.run()
     { "ask", test_answer },
     { "sync", test_permission_sync },
     { "terminals", test_terminals },
+    { "draft", test_draft },
     { "follow", test_follow },
     { "settings", test_settings },
     { "strategy", test_strategy },

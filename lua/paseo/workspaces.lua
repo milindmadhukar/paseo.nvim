@@ -418,6 +418,30 @@ end
 ---Start a new session in a workspace.
 ---@param ws paseo.PaseoWorkspace
 ---@param opts? { title?: string }
+---The Paseo workspace a directory belongs to.
+---
+---A workspace's `directory` is its working directory, and anything under it is
+---in it -- which is how a member worktree resolves to the workspace that
+---assembled it. One walk, in one place: the sessions picker and the Sessions
+---panel both need the answer and had no business each writing it.
+---@param root string
+---@param callback fun(ws: paseo.PaseoWorkspace|nil, err: string|nil)
+function M.for_dir(root, callback)
+  local here = vim.fn.resolve(vim.fn.fnamemodify(root, ":p")):gsub("/+$", "")
+  M.list(function(list, err)
+    if err then
+      return callback(nil, err)
+    end
+    for _, ws in ipairs(list) do
+      local dir = vim.fn.resolve(ws.directory or ""):gsub("/+$", "")
+      if dir ~= "" and (here == dir or vim.startswith(here, dir .. "/")) then
+        return callback(ws, nil)
+      end
+    end
+    callback(nil, "this directory is not in a Paseo workspace yet")
+  end)
+end
+
 ---@param callback fun(id: string|nil, err: string|nil)
 function M.new_session(ws, opts, callback)
   opts = opts or {}

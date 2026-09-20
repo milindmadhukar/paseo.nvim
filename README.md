@@ -104,6 +104,18 @@ require("paseo").setup {
       position = "right",         -- or "left"
     },
 
+    terminal = {                  -- the terminal surface; see below
+      width = 84,                 -- percent of the editor, 1-100
+      height = 78,
+      -- row and col are absent: absent means centred
+      list = 22,                  -- the terminal list, in CELLS
+      zindex = 45,                -- over the dashboard, under a picker
+      backdrop = true,
+      keys = { next = "<C-j>", prev = "<C-k>",
+               list = "<C-h>", terminal = "<C-l>" },
+      presets = {},               -- extra entries for `c`
+    },
+
     answer = {                    -- where you answer a question, or decide a plan
       width = 96,                 -- a CAP in cells, not a share of anything
       min_width = 54,             -- narrower than this and it centres on the editor
@@ -148,6 +160,7 @@ require("paseo").setup {
 | `:Paseo workspaces` | Workspace picker — open, sessions, create, archive |
 | `:Paseo wcreate` | Create a workspace here — the shape is worked out for you |
 | `:Paseo sessions` | Sessions in this workspace |
+| `:Paseo term` | Terminals in this workspace, as many as you want |
 | `:Paseo ws …` | Manifest-level: `init` · `create <name> [repos]` · `rm` · `ls` · `status` |
 | `:Paseo agent [stop]` | Sidecar and agent status |
 | `:Paseo repos` | The repos in the current unit of work |
@@ -162,9 +175,9 @@ thinking · `az` fast · `am` model · `a?` settings. Then `aw` workspaces · `a
 new workspace · `aS` sessions · `at` agents · `aR` repos · `aH` health.
 
 The model picker chooses a provider, then one of its labeled models. When a new
-agent is needed, one review screen lets you set permissions, reasoning, and
-model-supported features before creation (`<CR>` edits a row, `c` creates,
-`q` cancels). Opening an existing chat reuses it only when it matches the
+agent is needed, [one screen](#starting-a-session) sets provider, model,
+permissions, reasoning and features before creation — `c` creates, `q` cancels.
+Opening an existing chat reuses it only when it matches the
 selected provider and model. Modes are per provider: Codex reports Default,
 Auto-review, and Full Access; its Plan and Fast controls are separate features.
 Claude reports Plan as a mode. Reasoning and creation-time feature choices come
@@ -205,7 +218,7 @@ swaps to the sidebar and back.
 |---|---|
 | `Chat` | the conversation and the composer, real buffers floated on top |
 | `Session` | mode, thinking level, model, feature toggles — keyboard or click |
-| `Sessions` | the agents in this workspace, live; click one to switch to it |
+| `Sessions` | the agents **and terminals** here, live; open one |
 | `Changes` | what is changed on disk, per repo; click a file to open it |
 | `Usage` | context window, tokens, cost |
 | `Workspaces` | every workspace Paseo knows, plus the repos in this unit of work |
@@ -329,6 +342,120 @@ The same cards open on their own — `:Paseo mode`, `:Paseo thinking`,
 to be `vim.ui.select` lists of strings with a `●` glued to the front of one of
 them, formatted independently of the panel that drew the same four settings.
 There is one renderer now, and one place a change is written.
+
+### Starting a session
+
+Starting an agent where there is none opens **that same renderer** over a
+session that does not exist yet. Two more cards, because provider and model are
+settings here and are not settings on a running agent:
+
+```
+  ╭─ 󱚠  Provider   p  ────────────╮  ╭─ Permission mode   m  ─────────╮
+  │   Claude   Codex              │  │   Plan   Always ask   Bypass   │
+  ╰───────────────────────────────╯  ╰────────────────────────────────╯
+
+  ╭─ Model   s  ──────────────────────────────────────────────────────╮
+  │  ● Opus 5                                                default  │
+  │  ○ Sonnet 5                                                       │
+  ╰───────────────────────────────────────────────────────────────────╯
+
+  ╭─ 󰧑  Thinking   t  ────────────╮  ╭─ ⚡  Features   f  ────────────╮
+  │   Off   Think                 │  │    Fast mode                   │
+  ╰───────────────────────────────╯  ╰────────────────────────────────╯
+
+   c   create session                                claude/opus-5
+
+   h j k l  move   ⏎  apply   p s m t f  group   r  reload   c  create
+```
+
+`c` creates, `q` cancels, and nothing exists until you press one. There is no
+Create *card*, because a card that is not a setting reads as one.
+
+**The screen is the picker.** Choosing a provider used to be two
+`vim.ui.select` prompts *before* you saw anything, and what you saw afterwards
+was a plain buffer — `Provider        Claude`, formatted with `%-15s`, no
+highlights — with another `vim.ui.select` behind every row. It was the only
+screen in the plugin that was not drawn by the renderer every other screen
+uses, and it looked it.
+
+Changing provider, model or mode re-asks the daemon what **features** that
+combination supports, because they are per model and per mode both. The card
+holds the height it had while that is in flight, so the cards below it do not
+jump — and a reply for a choice you have since changed is dropped rather than
+applied, which is what two quick mode changes used to produce.
+
+### Terminals
+
+Paseo runs terminals as well as agents — the `claude` and `codex` sessions you
+started in the app are PTYs on the daemon — and `:Paseo term` is where you
+drive them:
+
+```
+ ╭────────────────────╮ ╭───────────────────────────────────────────────╮
+ │  Terminals         │ │  Claude   ✳ Claude Code        ~/Code/kora    │
+ │ ────────────────── │ ╰───────────────────────────────────────────────╯
+ │ ▌· Claude       1  │ ╭───────────────────────────────────────────────╮
+ │  · reviewer     2  │ │ ▐▛███▜▌ Claude Code v2.1.263                  │
+ │  · Terminal 3   3  │ │ ▝▜█████▛▘ Opus 5 (1M context)                 │
+ │                    │ │                                               │
+ │ ────────────────── │ │ > _                                           │
+ │  c  new    d  kill │ │                                               │
+ │  r  name   q  close│ │                                               │
+ ╰────────────────────╯ ╰───────────────────────────────────────────────╯
+```
+
+**Several at once** — that is the point, and it is what the dashboard tab this
+replaced could not do. It held exactly one terminal, in a module-local, and
+closed it the moment you switched tabs. The shape is
+[floaterm](https://github.com/nvzone/floaterm)'s, and so is the geometry: three
+windows, every one `relative = "editor"` with pre-floored coordinates, because
+hanging the bar off the rail makes its position the sum of two independently
+rounded numbers and the rig lines up at some terminal sizes and not others.
+
+In the list: `<CR>` opens, `1`-`9` open the *n*th, `c` starts one, `r` names
+it, `d` kills it (asked first — something is usually running in there), `<C-l>`
+goes to the terminal, `q` closes. In a terminal: `<C-j>`/`<C-k>` cycle,
+`<C-h>` goes back to the list, `<M-1>`-`<M-9>` open the *n*th, `q` closes.
+
+Those four navigation keys are bound in **terminal mode** too, which is the
+only way cycling is worth having — otherwise it starts with `<C-\><C-n>`. That
+does take them from whatever is running inside, which is right for `claude` and
+wrong for `tmux`, so `ui.terminal.keys` renames or disables any of them. The
+**digits are deliberately not bound in a terminal**: a bare `5` there costs you
+`50k` to scroll back, and `<M-5>` reaches the same terminal. `<Esc>` is never
+bound at all — it belongs to the PTY, so vim running inside one can still leave
+insert mode.
+
+`c` offers a shell, then one entry per provider the daemon has — read live, so
+enabling one in Paseo makes it appear here without a config change — then
+anything in `ui.terminal.presets`, then a free-text command. Nothing checks
+that a command exists, on purpose: the terminal runs on the **daemon's** host,
+which is not necessarily this machine, so the honest failure is the PTY
+printing `command not found`.
+
+**A name you give is kept here**, by the plugin, and the daemon is told as
+well. That is not belt and braces. `renameTerminal` sets a terminal's `title`,
+and `title` is also what the PTY reports for itself — so the shell overwrites
+your name with `milind@host:~/dir` within a second, and every terminal in one
+directory ends up labelled identically. The list shows, in order: the name you
+gave, the stable one the daemon assigned (`Terminal 3`), then the live title.
+The bar shows the live title *beside* the name, where there is room for it and
+where it is actually useful.
+
+A terminal is a **real** terminal — `nvim_open_term`, the same libvterm behind
+`:terminal`, fed the PTY's own bytes, so colour, the cursor and a TUI redrawing
+itself all work. One `terminal_output` listener routes to a registry keyed by
+id, which is the whole of how several are fed at once; `bridge.on` has no
+`off`, so a listener per attach would stack up one dead closure per terminal
+you opened.
+
+A terminal **dying** is a directory update that no longer lists it, never a
+process exiting under us — Paseo owns the process, not Neovim, so none of
+floaterm's reaping machinery applies. The row goes and the surface stays open
+showing an empty pane. floaterm closes itself when its last terminal dies;
+pressing `d` on the last row and having the window vanish is jarring, and not
+doing it removes the ordering problem between a window closing and a terminal
+ending outright.
 
 ### Colour
 
