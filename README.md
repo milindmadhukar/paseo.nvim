@@ -115,6 +115,9 @@ require("paseo").setup {
   workspaces = {
     dir = ".workspaces",          -- relative to a project root
     branch_prefix = "ws/",        -- used when there is no manifest to ask
+    open = "tab",                 -- what <CR> in the picker does: a new tab
+                                  -- page `tcd`'d in. Or "tcd", "cd", or a
+                                  -- function -- see below
   },
 
   review = {
@@ -654,6 +657,52 @@ prerequisite any more.
 The point is that "is this the `ws init` kind of project?" is a question about
 plumbing, and you should be able to type one command without answering it.
 
+### Opening one
+
+`<CR>` in the picker switches **inside this Neovim**: a new tab page, `tcd`'d
+into the workspace. A tab rather than a bare `cd` because chdir'ing in place
+leaves the buffers, LSP clients and jumplist of the workspace you just left
+pointing into it — one tab per unit of work keeps them apart for the price of a
+tab. `workspaces.open` picks something else:
+
+| | |
+|---|---|
+| `"tab"` | new tab page, `tcd`'d in — the default |
+| `"tcd"` | this tab's cwd, no new tab |
+| `"cd"` | the editor's cwd; everything follows |
+| a function | you do it |
+
+The function is how you get a GUI window per workspace instead — which is what
+this used to do unconditionally, and shouldn't have: over ssh, or in any
+terminal Neovim, there is nothing to spawn and `<CR>` appeared to do nothing.
+
+```lua
+workspaces = {
+  open = function(ws)
+    if vim.g.neovide then
+      vim.fn.jobstart({ "neovide" }, { cwd = ws.directory, detach = true })
+      return
+    end
+    return false  -- decline: fall back to the built-in tab switch
+  end,
+}
+```
+
+Returning `false` **declines**, so one config can spawn a window under a GUI and
+switch in place in a terminal. Anything else — `nil` included — means you
+handled it.
+
+To keep the built-in switch and only decide what the new tab *shows*, listen for
+`User PaseoWorkspaceOpen` instead; it fires after the `tcd`, with the root in
+`data.root`:
+
+```lua
+vim.api.nvim_create_autocmd("User", {
+  pattern = "PaseoWorkspaceOpen",
+  callback = function(ev) require("oil").open(ev.data.root) end,
+})
+```
+
 ## Using it without the Paseo app
 
 That is the point. The composer is a real Neovim buffer, the conversation is
@@ -879,7 +928,8 @@ everything after it.
   git invocations, and `vim.system` gives that natively — so the binary bought
   a build step, a release pipeline and a second language for nothing.
 - **Phase 3 — workspace layer.** Workspace picker with a live, push-driven
-  agent status column; a new Neovide window per workspace.
+  agent status column; `<CR>` switches this Neovim, or runs whatever
+  `workspaces.open` is.
 - **Phase 4 — commit, PR, merge.** Agent-agnostic skills over `ws … --json`.
 
 ## Licence

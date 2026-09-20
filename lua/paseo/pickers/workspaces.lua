@@ -16,31 +16,6 @@ local workspaces = require "paseo.workspaces"
 
 local M = {}
 
----Open a workspace in a NEW WINDOW rather than chdir'ing this one.
----
----Switching by chdir leaves this instance's buffers, LSP clients and jumplist
----pointing into the workspace you just left. One window per unit of work is the
----honest model.
----@param ws paseo.PaseoWorkspace
-local function open_workspace(ws)
-  local root = ws.directory
-  if not root or root == "" then
-    return vim.notify("paseo: that workspace has no directory", vim.log.levels.WARN)
-  end
-
-  local ok, gui = pcall(require, "utils.gui")
-  if ok and type(gui.spawn) == "function" then
-    return gui.spawn { cwd = root }
-  end
-  if vim.fn.executable "neovide" == 1 then
-    return vim.fn.jobstart({ "neovide" }, { cwd = root, detach = true, stdin = "null" })
-  end
-
-  vim.cmd.tcd(vim.fn.fnameescape(root))
-  require("paseo.repos").invalidate()
-  vim.notify("paseo: tab cwd is now " .. vim.fn.fnamemodify(root, ":~"), vim.log.levels.INFO)
-end
-
 ---@param ws paseo.PaseoWorkspace
 ---@param widths { project: integer, name: integer }
 ---@return string
@@ -190,7 +165,7 @@ function M.open(opts)
             local entry = state.get_selected_entry()
             actions.close(bufnr)
             if entry then
-              open_workspace(entry.value)
+              workspaces.open(entry.value)
             end
           end)
 

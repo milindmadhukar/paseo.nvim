@@ -295,6 +295,56 @@ function M.create(opts, callback)
   end)
 end
 
+---Switch to a workspace.
+---
+---IN THIS NEOVIM by default, because that is what a Neovim plugin should do.
+---This used to spawn a Neovide window unconditionally, which is one person's
+---setup dressed up as a rule: over ssh, or in any terminal Neovim, there is no
+---GUI to spawn and `<CR>` appeared to do nothing at all.
+---
+---The switch is a new tab page with its own `tcd`, not a bare `cd`, because the
+---objection that produced the spawn is real -- chdir'ing in place leaves the
+---buffers, LSP clients and jumplist of the workspace you just left pointing
+---into it. A tab keeps them apart at the cost of one tab. `workspaces.open`
+---picks something else, up to and including spawning that GUI window.
+---
+---Fires `User PaseoWorkspaceOpen` with `data.root` afterwards, so a config can
+---decide what the new tab should SHOW -- a file picker, oil, a dashboard --
+---without having to replace the switch itself.
+---@param ws paseo.PaseoWorkspace
+---@return boolean opened
+function M.open(ws)
+  local root = ws and ws.directory
+  if not root or root == "" then
+    vim.notify("paseo: that workspace has no directory", vim.log.levels.WARN)
+    return false
+  end
+
+  local how = require("paseo.config").get().workspaces.open
+
+  if type(how) == "function" then
+    local ok, declined = pcall(how, ws)
+    if not ok then
+      vim.notify("paseo: workspaces.open: " .. tostring(declined), vim.log.levels.ERROR)
+    elseif declined ~= false then
+      return true
+    end
+    -- Errored, or declined on purpose. Either way the workspace still has to
+    -- open, and the built-in switch is the thing that always works.
+    how = "tab"
+  end
+
+  if how == "tab" then
+    vim.cmd.tabnew()
+  end
+  vim.cmd[how == "cd" and "cd" or "tcd"](vim.fn.fnameescape(root))
+  require("paseo.repos").invalidate()
+
+  vim.api.nvim_exec_autocmds("User", { pattern = "PaseoWorkspaceOpen", data = { root = root } })
+  vim.notify("paseo: " .. vim.fn.fnamemodify(root, ":~"), vim.log.levels.INFO)
+  return true
+end
+
 ---Archive a workspace, and dismantle its worktrees if we assembled them.
 ---@param ws paseo.PaseoWorkspace
 ---@param opts? { force: boolean }

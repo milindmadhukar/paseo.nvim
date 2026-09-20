@@ -2289,6 +2289,109 @@ local function test_strategy()
   vim.fn.delete(project, "rf")
 end
 
+-- ----------------------------------------------------------- opening a ws
+
+--- Opening a workspace happens IN THIS NEOVIM.
+---
+--- It used to spawn a Neovide window whenever one could be spawned, which is
+--- one person's setup: a terminal Neovim has no GUI to spawn and `<CR>` looked
+--- like it did nothing. The spawn is still available -- as a function you
+--- write -- and everything here is about that seam holding.
+local function test_workspace_open()
+  local config = require "paseo.config"
+  local workspaces = require "paseo.workspaces"
+
+  local dir = vim.fn.tempname()
+  vim.fn.mkdir(dir, "p")
+  local resolved = vim.fn.resolve(dir)
+  local ws = { directory = dir, name = "t" }
+
+  local start_tabs = #vim.api.nvim_list_tabpages()
+
+  -- The default. A tab of its own, tcd'd in: the objection that produced the
+  -- GUI spawn -- that chdir leaves the old workspace's buffers behind -- is
+  -- answered by the tab, not by a second process.
+  config.setup {}
+  eq("open: the default switches in this Neovim", config.defaults().workspaces.open, "tab")
+
+  local seen
+  local au = vim.api.nvim_create_autocmd("User", {
+    pattern = "PaseoWorkspaceOpen",
+    callback = function(ev)
+      seen = ev.data.root
+    end,
+  })
+
+  truthy("open: it opens", workspaces.open(ws))
+  eq("open: in a new tab page", #vim.api.nvim_list_tabpages(), start_tabs + 1)
+  eq("open: whose cwd is the workspace", vim.fn.resolve(vim.fn.getcwd()), resolved)
+  eq("open: and it announces the root, so a config can fill the tab", seen, dir)
+  -- `tcd`, not `cd`: the tab we came from must not have moved with it.
+  vim.cmd.tabclose()
+  truthy(
+    "open: the tab it came from kept its cwd",
+    vim.fn.resolve(vim.fn.getcwd()) ~= resolved,
+    vim.fn.getcwd()
+  )
+
+  -- "tcd" is the same switch without the tab, for people who keep one.
+  local tabs = #vim.api.nvim_list_tabpages()
+  config.setup { workspaces = { open = "tcd" } }
+  workspaces.open(ws)
+  eq("open: `tcd` reuses this tab", #vim.api.nvim_list_tabpages(), tabs)
+  eq("open: and still lands in the workspace", vim.fn.resolve(vim.fn.getcwd()), resolved)
+
+  -- The escape hatch, which is how the Neovide spawn comes back.
+  local spawned
+  config.setup {
+    workspaces = {
+      open = function(got)
+        spawned = got.directory
+      end,
+    },
+  }
+  tabs = #vim.api.nvim_list_tabpages()
+  truthy("open: a function handles it", workspaces.open(ws))
+  eq("open: and is handed the workspace", spawned, dir)
+  eq("open: with no tab opened behind its back", #vim.api.nvim_list_tabpages(), tabs)
+
+  -- Returning `false` DECLINES -- which is what lets one config spawn a window
+  -- under a GUI and switch in place in a terminal, rather than being two
+  -- configs.
+  config.setup {
+    workspaces = {
+      open = function()
+        return false
+      end,
+    },
+  }
+  workspaces.open(ws)
+  eq("open: declining falls back to the built-in switch", #vim.api.nvim_list_tabpages(), tabs + 1)
+  vim.cmd.tabclose()
+
+  -- A function that throws must not strand you on the picker with nothing
+  -- open. The error is reported; the workspace still opens.
+  config.setup {
+    workspaces = {
+      open = function()
+        error "nope"
+      end,
+    },
+  }
+  truthy("open: a broken handler still opens the workspace", workspaces.open(ws))
+  vim.cmd.tabclose()
+
+  -- A workspace with no directory is the one case that cannot open.
+  eq("open: nothing to open without a directory", workspaces.open { name = "x" }, false)
+
+  local bad = pcall(config.setup, { workspaces = { open = "neovide" } })
+  eq("open: and an unknown mode is rejected at setup, not at <CR>", bad, false)
+
+  vim.api.nvim_del_autocmd(au)
+  config.setup {}
+  vim.fn.delete(dir, "rf")
+end
+
 -- --------------------------------------------------------------- questions
 
 local function test_questions()
@@ -3421,6 +3524,7 @@ function M.run()
     { "follow", test_follow },
     { "settings", test_settings },
     { "strategy", test_strategy },
+    { "workspace open", test_workspace_open },
   }
 
   for _, suite in ipairs(suites) do

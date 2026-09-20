@@ -108,6 +108,26 @@ local M = {}
 ---                       A manifest carries its own `branch_prefix` and that
 ---                       wins; this is for the case that has no manifest --
 ---                       a plain git repo, where Paseo cuts the worktree.
+---@field open "tab"|"tcd"|"cd"|fun(ws: paseo.PaseoWorkspace): boolean?
+---                       What `<CR>` in the workspace picker does. The three
+---                       strings all switch INSIDE this Neovim:
+---                         "tab" -- new tab page, `tcd`'d into the workspace.
+---                                  The default: a tab is the cheapest thing
+---                                  that keeps the buffers of the workspace you
+---                                  just left out of the one you just entered.
+---                         "tcd" -- this tab's cwd, no new tab.
+---                         "cd"  -- the editor's cwd. Everything follows.
+---                       A function is the escape hatch, and it is how you
+---                       spawn a GUI window per workspace instead:
+---                         open = function(ws)
+---                           vim.fn.jobstart({ "neovide" },
+---                             { cwd = ws.directory, detach = true })
+---                         end
+---                       Return `false` from it to DECLINE -- the built-in
+---                       "tab" switch then happens instead, which is what lets
+---                       one config do both (spawn when `vim.g.neovide`, switch
+---                       in place in a terminal). Any other return value, `nil`
+---                       included, means you handled it.
 
 ---@class paseo.Config.Review
 ---@field agents boolean  Whether `:Paseo explain` and `:Paseo ask` list the
@@ -174,6 +194,10 @@ local defaults = {
   workspaces = {
     dir = ".workspaces",
     branch_prefix = "ws/",
+    -- In this Neovim, not a new GUI window. Spawning one was the author's
+    -- habit and it is a terrible default: in a terminal Neovim over ssh there
+    -- is nothing to spawn, and `<CR>` did nothing you could see.
+    open = "tab",
   },
 
   review = {
@@ -203,6 +227,9 @@ function M.setup(opts)
   vim.validate("ui.expand", config.ui.expand, function(v)
     return v == "running" or v == "always" or v == "never"
   end, '"running", "always" or "never"')
+  vim.validate("workspaces.open", config.workspaces.open, function(v)
+    return type(v) == "function" or v == "tab" or v == "tcd" or v == "cd"
+  end, '"tab", "tcd", "cd", or a function taking the workspace')
   -- Clamped rather than merely validated: `nvim_open_win` rejects anything
   -- below 1 outright, and the backdrop sits five below this.
   vim.validate("ui.float.zindex", config.ui.float.zindex, "number")

@@ -101,6 +101,7 @@ Defaults: >lua
       workspaces = {
         dir = ".workspaces",
         branch_prefix = "ws/",
+        open = "tab",             -- <CR> in the picker: a new tab, `tcd`'d in
       },
 
       review = {
@@ -348,6 +349,40 @@ workspaces.branch_prefix                           string, default `"ws/"`
     Prefix for the branch a new workspace works on. A manifest carries its own
     `branch_prefix` and that wins; this covers the case with no manifest -- a
     plain git repo, where Paseo cuts the worktree. See |paseo-workspace-kinds|.
+
+                                                *paseo-config.workspaces.open*
+workspaces.open                               string|function, default `"tab"`
+
+    What `<CR>` in the workspace picker does. The three strings all switch
+    INSIDE this Neovim:
+
+        "tab"   a new tab page, `tcd`'d into the workspace. The default.
+        "tcd"   this tab's cwd. No new tab.
+        "cd"    the editor's cwd. Everything follows.
+
+    A tab rather than a bare `cd` because chdir'ing in place leaves the
+    buffers, LSP clients and jumplist of the workspace you just left pointing
+    into it. One tab per unit of work keeps them apart for the price of a tab.
+
+    A function is the escape hatch, and is how you spawn a GUI window per
+    workspace instead -- which is what this used to do unconditionally, and
+    should not have: over ssh, or in any terminal Neovim, there is nothing to
+    spawn and `<CR>` appeared to do nothing. >lua
+
+        open = function(ws)
+          if not vim.g.neovide then
+            return false  -- decline: the built-in tab switch happens
+          end
+          vim.fn.jobstart({ "neovide" },
+            { cwd = ws.directory, detach = true })
+        end,
+<
+    Returning `false` DECLINES, so one config can spawn a window under a GUI
+    and switch in place in a terminal. Any other return value, `nil` included,
+    means you handled it.
+
+    To keep the built-in switch and only decide what the new tab SHOWS, leave
+    this alone and listen for |paseo-workspace-open-autocmd|.
 
                                                   *paseo-config.review.agents*
 review.agents                                       boolean, default `true`
@@ -648,7 +683,8 @@ where Paseo's own worktree isolation already works.
                                                           *paseo-workspaces-keys*
 In the workspace picker (|:Paseo-workspaces|) ~
 
-    <CR>      open it in a new window
+    <CR>      open it -- a new tab page `tcd`'d into the workspace, or
+              whatever |paseo-config.workspaces.open| says
     <C-s>     its sessions
     <C-n>     create a workspace
     <C-d>     archive it -- refuses, and says what it would lose, if a member
@@ -763,6 +799,20 @@ require("paseo.git").stage({hunk}, {callback})
     A WHOLE-FILE DELETION (`hunk.file_deleted`) has no file on disk, so no
     buffer can open on it and gitsigns can never attach. Those, and untracked
     files, go through `git add` instead, which records a removal correctly.
+
+                                                 *paseo-workspace-open-autocmd*
+Opening a workspace (|paseo-workspaces-keys|) fires `User PaseoWorkspaceOpen`
+after the `tcd`, with the root in `data.root`. That is the seam for deciding
+what the new tab SHOWS -- a file picker, oil, a dashboard -- without replacing
+the switch itself: >lua
+
+    vim.api.nvim_create_autocmd("User", {
+      pattern = "PaseoWorkspaceOpen",
+      callback = function(ev) require("oil").open(ev.data.root) end,
+    })
+<
+It does NOT fire when |paseo-config.workspaces.open| is a function that
+handled the open itself -- that function already knows where it sent you.
 
                                                          *paseo-review-autocmd*
 The workspace picker's `<C-r>` (|paseo-workspaces-keys|) does not build a list
