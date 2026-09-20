@@ -419,9 +419,14 @@ local function make_buffers(chat)
     vim.keymap.set("n", "gp", function()
       require("paseo.ui.permission").reopen(chat)
     end, vim.tbl_extend("force", conv, { desc = "paseo: reopen permission prompt" }))
-    vim.keymap.set("n", "<C-f>", M.fullscreen, vim.tbl_extend("force", conv, {
-      desc = "paseo: sidebar <-> full screen",
-    }))
+    vim.keymap.set(
+      "n",
+      "<C-f>",
+      M.fullscreen,
+      vim.tbl_extend("force", conv, {
+        desc = "paseo: sidebar <-> full screen",
+      })
+    )
 
     -- Cards are drawn to the window width, so a resize leaves every box either
     -- short or wrapped. Re-render rather than live with it.
@@ -489,13 +494,23 @@ local function make_buffers(chat)
       end
     end
     for _, key in ipairs { "p", "P" } do
-      vim.keymap.set("n", key, paste(key), vim.tbl_extend("force", opts, {
-        desc = "paseo: paste (an image, if the clipboard has one)",
-      }))
+      vim.keymap.set(
+        "n",
+        key,
+        paste(key),
+        vim.tbl_extend("force", opts, {
+          desc = "paseo: paste (an image, if the clipboard has one)",
+        })
+      )
     end
-    vim.keymap.set({ "n", "i" }, "<C-v>", paste "<C-v>", vim.tbl_extend("force", opts, {
-      desc = "paseo: paste (an image, if the clipboard has one)",
-    }))
+    vim.keymap.set(
+      { "n", "i" },
+      "<C-v>",
+      paste "<C-v>",
+      vim.tbl_extend("force", opts, {
+        desc = "paseo: paste (an image, if the clipboard has one)",
+      })
+    )
     vim.keymap.set("n", "q", function()
       M.close()
     end, vim.tbl_extend("force", opts, { desc = "paseo: close chat" }))
@@ -620,7 +635,17 @@ end
 -- --------------------------------------------------------------------- API
 
 ---Open (or focus) a chat.
----@param opts? { root?: string, focus?: boolean, agent_id?: string, title?: string }
+---
+---`create = false` means "show me the agent in this directory, and say so if
+---there is not one" -- no provider picker. That is what an AUTOMATIC open
+---needs: `M.follow` re-points the window every time you change workspace, and
+---a modal asking which provider to use, unbidden, on a workspace you have not
+---started an agent in yet, is worse than the empty window it replaces.
+---
+---`surface` overrides where this chat last was. Only `M.follow` passes it: the
+---surface you are looking at belongs to the window, not to the conversation
+---you are switching to.
+---@param opts? { root?: string, focus?: boolean, agent_id?: string, title?: string, create?: boolean, surface?: "float"|"sidebar" }
 ---@param callback? fun(chat: paseo.Chat|nil, err: string|nil)
 function M.open(opts, callback)
   opts = opts or {}
@@ -646,6 +671,9 @@ function M.open(opts, callback)
     chats[key] = chat
   end
   current = chat
+  if opts.surface then
+    chat.surface = opts.surface
+  end
 
   layout(chat)
   if opts.focus ~= false and chat.win_composer and vim.api.nvim_win_is_valid(chat.win_composer) then
@@ -723,35 +751,42 @@ function M.open(opts, callback)
       if found and found.id then
         return adopt(found)
       end
+      if opts.create == false then
+        notice(chat, "no agent in this workspace yet — :Paseo chat starts one")
+        return callback(nil, nil)
+      end
       notice(chat, "choose session settings…")
-      require("paseo.ui.create").review({ cwd = root, preferred = preferred }, function(draft, review_err)
-        if review_err then
-          notice(chat, review_err, "error")
-          return callback(nil, review_err)
-        end
-        if not draft then
-          chats[root] = nil
-          if current == chat then
-            M.close()
+      require("paseo.ui.create").review(
+        { cwd = root, preferred = preferred },
+        function(draft, review_err)
+          if review_err then
+            notice(chat, review_err, "error")
+            return callback(nil, review_err)
           end
-          return callback(nil, "cancelled")
-        end
-        bridge.request("agent.ensure", {
-          cwd = root,
-          provider = draft.provider,
-          modeId = draft.modeId,
-          thinkingOptionId = draft.thinkingOptionId,
-          featureValues = draft.featureValues,
-          title = "paseo.nvim · " .. vim.fs.basename(root),
-        }, function(agent_err, result)
-          if agent_err then
-            notice(chat, agent_err, "error")
-            return callback(nil, agent_err)
+          if not draft then
+            chats[root] = nil
+            if current == chat then
+              M.close()
+            end
+            return callback(nil, "cancelled")
           end
-          config.get().paseo.provider = draft.provider
-          adopt(result)
-        end)
-      end)
+          bridge.request("agent.ensure", {
+            cwd = root,
+            provider = draft.provider,
+            modeId = draft.modeId,
+            thinkingOptionId = draft.thinkingOptionId,
+            featureValues = draft.featureValues,
+            title = "paseo.nvim · " .. vim.fs.basename(root),
+          }, function(agent_err, result)
+            if agent_err then
+              notice(chat, agent_err, "error")
+              return callback(nil, agent_err)
+            end
+            config.get().paseo.provider = draft.provider
+            adopt(result)
+          end)
+        end
+      )
     end)
   end)
 end
@@ -845,6 +880,55 @@ function M.toggle()
     return M.close()
   end
   M.open {}
+end
+
+---Re-point an OPEN chat at another directory.
+---
+---The bug this fixes: with the dashboard up full screen, switching workspace
+---left it showing the previous workspace's agent. The window is the one thing
+---on screen and it was describing somewhere you are no longer standing -- and
+---since a float belongs to the tab page it was opened on, the `"tab"` switch
+---did not even leave it visible.
+---
+---Three deliberate choices:
+---
+---  * NOTHING OPEN, NOTHING HAPPENS. Changing directory is not a request for a
+---    chat. This only ever moves a window that is already up.
+---  * It goes through `close` rather than handing the surface a new chat,
+---    because a float opened on the tab you just left is still a VALID window
+---    -- `is_open` says yes, `open` takes its "already up" branch, and you get
+---    yanked back to the old tab. Closing first is what puts the surface on the
+---    tab page you are actually on.
+---  * `create = false`: an automatic re-point must never open a provider
+---    picker. A workspace with no agent yet says so and waits.
+---
+---Focus follows the surface: the float covers the screen, so you need to be
+---able to type into it; the sidebar sits beside code you were editing, so it
+---must not steal your cursor.
+---@param root string
+---@param opts? { focus?: boolean }
+---@return boolean followed
+function M.follow(root, opts)
+  opts = opts or {}
+  local chat = current
+  if not chat or type(root) ~= "string" or root == "" then
+    return false
+  end
+
+  local float = require "paseo.ui.float"
+  if not (float.is_open(chat) or sidebar.is_open(chat)) then
+    return false
+  end
+
+  local surface = chat.surface or config.get().ui.surface
+  local focus = opts.focus
+  if focus == nil then
+    focus = surface == "float"
+  end
+
+  M.close()
+  M.open { root = root, surface = surface, focus = focus, create = false }
+  return true
 end
 
 ---Put the chat on a named surface, keeping the conversation and the draft.
@@ -1096,8 +1180,7 @@ function M.load_settings(chat)
       -- `agent.ensure`, so it has no provider and the header read "…" for the
       -- whole session. The config call already knows.
       if config.provider then
-        chat.provider = config.model and (config.provider .. "/" .. config.model)
-          or config.provider
+        chat.provider = config.model and (config.provider .. "/" .. config.model) or config.provider
       end
       chat.usage = config.usage or chat.usage
       chat.config_snapshot = config

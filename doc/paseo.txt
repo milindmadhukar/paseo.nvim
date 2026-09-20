@@ -97,6 +97,18 @@ Defaults: >lua
           composer = 8,           -- rows the composer gets
           position = "right",     -- or "left"
         },
+
+        terminal = {
+          width = 84,             -- percent of the editor, 1-100
+          height = 78,
+          -- row and col are absent: absent means centred
+          list = 22,              -- the terminal list, in CELLS
+          zindex = 45,            -- over the dashboard, under a picker
+          backdrop = true,
+          keys = { next = "<C-j>", prev = "<C-k>",
+                   list = "<C-h>", terminal = "<C-l>" },
+          presets = {},           -- extra entries for `c`
+        },
       },
 
       workspaces = {
@@ -219,22 +231,28 @@ ui.theme                                              table, default `{}`
 ui.animate                                 boolean|table, default on
 
     Motion. `false` disables every effect; a table names them: >lua
-        ui = { animate = { bars = true, flash = true, reveal = true, fps = 30 } }
+        ui = { animate = { bars = true, flash = true, fps = 30 } }
 <
     `bars`    Ease a progress bar towards its new value rather than snapping.
               The context-window bar is the one that benefits: a jump from
               40% to 70% reads as a glitch.
     `flash`   Briefly tint a tool card as it settles to ok or failed, then
               fade out through the accent ramp.
-    `reveal`  Stagger rows in when a tab is switched to.
     `fps`     Frames a second, clamped to 1-60.
 
     The spinner is NOT one of these and is never disabled: a turn that is
     running has to look different from one that is wedged, and that is
     information rather than decoration.
 
-    None of the effects changes a section's HEIGHT, which is a constraint
-    rather than a choice -- see |paseo-colours|.
+    Neither effect changes a section's HEIGHT, which is a constraint rather
+    than a choice: volt records each section's start row when the layout is
+    measured, so a section that grows mid-animation draws every section below
+    it at the wrong row.
+
+    A third effect -- staggering a panel's rows in on a tab switch -- was
+    written and then removed. The Sessions panel maps cursor rows to sessions,
+    and that map named every row while only some were painted, so for the
+    length of the reveal the screen disagreed with what a keypress would do.
 
                         *paseo-config.ui.float.width*
                         *paseo-config.ui.float.height*
@@ -325,6 +343,31 @@ ui.sidebar                                                          table
     back from. Neovim claws the difference back the instant focus returns
     there, so a bigger number is not a wider sidebar -- it is a number that
     quietly does not happen.
+
+                                                *paseo-config.ui.terminal*
+ui.terminal                                                         table
+
+    The terminal surface -- |paseo-terminals|. `width` and `height` are
+    percentages of the editor, 1-100, the same unit |paseo-config.ui.float|
+    takes, so a number means the same thing in both.
+
+    `list` is the ONE exception and is in CELLS. The rail holds names, and 10%
+    of a 300-column monitor is thirty columns of mostly nothing; it is clamped
+    to 16-36 and to half the box, so a narrow editor still gets a terminal.
+
+    `zindex` is 45: above the dashboard's 30, because this opens over it, and
+    below the 50 telescope and `vim.ui.select` take, so the new-terminal
+    picker lands on top of it rather than underneath.
+
+    `keys` renames or disables the four navigation keys. `next`, `prev`,
+    `list` and `terminal` are bound in TERMINAL mode as well as normal, which
+    is what makes cycling worth having and also what takes them from whatever
+    is running inside. `false` leaves one unbound: >lua
+        terminal = { keys = { next = false, prev = false } }
+<
+    `presets` adds entries to what `c` offers, beside the shell and the
+    providers the daemon reports. A string is its own command; a table may
+    give a `label`, a `command` and `args`. See |paseo-terminals-presets|.
 
                                                      *paseo-config.ui.answer*
 ui.answer                                                           table
@@ -453,6 +496,10 @@ workspaces.open                               string|function, default `"tab"`
     To keep the built-in switch and only decide what the new tab SHOWS, leave
     this alone and listen for |paseo-workspace-open-autocmd|.
 
+    An open chat comes WITH you, whichever of the three you pick -- see
+    |paseo-chat-follows|. A function that opens its own window does not move
+    this Neovim, so the chat in it stays where it is.
+
                                                   *paseo-config.review.agents*
 review.agents                                       boolean, default `true`
 
@@ -533,12 +580,17 @@ review.agents                                       boolean, default `true`
 
     Sessions in the workspace containing this directory.
 
+:Paseo term                                                  *:Paseo-term*
 :Paseo terminals                                        *:Paseo-terminals*
 
-    The Paseo terminals in this workspace, on the dashboard's `7` tab. Opens
-    the dashboard if it is not already up, because a terminal is a live PTY
-    floated over the body and needs the surface that owns that space. See
-    |paseo-chat-terminals|.
+    The terminal surface for this workspace, toggled: a list of the Paseo
+    terminals here down the left, and the one you are in filling the rest.
+    Several at once. See |paseo-terminals|.
+
+    `terminals` is the old name for it and still works. It used to mean "the
+    dashboard tab listing them"; that tab is gone, because the list belongs
+    with the agents on |paseo-chat-float|'s `3` tab, which is where Paseo
+    itself puts it.
 
 :Paseo ws [init|create|rm|ls|status]                           *:Paseo-ws*
 
@@ -753,7 +805,8 @@ where Paseo's own worktree isolation already works.
 In the workspace picker (|:Paseo-workspaces|) ~
 
     <CR>      open it -- a new tab page `tcd`'d into the workspace, or
-              whatever |paseo-config.workspaces.open| says
+              whatever |paseo-config.workspaces.open| says. An open chat
+              follows: |paseo-chat-follows|
     <C-s>     its sessions
     <C-n>     create a workspace
     <C-d>     archive it -- refuses, and says what it would lose, if a member
@@ -869,6 +922,34 @@ require("paseo.git").stage({hunk}, {callback})
     buffer can open on it and gitsigns can never attach. Those, and untracked
     files, go through `git add` instead, which records a removal correctly.
 
+                                                          *paseo-chat-follows*
+THE CHAT FOLLOWS THE WORKSPACE YOU ARE IN.
+
+Switching workspace (|paseo-workspaces-keys|) re-points an OPEN chat at the
+agent in the workspace you just moved to. Without it the full-screen surface
+-- the one window on screen -- went on describing the workspace you had just
+left, and because a float belongs to the tab page it was opened on, the
+default `"tab"` switch did not even leave it visible.
+
+Three things it deliberately does not do:
+
+  - It does not OPEN a chat. Changing directory is not a request for one, so
+    with nothing on screen nothing happens.
+  - It does not ask which provider to use. A workspace you have not started an
+    agent in yet says so and waits; `:Paseo chat` is how you start one.
+  - It does not move your cursor out of your code. The full-screen surface
+    takes focus, because it covers the screen and you need to type into it;
+    the sidebar does not.
+
+`<C-r>` re-points the chat too, but never takes focus -- the cursor belongs in
+whatever |paseo-review-autocmd| opens.
+
+                                                        *paseo.ui.chat.follow*
+require("paseo.ui.chat").follow({root}, {opts})              -> boolean
+
+    Re-point the open chat at `root`. Returns false, having done nothing, when
+    no chat is on screen. `opts.focus` overrides the rule above.
+
                                                  *paseo-workspace-open-autocmd*
 Opening a workspace (|paseo-workspaces-keys|) fires `User PaseoWorkspaceOpen`
 after the `tcd`, with the root in `data.root`. That is the seam for deciding
@@ -960,13 +1041,12 @@ tab for every other thing Paseo knows: >
 
     1 Chat        the conversation and composer
     2 Session     mode, thinking level, model and feature toggles
-    3 Sessions    the agents in this workspace, live -- click one to switch
+    3 Sessions    the agents AND terminals here, live -- open one
     4 Changes     what is changed on disk -- click a file to open it
     5 Usage       context window, tokens and cost
     6 Workspaces  every workspace, and the repos in this unit of work
-    7 Terminals   the Paseo terminals here -- open one and type in it
 <
-`1`-`7` jump, `<M-1>`-`<M-7>` and `<Tab>`/`<S-Tab>` do the same, and
+`1`-`6` jump, `<M-1>`-`<M-6>` and `<Tab>`/`<S-Tab>` do the same, and
 everything on screen that does something responds to a CLICK -- the tab bar, a
 mode, a model, a session, a changed file. The keys are bound on the composer
 and the conversation as well as on the chrome, because the Chat tab puts your
@@ -1030,6 +1110,43 @@ of strings with a `●` glued to the front of one of them; they are the Session
 tab's renderer in a window of its own, so there is no second implementation to
 drift.
 
+                                                       *paseo-new-session*
+Starting an agent where there is none opens the SAME renderer over a session
+that does not exist yet -- two more cards, because provider and model are
+settings here and are not settings on a running agent: >
+
+    ╭─ 󱚠  Provider   p  ────────────╮  ╭─ Permission mode   m  ─────────╮
+    │   Claude   Codex              │  │   Plan   Always ask   Bypass   │
+    ╰───────────────────────────────╯  ╰────────────────────────────────╯
+
+    ╭─ Model   s  ──────────────────────────────────────────────────────╮
+    │  ● Opus 5                                                default  │
+    │  ○ Sonnet 5                                                       │
+    ╰───────────────────────────────────────────────────────────────────╯
+
+    ╭─ 󰧑  Thinking   t  ────────────╮  ╭─ ⚡  Features   f  ────────────╮
+    │   Off   Think                 │  │    Fast mode                   │
+    ╰───────────────────────────────╯  ╰────────────────────────────────╯
+
+     c   create session                                claude/opus-5
+
+     h j k l  move   ⏎  apply   p s m t f  group   r  reload   c  create
+<
+`c` creates, `q` cancels, and nothing is created until you press one. There is
+no Create card, because a card that is not a setting reads as one.
+
+The SCREEN IS THE PICKER. Choosing a provider used to be two `vim.ui.select`
+prompts before you saw anything, and what you saw afterwards was a plain
+buffer -- `Provider        Claude` -- with no highlights and another
+`vim.ui.select` behind every row. A daemon with no provider ready still
+reports that as an error rather than opening an empty window.
+
+Changing provider, model or mode re-asks the daemon what FEATURES that
+combination supports, because they are per model and per mode both. The card
+keeps the height it had while that is in flight, so the ones below it do not
+jump; and a reply for a choice you have since changed is dropped rather than
+applied, which is what two quick mode changes used to produce.
+
 `:Paseo fast` stays a direct toggle rather than a window -- it is a one
 keystroke convenience and putting a window in front of it would defeat the
 point. It opens the Features card only when this provider has no `fast_mode`
@@ -1050,8 +1167,8 @@ In the composer ~
     <CR>      (normal mode) send
     <C-s>     send, from normal or insert mode
     p  P      paste -- an image if the clipboard has one, text otherwise
-    1-7       jump to a tab (full screen; see ui.float.tab_keys)
-    <M-1>..7  the same, without taking the count keys
+    1-6       jump to a tab (full screen; see ui.float.tab_keys)
+    <M-1>..6  the same, without taking the count keys
     <Tab>     next tab, <S-Tab> the previous one
     <C-f>     switch surface
     q         close the chat
@@ -1060,8 +1177,8 @@ In the conversation ~
 
     <Tab>     expand or collapse the item under the cursor
     <CR>      the same
-    1-7       jump to a tab (full screen; see ui.float.tab_keys)
-    <M-1>..7  the same, without taking the count keys
+    1-6       jump to a tab (full screen; see ui.float.tab_keys)
+    <M-1>..6  the same, without taking the count keys
     gp        reopen a pending permission prompt
     <C-f>     switch surface
     q         close the chat
@@ -1072,6 +1189,14 @@ On the Session tab ~
     <CR>      apply the focused setting
     m t f s   jump to a group of settings
     r         re-fetch from the daemon
+
+On the Sessions tab ~
+
+    <CR>      open -- an agent switches the chat, a terminal opens |:Paseo-term|
+    c         a new terminal here
+    a         a new agent here, through |paseo-new-session|
+    r         rename the terminal under the cursor
+    d         kill a terminal, or archive an agent -- asked first, either way
 
 These are bound only while that tab is showing, and whatever they displaced
 is put back on the way out -- the six panels share one buffer, so a `<CR>`
@@ -1164,25 +1289,77 @@ the agent is busy and nothing else. A failure stays open. `ui.expand` changes
 this: `"always"`, `"never"`, or the default `"running"`. A card you have
 toggled by hand is yours from then on and is never folded back under you.
 
-                                                       *paseo-chat-terminals*
+                          *paseo-terminals* *paseo-chat-terminals*
 Paseo runs TERMINALS as well as agents -- the `claude` or `codex` sessions you
-started in the app are PTYs on the daemon -- and tab `7` is the list of the
-ones in this workspace: >
+started in the app are PTYs on the daemon -- and |:Paseo-term| is where you
+drive them. A list down the left, a bar naming what you are in, and the
+terminal filling the rest. SEVERAL AT ONCE: that is the point, and it is what
+the dashboard tab this replaced could not do.
 
-    <CR>   open the terminal under the cursor
-    c      start a new one, optionally running a command
-    r      rename it
+In the list ~
+
+    <CR>   open the one under the cursor
+    1-9    open the nth
+    c      start a new one -- a shell, a provider's CLI, or a command
+    r      name it
     d      kill it (asked first; something is usually running in there)
-<
-Opening one floats a REAL terminal over the body. It is `nvim_open_term`, the
-same libvterm behind `:terminal`, fed the PTY's own bytes -- so colour, the
-cursor, and a TUI redrawing itself all work, and what you type goes back to
-the daemon. `<C-\><C-n>` leaves terminal mode as usual; `q` from normal mode
-closes the view and detaches. `<Esc>` belongs to the PTY, so vim running
-inside one can still leave insert mode.
+    <C-l>  back to the terminal
+    q      close the surface
 
-Scrollback comes with you on attach, when the daemon supports it --
+In a terminal ~
+
+    <C-j>  the next one, <C-k> the previous -- bound in TERMINAL mode too
+    <C-h>  back to the list
+    <M-1>..9  open the nth
+    q      close the surface, from normal mode
+<
+`<C-j>`, `<C-k>`, `<C-h>` and `<C-l>` are bound in terminal mode, which is the
+only way cycling is worth having -- otherwise it starts with `<C-\><C-n>`. That
+does take those keys from whatever is running inside, which is right for
+`claude` and wrong for `tmux`; `ui.terminal.keys` renames or disables any of
+them. The DIGITS are deliberately not bound in a terminal: a bare `5` there
+costs you `50k` to scroll back, and `<M-5>` reaches the same terminal.
+
+`<Esc>` is never bound. It belongs to the PTY, so vim running inside one can
+still leave insert mode, and `<C-\><C-n>` is Neovim's own way out.
+
+                                                     *paseo-terminals-presets*
+`c` offers a SHELL, then one entry per provider the daemon has -- `claude` and
+`codex` today, and whatever you enable in Paseo tomorrow, because the list is
+read from the daemon rather than written here -- then anything in
+`ui.terminal.presets`, then a free-text command: >
+
+    ui = {
+      terminal = {
+        presets = { "lazygit", { label = "Top", command = "btop" } },
+      },
+    }
+<
+Nothing checks that a command exists, on purpose: the terminal runs on the
+DAEMON's host, which is not necessarily this machine, so the honest failure is
+the PTY printing `command not found`.
+
+                                                      *paseo-terminals-names*
+A name you give with `r` is kept HERE, by the plugin, and the daemon is told
+as well. That is not belt and braces: `renameTerminal` sets a terminal's
+`title`, and `title` is also what the PTY reports for itself -- so the shell
+overwrites your name with `user@host:~/dir` within a second, and every
+terminal in one directory ends up labelled identically. The list therefore
+shows, in order: the name you gave, the stable one the daemon assigned
+(`Terminal 3`), then the live title. The BAR shows the live title beside the
+name, where there is room for it and where it is actually useful.
+
+                                                     *paseo-terminals-render*
+A terminal here is a REAL terminal. It is `nvim_open_term`, the same libvterm
+behind `:terminal`, fed the PTY's own bytes -- so colour, the cursor, and a
+TUI redrawing itself all work, and what you type goes back to the daemon.
+Scrollback comes with you on attach, when the daemon supports it;
 |:checkhealth| `paseo` says whether yours does.
+
+A terminal DYING is a directory update that no longer lists it, never a
+process exiting under us -- Paseo owns the process, not Neovim. The list drops
+the row and the surface stays open, showing an empty pane, because closing
+your terminal manager because a process ended is not what you asked for.
 
                                                        *paseo-chat-history*
 The conversation is the agent's real timeline, fetched when the chat opens,

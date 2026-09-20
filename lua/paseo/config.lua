@@ -54,6 +54,7 @@ local M = {}
 ---@field float paseo.Config.UI.Float
 ---@field sidebar paseo.Config.UI.Sidebar
 ---@field ask paseo.Config.UI.Answer
+---@field terminal paseo.Config.UI.Terminal
 
 ---@class paseo.Config.UI.Animate
 ---@field bars boolean    Ease a progress bar towards its new value rather than
@@ -61,7 +62,6 @@ local M = {}
 ---                       benefits: a jump from 40% to 70% reads as a glitch.
 ---@field flash boolean   Briefly tint a tool card as it settles to ok or
 ---                       failed, then fade out through the accent ramp.
----@field reveal boolean  Stagger rows in when a tab is switched to.
 ---@field fps integer     Frames a second for all of the above. Every frame is
 ---                       one `volt.redraw` of one named section, which is an
 ---                       in-place extmark overwrite -- cheap, but not free on
@@ -123,6 +123,34 @@ local M = {}
 ---                       anything opened over them, because a question you
 ---                       cannot see is a turn that never finishes. The card
 ---                       sits 10 above this and its children 15.
+---@class paseo.Config.UI.Terminal
+---@field width number|fun(columns: integer): integer   PERCENT of the editor,
+---@field height number|fun(lines: integer): integer    1-100, the same unit
+---                      `ui.float` and floaterm's `size` take, so a number
+---                      means the same thing in all three.
+---@field row integer?    Absolute editor cells. Absent means centred.
+---@field col integer?
+---@field list integer    Width of the terminal list, in CELLS. The one
+---                      exception to the percentage rule, and deliberately:
+---                      the rail holds NAMES, and 10% of a 300-column monitor
+---                      is thirty columns of mostly nothing.
+---@field zindex integer  Base z-index. Above the dashboard's 30 -- this opens
+---                      over it -- and below the 50 telescope and
+---                      `vim.ui.select` take, so a picker opened from here is
+---                      on top of it.
+---@field backdrop boolean  Dim the editor behind the surface.
+---@field keys paseo.Config.UI.Terminal.Keys
+---@field presets (string|table)[]  Extra entries for the new-terminal picker,
+---                      beside a shell and one per provider the daemon has.
+---                      `"lazygit"`, or `{ label = "Lazygit", command = … }`.
+
+---@class paseo.Config.UI.Terminal.Keys
+---@field next string|false   Next terminal. Bound in TERMINAL mode too, which
+---@field prev string|false   is what makes it worth having -- and which takes
+---                      the key from whatever is running inside. Fine for
+---                      `claude`; set false if you run `tmux` in there.
+---@field list string|false   From the terminal to the rail.
+---@field terminal string|false  From the rail back to the terminal.
 
 ---@class paseo.Config.Workspaces
 ---@field dir string      Directory, relative to a project root, holding the
@@ -183,14 +211,13 @@ local defaults = {
     -- setting one group should not have to restate the others.
     theme = {},
 
-    -- Motion, on by default but cheap: three effects, none of which changes a
+    -- Motion, on by default but cheap: two effects, neither of which changes a
     -- section's HEIGHT. That constraint is not a style choice -- volt records
     -- each section's start row when the layout is measured, so a section that
     -- grows mid-animation draws every section below it at the wrong row.
     animate = {
       bars = true,
       flash = true,
-      reveal = true,
       fps = 30,
     },
 
@@ -234,6 +261,22 @@ local defaults = {
       min_width = 54,
       backdrop = true,
       zindex = 190,
+    },
+
+    terminal = {
+      width = 84,
+      height = 78,
+      -- row and col are deliberately absent: absent means centred.
+      list = 22,
+      zindex = 45,
+      backdrop = true,
+      keys = {
+        next = "<C-j>",
+        prev = "<C-k>",
+        list = "<C-h>",
+        terminal = "<C-l>",
+      },
+      presets = {},
     },
   },
 
@@ -284,13 +327,13 @@ function M.setup(opts)
   vim.validate("ui.theme", config.ui.theme, "table")
   vim.validate("ui.animate", config.ui.animate, function(v)
     return type(v) == "boolean" or type(v) == "table"
-  end, "false, or a table of bars/flash/reveal/fps")
+  end, "false, or a table of bars/flash/fps")
   -- `animate = false` is the shorthand everyone will actually type; normalise
   -- it here so nothing downstream has to handle both shapes.
   if config.ui.animate == false then
-    config.ui.animate = { bars = false, flash = false, reveal = false, fps = 30 }
+    config.ui.animate = { bars = false, flash = false, fps = 30 }
   elseif config.ui.animate == true then
-    config.ui.animate = { bars = true, flash = true, reveal = true, fps = 30 }
+    config.ui.animate = { bars = true, flash = true, fps = 30 }
   end
   config.ui.animate.fps = math.max(1, math.min(60, math.floor(config.ui.animate.fps or 30)))
   vim.validate("workspaces.open", config.workspaces.open, function(v)
@@ -300,12 +343,22 @@ function M.setup(opts)
   -- below 1 outright, and the backdrop sits five below this.
   vim.validate("ui.float.zindex", config.ui.float.zindex, "number")
   config.ui.float.zindex = math.max(10, math.floor(config.ui.float.zindex))
+  vim.validate("ui.terminal.zindex", config.ui.terminal.zindex, "number")
+  config.ui.terminal.zindex = math.max(10, math.floor(config.ui.terminal.zindex))
+  vim.validate("ui.terminal.backdrop", config.ui.terminal.backdrop, "boolean")
+  vim.validate("ui.terminal.presets", config.ui.terminal.presets, "table")
+  for name, key in pairs(config.ui.terminal.keys) do
+    vim.validate(("ui.terminal.keys.%s"):format(name), key, function(v)
+      return v == false or type(v) == "string"
+    end, "a key, or false to leave it unbound")
+  end
   -- Validated here rather than at the window, where a bad value would surface
   -- as `nvim_open_win` complaining about a width -- true, and no help at all in
   -- finding the key that caused it.
   for where, keys in pairs {
     float = { "width", "height", "row", "col", "composer" },
     sidebar = { "width", "min_width", "composer" },
+    terminal = { "width", "height", "row", "col", "list" },
   } do
     for _, key in ipairs(keys) do
       vim.validate(("ui.%s.%s"):format(where, key), config.ui[where][key], function(v)

@@ -34,6 +34,24 @@ local roots = {}
 ---look empty.
 ---@type table<string, boolean>
 local watched = {}
+---Roots a snapshot has actually arrived for. Separate from `watched`, which is
+---set BEFORE the round trip so a redraw-driven `watch` cannot queue one
+---subscription per frame -- and which therefore says "ready" while the first
+---list is still in flight, so a workspace with three terminals in it read as
+---"none yet" for as long as the daemon took to answer.
+---@type table<string, boolean>
+local answered = {}
+---Names given here rather than by the daemon.
+---
+---`renameTerminal` takes a `title`, and `title` is ALSO what the PTY reports
+---for itself -- so the daemon overwrites a rename with the shell's own
+---`milind@host:~/dir` within a second of you typing one, and every terminal in
+---a directory ends up with the same useless label. The name you choose is
+---therefore kept here, and the daemon is still told in case a later one keeps
+---it. Precedence is floaterm's: a name you gave, then the stable one the
+---daemon assigned, then the live title.
+---@type table<string, string>
+local labels = {}
 ---`bridge.on` has no `off`, so the directory listener is registered once.
 local listening = false
 local listeners = {}
@@ -53,6 +71,7 @@ local function apply(payload)
   -- the entries belonging to this cwd are cleared before the new ones land.
   local cwd = payload.cwd
   if cwd then
+    answered[cwd] = true
     for id, at in pairs(roots) do
       if at == cwd then
         terminals[id] = nil
@@ -111,10 +130,64 @@ end
 ---another's.
 M._apply = apply
 
+---Seed a terminal the daemon has just made, under the root it was made in.
+---
+---The directory is told by PUSH, and `terminals.create` answers before the
+---snapshot carrying the new terminal arrives -- so opening the thing you just
+---created would otherwise have to wait for a round trip that has already
+---happened once. The snapshot replaces this the moment it lands.
+---@param terminal paseo.Terminal
+---@param root string
+function M.adopt(terminal, root)
+  if not (terminal and terminal.id) then
+    return
+  end
+  terminals[terminal.id] = terminal
+  roots[terminal.id] = root
+end
+
 ---Call `fn` whenever the list changes.
 ---@param fn fun(terminals: table<string, paseo.Terminal>)
 function M.on_change(fn)
   listeners[#listeners + 1] = fn
+end
+
+---What to call a terminal. See `labels`.
+---@param terminal paseo.Terminal|string  A terminal, or its id.
+---@return string
+function M.label(terminal)
+  if type(terminal) == "string" then
+    terminal = terminals[terminal] or { id = terminal }
+  end
+  if type(terminal) ~= "table" or not terminal.id then
+    return "?"
+  end
+  return labels[terminal.id] or terminal.name or terminal.title or terminal.id
+end
+
+---The live title the PTY reports for itself -- the shell's prompt title,
+---usually `user@host:~/dir`. Worth showing where there is room for it, and
+---never in a twenty-column rail where every terminal's is identical.
+---@param terminal paseo.Terminal
+---@return string|nil
+function M.subtitle(terminal)
+  local title = terminal and terminal.title
+  if not title or title == "" or title == M.label(terminal) then
+    return nil
+  end
+  return title
+end
+
+---@param id string
+---@param label string|nil  nil or empty hands the name back to the daemon's.
+function M.set_label(id, label)
+  if not id then
+    return
+  end
+  labels[id] = (label and vim.trim(label) ~= "") and vim.trim(label) or nil
+  for _, fn in ipairs(listeners) do
+    pcall(fn, terminals)
+  end
 end
 
 ---@param id string
@@ -139,7 +212,7 @@ function M.for_root(root)
     end
   end
   table.sort(out, function(a, b)
-    return (a.title or a.name or a.id) < (b.title or b.name or b.id)
+    return M.label(a) < M.label(b)
   end)
   return out
 end
@@ -148,7 +221,16 @@ end
 ---rather than "none" before the first list lands.
 ---@return boolean
 function M.ready(root)
-  return watched[root] == true
+  root = vim.fn.resolve(vim.fn.fnamemodify(root, ":p")):gsub("/+$", "")
+  for cwd, yes in pairs(answered) do
+    if yes then
+      local at = vim.fn.resolve(cwd):gsub("/+$", "")
+      if at == root or vim.startswith(at, root .. "/") then
+        return true
+      end
+    end
+  end
+  return false
 end
 
 ---How a terminal's activity draws, as { glyph, highlight group }.

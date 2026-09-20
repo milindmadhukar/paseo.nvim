@@ -33,7 +33,7 @@ local M = {}
 ---the set is per provider and codex spells its own version `full-access`.
 ---@param id string
 ---@return string|nil  A key of `widgets.CHIP`.
-local function mode_tone(id)
+function M.tone(id)
   local lowered = id:lower()
   if lowered:find "bypass" or lowered:find "full%-access" or lowered:find "danger" then
     return "danger"
@@ -88,7 +88,7 @@ function M.groups(chat)
 
   local modes = entries(config.availableModes)
   for _, entry in ipairs(modes) do
-    entry.tone = mode_tone(entry.id)
+    entry.tone = M.tone(entry.id)
   end
 
   -- Only the toggles. A feature the provider reports as something other than a
@@ -235,6 +235,43 @@ function M.apply(chat, group, entry, done)
       end)
     end)
   end)
+end
+
+-- ------------------------------------------------------------------ source
+
+---@class paseo.SettingsSource
+---@field groups fun(self): table[]|nil
+---@field apply fun(self, group: table, entry: table, done: fun())
+---@field load fun(self, done: fun())
+---@field keys table<string, string>
+
+---This module, as the interface |paseo.ui.panels.session| draws.
+---
+---The View used to call `session.groups`, `session.apply` and `session.load`
+---by name, which tied it to a RUNNING agent -- and that is why the screen
+---shown before an agent exists was a second, hand-rolled renderer of the same
+---four settings. The View is already generic over "a list of groups"; this is
+---the three-method seam that lets |paseo.ui.draft| hand it a session that does
+---not exist yet.
+---@param chat table
+---@return paseo.SettingsSource
+function M.source(chat)
+  return {
+    chat = chat,
+    keys = M.KEYS,
+    pairs = { { "thinking", "features" } },
+    groups = function()
+      return M.groups(chat)
+    end,
+    apply = function(_, group, entry, done)
+      M.apply(chat, group, entry, done)
+    end,
+    load = function(_, done)
+      M.load(chat, function()
+        done()
+      end)
+    end,
+  }
 end
 
 -- ---------------------------------------------------------------- commands

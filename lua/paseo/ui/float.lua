@@ -34,7 +34,7 @@ local ns = api.nvim_create_namespace "paseo.float"
 ---@type table|nil
 local state
 
-M.TABS = { "Chat", "Session", "Sessions", "Changes", "Usage", "Workspaces", "Terminals" }
+M.TABS = { "Chat", "Session", "Sessions", "Changes", "Usage", "Workspaces" }
 
 -- ------------------------------------------------------------------ geometry
 
@@ -256,15 +256,7 @@ local function body_lines()
       or {
         { { "  this panel is unavailable", "PaseoToolFail" } },
       }
-    -- How many rows the reveal has got to. `#body` when there is no reveal
-    -- running, which is the case for every redraw but the first after a tab
-    -- switch.
-    local shown = require("paseo.ui.animate").revealed("float.body", #body)
-
-    for i, line in ipairs(body) do
-      if i > shown then
-        break
-      end
+    for _, line in ipairs(body) do
       local row = { { "  ", nil } }
       vim.list_extend(row, render.truncate(vim.deepcopy(line), g.width - 4))
       lines[#lines + 1] = row
@@ -283,6 +275,22 @@ local function body_lines()
     table.remove(lines)
   end
   return lines
+end
+
+---The buffer line a panel's first line is drawn on.
+---
+---Header, tab bar, rule -- so body row 1 is buffer line 4. Exposed rather than
+---re-derived by the panel that needs it: the Sessions panel maps cursor rows
+---to sessions, and the panel this replaced hardcoded the sum as `row - 5`,
+---which meant adding a heading line silently retargeted its kill key.
+---
+---The number itself comes from |paseo.ui.layout|, which is the one place the
+---chrome's row budget is stated -- it is the same figure the body height and
+---the composer geometry are computed from, and three copies of it is how the
+---`row - 5` happened in the first place.
+---@return integer
+function M.body_row_offset()
+  return layout.CHROME.above
 end
 
 ---@return table[][]
@@ -307,17 +315,6 @@ end
 ---anything first. A panel whose content changed height therefore has to go all
 ---the way back through `gen_data`, or rows from the previous draw survive
 ---underneath the new ones.
----Where the surface currently is, or nil when it is closed.
----
----Exposed for the one panel that puts a window of its own over the body: a
----Paseo terminal is a real PTY buffer and cannot be drawn as cells, so it has
----to be floated at the body's coordinates the way the conversation is on the
----Chat tab.
----@return table|nil
-function M.geometry_of()
-  return state and state.geometry or nil
-end
-
 ---The chrome buffer, for a panel that has to schedule a redraw of itself.
 ---
 ---A panel is handed a width and a height, not a buffer -- but an animated
@@ -609,16 +606,6 @@ function M.select(name)
       pcall(panel.load, state.chat)
     end
     panel_keys(name, "attach")
-
-    -- Stagger the rows in. Cheap because volt repaints one named section in
-    -- place, and safe because `revealed` only ever draws FEWER rows into a
-    -- block that is padded to its final height anyway -- a reveal that grew
-    -- the section would put every section below it at the wrong row.
-    require("paseo.ui.animate").reveal {
-      key = "float.body",
-      buf = state.buf,
-      section = "body",
-    }
   end
 
   M.rebuild()
@@ -643,10 +630,73 @@ end
 
 -- ------------------------------------------------------------- open / close
 
+---Move a tab page off a window we are about to close.
+---
+---Closing a float that is another TAB PAGE'S CURRENT WINDOW leaves that tab
+---pointing at a window which no longer exists. Neovim does not recover: the
+---next `:tabclose`, or merely switching back, dies with `E315: ml_get: Invalid
+---lnum` -- and with the four windows this surface opens, it takes the whole
+---process down instead.
+---
+---The dashboard is always its tab's current window, so this is one keystroke
+---away: open the chat, `gt`, close it. `workspaces.open` with the default
+---`"tab"` does exactly that shape of thing on every workspace switch, which is
+---what turned a latent crash into a routine one.
+---
+---`nvim_tabpage_set_win` is 0.11. On 0.10 the only way to move another tab
+---page's cursor is to stand on it, and `noautocmd` keeps that round trip from
+---looking like navigation to a config that chdirs on `TabEnter`.
+---@param wins integer[]  Windows about to be closed.
+local function reseat(wins)
+  local doomed = {}
+  for _, win in ipairs(wins) do
+    if win and api.nvim_win_is_valid(win) then
+      doomed[win] = true
+    end
+  end
+
+  local here = api.nvim_get_current_tabpage()
+  local tabs = {}
+  for win in pairs(doomed) do
+    local tab = api.nvim_win_get_tabpage(win)
+    if tab ~= here then
+      tabs[tab] = true
+    end
+  end
+
+  for tab in pairs(tabs) do
+    if api.nvim_tabpage_is_valid(tab) and doomed[api.nvim_tabpage_get_win(tab)] then
+      local keep
+      for _, win in ipairs(api.nvim_tabpage_list_wins(tab)) do
+        -- A normal window for preference: seating the tab on another float is
+        -- the same bug one step along.
+        if not doomed[win] and api.nvim_win_get_config(win).relative == "" then
+          keep = win
+          break
+        end
+      end
+      if keep and api.nvim_tabpage_set_win then
+        pcall(api.nvim_tabpage_set_win, tab, keep)
+      elseif keep then
+        local there = api.nvim_tabpage_get_number(tab)
+        vim.cmd("noautocmd tabnext " .. there)
+        pcall(api.nvim_set_current_win, keep)
+        vim.cmd("noautocmd tabnext " .. api.nvim_tabpage_get_number(here))
+      end
+    end
+  end
+end
+
 function M.close()
   if not state then
     return
   end
+  reseat {
+    state.win,
+    state.backdrop_win,
+    state.chat.win_conversation,
+    state.chat.win_composer,
+  }
   -- Before `state` goes: `panel_keys` reads it, and a panel left attached
   -- would have its mappings outlive the buffer they were bound to.
   panel_keys(state.tab, "detach")

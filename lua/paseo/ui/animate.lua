@@ -9,11 +9,19 @@
 --- reason.
 ---
 --- So nothing in this file changes a height. A tween moves a number inside a
---- bar of fixed width; a flash swaps a highlight; a reveal draws fewer rows
---- into a block that was already the right size and fills the rest with
---- blanks. Every effect is a repaint of one named section, which is what makes
---- them cheap -- volt's extmarks are keyed `id = row`, so redrawing a section
---- overwrites its own rows in place with no clear and no flicker.
+--- bar of fixed width and a flash swaps a highlight; both are a repaint of one
+--- named section, which is what makes them cheap -- volt's extmarks are keyed
+--- `id = row`, so redrawing a section overwrites its own rows in place with no
+--- clear and no flicker.
+---
+--- There WAS a third effect, staggering a panel's rows in on a tab switch, and
+--- it is gone for a reason worth recording. It drew fewer rows into a block
+--- padded to its final height, which respects the constraint above -- but the
+--- Sessions panel maps cursor rows to sessions, and that map still named every
+--- row while only some were painted. For the length of the reveal the screen
+--- disagreed with what a keypress would do. A decorative effect is not worth a
+--- window in which the surface lies about itself, least of all in a plugin
+--- whose point is that you never leave the keyboard.
 ---
 --- All of it is off when `ui.animate = false`, which normalises to every
 --- effect false in `config.setup`. The spinner is NOT here and is never
@@ -156,12 +164,6 @@ M.FLASH_MS = 420
 ---which is a blink rather than a settle.
 ---Start a repaint clock for `key`, running for `FLASH_MS`.
 ---
----Shared by `flash` and `reveal`, which are the same machine -- a start time
----and something that repaints while it runs -- differing only in what they
----read back out of it. Ungated: each caller checks its OWN setting, because
----`reveal` delegating to a gated `flash` meant turning flash off silently
----turned reveal off too.
----
 ---`on_frame` is how this works on a REAL buffer as well as a volt one. The
 ---transcript is ordinary buffer lines with extmarks over them, so there is no
 ---named section to repaint -- it redraws one block by id instead, and says so
@@ -231,42 +233,6 @@ function M.flash_stop(key)
   end
 
   return math.min(3, math.floor((elapsed / M.FLASH_MS) * 4))
-end
-
----How long a full reveal takes.
-M.REVEAL_MS = 260
-
----Begin revealing a block of rows.
----@param o { key: string, buf: integer, section: string|string[] }
-function M.reveal(o)
-  if not M.enabled "reveal" then
-    M.stop(o.key)
-    return
-  end
-  clock(o).until_ = vim.uv.now() + M.REVEAL_MS
-end
-
----How many of `total` rows should be drawn this frame.
----
----The caller pads the remainder with BLANK rows rather than dropping them: the
----block keeps its height throughout, which is the constraint at the top of
----this file.
----@param key string
----@param total integer
----@return integer
-function M.revealed(key, total)
-  local state = live[key]
-  if not (state and state.until_) then
-    return total
-  end
-
-  local remaining = state.until_ - vim.uv.now()
-  if remaining <= 0 then
-    return total
-  end
-
-  local done = 1 - (remaining / M.REVEAL_MS)
-  return math.max(1, math.min(total, math.ceil(done * total)))
 end
 
 return M
