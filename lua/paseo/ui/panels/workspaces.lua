@@ -11,6 +11,9 @@
 
 local agents = require "paseo.agents"
 
+local icons = require "paseo.ui.icons"
+local widgets = require "paseo.ui.widgets"
+
 local M = {}
 
 M.title = "Workspaces"
@@ -87,7 +90,13 @@ function M.lines(chat, width)
   w_project = math.min(w_project, 20)
   w_name = math.min(w_name, 28)
 
-  local lines = { { { "  Workspaces", "PaseoHeader" } }, {} }
+  local lines = {
+    {
+      { "  " .. icons.panel.Workspaces .. "  ", "PaseoBlue1" },
+      { "Workspaces", "PaseoHeader" },
+    },
+    {},
+  }
 
   if #list == 0 then
     lines[#lines + 1] = { { "  no workspaces yet", "PaseoDim" } }
@@ -102,13 +111,28 @@ function M.lines(chat, width)
       end
       require("paseo.ui.chat").open { root = ws.directory, title = ws.name }
     end
-    lines[#lines + 1] = {
-      { mine and "  ▌ " or "    ", mine and "PaseoAgent" or nil, click },
-      { ("%-" .. w_project .. "s  "):format(ws.project or ""), "PaseoDim", click },
-      { ("%-" .. w_name .. "s  "):format(ws.name or ""), mine and "PaseoAgent" or nil, click },
-      { ("%-9s"):format(shape(ws)), "PaseoBadge", click },
-      { "  " .. agents.summary(ws.directory or ""), "PaseoDim", click },
+    local id = "workspaces." .. (ws.directory or ws.name or "")
+    local action = widgets.hover(id, "body", click)
+    local row = {
+      { mine and "  " .. widgets.icons.mine .. " " or "    ", mine and "PaseoAgent" or nil },
+      -- A swatch per project, hashed off its name, so a list of twenty
+      -- workspaces groups by eye before it is read.
+      widgets.swatch(ws.project or ws.name or ""),
+      { " " .. ("%-" .. w_project .. "s  "):format(ws.project or ""), "PaseoDim" },
+      { ("%-" .. w_name .. "s  "):format(ws.name or ""), mine and "PaseoAgent" or nil },
+      { ("%-9s"):format(shape(ws)), "PaseoBadge" },
+      { "  " .. agents.summary(ws.directory or ""), "PaseoDim" },
     }
+
+    local row_hl = widgets.row_hl(id, mine)
+    if row_hl then
+      lines[#lines + 1] = widgets.fill_row(row, width, row_hl, action)
+    else
+      for _, cell in ipairs(row) do
+        cell[3] = action
+      end
+      lines[#lines + 1] = row
+    end
   end
 
   lines[#lines + 1] = {}
@@ -119,16 +143,19 @@ function M.lines(chat, width)
     require("paseo.pickers.workspaces").open()
   end
   lines[#lines + 1] = {
-    { "  + ", "PaseoKey", new },
+    { "  " .. icons.ui.new .. " ", "PaseoKey", new },
     { "new workspace here", "PaseoDim", new },
-    { "      ⋯ ", "PaseoKey", picker },
+    { "      " .. icons.ui.more .. " ", "PaseoKey", picker },
     { "open, sessions, archive", "PaseoDim", picker },
   }
 
   -- The repos of the unit of work this session is in -- `:Paseo repos`, which
   -- is otherwise a notification you have to ask for.
   lines[#lines + 1] = {}
-  lines[#lines + 1] = { { "  This unit of work", "PaseoHeader" } }
+  lines[#lines + 1] = {
+    { "  " .. icons.ui.repo .. "  ", "PaseoBlue1" },
+    { "This unit of work", "PaseoHeader" },
+  }
   lines[#lines + 1] = {}
   local repos = require("paseo.repos").list { path = chat.root }
   if #repos == 0 then
@@ -136,7 +163,9 @@ function M.lines(chat, width)
   end
   for _, repo in ipairs(repos) do
     lines[#lines + 1] = {
-      { "    " .. repo.name, nil },
+      { "    " },
+      widgets.swatch(repo.name),
+      { " " .. repo.name, nil },
       { "   " .. vim.fn.fnamemodify(repo.worktree, ":~"), "PaseoPath" },
     }
   end

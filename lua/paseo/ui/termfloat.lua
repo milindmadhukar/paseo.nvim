@@ -147,15 +147,15 @@ local function list_lines()
     local click = function()
       M.focus(item.id)
     end
-    local line = widgets.row(
+    local line = widgets.row({
       {
-        { current and "▌" or " ", current and "PaseoAgent" or nil, click },
-        { glyph[1] .. " ", glyph[2], click },
-        { terminals.label(item), current and "PaseoAgent" or "PaseoCardText", click },
+        current and require("paseo.ui.icons").marker.mine or " ",
+        current and "PaseoAgent" or nil,
+        click,
       },
-      { i <= 9 and { tostring(i) .. " ", "PaseoKeycapDim", click } or { "", nil, click } },
-      inner
-    )
+      { glyph[1] .. " ", glyph[2], click },
+      { terminals.label(item), current and "PaseoAgent" or "PaseoCardText", click },
+    }, { i <= 9 and { tostring(i) .. " ", "PaseoKeycapDim", click } or { "", nil, click } }, inner)
     lines[#lines + 1] = render.truncate(line, inner)
     state.rows[#lines] = item.id
   end
@@ -427,7 +427,10 @@ function M.create(preset)
   }, function(err, result)
     vim.schedule(function()
       if err then
-        return vim.notify("paseo: could not start a terminal — " .. tostring(err), vim.log.levels.ERROR)
+        return vim.notify(
+          "paseo: could not start a terminal — " .. tostring(err),
+          vim.log.levels.ERROR
+        )
       end
       local item = result and result.terminal
       -- Straight into it. You did not ask for a row in a list; you asked for
@@ -478,22 +481,25 @@ end
 ---@param id string
 function M.rename(id)
   local item = terminals.get(id)
-  vim.ui.input({ prompt = "Name: ", default = item and terminals.label(item) or "" }, function(title)
-    if title == nil then
-      return
+  vim.ui.input(
+    { prompt = "Name: ", default = item and terminals.label(item) or "" },
+    function(title)
+      if title == nil then
+        return
+      end
+      -- Ours first, because it is the one that survives. The daemon is told as
+      -- well -- a later one may keep a title the PTY does not overwrite, and
+      -- the name then shows up in the Paseo app too -- but nothing here waits
+      -- on that answer.
+      terminals.set_label(id, title)
+      redraw()
+      require("paseo.bridge").request(
+        "terminals.rename",
+        { terminalId = id, title = title },
+        function() end
+      )
     end
-    -- Ours first, because it is the one that survives. The daemon is told as
-    -- well -- a later one may keep a title the PTY does not overwrite, and
-    -- the name then shows up in the Paseo app too -- but nothing here waits
-    -- on that answer.
-    terminals.set_label(id, title)
-    redraw()
-    require("paseo.bridge").request(
-      "terminals.rename",
-      { terminalId = id, title = title },
-      function() end
-    )
-  end)
+  )
 end
 
 ---@param id string
@@ -710,7 +716,11 @@ local function relayout()
   }
   for _, box in ipairs(boxes) do
     if box[1] and api.nvim_win_is_valid(box[1]) then
-      pcall(api.nvim_win_set_config, box[1], vim.tbl_extend("force", { relative = "editor" }, box[2]))
+      pcall(
+        api.nvim_win_set_config,
+        box[1],
+        vim.tbl_extend("force", { relative = "editor" }, box[2])
+      )
     end
   end
   if state.backdrop_win and api.nvim_win_is_valid(state.backdrop_win) then

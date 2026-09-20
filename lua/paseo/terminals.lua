@@ -239,12 +239,13 @@ end
 function M.glyph(terminal)
   local activity = terminal.activity
   local state = activity and activity.state
+  local icons = require "paseo.ui.icons"
   if state == "attention" then
-    return { "!", "PaseoDanger" }
+    return { icons.status.permission, "PaseoDanger" }
   elseif state == "working" then
-    return { "•", "PaseoAgent" }
+    return { icons.status.running, "PaseoAgent" }
   end
-  return { "·", "PaseoDim" }
+  return { icons.status.idle, "PaseoDim" }
 end
 
 ---A one-line summary of a root's terminals, for a picker column.

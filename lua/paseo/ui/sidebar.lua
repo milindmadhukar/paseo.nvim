@@ -9,6 +9,7 @@
 --- preserves your draft and your scroll position for free, because neither
 --- lives in the window.
 
+local icons = require "paseo.ui.icons"
 local render = require "paseo.ui.render"
 local transcript = require "paseo.ui.transcript"
 
@@ -100,7 +101,7 @@ function M.header(chat)
   -- Something is waiting on you. Worth shouting about: the agent is blocked
   -- until it is answered.
   if chat.permissions and #chat.permissions > 0 then
-    line[#line + 1] = { "   needs you (gp) ", "PaseoDanger" }
+    line[#line + 1] = { "  " .. icons.status.permission .. " needs you (gp) ", "PaseoDanger" }
   end
 
   line[#line + 1] = { "  ", "PaseoDim" }
@@ -179,7 +180,7 @@ function M.open(chat)
   -- costs you the width it occupies.
   vim.wo[chat.win_composer].winbar = render.to_winbar {
     { "  ", "PaseoDim" },
-    { "↵", "PaseoKey" },
+    { icons.spell "<CR>", "PaseoKey" },
     { " send · ", "PaseoDim" },
     { "<C-f>", "PaseoKey" },
     { " full screen · ", "PaseoDim" },

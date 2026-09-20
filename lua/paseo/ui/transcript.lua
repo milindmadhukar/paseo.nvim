@@ -244,6 +244,17 @@ end
 ---@param item table|nil  New item data; keeps the old if omitted.
 ---@param opts? { follow?: boolean }  `follow = false` to leave the view alone.
 function M.rerender(chat, block, item, opts)
+  -- Caught BEFORE `block.item` is replaced: the flash marks the TRANSITION
+  -- from running to settled, and once the new item is in place there is
+  -- nothing left to compare against. A card that arrives already completed --
+  -- a replayed timeline, a reconnect -- does not flash, which is right: it did
+  -- not just happen.
+  local settled = item
+    and item.status
+    and item.status ~= "running"
+    and block.item
+    and block.item.status == "running"
+
   if item then
     block.item = item
     -- The running->completed replacement is where a card earns its fold. Only
@@ -265,6 +276,22 @@ function M.rerender(chat, block, item, opts)
   draw(chat, block, row, block.height)
   if stick then
     to_bottom(chat)
+  end
+
+  if settled then
+    -- `on_frame` rather than a section name: this is a real buffer, so the
+    -- repaint is one block redrawn by id. `follow = false` so a flash cannot
+    -- drag the window to the bottom while you are reading further up.
+    require("paseo.ui.animate").flash {
+      key = require("paseo.ui.timeline").flash_key(item),
+      buf = chat.conversation,
+      on_frame = function()
+        local at = row_of(chat, block)
+        if at then
+          draw(chat, block, at, block.height)
+        end
+      end,
+    }
   end
 end
 

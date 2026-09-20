@@ -43,6 +43,7 @@ claude / codex / opencode.
 Hard:
   - Neovim 0.10+
   - `git`
+  - a Nerd Font -- every surface draws glyphs from one; see |paseo-glyphs|
   - telescope.nvim, for the workspace and session pickers
   - gitsigns.nvim, for finding the hunk under the cursor (|:Paseo-ask|)
   - nvzone/volt, for the chat chrome, the panels and the permission dialog
@@ -178,6 +179,80 @@ ui.expand                                       string, default `"running"`
     so you watch the output arrive; a failure stays open, because a failure is
     the one you wanted to read. `"always"` and `"never"` are the two ends.
     `<Tab>` overrides whichever it is. See |paseo-chat-timeline|.
+
+                                                      *paseo-config.ui.style*
+ui.style                                 string|table, default `"plate"`
+
+    The frame language: how a card is drawn, and what the outer edge of a
+    float is. A preset name, or a table of the same fields when you only want
+    to change one of them. >lua
+        ui = { style = "rounded" }
+        ui = { style = { preset = "rounded", border = "none" } }
+<
+    `card` is one of:
+
+    `"plate"`    NO frame at all. A title row and a body painted one
+                 elevation step above the surface, with a row of padding
+                 above and below. The default.
+    `"rule"`     A title, then one hairline INSET from both edges -- a
+                 full-bleed rule reads as a table border, not a divider.
+    `"rounded"`  Real boxes, `╭╮╰╯`, with the title inset in the top rule.
+    `"square"`   The same with `┌┐└┘`.
+
+    `border` is one of `"invisible"` (the default), `"rounded"`, `"single"`
+    or `"none"`.
+
+    `"invisible"` is NOT `"none"`. It keeps a real border and paints the
+    glyphs fg == bg, so the frame becomes a one-cell ring of padding in the
+    surface's own colour. Dropping the border instead takes that padding with
+    it and puts content hard against the window edge.
+
+    Every style produces the SAME number of rows for the same content. That is
+    not tidiness: volt records a section's start row when the layout is
+    measured and never recomputes it, so a card whose height depended on the
+    frame would move every section below it the moment this changed.
+
+    See |paseo-colours|.
+
+                                                      *paseo-config.ui.theme*
+ui.theme                                              table, default `{}`
+
+    Highlight overrides, laid over the derived groups AFTER derivation and
+    re-applied on every |ColorScheme|. >lua
+        ui = { theme = { PaseoChipOn = { bg = "#204a26" } } }
+<
+    A config key rather than "set the group again after setup()", which is
+    what the docs used to say and which quietly stopped working the moment you
+    changed colourscheme -- the derivation re-runs and overwrote it.
+
+    See |paseo-colours| for the group names.
+
+                                                    *paseo-config.ui.animate*
+ui.animate                                 boolean|table, default on
+
+    Motion. `false` disables every effect; a table names them: >lua
+        ui = { animate = { bars = true, flash = true, fps = 30 } }
+<
+    `bars`    Ease a progress bar towards its new value rather than snapping.
+              The context-window bar is the one that benefits: a jump from
+              40% to 70% reads as a glitch.
+    `flash`   Briefly tint a tool card as it settles to ok or failed, then
+              fade out through the accent ramp.
+    `fps`     Frames a second, clamped to 1-60.
+
+    The spinner is NOT one of these and is never disabled: a turn that is
+    running has to look different from one that is wedged, and that is
+    information rather than decoration.
+
+    Neither effect changes a section's HEIGHT, which is a constraint rather
+    than a choice: volt records each section's start row when the layout is
+    measured, so a section that grows mid-animation draws every section below
+    it at the wrong row.
+
+    A third effect -- staggering a panel's rows in on a tab switch -- was
+    written and then removed. The Sessions panel maps cursor rows to sessions,
+    and that map named every row while only some were painted, so for the
+    length of the reveal the screen disagreed with what a keypress would do.
 
                         *paseo-config.ui.float.width*
                         *paseo-config.ui.float.height*
@@ -1137,31 +1212,75 @@ work on an agent's reply. Volt draws the chrome around it -- the header, the
 panels, the permission dialog -- because virtual text cannot be yanked.
 
                                                           *paseo-colours*
-Every colour is DERIVED, never hardcoded, so the surfaces follow whatever
-colourscheme is loaded. Volt supplies the accents -- from base46's palette on
-NvChad, from `Normal`/`Comment`/`Function`/`added`/`removed` otherwise -- and
-the backgrounds are steps off `Normal`: the surface two points away, a card
-seven, a chip a little further still. On a light background every step goes
-the other way, and accents used as text are pushed away from the background
-before use, because a pale green on a green-tinted chip is not readable.
+Every colour is DERIVED, never hardcoded, and nothing here depends on NvChad.
+
+BACKGROUNDS are an elevation ladder stepped off `Normal`: the editor, the
+surface two points away, a card five, a chip eight, the selected row eleven.
+On a light background every step goes the other way. Depth comes from that
+ladder rather than from drawn boxes, which is the idea behind the default
+|paseo-config.ui.style| of `"plate"`.
+
+ACCENTS get four stops each -- `PaseoGreen0` through `PaseoGreen3`, blended
+towards the background -- so there is something to fade a flash through, shade
+a heat scale with, and draw a divider in that is not content weight.
+
+Where the accents come from is a chain, and the order matters. With NvChad,
+volt's `Ex*` groups, which are base46's palette. Without it, `DiagnosticError`
+/`Removed`, `DiagnosticOk`/`Added`, `Function`, `DiagnosticWarn`/`Changed` --
+the groups that MEAN what we mean. `Added` before `String`, because on
+`morning` `String` is magenta, so a tool that succeeded was drawn the colour
+of a string literal.
+
+Volt's `Ex*` groups are deliberately NOT read on the non-base46 path: volt's
+own fallback writes `ExBlue = { fg = get_hl "Function" }`, and
+`volt.utils.get_hl` returns a TABLE rather than a colour, so on every setup
+without NvChad each accent resolves to `#000000`. Black is not obviously wrong
+on a dark theme, which is why it went unnoticed. It is simply invisible.
+
+Three corrections are then applied, each of which a real colourscheme forced:
+
+  - An accent used as TEXT is pushed until it is legible on whatever it sits
+    on. Both directions are tried and the better result wins; a colour that
+    already clears the bar is left exactly alone.
+  - DIM has to be dimmer than body text, and neutral with it. `morning` sets
+    `Comment` to pure blue: quiet by luminance, loud by saturation.
+  - A bar's TRACK is derived from the background, because a track is the
+    absence of fill.
+
+IDENTITY colours -- the dot beside a repo or a project -- are a separate set of
+eight, not the semantic accents: four collided in a list of four, and red
+already means "this failed". They are hue rotations off the theme's blue,
+stepped by the golden angle so consecutive indices land far apart on the wheel.
 
 On a TRANSPARENT theme -- `Normal` with no background -- no background is
 painted at all. Selection is then signalled by removing dimming rather than by
 adding a fill, which is better than an opaque rectangle over someone's
 wallpaper.
 
-Override any of it by setting the group again after `setup`; they are re-
-derived on `ColorScheme` and nowhere else.
+Override any group with |paseo-config.ui.theme|. Setting the group yourself
+after `setup` does NOT survive a colourscheme change, because the derivation
+re-runs on |ColorScheme| and overwrites it.
+
+                                                            *paseo-glyphs*
+A Nerd Font is REQUIRED. Every glyph lives in one registry,
+`lua/paseo/ui/icons.lua`, defined by CODEPOINT rather than by literal bytes.
+
+The codepoints are the point. Twice the bytes of a Private Use Area glyph have
+been lost out of a source file, and an empty icon is not a visible failure:
+the line still draws, and "off" and "broken" look identical. The test suite
+walks the whole registry and asserts every entry is at least one cell wide.
 
                                                         *paseo-chat-timeline*
 The transcript shows what the agent is DOING, not only what it says: files
 read, commands run, edits made, searches, sub-agents, and its reasoning.
 
-Each is a card, collapsed to one line, with a status glyph: >
+Each is a card, collapsed to one line, with a status glyph -- `md-progress_`
+`clock`, `md-check_circle`, `md-close_circle` and `md-cancel` from the
+registry, named there rather than pasted here. See |paseo-glyphs|.
 
-    ◐  running        ✓  completed
-    ✗  failed         ⊘  canceled
-<
+On the default |paseo-config.ui.style| a card has no frame: the status colour
+is carried by a one-column accent bar down its left edge, the same shape a
+message of your own gets. `"rounded"` puts the boxes back.
 `<Tab>` expands one to show what it actually did -- a command's output and
 exit code, an edit's diff, a read's line range, a search's matches. A failed
 call shows its error without being expanded.

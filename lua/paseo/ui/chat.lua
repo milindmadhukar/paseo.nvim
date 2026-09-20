@@ -419,9 +419,14 @@ local function make_buffers(chat)
     vim.keymap.set("n", "gp", function()
       require("paseo.ui.permission").reopen(chat)
     end, vim.tbl_extend("force", conv, { desc = "paseo: reopen permission prompt" }))
-    vim.keymap.set("n", "<C-f>", M.fullscreen, vim.tbl_extend("force", conv, {
-      desc = "paseo: sidebar <-> full screen",
-    }))
+    vim.keymap.set(
+      "n",
+      "<C-f>",
+      M.fullscreen,
+      vim.tbl_extend("force", conv, {
+        desc = "paseo: sidebar <-> full screen",
+      })
+    )
 
     -- Cards are drawn to the window width, so a resize leaves every box either
     -- short or wrapped. Re-render rather than live with it.
@@ -489,13 +494,23 @@ local function make_buffers(chat)
       end
     end
     for _, key in ipairs { "p", "P" } do
-      vim.keymap.set("n", key, paste(key), vim.tbl_extend("force", opts, {
-        desc = "paseo: paste (an image, if the clipboard has one)",
-      }))
+      vim.keymap.set(
+        "n",
+        key,
+        paste(key),
+        vim.tbl_extend("force", opts, {
+          desc = "paseo: paste (an image, if the clipboard has one)",
+        })
+      )
     end
-    vim.keymap.set({ "n", "i" }, "<C-v>", paste "<C-v>", vim.tbl_extend("force", opts, {
-      desc = "paseo: paste (an image, if the clipboard has one)",
-    }))
+    vim.keymap.set(
+      { "n", "i" },
+      "<C-v>",
+      paste "<C-v>",
+      vim.tbl_extend("force", opts, {
+        desc = "paseo: paste (an image, if the clipboard has one)",
+      })
+    )
     vim.keymap.set("n", "q", function()
       M.close()
     end, vim.tbl_extend("force", opts, { desc = "paseo: close chat" }))
@@ -741,34 +756,37 @@ function M.open(opts, callback)
         return callback(nil, nil)
       end
       notice(chat, "choose session settings…")
-      require("paseo.ui.create").review({ cwd = root, preferred = preferred }, function(draft, review_err)
-        if review_err then
-          notice(chat, review_err, "error")
-          return callback(nil, review_err)
-        end
-        if not draft then
-          chats[root] = nil
-          if current == chat then
-            M.close()
+      require("paseo.ui.create").review(
+        { cwd = root, preferred = preferred },
+        function(draft, review_err)
+          if review_err then
+            notice(chat, review_err, "error")
+            return callback(nil, review_err)
           end
-          return callback(nil, "cancelled")
-        end
-        bridge.request("agent.ensure", {
-          cwd = root,
-          provider = draft.provider,
-          modeId = draft.modeId,
-          thinkingOptionId = draft.thinkingOptionId,
-          featureValues = draft.featureValues,
-          title = "paseo.nvim · " .. vim.fs.basename(root),
-        }, function(agent_err, result)
-          if agent_err then
-            notice(chat, agent_err, "error")
-            return callback(nil, agent_err)
+          if not draft then
+            chats[root] = nil
+            if current == chat then
+              M.close()
+            end
+            return callback(nil, "cancelled")
           end
-          config.get().paseo.provider = draft.provider
-          adopt(result)
-        end)
-      end)
+          bridge.request("agent.ensure", {
+            cwd = root,
+            provider = draft.provider,
+            modeId = draft.modeId,
+            thinkingOptionId = draft.thinkingOptionId,
+            featureValues = draft.featureValues,
+            title = "paseo.nvim · " .. vim.fs.basename(root),
+          }, function(agent_err, result)
+            if agent_err then
+              notice(chat, agent_err, "error")
+              return callback(nil, agent_err)
+            end
+            config.get().paseo.provider = draft.provider
+            adopt(result)
+          end)
+        end
+      )
     end)
   end)
 end
@@ -1162,8 +1180,7 @@ function M.load_settings(chat)
       -- `agent.ensure`, so it has no provider and the header read "…" for the
       -- whole session. The config call already knows.
       if config.provider then
-        chat.provider = config.model and (config.provider .. "/" .. config.model)
-          or config.provider
+        chat.provider = config.model and (config.provider .. "/" .. config.model) or config.provider
       end
       chat.usage = config.usage or chat.usage
       chat.config_snapshot = config

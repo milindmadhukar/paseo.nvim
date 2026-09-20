@@ -122,7 +122,7 @@ function M.truncate(line, w)
         end
         out[#out + 1] = { taken, cell[2] }
       end
-      out[#out + 1] = { "…", "PaseoDim" }
+      out[#out + 1] = { require("paseo.ui.icons").marker.ellipsis, "PaseoDim" }
       return out
     end
   end
@@ -172,46 +172,95 @@ end
 
 -- ----------------------------------------------------------------------- cards
 
-M.icons = {
-  running = "󰑮",
-  completed = "",
-  failed = "",
-  canceled = "",
-  thinking = "",
-  todo = "",
-  note = "",
-}
+---How many columns a card's body actually gets at `w`.
+---
+---A framed card spends two columns on its sides that an unframed one does not,
+---so anything wrapping text to fit inside a card has to ask rather than
+---assume: hardcoding either number truncates under the other style.
+---@param w integer
+---@param kind? string
+---@return integer
+function M.card_inner(w, kind)
+  kind = kind or require("paseo.ui.style").get().card
+  local framed = kind == "rounded" or kind == "square"
+  return math.max(4, w - (framed and 4 or 2))
+end
 
----A bordered block: a header line, then a body, in a rounded box.
+---A card: a header line, then a body.
 ---
 ---Used for tool calls in the transcript AND for the `detail` of a permission
 ---request, which is the point of having one builder -- approving a command
 ---shows you the same card you would have seen it run as.
+---
+---Honours `ui.style` like every other card, so the transcript and the
+---dashboard cannot drift apart again. The two framed styles put the header IN
+---the top border; the two unframed ones replace the frame with a one-column
+---accent bar down the left edge, carrying the same colour the border would
+---have -- which is how a failed card still reads as failed without a box
+---around it. That bar is the same shape as the `▌` gutter a user message
+---already gets, so the transcript has one visual grammar rather than two.
+---
+---A COLLAPSED card -- no body -- is always exactly one line. A transcript full
+---of three-line boxes for "read a file" is unreadable, and that is true in
+---every style.
 ---@param header table[]
 ---@param body table[][]
----@param opts { width: integer, hl?: string }
+---@param opts { width: integer, hl?: string, kind?: string }
 ---@return table[][]
 function M.card(header, body, opts)
+  local style = require "paseo.ui.style"
   local hl = opts.hl or "PaseoBorder"
   local w = opts.width
-  local inner = math.max(10, w - 4)
   local collapsed = #body == 0
+  local kind = opts.kind or style.get().card
+  local box = style.BOX[kind]
 
   local lines = {}
 
+  if not box then
+    -- Unframed. The accent bar is two columns -- the glyph and a space -- so
+    -- the content lines up with the framed styles' "│ " to the cell.
+    local bar = { require("paseo.ui.icons").marker.mine .. " ", hl }
+    local inner = math.max(10, M.card_inner(w, kind))
+
+    local head = { vim.deepcopy(bar) }
+    vim.list_extend(head, M.truncate(vim.deepcopy(header), inner))
+    lines[#lines + 1] = head
+
+    if collapsed then
+      return lines
+    end
+
+    if kind == "rule" then
+      lines[#lines + 1] = {
+        vim.deepcopy(bar),
+        { string.rep(style.BOX.square.h, math.max(0, w - 3)), "PaseoCardRule" },
+      }
+    end
+
+    for _, line in ipairs(body) do
+      local row = { vim.deepcopy(bar) }
+      vim.list_extend(row, M.truncate(vim.deepcopy(line), inner))
+      lines[#lines + 1] = row
+    end
+
+    return lines
+  end
+
+  local inner = math.max(10, M.card_inner(w, kind))
+
   -- The header sits IN the top border, so a collapsed card is ONE line of
-  -- box-drawing rather than three lines wrapped around one fact. A transcript
-  -- full of three-line boxes for "read a file" is unreadable.
+  -- box-drawing rather than three lines wrapped around one fact.
   -- The header's budget is NOT `inner`: it has to leave room for the opening
   -- "╭─ ", the space before the rule, and the closing corner. Giving it
   -- `inner` made every card whose summary was long enough to truncate come out
   -- exactly one column too wide.
-  local top = { { "╭─ ", hl } }
+  local top = { { box.tl .. box.h .. " ", hl } }
   vim.list_extend(top, M.truncate(vim.deepcopy(header), math.max(8, w - 5)))
   -- `w - 2` leaves room for the closing corner and the space that separates
   -- the header text from the rule, so it reads "✓ Shell  ls -la ─────╮".
   local rule = math.max(0, w - 2 - M.width(top))
-  top[#top + 1] = { " " .. string.rep("─", rule) .. (collapsed and "╯" or "╮"), hl }
+  top[#top + 1] = { " " .. string.rep(box.h, rule) .. (collapsed and box.br or box.tr), hl }
   lines[#lines + 1] = top
 
   if collapsed then
@@ -219,14 +268,14 @@ function M.card(header, body, opts)
   end
 
   for _, line in ipairs(body) do
-    local row = { { "│ ", hl } }
+    local row = { { box.v .. " ", hl } }
     vim.list_extend(row, M.truncate(vim.deepcopy(line), inner))
     M.pad(row, w - 1)
-    row[#row + 1] = { "│", hl }
+    row[#row + 1] = { box.v, hl }
     lines[#lines + 1] = row
   end
 
-  lines[#lines + 1] = { { "╰" .. string.rep("─", math.max(0, w - 2)) .. "╯", hl } }
+  lines[#lines + 1] = { { box.bl .. string.rep(box.h, math.max(0, w - 2)) .. box.br, hl } }
   return lines
 end
 

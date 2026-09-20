@@ -167,7 +167,10 @@ function M.ensure(terminal, win)
   bridge.request("terminals.attach", { terminalId = id, rows = rows, cols = cols }, function(err)
     if err then
       vim.schedule(function()
-        vim.notify("paseo: cannot attach to that terminal — " .. tostring(err), vim.log.levels.ERROR)
+        vim.notify(
+          "paseo: cannot attach to that terminal — " .. tostring(err),
+          vim.log.levels.ERROR
+        )
         M.detach(id)
       end)
     end
@@ -207,7 +210,12 @@ function M.show(view, win)
   if api.nvim_win_get_buf(win) ~= view.buf then
     api.nvim_win_set_buf(win, view.buf)
   end
-  for option, value in pairs { number = false, relativenumber = false, signcolumn = "no", winbar = "" } do
+  for option, value in pairs {
+    number = false,
+    relativenumber = false,
+    signcolumn = "no",
+    winbar = "",
+  } do
     pcall(function()
       vim.wo[win][option] = value
     end)

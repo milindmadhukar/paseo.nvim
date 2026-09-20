@@ -39,10 +39,33 @@ local M = {}
 ---                       "float" is the default: the full-screen dashboard is
 ---                       the one with everything on it, and the sidebar is the
 ---                       narrower thing you switch TO with <C-f>.
+---@field style string|paseo.Style  Frame language. A preset name --
+---                       "plate", "rule", "rounded", "square" -- or a table of
+---                       the same fields, which only has to name what it
+---                       changes. "plate" is the default and draws NO frame
+---                       around a card: sections are separated by background
+---                       elevation and padding instead. See `paseo.ui.style`.
+---@field theme table<string, vim.api.keyset.highlight>  Highlight overrides,
+---                       laid over the derived groups. This is a config key
+---                       rather than "set the group again after setup()"
+---                       because the derivation re-runs on `ColorScheme` and
+---                       used to overwrite anything set that way.
+---@field animate boolean|paseo.Config.UI.Animate  Motion. `false` is instant.
 ---@field float paseo.Config.UI.Float
 ---@field sidebar paseo.Config.UI.Sidebar
 ---@field ask paseo.Config.UI.Answer
 ---@field terminal paseo.Config.UI.Terminal
+
+---@class paseo.Config.UI.Animate
+---@field bars boolean    Ease a progress bar towards its new value rather than
+---                       snapping. The context-window bar is the one that
+---                       benefits: a jump from 40% to 70% reads as a glitch.
+---@field flash boolean   Briefly tint a tool card as it settles to ok or
+---                       failed, then fade out through the accent ramp.
+---@field fps integer     Frames a second for all of the above. Every frame is
+---                       one `volt.redraw` of one named section, which is an
+---                       in-place extmark overwrite -- cheap, but not free on
+---                       a slow link.
 
 ---@class paseo.Config.UI.Float
 ---@field width number|fun(columns: integer): integer   PERCENT of the editor,
@@ -177,6 +200,27 @@ local defaults = {
   ui = {
     surface = "float",
 
+    -- No frame around a card. This is the single biggest visual change and it
+    -- is the default because a box per card, drawn inside the float's own
+    -- border, with a rule under the tab bar as well, was three frame weights
+    -- competing in one window. Depth comes from the elevation ladder in
+    -- `ui/theme.lua` instead. `"rounded"` is the old look, kept and fixed.
+    style = "plate",
+
+    -- Empty rather than absent: the merge is `tbl_deep_extend`, and a user
+    -- setting one group should not have to restate the others.
+    theme = {},
+
+    -- Motion, on by default but cheap: two effects, neither of which changes a
+    -- section's HEIGHT. That constraint is not a style choice -- volt records
+    -- each section's start row when the layout is measured, so a section that
+    -- grows mid-animation draws every section below it at the wrong row.
+    animate = {
+      bars = true,
+      flash = true,
+      fps = 30,
+    },
+
     -- How much of a tool card is open by default.
     --
     -- "running" -- the useful middle. A command is expanded WHILE it runs, so
@@ -272,6 +316,26 @@ function M.setup(opts)
   vim.validate("ui.expand", config.ui.expand, function(v)
     return v == "running" or v == "always" or v == "never"
   end, '"running", "always" or "never"')
+  -- Validated against the style module rather than inline, so the list of
+  -- presets has one home and a new one does not need remembering here.
+  vim.validate(
+    "ui.style",
+    config.ui.style,
+    require("paseo.ui.style").valid,
+    'a preset name ("plate", "rule", "rounded", "square") or a table of card/border'
+  )
+  vim.validate("ui.theme", config.ui.theme, "table")
+  vim.validate("ui.animate", config.ui.animate, function(v)
+    return type(v) == "boolean" or type(v) == "table"
+  end, "false, or a table of bars/flash/fps")
+  -- `animate = false` is the shorthand everyone will actually type; normalise
+  -- it here so nothing downstream has to handle both shapes.
+  if config.ui.animate == false then
+    config.ui.animate = { bars = false, flash = false, fps = 30 }
+  elseif config.ui.animate == true then
+    config.ui.animate = { bars = true, flash = true, fps = 30 }
+  end
+  config.ui.animate.fps = math.max(1, math.min(60, math.floor(config.ui.animate.fps or 30)))
   vim.validate("workspaces.open", config.workspaces.open, function(v)
     return type(v) == "function" or v == "tab" or v == "tcd" or v == "cd"
   end, '"tab", "tcd", "cd", or a function taking the workspace')
@@ -315,7 +379,8 @@ function M.setup(opts)
   config.ui.answer.zindex = math.max(10, config.ui.answer.zindex)
   -- A `min_width` above `width` would make the fallback unreachable in one
   -- direction and permanent in the other.
-  config.ui.answer.min_width = math.max(20, math.min(config.ui.answer.min_width, config.ui.answer.width))
+  config.ui.answer.min_width =
+    math.max(20, math.min(config.ui.answer.min_width, config.ui.answer.width))
 
   return config
 end

@@ -16,6 +16,7 @@
 --- telescope picker rather than being reimplemented here.
 
 local agents = require "paseo.agents"
+local icons = require "paseo.ui.icons"
 local terminals = require "paseo.terminals"
 local widgets = require "paseo.ui.widgets"
 
@@ -23,12 +24,50 @@ local M = {}
 
 M.title = "Sessions"
 
+---Status glyphs, from the registry -- the timeline says the same four things
+---about a tool call, and the two had spelled them differently.
 local GLYPH = {
-  idle = { "●", "PaseoDim" },
-  running = { "◐", "PaseoToolRunning" },
-  permission = { "", "PaseoDanger" },
-  error = { "✗", "PaseoToolFail" },
+  idle = { icons.status.idle, "PaseoDim" },
+  running = { icons.status.running, "PaseoToolRunning" },
+  permission = { icons.status.permission, "PaseoDanger" },
+  error = { icons.status.failed, "PaseoToolFail" },
 }
+
+---The KIND glyph: what tells an agent row from a terminal row.
+---
+---This was two literal spaces. The codepoint had been lost out of the file, so
+---the one cell whose whole job is to say which of the two kinds a row is drew
+---nothing at all -- and a merged list where you cannot tell the halves apart
+---is the merge not having happened. See |paseo-glyphs|.
+local KIND = {
+  agent = { icons.panel.Sessions, "PaseoBlue1" },
+  terminal = { icons.panel.Terminals, "PaseoYellow1" },
+}
+
+---One list row, painted whole when it is hovered or current.
+---
+---`fill_row` drops per-cell colour so the highlight is one unbroken band
+---across the full width rather than stopping where the text does. The status
+---is carried by the glyph's SHAPE anyway -- idle, running, needs-you and
+---failed are four different icons, not one icon in four colours.
+---@param cells table[]
+---@param id string
+---@param width integer
+---@param click function|nil
+---@param current boolean|nil
+---@return table[]
+local function row(cells, id, width, click, current)
+  local action = click and widgets.hover(id, "body", click) or nil
+  local hl = widgets.row_hl(id, current)
+
+  if hl then
+    return widgets.fill_row(cells, width, hl, action)
+  end
+  for _, cell in ipairs(cells) do
+    cell[3] = action
+  end
+  return cells
+end
 
 ---Buffer line -> what is on it, rebuilt on every draw.
 ---
@@ -57,7 +96,11 @@ function M.lines(chat, width)
   M._rows = {}
 
   local lines = {
-    { { "  Sessions in ", "PaseoHeader" }, { vim.fn.fnamemodify(chat.root, ":~"), "PaseoDim" } },
+    {
+      { "  " .. icons.panel.Sessions .. "  ", "PaseoBlue1" },
+      { "Sessions in ", "PaseoHeader" },
+      { vim.fn.fnamemodify(chat.root, ":~"), "PaseoDim" },
+    },
     {},
   }
 
@@ -92,14 +135,33 @@ function M.lines(chat, width)
           }
         end
       or nil
-    lines[#lines + 1] = {
-      { mine and "  ▌ " or "    ", mine and "PaseoAgent" or nil, click },
-      { "  ", "PaseoDim", click },
-      { glyph[1] .. " ", glyph[2], click },
-      { agent.title or agent.id, mine and "PaseoAgent" or nil, click },
-      { agent.provider and ("   " .. agent.provider) or "", "PaseoDim", click },
-      { agent.requiresAttention and "   needs you" or "", "PaseoDanger", click },
-    }
+    -- Metadata is RIGHT-ALIGNED into one column rather than trailing the
+    -- title. A provider written three spaces after a title of whatever length
+    -- gives a different left edge on every row, and a column you cannot scan
+    -- is a column that may as well not be there.
+    local right = {}
+    if agent.requiresAttention then
+      -- A chip, not red text. This is the one row in the list that is waiting
+      -- on you, and "waiting on you" is a state, which is what a chip is for.
+      right[#right + 1] = widgets.chip("needs you", "danger")
+      right[#right + 1] = { " ", "PaseoDim" }
+    end
+    if agent.provider then
+      right[#right + 1] = { agent.provider, "PaseoDim" }
+    end
+
+    lines[#lines + 1] = row(
+      widgets.row({
+        { mine and "  " .. widgets.icons.mine .. " " or "    ", mine and "PaseoAgent" or nil },
+        { KIND.agent[1] .. " ", KIND.agent[2] },
+        { glyph[1] .. " ", glyph[2] },
+        { agent.title or agent.id, mine and "PaseoAgent" or nil },
+      }, right, width, nil),
+      "sessions.agent." .. agent.id,
+      width,
+      click,
+      mine
+    )
     claim("agent", agent.id, agent.cwd or chat.root)
   end
 
@@ -108,7 +170,8 @@ function M.lines(chat, width)
       lines[#lines + 1] = {}
     end
     lines[#lines + 1] = {
-      { "  Terminals", "PaseoHeader" },
+      { "  " .. icons.panel.Terminals .. "  ", "PaseoYellow1" },
+      { "Terminals", "PaseoHeader" },
       { "  " .. terminals.summary(chat.root), "PaseoDim" },
     }
     lines[#lines + 1] = {}
@@ -120,20 +183,30 @@ function M.lines(chat, width)
       require("paseo.ui.termfloat").open { root = chat.root, id = item.id }
     end
     local reason = item.activity and item.activity.attentionReason
-    lines[#lines + 1] = {
-      { "    ", nil, click },
-      { "  ", "PaseoDim", click },
-      { glyph[1] .. " ", glyph[2], click },
-      { terminals.label(item), nil, click },
-      { reason == "needs_input" and "   needs input" or "", "PaseoDanger", click },
-      { reason == "finished" and "   finished" or "", "PaseoDim", click },
-    }
+    local right = {}
+    if reason == "needs_input" then
+      right[#right + 1] = widgets.chip("needs input", "danger")
+    elseif reason == "finished" then
+      right[#right + 1] = { "finished", "PaseoDim" }
+    end
+
+    lines[#lines + 1] = row(
+      widgets.row({
+        { "    " },
+        { KIND.terminal[1] .. " ", KIND.terminal[2] },
+        { glyph[1] .. " ", glyph[2] },
+        { terminals.label(item), nil },
+      }, right, width, nil),
+      "sessions.terminal." .. item.id,
+      width,
+      click
+    )
     claim("terminal", item.id, chat.root)
   end
 
   lines[#lines + 1] = {}
   lines[#lines + 1] = widgets.hints {
-    { "⏎", "open" },
+    { "<CR>", "open" },
     { "c", "terminal" },
     { "a", "agent" },
     { "r", "rename" },

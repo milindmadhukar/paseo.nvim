@@ -34,6 +34,7 @@
 local plan = require "paseo.ui.plan"
 local questions = require "paseo.ui.questions"
 local render = require "paseo.ui.render"
+local icons = require "paseo.ui.icons"
 local widgets = require "paseo.ui.widgets"
 
 local api = vim.api
@@ -241,7 +242,12 @@ local function stepper(o)
     local here = index == o.state.current
     local answered = #o.state.picked[index] > 0
     cells[#cells + 1] = {
-      (index > 1 and " " or "") .. (here and "◉" or answered and "●" or "○"),
+      (index > 1 and " " or "")
+        .. (
+          here and icons.marker.radio_on
+          or answered and icons.marker.bullet
+          or icons.marker.radio_off
+        ),
       here and "PaseoCardTitle" or answered and "PaseoCardText" or "PaseoCardDim",
       { click = goto_question(o, index) },
     }
@@ -277,22 +283,19 @@ local function question_body(o, w, avail)
   -- An answer TYPED has to be visible, or `i` looks like it did nothing.
   if question.free then
     local typed = questions.typed(question, picked)
-    tail[#tail + 1] = render.truncate(
-      #typed > 0 and {
-        widgets.keycap "i",
-        { " " .. widgets.icons.radio_on .. " ", "PaseoCardTitle" },
-        { table.concat(typed, ", "), "PaseoCardTitle" },
-        { "  typed", "PaseoCardDim" },
-      } or {
-        widgets.keycap "i",
-        { "   ", "PaseoCardText" },
-        {
-          #question.options > 0 and "something else — type it" or "type an answer",
-          "PaseoCardDim",
-        },
+    tail[#tail + 1] = render.truncate(#typed > 0 and {
+      widgets.keycap "i",
+      { " " .. widgets.icons.radio_on .. " ", "PaseoCardTitle" },
+      { table.concat(typed, ", "), "PaseoCardTitle" },
+      { "  typed", "PaseoCardDim" },
+    } or {
+      widgets.keycap "i",
+      { "   ", "PaseoCardText" },
+      {
+        #question.options > 0 and "something else — type it" or "type an answer",
+        "PaseoCardDim",
       },
-      w
-    )
+    }, w)
   end
 
   local notes = {}
@@ -306,8 +309,10 @@ local function question_body(o, w, avail)
     notes[#notes + 1] = "j k reaches the rest"
   end
   if #notes > 0 then
-    tail[#tail + 1] =
-      render.truncate({ { "   ", "PaseoCardText" }, { table.concat(notes, " · "), "PaseoCardDim" } }, w)
+    tail[#tail + 1] = render.truncate(
+      { { "   ", "PaseoCardText" }, { table.concat(notes, " · "), "PaseoCardDim" } },
+      w
+    )
   end
 
   -- The focused option's description, on ONE row drawn under the option it
@@ -357,8 +362,10 @@ local function question_body(o, w, avail)
 
   local lines = head
   if more_above > 0 then
-    lines[#lines + 1] =
-      render.truncate({ { "   ↑ ", "PaseoCardDim" }, { ("%d more"):format(more_above), "PaseoCardDim" } }, w)
+    lines[#lines + 1] = render.truncate(
+      { { "   ↑ ", "PaseoCardDim" }, { ("%d more"):format(more_above), "PaseoCardDim" } },
+      w
+    )
   end
   for at = from, to do
     local option = question.options[at]
@@ -366,8 +373,7 @@ local function question_body(o, w, avail)
     -- A checkbox where a second pick ADDS and a radio where it REPLACES. The
     -- shape says which, so "choose as many as apply" is a reminder rather than
     -- the only clue.
-    local marker = question.multi
-        and (chosen and widgets.icons.check_on or widgets.icons.check_off)
+    local marker = question.multi and (chosen and widgets.icons.check_on or widgets.icons.check_off)
       or (chosen and widgets.icons.radio_on or widgets.icons.radio_off)
     local action = {
       click = pick(o, at),
@@ -387,8 +393,10 @@ local function question_body(o, w, avail)
     end
   end
   if more_below > 0 then
-    lines[#lines + 1] =
-      render.truncate({ { "   ↓ ", "PaseoCardDim" }, { ("%d more"):format(more_below), "PaseoCardDim" } }, w)
+    lines[#lines + 1] = render.truncate(
+      { { "   ↓ ", "PaseoCardDim" }, { ("%d more"):format(more_below), "PaseoCardDim" } },
+      w
+    )
   end
 
   vim.list_extend(lines, tail)
@@ -471,17 +479,13 @@ local function build(o, f)
     -- including that it may jump BACKWARDS, or a send that does not send reads
     -- as a broken key.
     hints[#hints + 1] = {
-      "⏎",
+      "<CR>",
       missing
-          and (
-            missing ~= state.current and ("question %d"):format(missing)
-            or #state.questions == 1 and "answer it first"
-            or "answer this one"
-          )
+          and (missing ~= state.current and ("question %d"):format(missing) or #state.questions == 1 and "answer it first" or "answer this one")
         or (nothing and "send (nothing answered)" or "send the answers"),
     }
     if #state.questions > 1 then
-      hints[#hints + 1] = { "⇥", "question" }
+      hints[#hints + 1] = { "<Tab>", "question" }
     end
     if question.free then
       hints[#hints + 1] = { "i", "type" }
@@ -490,7 +494,7 @@ local function build(o, f)
       hints[#hints + 1] = { "s", "skip" }
     end
     hints[#hints + 1] = { "n", "decline" }
-    hints[#hints + 1] = { "␛", "later" }
+    hints[#hints + 1] = { "<Esc>", "later" }
   else
     title = {
       { ICON.plan .. "  ", "PaseoCardTitle" },
@@ -528,7 +532,7 @@ local function build(o, f)
       { "y", "implement" },
       { "n", "reject" },
       { "j k ^D", "scroll" },
-      { "␛", "later" },
+      { "<Esc>", "later" },
     }
   end
 

@@ -48,7 +48,7 @@ which reads like a broken install.
 
 | Needed for | |
 |---|---|
-| Everything | Neovim 0.10+, `git` |
+| Everything | Neovim 0.10+, `git`, a Nerd Font |
 | The chat UI | nvzone/volt |
 | The workspace and session pickers | telescope.nvim |
 | The hunk under the cursor | gitsigns.nvim |
@@ -87,6 +87,14 @@ require("paseo").setup {
   ui = {
     surface = "float",            -- where `:Paseo chat` opens. Or "sidebar".
 
+    style = "plate",              -- frame language. See "Style".
+    theme = {},                   -- highlight overrides, laid over the derived ones
+    animate = {                   -- or `false` for instant
+      bars = true,                -- ease a bar towards its new value
+      flash = true,               -- tint a tool card as it settles
+      fps = 30,
+    },
+
     float = {
       width = 94,                 -- percent of the editor, 1-100
       height = 86,
@@ -94,7 +102,7 @@ require("paseo").setup {
       composer = 7,               -- rows the composer gets
       zindex = 30,                -- BELOW the 50 a float gets by default
       backdrop = true,
-      tab_keys = true,            -- bare 1-6 switch tabs; see below
+      tab_keys = true,            -- bare 1-7 switch tabs; see below
     },
 
     sidebar = {
@@ -200,7 +208,7 @@ On the sidebar it is the conversation window's winbar. On the full-screen
 surface it is **not**: a winbar belongs to a window, the conversation window
 only exists on the Chat tab, and every other tab therefore had no header and
 could not tell you which model it was on. There it is a volt section in the
-chrome, drawn above the tab bar, true on all six tabs — and clicking it takes
+chrome, drawn above the tab bar, true on all seven tabs — and clicking it takes
 you to the panel that can change what it says.
 
 ### The full-screen surface
@@ -210,9 +218,22 @@ swaps to the sidebar and back.
 
 ```
   ⠹ 14s  claude/sonnet-5 · acceptEdits · 󰧑 think · ⚡ · 21%   ~/Code/paseo.nvim
-   1 Chat   2 Session   3 Sessions   4 Changes   5 Usage   6 Workspaces
-  ──────────────────────────────────────────────────────────────────────────
+   1 󰀄 Chat   2 󱕂 Session   3 󱙺 Sessions   4 󰘬 Changes   5 󰄨 Usage   6 󰙅 Workspaces   7 󰆍 Terminals
 ```
+
+The tab bar **degrades rather than truncates**, because the tab that would
+fall off the end is always the last one — which is the one you had not
+discovered yet. Four levels, widest that fits:
+
+| | |
+|---|---|
+| `1 󰀄 Chat` | number, icon and name |
+| `1 Chat` | the icon goes first: the name is what you read, the icon is what you recognise |
+| `1 󰀄` | seven of these fit in 41 columns |
+| `1` | and at the last level the active tab alone keeps its name |
+
+The row count never changes at any level, because the body height and the
+composer geometry are both measured against it.
 
 | | |
 |---|---|
@@ -223,7 +244,7 @@ swaps to the sidebar and back.
 | `Usage` | context window, tokens, cost |
 | `Workspaces` | every workspace Paseo knows, plus the repos in this unit of work |
 
-`1`–`6` jump, `<M-1>`–`<M-6>` and `<Tab>`/`<S-Tab>` do the same, and
+`1`–`7` jump, `<M-1>`–`<M-7>` and `<Tab>`/`<S-Tab>` do the same, and
 everything that does something responds to a click.
 
 A bare digit is also a **count**, and the two panes these are bound on are
@@ -294,22 +315,23 @@ Everything this session is set to, at once, with the current value **filled in**
 rather than marked with a dot:
 
 ```
-  ╭─ Permission mode   m  ──────────────────────────────╮
-  │   Plan   Always ask   Accept edits   Bypass         │
-  │  Edits are applied without asking.                  │
-  ╰─────────────────────────────────────────────────────╯
+  󰌾  Permission mode   m
+   Plan   Always ask   Accept edits   Bypass
+  Edits are applied without asking.
 
-  ╭─ 󰧑  Thinking   t  ────────╮  ╭─ ⚡  Features   f  ───╮
-  │   Off   Think             │  │    Fast mode         │
-  ╰───────────────────────────╯  ╰──────────────────────╯
+  󰧑  Thinking   t              󰥕  Features   f
+   Off   Think                  Fast mode
 
-  ╭─ Model   s  ────────────────────────────────────────╮
-  │  ● Opus 5                                  default  │
-  │  ○ Sonnet 5                                         │
-  ╰─────────────────────────────────────────────────────╯
+  󰧑  Model   s
+  ● Opus 5                                     default
+  ○ Sonnet 5
 
-   h j k l  move    ⏎  apply    m t f s  group    r  reload
+   h j k l  move    󰌑  apply    m t f s  group    r  reload
 ```
+
+Each block above is a **card**, and on the default `ui.style` a card has no
+frame at all: it is a plate one elevation step above the surface, with a row
+of padding top and bottom. `ui.style = "rounded"` puts the boxes back.
 
 `h`/`j`/`k`/`l` move — all four directions, and running off the end of a card
 lands on the next one, so there is one traversal rather than one per card.
@@ -457,28 +479,140 @@ pressing `d` on the last row and having the window vanish is jarring, and not
 doing it removes the ordering problem between a window closing and a terminal
 ending outright.
 
+### Style
+
+Four frame languages, under `ui.style`. A preset name, or a table of the same
+fields when you only want to change one:
+
+```lua
+ui = { style = "plate" }                            -- the default
+ui = { style = { preset = "rounded", border = "none" } }
+```
+
+| `card` | |
+|---|---|
+| `plate` | **no frame at all.** A title row and a body painted one elevation step above the surface, with a row of padding. The default. |
+| `rule` | a title, then one hairline **inset** from both edges — full-bleed reads as a table border, not a divider |
+| `rounded` | real boxes, `╭╮╰╯`, title inset in the top rule |
+| `square` | the same with `┌┐└┘` |
+
+| `border` | the outer edge |
+|---|---|
+| `invisible` | a real border painted `fg == bg`, so it becomes a one-cell ring of padding in the surface's own colour. The default — and **not** the same as `none`, which drops the padding with it and puts content hard against the window edge. |
+| `rounded` · `single` · `none` | literal |
+
+Every style produces the **same number of rows** for the same content, which is
+not tidiness: volt records a section's start row when the layout is measured
+and never recomputes it, so a card whose height depended on the frame would
+move every section below it the moment you changed this.
+
+The default is `plate` because the old look was three frame weights competing
+inside one window — a box around every card, inside the float's own border,
+with a rule under the tab bar as well.
+
 ### Colour
 
-Everything is derived, never hardcoded. Volt supplies the accents — base46's
-palette on NvChad, `Normal`/`Comment`/`Function`/`added`/`removed` otherwise —
-and the **backgrounds** are steps off `Normal`: the surface two points away, a
-card seven, a chip further still.
+Everything is derived, never hardcoded, and there is no dependency on NvChad.
 
-That last part is new, and it is most of why the dashboard stopped looking
-flat. There were no background groups at all before: `hl.lua` computed
-`Normal`'s background and then never used it, so the whole surface was coloured
-text on an undifferentiated float. The float border is now drawn with
-`fg == bg` — nvzone's trick — so the box becomes a one-cell padding ring in the
-surface's own colour rather than a frame around it.
-
+**Backgrounds** are an elevation ladder stepped off `Normal`: the editor, the
+surface two points away, a card five, a chip eight, the selected row eleven.
 Light themes step the other way (`vim.o.bg == "dark" and 1 or -1`, applied to
-every step), and an accent used as *text* is pushed away from the background
-first — `morning`'s "added" is `#90ee90`, which is illegible on a chip tinted
-with `#90ee90`.
+every step). Depth comes from that ladder rather than from drawn boxes, which
+is the whole idea behind `ui.style = "plate"`.
+
+**Accents** get four stops each — `mix(accent, bg, 10/40/60/80)`, as
+`PaseoGreen0`…`PaseoGreen3` — so there is something to fade a flash *through*,
+shade a heat scale with, and draw a divider in that is not content weight.
+
+Where the accents come from is a chain, and the order is load-bearing:
+
+- **With NvChad**, volt's `Ex*` groups, which are base46's palette.
+- **Without it**, `DiagnosticError`/`Removed`, `DiagnosticOk`/`Added`,
+  `Function`, `DiagnosticWarn`/`Changed` — the groups that *mean* what we mean.
+  `Added` before `String`, because on `morning` `String` is **magenta**, so a
+  tool that succeeded was drawn the colour of a string literal.
+
+We do not read volt's `Ex*` groups on the non-base46 path, and that is
+deliberate: volt's own fallback writes `ExBlue = { fg = get_hl "Function" }`,
+and `volt.utils.get_hl` returns a **table**, not a colour — so on every setup
+without NvChad each accent resolves to `#000000`. Black is not obviously wrong
+on a dark theme, which is why it went unnoticed. It is simply invisible.
+
+Three corrections are then applied, each of which a real colourscheme forced:
+
+- An accent used as **text** is pushed until it is legible on whatever it sits
+  on — measured, both directions tried, and a colour that already clears the
+  bar is left alone. `morning`'s `added` is `#90ee90`, unreadable on a plate
+  tinted with that same green; `default`'s is `#166336`, already dark enough
+  that pushing it further lands on black and throws the hue away.
+- **Dim** has to be dimmer than body text, and neutral. `morning` sets
+  `Comment` to pure blue: quiet by luminance, loud by saturation, so every
+  label came out louder than the words it qualified.
+- A bar's **track** is derived from the background, because a track is the
+  absence of fill. A comment-derived one came out pale blue on `morning` and a
+  42% bar looked full.
+
+**Identity** colours — the dot beside a repo, a project, a workspace — are a
+separate set of eight, and not the semantic accents. Two reasons, both found by
+looking at it: four is too few, so two repos in a list of four collided; and red
+already means *this failed*, so a repo drawn red read as a repo with a problem.
+The eight are hue rotations off the theme's own blue, stepped by the **golden
+angle** rather than by an even division — an even division puts consecutive
+indices next to each other on the wheel, and since a hash scatters names
+uniformly, neighbouring buckets come up constantly and three repos drew three
+shades of the same green.
 
 On a **transparent** theme — `Normal` with no background — nothing is painted
 at all, and selection is signalled by removing dimming rather than by adding a
 fill. An opaque rectangle over someone's wallpaper is worse than no card.
+
+Override any group with `ui.theme`, which is laid over the derived table:
+
+```lua
+ui = { theme = { PaseoChipOn = { bg = "#204a26" } } }
+```
+
+That is a config key rather than "set the group again after `setup()`", which
+is what the docs used to say and which quietly stopped working the moment you
+changed colourscheme — the derivation re-runs on `ColorScheme` and overwrote it.
+
+### Glyphs
+
+A Nerd Font is required, and every glyph lives in one registry
+(`lua/paseo/ui/icons.lua`) defined by **codepoint** rather than by literal
+bytes.
+
+The codepoints are the point. Twice the bytes of a Private Use Area glyph have
+been lost out of a source file: `check_on`/`check_off` went first, and a test
+was added covering exactly those four names — while six slots in
+`render.icons`, the `permission` marker in the Sessions panel, two group icons
+and five inline glyphs elsewhere were empty the whole time and the suite stayed
+green. An empty icon is not a visible failure; the line still draws, and "off"
+and "broken" look identical.
+
+The test now walks the whole registry and asserts every entry is at least one
+cell wide.
+
+### Motion
+
+`ui.animate`, or `false` for instant. Two effects: a bar eased towards its new
+value, and a tool card tinted as it settles then fading out through the accent
+ramp. The spinner is not one of them and is never disabled — a turn that is
+running has to look different from a turn that is wedged, and that is
+information rather than decoration.
+
+Neither changes a section's **height**, and that is a hard constraint rather
+than a choice: volt records each section's start row when the layout is
+measured, so a section that grows mid-flight draws every section below it at the
+wrong row — as `Invalid 'line': out of range`, thrown from inside `vim.on_key`.
+
+There was a **third** effect, staggering a panel's rows in on a tab switch, and
+it is gone for a reason worth recording. It respected that constraint — it drew
+fewer rows into a block already padded to its final height. But the Sessions
+panel maps cursor rows to sessions, and that map still named every row while
+only some were painted, so for the length of the reveal the screen disagreed
+with what a keypress would do. A decorative effect is not worth a window in
+which the surface lies about itself.
 
 ### Questions
 
@@ -865,6 +999,16 @@ harness uses Bun when present and Node plus the local TypeScript otherwise.
 
 ```
 lua/paseo/          the plugin
+  ui/               the design system, then the surfaces built on it
+    theme.lua       tokens: the palette, the elevation ladder, the accent ramps
+    hl.lua          applies them, plus the user's `ui.theme` overrides
+    style.lua       frame presets, and the box characters nothing else names
+    icons.lua       every glyph, by codepoint
+    layout.lua      the chrome's row budget, stated once
+    animate.lua     motion, none of which may change a height
+    render.lua      the cell/line alphabet and the three sinks
+    widgets.lua     the vocabulary: cards, chips, keycaps, tiles, bars, tables
+    panels/         one per dashboard tab
   workspace/        assembling N worktrees into one unit of work
   pickers/          workspaces, sessions
   backends/         the no-daemon fallback

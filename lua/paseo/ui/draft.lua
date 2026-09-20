@@ -252,7 +252,10 @@ function M.refresh_features(draft, keep_values, done)
       end
       if err then
         draft.loading = false
-        vim.notify("paseo: could not read this model's features — " .. tostring(err), vim.log.levels.WARN)
+        vim.notify(
+          "paseo: could not read this model's features — " .. tostring(err),
+          vim.log.levels.WARN
+        )
         return done()
       end
 
@@ -333,8 +336,7 @@ function M.apply(draft, group, entry, done)
       if model.id == entry.id then
         draft.model = model
         draft.provider = draft.entry.provider .. "/" .. model.id
-        draft.thinkingOptionId =
-          default_id(model.thinkingOptions, model.defaultThinkingOptionId)
+        draft.thinkingOptionId = default_id(model.thinkingOptions, model.defaultThinkingOptionId)
         return M.refresh_features(draft, true, done)
       end
     end
@@ -373,7 +375,10 @@ function M.load(draft, done)
   bridge.request("providers", { cwd = draft.cwd }, function(err, result)
     vim.schedule(function()
       if err then
-        vim.notify("paseo: could not re-read the providers — " .. tostring(err), vim.log.levels.WARN)
+        vim.notify(
+          "paseo: could not re-read the providers — " .. tostring(err),
+          vim.log.levels.WARN
+        )
         return done()
       end
       draft.entries = result and result.entries or {}

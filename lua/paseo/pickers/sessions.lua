@@ -13,7 +13,9 @@ local M = {}
 ---@param width integer
 ---@return string
 local function display(agent, width)
-  local state = agent.requiresAttention and "!" or (agent.status == "idle" and " " or "·")
+  local icons = require "paseo.ui.icons"
+  local state = agent.requiresAttention and icons.status.permission
+    or (agent.status == "idle" and " " or icons.status.running)
   return ("%s %-" .. width .. "s  %s"):format(
     state,
     agent.provider or "?",
