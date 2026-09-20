@@ -260,7 +260,12 @@ local function chips_body(self, group, focus, w)
     elseif entry.id == group.current then
       state = entry.tone or "on"
     else
-      state = "off"
+      -- A toned option keeps its tone even UNSELECTED. The point of colouring
+      -- these at all is that you can tell "nothing asks, everything runs" from
+      -- "research and write a plan" while you are CHOOSING between them, and
+      -- a tone that only appears once you have already picked it is a warning
+      -- delivered after the fact.
+      state = entry.tone and (entry.tone .. "_off") or "off"
     end
     chips[#chips + 1] = widgets.chip(entry.label, state, click(self, group, entry))
   end
@@ -526,7 +531,7 @@ function View:draw(width)
 
   local hints = {
     { "h j k l", "move" },
-    { "⏎", "apply" },
+    { "<CR>", "apply" },
     { table.concat(keys, " "), "group" },
     { "r", "reload" },
   }

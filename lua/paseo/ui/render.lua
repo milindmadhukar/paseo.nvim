@@ -122,7 +122,7 @@ function M.truncate(line, w)
         end
         out[#out + 1] = { taken, cell[2] }
       end
-      out[#out + 1] = { "…", "PaseoDim" }
+      out[#out + 1] = { require("paseo.ui.icons").marker.ellipsis, "PaseoDim" }
       return out
     end
   end

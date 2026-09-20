@@ -35,6 +35,22 @@ local STATUS_HL = {
   canceled = "PaseoDim",
 }
 
+---What the card's EDGE is drawn in -- the accent bar on an unframed style,
+---the box on a framed one.
+---
+---Loudness tracks how much you need to look. A failure gets the accent at full
+---strength; a command that is still running gets amber, because it is the
+---other thing worth glancing at; and a call that SUCCEEDED -- which is most of
+---a transcript -- gets a muted stop off the ramp. A long run of full-strength
+---green edges is a wall of colour saying "everything is fine", which is the
+---one message that does not need saying loudly.
+local EDGE_HL = {
+  running = "PaseoToolRunning",
+  completed = "PaseoGreen2",
+  failed = "PaseoToolFail",
+  canceled = "PaseoTextFaint",
+}
+
 ---The accent plate a card wears for the moment it settles.
 ---
 ---A tinted background rather than a brighter foreground: the card is already
@@ -92,7 +108,7 @@ end
 ---@param detail table|nil
 ---@param width integer
 ---@return table[][]
-local function detail_body(detail, width)
+local function detail_body(detail, width, summary)
   if not detail then
     return {}
   end
@@ -100,7 +116,11 @@ local function detail_body(detail, width)
   local lines = {}
 
   if detail.type == "shell" then
-    if detail.command then
+    -- The command is already the card's SUMMARY, in the header. Repeating it
+    -- as the body's first line spent a row of an expanded card saying what the
+    -- row above it just said; `summary` is only elided when it was truncated,
+    -- and then the full text is worth having.
+    if detail.command and detail.command ~= summary then
       vim.list_extend(lines, render.wrap(detail.command, inner, "PaseoToolArg"))
     end
     for _, line in ipairs(tail_lines(detail.output, 20)) do
@@ -117,12 +137,18 @@ local function detail_body(detail, width)
         where = ("%s-%d"):format(where, detail.offset + detail.limit)
       end
     end
-    lines[#lines + 1] = { { where, "PaseoPath" } }
+    -- Only when it says something the header does not. A read with a line
+    -- range does; a plain read repeats the summary exactly.
+    if where ~= short_path(summary) then
+      lines[#lines + 1] = { { where, "PaseoPath" } }
+    end
     for _, line in ipairs(vim.list_slice(vim.split(detail.content or "", "\n"), 1, 20)) do
       lines[#lines + 1] = { { line, "PaseoDim" } }
     end
   elseif detail.type == "edit" then
-    lines[#lines + 1] = { { short_path(detail.filePath), "PaseoPath" } }
+    if short_path(detail.filePath) ~= short_path(summary) then
+      lines[#lines + 1] = { { short_path(detail.filePath), "PaseoPath" } }
+    end
     -- A unified diff is the one thing worth showing in full colour: it is the
     -- change you are about to accept.
     for _, line in ipairs(vim.list_slice(vim.split(detail.unifiedDiff or "", "\n"), 1, 40)) do
@@ -137,7 +163,9 @@ local function detail_body(detail, width)
       lines[#lines + 1] = { { line, hl } }
     end
   elseif detail.type == "write" then
-    lines[#lines + 1] = { { short_path(detail.filePath), "PaseoPath" } }
+    if short_path(detail.filePath) ~= short_path(summary) then
+      lines[#lines + 1] = { { short_path(detail.filePath), "PaseoPath" } }
+    end
     local content = detail.content or ""
     if content ~= "" then
       lines[#lines + 1] = {
@@ -188,11 +216,11 @@ local function detail_body(detail, width)
       lines[#lines + 1] = { { detail.branchName, "PaseoDim" } }
     end
     for _, command in ipairs(detail.commands or {}) do
-      local glyph, group = "·", "PaseoDim"
+      local glyph, group = icons.status.pending, "PaseoDim"
       if command.status == "completed" then
-        glyph, group = "✓", "PaseoToolOk"
+        glyph, group = icons.status.completed, "PaseoToolOk"
       elseif command.status == "failed" then
-        glyph, group = "✗", "PaseoToolFail"
+        glyph, group = icons.status.failed, "PaseoToolFail"
       end
       local line = {
         { glyph .. " ", group },
@@ -220,8 +248,8 @@ end
 ---@param detail table|nil
 ---@param width integer
 ---@return table[][]
-function M.detail_body(detail, width)
-  return detail_body(detail, width)
+function M.detail_body(detail, width, summary)
+  return detail_body(detail, width, summary)
 end
 
 -- ------------------------------------------------------------------- cards
@@ -241,7 +269,7 @@ local function tool_card(item, opts)
   local status_hl = (flashing and FLASH_HL[status]) or STATUS_HL[status] or "PaseoDim"
 
   local header = {
-    { GLYPH[status] or "·", status_hl },
+    { GLYPH[status] or icons.status.pending, status_hl },
     { " " .. name, "PaseoToolName" },
   }
 
@@ -266,14 +294,14 @@ local function tool_card(item, opts)
     if display.errorText or item.error then
       header[#header + 1] = { "  " .. tostring(display.errorText or item.error), "PaseoToolFail" }
     end
-    return render.card(header, {}, { width = opts.width })
+    return render.card(header, {}, { width = opts.width, hl = EDGE_HL[status] })
   end
 
-  local body = detail_body(item.detail, opts.width)
+  local body = detail_body(item.detail, opts.width, display.summary)
   if display.errorText or item.error then
     body[#body + 1] = { { tostring(display.errorText or item.error), "PaseoToolFail" } }
   end
-  return render.card(header, body, { width = opts.width })
+  return render.card(header, body, { width = opts.width, hl = EDGE_HL[status] })
 end
 
 ---Build the lines for one item.
@@ -327,9 +355,12 @@ function M.card(item, opts)
   if kind == "todo" then
     local lines = { { { icons.status.todo .. " plan", "PaseoHeader" } } }
     for _, task in ipairs(item.items or {}) do
-      local mark = task.status == "completed" and "✓"
-        or task.status == "in_progress" and "◐"
-        or "○"
+      -- From the registry, like every other status marker. A plan item and a
+      -- tool card say the same three things about the same three states, and
+      -- these were the one place still spelling them out.
+      local mark = task.status == "completed" and icons.status.completed
+        or task.status == "in_progress" and icons.status.running
+        or icons.status.pending
       local hl = task.status == "completed" and "PaseoToolOk"
         or task.status == "in_progress" and "PaseoToolRunning"
         or "PaseoDim"

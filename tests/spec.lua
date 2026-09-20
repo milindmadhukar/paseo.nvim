@@ -1403,11 +1403,18 @@ local function test_ui()
 
   -- The regression this guards: a tool call arrives TWICE, running then
   -- completed. Appending the second one prints every command in the
-  -- transcript twice. The transcript must therefore get SHORTER here -- the
-  -- card folds on success -- and never longer.
+  -- transcript twice, so the transcript must never get LONGER here.
+  --
+  -- It used to assert "shorter", which was a proxy: the running card spent a
+  -- body row repeating its own command, so folding always removed at least
+  -- that row. The card no longer repeats it -- the command is already the
+  -- header's summary -- so a command that has produced no output yet is the
+  -- same height open or folded, which is correct rather than a regression.
+  -- The block count below is the assertion that actually catches a duplicate.
   truthy(
     "ui: a completing tool call replaces its card rather than appending",
-    vim.api.nvim_buf_line_count(chat.conversation) < before
+    vim.api.nvim_buf_line_count(chat.conversation) <= before,
+    ("%d -> %d"):format(before, vim.api.nvim_buf_line_count(chat.conversation))
   )
   truthy("ui: and folds once it has succeeded", not chat.blocks[chat.by_call["call-1"]].expanded)
   local blocks = 0
@@ -1415,6 +1422,45 @@ local function test_ui()
     blocks = blocks + 1
   end
   eq("ui: and does not create a second block", blocks, 4)
+
+  -- And with output to fold away, it does shrink -- which is the visible half
+  -- of "the card folds on success". Asserted against `timeline.card`, which is
+  -- the pure function that decides a card's height, rather than by pushing
+  -- another block through the shared transcript this section goes on to make
+  -- assertions about.
+  local card = require "paseo.ui.timeline"
+  local ran = card.card({
+    kind = "tool",
+    callId = "c",
+    name = "Bash",
+    status = "running",
+    display = { displayName = "Shell", summary = "wc -l" },
+    detail = { type = "shell", command = "wc -l", output = "1\n2\n3" },
+  }, { width = 60, expanded = true })
+  local folded = card.card({
+    kind = "tool",
+    callId = "c",
+    name = "Bash",
+    status = "completed",
+    display = { displayName = "Shell", summary = "wc -l" },
+    detail = { type = "shell", command = "wc -l", output = "1\n2\n3", exitCode = 0 },
+  }, { width = 60, expanded = false })
+  truthy(
+    "ui: a card with output folds smaller than it ran",
+    #(folded.lines or folded) < #(ran.lines or ran),
+    ("%d open, %d folded"):format(#(ran.lines or ran), #(folded.lines or folded))
+  )
+
+  -- The command is the header's summary; repeating it as the body's first line
+  -- spent a row saying what the row above it had just said.
+  local body = ""
+  for _, line in ipairs(ran.lines or ran) do
+    for _, cell in ipairs(line) do
+      body = body .. cell[1]
+    end
+  end
+  local occurrences = select(2, body:gsub("wc %-l", ""))
+  eq("ui: and does not print its command twice", occurrences, 1)
 
   local joined = table.concat(vim.api.nvim_buf_get_lines(chat.conversation, 0, -1, false), "\n")
   -- Named through the registry, not pasted in. A literal glyph in a test is
@@ -3234,15 +3280,12 @@ local function test_draft()
           held[#held + 1] = callback
           return
         end
-        return callback(
-          nil,
-          {
-            features = {
-              { id = "fast_mode", type = "toggle", label = "Fast", value = false },
-              { id = "plan_mode", type = "toggle", label = "Plan", value = false },
-            },
-          }
-        )
+        return callback(nil, {
+          features = {
+            { id = "fast_mode", type = "toggle", label = "Fast", value = false },
+            { id = "plan_mode", type = "toggle", label = "Plan", value = false },
+          },
+        })
       end
       callback(nil, {})
     end
@@ -3517,14 +3560,11 @@ local function test_provider_setup()
         return volt_text(review_buf):find("loading", 1, true) ~= nil
       end)
     )
-    held_feature_callback(
-      nil,
-      {
-        features = {
-          { id = "plan_mode", type = "toggle", label = "Plan", value = false },
-        },
-      }
-    )
+    held_feature_callback(nil, {
+      features = {
+        { id = "plan_mode", type = "toggle", label = "Plan", value = false },
+      },
+    })
     truthy(
       "provider: model features finish loading",
       vim.wait(1000, function()

@@ -320,6 +320,17 @@ end
 ---nth series" gets the same colour across redraws.
 M.ACCENTS = { "red", "green", "blue", "yellow" }
 
+---How many identity swatches there are.
+---
+---Identity colours are NOT the semantic accents. Two reasons, both learned by
+---looking at it: four is too few, so two repos in a list of four collided and
+---got the same dot; and red already means "this failed" everywhere else, so a
+---repo that drew red read as a repo with a problem.
+---
+---Eight rotated hues instead, seeded off the theme's own blue so they carry
+---its saturation and lightness and cannot look pasted in from another palette.
+M.SWATCHES = 8
+
 ---How far each ramp stop is blended towards the background, in percent.
 ---
 ---Deliberately NOT an even 20/40/60/80. An even ramp reads as four steps of
@@ -344,6 +355,41 @@ M.ELEVATION = { bg0 = 0, bg1 = 2, bg2 = 5, bg3 = 8, bg4 = 11 }
 ---@field bg table<string, string|nil>          Elevation ladder, bg0..bg4.
 ---@field ramp table<string, string[]>          Accent name -> four stops.
 ---@field ink fun(accent: string|nil): string|nil
+
+---The golden angle, as a fraction of the hue wheel.
+---
+---Stepping by this rather than by `1/count` is what makes CONSECUTIVE indices
+---land far apart. An even division puts 6, 7 and 8 next to each other on the
+---wheel -- and since a hash scatters names uniformly, neighbouring buckets come
+---up constantly, so three repos in a list drew three shades of the same green.
+---The golden angle is the standard answer: no matter how many you take, they
+---stay maximally spread and no two are close.
+M.GOLDEN_ANGLE = 0.381966
+
+---`count` colours spread around the hue wheel from `seed`.
+---
+---Rotating hue rather than picking from a list keeps the theme's saturation
+---and lightness, so the set looks like it belongs to whatever is loaded --
+---which a hardcoded palette cannot do, and which is the whole reason these are
+---derived at all.
+---@param seed string|nil
+---@param count integer
+---@return string[]
+function M.hues(seed, count)
+  local out = {}
+  if not seed then
+    return out
+  end
+  local ok, color = pcall(require, "volt.color")
+  if not ok then
+    return out
+  end
+  for i = 1, count do
+    -- `change_hex_hue` takes a PERCENTAGE of the wheel, not degrees.
+    out[i] = color.change_hex_hue(seed, ((i - 1) * M.GOLDEN_ANGLE * 100) % 100)
+  end
+  return out
+end
 
 ---Derive the whole token set from the current colourscheme.
 ---@return paseo.Theme
@@ -461,6 +507,13 @@ function M.groups(t)
     PaseoTrack = { fg = bg.bg4 or M.blend(c.grey, c.bg, 70) or c.border },
   }
 
+  -- Identity swatches: one per hue, legible on the surface they are drawn on.
+  -- A repo, a project, an agent -- anything whose colour means "this one" and
+  -- not "this is good" or "this is broken".
+  for i, hue in ipairs(M.hues(c.blue, M.SWATCHES)) do
+    groups["PaseoSwatch" .. i] = { fg = M.readable(hue, bg.bg1 or c.bg, M.MIN_CONTRAST) }
+  end
+
   -- The accent ramps, as groups, so a `lines()` closure can name a stop
   -- without reaching for the token table: PaseoGreen0 is nearly the accent,
   -- PaseoGreen3 is nearly the background.
@@ -506,6 +559,12 @@ function M.groups(t)
     end
 
     groups.PaseoChipOff = { fg = c.grey, bg = bg.bg3 }
+    -- An UNSELECTED option that still carries a warning. The plate stays
+    -- neutral -- a filled plate means "this is the one you are on" -- and only
+    -- the text takes the accent, so the option reads as available-but-loud
+    -- rather than as selected.
+    groups.PaseoChipWarnOff = { fg = ink(c.yellow, bg.bg3), bg = bg.bg3 }
+    groups.PaseoChipDangerOff = { fg = ink(c.red, bg.bg3), bg = bg.bg3 }
     groups.PaseoChipOn = plate(c.green, bg.bg2, 82)
     groups.PaseoChipFocus = plate(c.blue, bg.bg2, 72)
     groups.PaseoChipWarn = plate(c.yellow, bg.bg2, 80)
@@ -540,6 +599,8 @@ function M.groups(t)
     groups.PaseoRowActive = { reverse = true }
 
     groups.PaseoChipOff = { fg = c.grey }
+    groups.PaseoChipWarnOff = { fg = c.yellow }
+    groups.PaseoChipDangerOff = { fg = c.red }
     groups.PaseoChipOn = { fg = c.green, bold = true }
     groups.PaseoChipFocus = { fg = c.blue, bold = true, reverse = true }
     groups.PaseoChipWarn = { fg = c.yellow, bold = true }

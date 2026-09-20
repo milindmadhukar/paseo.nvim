@@ -45,6 +45,9 @@ M.CHIP = {
   focus = "PaseoChipFocus",
   warn = "PaseoChipWarn",
   danger = "PaseoChipDanger",
+  -- The same two tones on an UNSELECTED option: neutral plate, accent text.
+  warn_off = "PaseoChipWarnOff",
+  danger_off = "PaseoChipDangerOff",
 }
 
 ---Selection markers. The registry is `ui/icons.lua` now -- this is the name
@@ -479,31 +482,33 @@ end
 
 -- ---------------------------------------------------------------- accents
 
----A stable accent for an arbitrary name.
+---A stable identity colour for an arbitrary name.
 ---
 ---Same repo, same colour, every redraw and every session -- which is the only
 ---property that makes a colour-coded list worth having. Hashed rather than
 ---assigned by position, because position changes when something is archived
 ---and a legend you have learned should not be reshuffled by that.
 ---@param name string
----@return string  An accent name from `theme.ACCENTS`.
+---@return integer  1-based index into the swatch palette.
 function M.accent_for(name)
-  local accents = require("paseo.ui.theme").ACCENTS
-  local sum = 0
-  for i = 1, #name do
-    sum = (sum * 31 + name:byte(i)) % 2147483647
-  end
-  return accents[(sum % #accents) + 1]
+  local count = require("paseo.ui.theme").SWATCHES
+  -- sha256 rather than a rolling `sum * 31 + byte`. That hash has almost no
+  -- avalanche on short similar strings, and "paseo" and "paseo.nvim" -- which
+  -- is exactly the pair a multi-repo unit of work puts next to each other --
+  -- landed on the same colour.
+  local digest = vim.fn.sha256(name)
+  return (tonumber(digest:sub(1, 8), 16) % count) + 1
 end
 
 ---A colour swatch for a name: the little dot that says which repo a row is in.
+---
+---From the SWATCH palette, not from the semantic accents. Four accents gave
+---collisions in a list of four, and half of them already mean something --
+---a repo drawn red read as a repo with a problem.
 ---@param name string
----@param stop? integer  Which ramp stop, 0-3. Default 0, the strongest.
 ---@return table
-function M.swatch(name, stop)
-  local accent = M.accent_for(name)
-  local group = "Paseo" .. accent:sub(1, 1):upper() .. accent:sub(2) .. (stop or 0)
-  return { M.icons.swatch, group }
+function M.swatch(name)
+  return { M.icons.swatch, "PaseoSwatch" .. M.accent_for(name) }
 end
 
 -- -------------------------------------------------------------- scrollbar

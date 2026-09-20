@@ -1247,6 +1247,11 @@ Three corrections are then applied, each of which a real colourscheme forced:
   - A bar's TRACK is derived from the background, because a track is the
     absence of fill.
 
+IDENTITY colours -- the dot beside a repo or a project -- are a separate set of
+eight, not the semantic accents: four collided in a list of four, and red
+already means "this failed". They are hue rotations off the theme's blue,
+stepped by the golden angle so consecutive indices land far apart on the wheel.
+
 On a TRANSPARENT theme -- `Normal` with no background -- no background is
 painted at all. Selection is then signalled by removing dimming rather than by
 adding a fill, which is better than an opaque rectangle over someone's

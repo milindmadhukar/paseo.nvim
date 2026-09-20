@@ -148,7 +148,11 @@ local function list_lines()
       M.focus(item.id)
     end
     local line = widgets.row({
-      { current and "▌" or " ", current and "PaseoAgent" or nil, click },
+      {
+        current and require("paseo.ui.icons").marker.mine or " ",
+        current and "PaseoAgent" or nil,
+        click,
+      },
       { glyph[1] .. " ", glyph[2], click },
       { terminals.label(item), current and "PaseoAgent" or "PaseoCardText", click },
     }, { i <= 9 and { tostring(i) .. " ", "PaseoKeycapDim", click } or { "", nil, click } }, inner)

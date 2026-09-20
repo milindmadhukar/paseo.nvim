@@ -90,7 +90,13 @@ function M.lines(chat, width)
   w_project = math.min(w_project, 20)
   w_name = math.min(w_name, 28)
 
-  local lines = { { { "  Workspaces", "PaseoHeader" } }, {} }
+  local lines = {
+    {
+      { "  " .. icons.panel.Workspaces .. "  ", "PaseoBlue1" },
+      { "Workspaces", "PaseoHeader" },
+    },
+    {},
+  }
 
   if #list == 0 then
     lines[#lines + 1] = { { "  no workspaces yet", "PaseoDim" } }
@@ -146,7 +152,10 @@ function M.lines(chat, width)
   -- The repos of the unit of work this session is in -- `:Paseo repos`, which
   -- is otherwise a notification you have to ask for.
   lines[#lines + 1] = {}
-  lines[#lines + 1] = { { "  This unit of work", "PaseoHeader" } }
+  lines[#lines + 1] = {
+    { "  " .. icons.ui.repo .. "  ", "PaseoBlue1" },
+    { "This unit of work", "PaseoHeader" },
+  }
   lines[#lines + 1] = {}
   local repos = require("paseo.repos").list { path = chat.root }
   if #repos == 0 then

@@ -552,6 +552,16 @@ Three corrections are then applied, each of which a real colourscheme forced:
   absence of fill. A comment-derived one came out pale blue on `morning` and a
   42% bar looked full.
 
+**Identity** colours — the dot beside a repo, a project, a workspace — are a
+separate set of eight, and not the semantic accents. Two reasons, both found by
+looking at it: four is too few, so two repos in a list of four collided; and red
+already means *this failed*, so a repo drawn red read as a repo with a problem.
+The eight are hue rotations off the theme's own blue, stepped by the **golden
+angle** rather than by an even division — an even division puts consecutive
+indices next to each other on the wheel, and since a hash scatters names
+uniformly, neighbouring buckets come up constantly and three repos drew three
+shades of the same green.
+
 On a **transparent** theme — `Normal` with no background — nothing is painted
 at all, and selection is signalled by removing dimming rather than by adding a
 fill. An opaque rectangle over someone's wallpaper is worse than no card.

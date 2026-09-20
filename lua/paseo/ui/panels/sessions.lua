@@ -40,8 +40,8 @@ local GLYPH = {
 ---nothing at all -- and a merged list where you cannot tell the halves apart
 ---is the merge not having happened. See |paseo-glyphs|.
 local KIND = {
-  agent = { icons.panel.Sessions, "PaseoBlue2" },
-  terminal = { icons.panel.Terminals, "PaseoYellow2" },
+  agent = { icons.panel.Sessions, "PaseoBlue1" },
+  terminal = { icons.panel.Terminals, "PaseoYellow1" },
 }
 
 ---One list row, painted whole when it is hovered or current.
@@ -135,14 +135,33 @@ function M.lines(chat, width)
           }
         end
       or nil
-    lines[#lines + 1] = row({
-      { mine and "  " .. widgets.icons.mine .. " " or "    ", mine and "PaseoAgent" or nil },
-      { KIND.agent[1] .. " ", KIND.agent[2] },
-      { glyph[1] .. " ", glyph[2] },
-      { agent.title or agent.id, mine and "PaseoAgent" or nil },
-      { agent.provider and ("   " .. agent.provider) or "", "PaseoDim" },
-      { agent.requiresAttention and "   needs you" or "", "PaseoDanger" },
-    }, "sessions.agent." .. agent.id, width, click, mine)
+    -- Metadata is RIGHT-ALIGNED into one column rather than trailing the
+    -- title. A provider written three spaces after a title of whatever length
+    -- gives a different left edge on every row, and a column you cannot scan
+    -- is a column that may as well not be there.
+    local right = {}
+    if agent.requiresAttention then
+      -- A chip, not red text. This is the one row in the list that is waiting
+      -- on you, and "waiting on you" is a state, which is what a chip is for.
+      right[#right + 1] = widgets.chip("needs you", "danger")
+      right[#right + 1] = { " ", "PaseoDim" }
+    end
+    if agent.provider then
+      right[#right + 1] = { agent.provider, "PaseoDim" }
+    end
+
+    lines[#lines + 1] = row(
+      widgets.row({
+        { mine and "  " .. widgets.icons.mine .. " " or "    ", mine and "PaseoAgent" or nil },
+        { KIND.agent[1] .. " ", KIND.agent[2] },
+        { glyph[1] .. " ", glyph[2] },
+        { agent.title or agent.id, mine and "PaseoAgent" or nil },
+      }, right, width, nil),
+      "sessions.agent." .. agent.id,
+      width,
+      click,
+      mine
+    )
     claim("agent", agent.id, agent.cwd or chat.root)
   end
 
@@ -164,14 +183,24 @@ function M.lines(chat, width)
       require("paseo.ui.termfloat").open { root = chat.root, id = item.id }
     end
     local reason = item.activity and item.activity.attentionReason
-    lines[#lines + 1] = row({
-      { "    " },
-      { KIND.terminal[1] .. " ", KIND.terminal[2] },
-      { glyph[1] .. " ", glyph[2] },
-      { terminals.label(item), nil },
-      { reason == "needs_input" and "   needs input" or "", "PaseoDanger" },
-      { reason == "finished" and "   finished" or "", "PaseoDim" },
-    }, "sessions.terminal." .. item.id, width, click)
+    local right = {}
+    if reason == "needs_input" then
+      right[#right + 1] = widgets.chip("needs input", "danger")
+    elseif reason == "finished" then
+      right[#right + 1] = { "finished", "PaseoDim" }
+    end
+
+    lines[#lines + 1] = row(
+      widgets.row({
+        { "    " },
+        { KIND.terminal[1] .. " ", KIND.terminal[2] },
+        { glyph[1] .. " ", glyph[2] },
+        { terminals.label(item), nil },
+      }, right, width, nil),
+      "sessions.terminal." .. item.id,
+      width,
+      click
+    )
     claim("terminal", item.id, chat.root)
   end
 

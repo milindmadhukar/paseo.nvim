@@ -180,7 +180,7 @@ function M.open(chat)
   -- costs you the width it occupies.
   vim.wo[chat.win_composer].winbar = render.to_winbar {
     { "  ", "PaseoDim" },
-    { "↵", "PaseoKey" },
+    { icons.spell "<CR>", "PaseoKey" },
     { " send · ", "PaseoDim" },
     { "<C-f>", "PaseoKey" },
     { " full screen · ", "PaseoDim" },
