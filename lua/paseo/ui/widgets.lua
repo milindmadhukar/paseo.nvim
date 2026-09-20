@@ -47,8 +47,14 @@ M.CHIP = {
 M.icons = {
   radio_on = "●",
   radio_off = "○",
-  check_on = "",
-  check_off = "",
+  -- Geometric Shapes rather than nerd-font glyphs, and that is not a style
+  -- choice: these two were EMPTY STRINGS -- the codepoints had been lost out of
+  -- the file at some point -- so the Session panel's feature toggles and every
+  -- multi-select question drew their marker as nothing at all. A marker that
+  -- depends on a patched font is a marker that is sometimes absent, and absent
+  -- is indistinguishable from "off".
+  check_on = "▣",
+  check_off = "□",
   card_tl = "╭",
   card_tr = "╮",
   card_bl = "╰",
