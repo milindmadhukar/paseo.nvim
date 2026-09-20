@@ -353,7 +353,10 @@ local function test_explain_quickfix()
 
       -- The box, not the chat: `qfask` asks what you want to know before it
       -- opens anything. Nothing is sent until it is answered.
-      truthy("explain: the ask box opens rather than the chat", require("paseo.ui.prompt").is_open())
+      truthy(
+        "explain: the ask box opens rather than the chat",
+        require("paseo.ui.prompt").is_open()
+      )
       truthy("explain: and nothing is sent until it is answered", attached == nil)
 
       vim.api.nvim_buf_set_lines(vim.api.nvim_get_current_buf(), 0, -1, false, { "what broke?" })
@@ -374,8 +377,7 @@ local function test_explain_quickfix()
         )
         truthy(
           "explain: the root is a worktree the entries came from",
-          attached.opts and attached.opts.root ~= nil
-              and vim.startswith(attached.opts.root, root)
+          attached.opts and attached.opts.root ~= nil and vim.startswith(attached.opts.root, root)
             or false,
           vim.inspect(attached.opts)
         )
@@ -440,8 +442,11 @@ local function test_prompt()
   eq("prompt: floating over the editor", cfg.relative, "editor")
   -- Above the dashboard's 30, below the permission dialog's 200: a permission
   -- request must never come up behind a box you are typing in.
-  truthy("prompt: z-index sits above the dashboard, below the dialog",
-    cfg.zindex > 30 and cfg.zindex < 200, tostring(cfg.zindex))
+  truthy(
+    "prompt: z-index sits above the dashboard, below the dialog",
+    cfg.zindex > 30 and cfg.zindex < 200,
+    tostring(cfg.zindex)
+  )
   vim.api.nvim_win_close(0, true)
   vim.wait(100)
 
@@ -450,8 +455,11 @@ local function test_prompt()
     vim.cmd "stopinsert"
     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "x", false)
   end)
-  eq("prompt: <CR> sends the question, blank lines and all", text,
-    "why is this here?\n\nsecond paragraph")
+  eq(
+    "prompt: <CR> sends the question, blank lines and all",
+    text,
+    "why is this here?\n\nsecond paragraph"
+  )
   eq("prompt: and answers the caller exactly once", calls, 1)
 
   -- Grows with the question: "why?" and a paragraph are different shapes, and
@@ -462,7 +470,11 @@ local function test_prompt()
   vim.api.nvim_buf_set_lines(grow, 0, -1, false, vim.split(("l\n"):rep(40), "\n"))
   vim.api.nvim_exec_autocmds("TextChanged", { buffer = grow })
   local after = vim.api.nvim_win_get_config(0).height
-  truthy("prompt: the box grows with the question", after > before, ("%d -> %d"):format(before, after))
+  truthy(
+    "prompt: the box grows with the question",
+    after > before,
+    ("%d -> %d"):format(before, after)
+  )
   truthy("prompt: but is capped, not unbounded", after <= 14, tostring(after))
   vim.api.nvim_win_close(0, true)
   vim.wait(100)
@@ -644,7 +656,10 @@ local function test_bridge()
     -- Both halves are load-bearing and neither is obviously necessary on its
     -- own, which is why they are asserted rather than trusted: a guarded write
     -- that still reports failures by writing is the same bug.
-    truthy("bridge: the write path gives up once the pipe is broken", source:find("if (broken) return", 1, true) ~= nil)
+    truthy(
+      "bridge: the write path gives up once the pipe is broken",
+      source:find("if (broken) return", 1, true) ~= nil
+    )
     truthy(
       "bridge: and the error handler does not write into a broken pipe",
       source:find("if (broken || bailing) return", 1, true) ~= nil
@@ -654,7 +669,10 @@ local function test_bridge()
     -- so the write that would trip the broken flag never happens. Deleting
     -- this because node exits without it regresses every bun user to a
     -- permanently hung orphan.
-    truthy("bridge: and shutdown has a deadline", source:find("setTimeout(() => process.exit(code)", 1, true) ~= nil)
+    truthy(
+      "bridge: and shutdown has a deadline",
+      source:find("setTimeout(() => process.exit(code)", 1, true) ~= nil
+    )
   end
 
   -- The same regression, executed rather than read: orphan.sh severs the read
@@ -677,11 +695,20 @@ local function test_bridge()
   if lua_bridge then
     local source = lua_bridge:read "*a"
     lua_bridge:close()
-    truthy("bridge: stop() closes stdin whatever the sidecar says", source:find("handle:write(nil)", 1, true) ~= nil)
-    truthy("bridge: stop() does not wait for a reply to kill", source:find("handle:kill(15)", 1, true) ~= nil)
+    truthy(
+      "bridge: stop() closes stdin whatever the sidecar says",
+      source:find("handle:write(nil)", 1, true) ~= nil
+    )
+    truthy(
+      "bridge: stop() does not wait for a reply to kill",
+      source:find("handle:kill(15)", 1, true) ~= nil
+    )
     -- Two ensure() calls during an autostart used to spawn two sidecars and
     -- orphan the first.
-    truthy("bridge: a boot in flight is not started twice", source:find("if state.starting then", 1, true) ~= nil)
+    truthy(
+      "bridge: a boot in flight is not started twice",
+      source:find("if state.starting then", 1, true) ~= nil
+    )
   end
 
   -- The sending code moved from explain.lua into the chat window when the
@@ -839,20 +866,35 @@ local function test_ref()
     kind = "hunk",
   }
   local rendered = ref.render(deleted)
-  truthy("ref: a deleted hunk is still quoted -- it is not in the file to read", 
-    rendered:find("-also gone", 1, true) ~= nil, rendered)
-  truthy("ref: and is fenced as a diff, not as the file's language",
-    rendered:find("```diff", 1, true) ~= nil, rendered)
-  truthy("ref: and says the line is ABOVE the removed block, not the removal",
-    rendered:find("ABOVE", 1, true) ~= nil, rendered)
+  truthy(
+    "ref: a deleted hunk is still quoted -- it is not in the file to read",
+    rendered:find("-also gone", 1, true) ~= nil,
+    rendered
+  )
+  truthy(
+    "ref: and is fenced as a diff, not as the file's language",
+    rendered:find("```diff", 1, true) ~= nil,
+    rendered
+  )
+  truthy(
+    "ref: and says the line is ABOVE the removed block, not the removal",
+    rendered:find("ABOVE", 1, true) ~= nil,
+    rendered
+  )
 
   deleted.detached = false
   deleted.modified = true
   local live = ref.render(deleted)
-  truthy("ref: an attached hunk is a location, not a quotation",
-    live:find("gone", 1, true) == nil, live)
-  truthy("ref: an unsaved buffer is declared, since the agent reads disk",
-    live:find("unsaved changes", 1, true) ~= nil, live)
+  truthy(
+    "ref: an attached hunk is a location, not a quotation",
+    live:find("gone", 1, true) == nil,
+    live
+  )
+  truthy(
+    "ref: an unsaved buffer is declared, since the agent reads disk",
+    live:find("unsaved changes", 1, true) ~= nil,
+    live
+  )
 
   vim.cmd "tabclose"
   os.remove(loose)
@@ -1139,10 +1181,15 @@ local function test_ui()
 
   -- A card whose lines are not all exactly the requested width draws a ragged
   -- right edge, which is what every box-drawing bug looks like.
+  --
+  -- Pinned to a FRAMED style. The width invariant is a property of having a
+  -- right-hand border to line up: an unframed card has no right edge, and
+  -- padding one to full width would put trailing whitespace on every line of a
+  -- buffer the user yanks out of. That is asserted separately below.
   local card = render.card(
-    { { "✓ Shell", "PaseoToolOk" } },
+    { { "Shell", "PaseoToolOk" } },
     { { { "ls -la" } }, { { "a.txt" } } },
-    { width = 40 }
+    { width = 40, kind = "rounded" }
   )
   local ragged
   for _, line in ipairs(card) do
@@ -1150,7 +1197,7 @@ local function test_ui()
       ragged = render.concat(line)
     end
   end
-  eq("ui: every card line is exactly the requested width", ragged, nil)
+  eq("ui: every framed card line is exactly the requested width", ragged, nil)
 
   -- Found by real agent history, not by a fixture: a multi-line shell command
   -- comes back with newlines in `display.summary`, and nvim_buf_set_lines
@@ -1159,7 +1206,7 @@ local function test_ui()
   local newline_card = render.card(
     { { "Shell", "PaseoToolName" }, { "cat <<EOF\nhello\nEOF", "PaseoToolArg" } },
     {},
-    { width = 50 }
+    { width = 50, kind = "rounded" }
   )
   eq(
     "ui: a cell containing a newline is flattened, not passed through",
@@ -1174,7 +1221,7 @@ local function test_ui()
   local long = render.card(
     { { string.rep("x", 400), "PaseoToolArg" } },
     { { { string.rep("y", 400) } } },
-    { width = 60 }
+    { width = 60, kind = "rounded" }
   )
   local widths = {}
   for _, line in ipairs(long) do
@@ -1182,9 +1229,47 @@ local function test_ui()
   end
   eq("ui: a truncated header does not overflow the card", widths, { 60, 60, 60 })
 
-  -- A collapsed card is ONE line. A transcript of three-line boxes around
-  -- "read a file" is unreadable.
-  eq("ui: a card with no body is a single line", #render.card({ { "x" } }, {}, { width = 40 }), 1)
+  -- Every style has to hold two invariants, whatever it does in between: a
+  -- collapsed card is one line, and nothing overflows the width it was given.
+  -- Those are the two that break the transcript rather than merely looking
+  -- wrong -- an over-wide line soft-wraps and a multi-line "collapsed" card
+  -- makes a fold of one fact.
+  for _, kind in ipairs { "plate", "rule", "rounded", "square" } do
+    eq(
+      "ui: a card with no body is a single line -- " .. kind,
+      #render.card({ { "x" } }, {}, { width = 40, kind = kind }),
+      1
+    )
+
+    local over
+    for _, line in
+      ipairs(
+        render.card(
+          { { string.rep("x", 400) } },
+          { { { string.rep("y", 400) } }, { { "short" } } },
+          { width = 40, kind = kind }
+        )
+      )
+    do
+      if render.width(line) > 40 then
+        over = render.width(line)
+      end
+    end
+    eq("ui: no card line overflows its width -- " .. kind, over, nil)
+  end
+
+  -- An unframed card must NOT pad: these lines are real buffer text, and
+  -- trailing whitespace on every row of a tool card is whitespace in whatever
+  -- the reader yanks out of the transcript.
+  local unpadded
+  for _, line in
+    ipairs(render.card({ { "Shell" } }, { { { "ls -la" } } }, { width = 40, kind = "plate" }))
+  do
+    if render.concat(line):match "%s$" then
+      unpadded = render.concat(line)
+    end
+  end
+  eq("ui: an unframed card does not pad to width", unpadded, nil)
 
   -- Extmark columns are BYTES; widths are display columns. Box-drawing and the
   -- status glyphs make the two differ on literally every card line.
@@ -1258,15 +1343,21 @@ local function test_ui()
   -- watch: an expanded worktree-setup card used to be a header and nothing
   -- else, so a setup command that failed left a worktree you cannot build in
   -- and no way to see which command did it.
-  local setup = table.concat(vim.tbl_map(render.concat, timeline.detail_body({
-    type = "worktree_setup",
-    worktreePath = "/tmp/wt",
-    branchName = "ws/thing",
-    commands = {
-      { index = 1, command = "bun install", status = "completed", exitCode = 0 },
-      { index = 2, command = "bun run build", status = "failed", exitCode = 2 },
-    },
-  }, 60)), "\n")
+  local setup = table.concat(
+    vim.tbl_map(
+      render.concat,
+      timeline.detail_body({
+        type = "worktree_setup",
+        worktreePath = "/tmp/wt",
+        branchName = "ws/thing",
+        commands = {
+          { index = 1, command = "bun install", status = "completed", exitCode = 0 },
+          { index = 2, command = "bun run build", status = "failed", exitCode = 2 },
+        },
+      }, 60)
+    ),
+    "\n"
+  )
   truthy("ui: a worktree setup names its branch", setup:find("ws/thing", 1, true) ~= nil)
   truthy("ui: and each command it ran", setup:find("bun run build", 1, true) ~= nil)
   truthy("ui: and how the failing one failed", setup:find("exit 2", 1, true) ~= nil)
@@ -1318,10 +1409,7 @@ local function test_ui()
     "ui: a completing tool call replaces its card rather than appending",
     vim.api.nvim_buf_line_count(chat.conversation) < before
   )
-  truthy(
-    "ui: and folds once it has succeeded",
-    not chat.blocks[chat.by_call["call-1"]].expanded
-  )
+  truthy("ui: and folds once it has succeeded", not chat.blocks[chat.by_call["call-1"]].expanded)
   local blocks = 0
   for _ in pairs(chat.blocks) do
     blocks = blocks + 1
@@ -1329,8 +1417,19 @@ local function test_ui()
   eq("ui: and does not create a second block", blocks, 4)
 
   local joined = table.concat(vim.api.nvim_buf_get_lines(chat.conversation, 0, -1, false), "\n")
-  truthy("ui: the completed card shows its terminal status", joined:find("✓", 1, true) ~= nil)
-  truthy("ui: and no longer shows the running one", joined:find("◐", 1, true) == nil)
+  -- Named through the registry, not pasted in. A literal glyph in a test is
+  -- the same fragile thing as a literal glyph in the source -- and when the
+  -- source one went missing, a test holding its own copy would have gone on
+  -- passing while the card drew nothing.
+  local glyphs = require "paseo.ui.icons"
+  truthy(
+    "ui: the completed card shows its terminal status",
+    joined:find(glyphs.status.completed, 1, true) ~= nil
+  )
+  truthy(
+    "ui: and no longer shows the running one",
+    joined:find(glyphs.status.running, 1, true) == nil
+  )
 
   -- Streamed chunks must join: a reply delivered as "Run" + "ning." renders
   -- "Running.", not two lines.
@@ -1343,11 +1442,15 @@ local function test_ui()
   transcript.rerender(chat, tool)
   truthy(
     "ui: expanding a card reveals its output",
-    table.concat(vim.api.nvim_buf_get_lines(chat.conversation, 0, -1, false), "\n")
+    table
+      .concat(vim.api.nvim_buf_get_lines(chat.conversation, 0, -1, false), "\n")
       :find("a.txt", 1, true) ~= nil
   )
-  eq("ui: anchors survive a block changing height", #vim.api.nvim_buf_get_extmarks(
-    chat.conversation, require("paseo.ui.hl").ns_anchor, 0, -1, {}), 4)
+  eq(
+    "ui: anchors survive a block changing height",
+    #vim.api.nvim_buf_get_extmarks(chat.conversation, require("paseo.ui.hl").ns_anchor, 0, -1, {}),
+    4
+  )
 
   -- THE BUG THAT MADE EVERY TOOL CARD INVISIBLE, at the only place it was
   -- observable: the shape of the line the sidecar actually writes.
@@ -1439,11 +1542,7 @@ local function test_ui()
   end
 
   float.open(surface_chat)
-  eq(
-    "ui: the cursor lands in the composer",
-    vim.api.nvim_get_current_buf(),
-    surface_chat.composer
-  )
+  eq("ui: the cursor lands in the composer", vim.api.nvim_get_current_buf(), surface_chat.composer)
   truthy(
     "ui: so the tab keys are bound THERE, not only on the chrome",
     mapping(surface_chat.composer, "1") ~= nil and mapping(surface_chat.composer, "5") ~= nil
@@ -1479,10 +1578,7 @@ local function test_ui()
     "ui: closing the float gives the composer its digits back",
     mapping(surface_chat.composer, "1") == nil and mapping(surface_chat.composer, "<Tab>") == nil
   )
-  truthy(
-    "ui: and the conversation's",
-    mapping(surface_chat.conversation, "1") == nil
-  )
+  truthy("ui: and the conversation's", mapping(surface_chat.conversation, "1") == nil)
 
   -- Z-INDEX. The surface used to sit at 100, above the 50 that `nvim_open_win`
   -- and plenary's popup hand out by default -- so every telescope picker and
@@ -1621,8 +1717,13 @@ local function test_ui()
   end
   truthy("ui: the dashboard chrome is a volt buffer", chrome_buf ~= nil)
   if chrome_buf then
-    local marks =
-      vim.api.nvim_buf_get_extmarks(chrome_buf, -1, { 0, 0 }, { 1, -1 }, { details = true })
+    local marks = vim.api.nvim_buf_get_extmarks(
+      chrome_buf,
+      -1,
+      { 0, 0 },
+      { 1, -1 },
+      { details = true }
+    )
     local drawn = {}
     for _, mark in ipairs(marks) do
       for _, cell in ipairs(mark[4].virt_text or {}) do
@@ -1635,11 +1736,18 @@ local function test_ui()
       drawn:find("test", 1, true) ~= nil,
       drawn
     )
-    truthy(
-      "ui: and the tab bar is numbered, so 1-6 is a hint you can read",
-      drawn:find("5 Usage", 1, true) ~= nil,
-      drawn
-    )
+    -- Every tab's NUMBER, at every width. The bar degrades from name+icon to
+    -- name, to icon, to bare number as the terminal narrows, and the number is
+    -- the one thing it must never drop -- it is the only place that says which
+    -- key goes where, and the tab that would fall off the end is always the
+    -- last one, which is the one you had not discovered yet.
+    local unnumbered = {}
+    for i = 1, #require("paseo.ui.float").TABS do
+      if not drawn:find(" " .. i .. " ", 1, true) then
+        unnumbered[#unnumbered + 1] = i
+      end
+    end
+    eq("ui: every tab keeps its number however narrow the bar gets", unnumbered, {}, drawn)
 
     -- Clicking a tab is the other half of "1-5 jump": volt dispatches a click
     -- through the cell's third element, and `volt.events.enable` -- which this
@@ -1761,10 +1869,32 @@ local function test_ui()
   -- `line_w` skips it when measuring -- but `render.width` counts it as five
   -- columns of text. So the order is hpad THEN truncate, never the reverse,
   -- and `widgets.row` resolves the sentinel before returning.
-  -- Every marker has to BE something. `check_on`/`check_off` were empty strings
-  -- -- the codepoints had been lost out of the file -- so the Session panel's
-  -- feature toggles and, once it existed, every multi-select question drew no
-  -- marker at all, and "off" was indistinguishable from "not drawn".
+  -- Every glyph in the registry has to BE something, and the check has to walk
+  -- the WHOLE registry rather than the four markers it used to.
+  --
+  -- This has now happened twice. `check_on`/`check_off` were empty strings --
+  -- the codepoints had been lost out of the file -- so the Session panel's
+  -- feature toggles drew no marker at all and "off" was indistinguishable from
+  -- "not drawn". That got fixed, and a test was added covering exactly those
+  -- four names; meanwhile six slots in `render.icons`, the `permission` marker
+  -- in the Sessions panel, two group icons and five inline glyphs elsewhere
+  -- were empty the entire time, and the suite stayed green.
+  --
+  -- An empty icon is not a visible failure: the line still draws. So the check
+  -- is width, over everything, with no list to keep in step.
+  local registry = require "paseo.ui.icons"
+  local blank = {}
+  for name, glyph in pairs(registry.all()) do
+    if vim.api.nvim_strwidth(glyph) < 1 then
+      blank[#blank + 1] = name
+    end
+  end
+  table.sort(blank)
+  eq("ui: no glyph in the registry is empty", blank, {})
+
+  -- The two selection markers additionally have to be exactly ONE cell. They
+  -- are drawn in fixed-width rows, and a two-cell marker shifts everything to
+  -- its right by a column on precisely the rows that are selected.
   for _, name in ipairs { "check_on", "check_off", "radio_on", "radio_off" } do
     eq(
       "ui: the " .. name .. " marker is exactly one cell",
@@ -1772,6 +1902,274 @@ local function test_ui()
       1
     )
   end
+
+  -- A key is spelled the way a keyboard spells it, and anything unrecognised
+  -- comes back UNCHANGED rather than empty -- a hint bar that silently drops
+  -- the key it is describing is worse than one that prints `<Plug>foo`.
+  eq("ui: a chord is spelled out", registry.spell "<C-f>", "Ctrl + f")
+  eq("ui: a bare key is left alone", registry.spell "q", "q")
+  eq("ui: an unknown special key survives", registry.spell "<Plug>foo", "<Plug>foo")
+
+  -- ----------------------------------------------------------------- style
+
+  -- Every style has to produce the SAME number of rows for the same content.
+  -- volt records a section's start row when the layout is measured and never
+  -- recomputes it on redraw, so a card whose height depended on the frame
+  -- would move every section below it the moment `ui.style` changed -- and
+  -- two cards paired side by side would stop squaring up.
+  local style = require "paseo.ui.style"
+  local heights = {}
+  for _, kind in ipairs(style.CARDS) do
+    heights[#heights + 1] = #widgets.card {
+      title = "Title",
+      w = 40,
+      kind = kind,
+      lines = { { { "one" } }, { { "two" } }, { { "three" } } },
+    }
+  end
+  eq("ui: every card style is the same height", heights, { 5, 5, 5, 5 })
+
+  local widths = {}
+  for _, kind in ipairs(style.CARDS) do
+    for _, line in
+      ipairs(widgets.card {
+        title = "Title",
+        w = 40,
+        kind = kind,
+        lines = { { { string.rep("z", 200) } } },
+      })
+    do
+      if render.width(line) ~= 40 then
+        widths[#widths + 1] = kind .. ":" .. render.width(line)
+      end
+    end
+  end
+  eq("ui: every panel card row is exactly its width", widths, {})
+
+  -- A preset name and the table form have to mean the same thing, and a table
+  -- only has to name what it changes.
+  eq("ui: a preset resolves", style.resolve "rounded", { card = "rounded", border = "rounded" })
+  eq(
+    "ui: a table layers over its preset",
+    style.resolve { preset = "rounded", border = "none" },
+    { card = "rounded", border = "none" }
+  )
+  eq(
+    "ui: nothing resolves to the default",
+    style.resolve(nil),
+    { card = "plate", border = "invisible" }
+  )
+  truthy("ui: a known preset validates", style.valid "square")
+  truthy("ui: an unknown preset does not", not style.valid "hexagonal")
+  truthy("ui: an unknown card does not", not style.valid { card = "hexagonal" })
+  -- "invisible" keeps a real border and paints it fg == bg. Dropping the
+  -- border instead would take its one cell of padding with it and put the
+  -- content hard against the window edge.
+  eq(
+    "ui: an invisible border is still a border",
+    (style.window_border { border = "invisible" }),
+    "rounded"
+  )
+
+  -- ----------------------------------------------------------------- theme
+
+  -- The elevation ladder has to actually STEP, in the right direction, or
+  -- every "raised" surface washes into the one under it. Light themes step the
+  -- other way; that sign is the whole reason this is derived rather than
+  -- written down.
+  local theme = require "paseo.ui.theme"
+  local previous_bg = vim.o.background
+  for _, background in ipairs { "dark", "light" } do
+    vim.o.background = background
+    local t = theme.derive()
+    if t.opaque then
+      local seen, duplicate = {}, nil
+      for _, tier in ipairs { "bg0", "bg1", "bg2", "bg3", "bg4" } do
+        if seen[t.bg[tier]] then
+          duplicate = tier
+        end
+        seen[t.bg[tier]] = true
+      end
+      eq("ui: the " .. background .. " elevation ladder has five distinct tiers", duplicate, nil)
+      eq("ui: and it steps " .. background, t.sign, background == "dark" and 1 or -1)
+    end
+
+    -- An accent used as text has to be legible on the plate it sits on. This
+    -- is measured rather than assumed: `morning`'s "added" is #90ee90, which
+    -- is unreadable on a plate tinted with that same green, while `default`'s
+    -- is already dark enough that pushing it further lands on black.
+    local groups = theme.groups()
+    local illegible = {}
+    for _, name in ipairs {
+      "PaseoChipOn",
+      "PaseoChipFocus",
+      "PaseoChipWarn",
+      "PaseoChipDanger",
+      "PaseoKeycap",
+      "PaseoGreenTile",
+      "PaseoRedTile",
+      "PaseoBlueTile",
+      "PaseoYellowTile",
+    } do
+      local group = groups[name]
+      if group.bg and theme.contrast(group.fg, group.bg) < theme.MIN_CONTRAST then
+        illegible[#illegible + 1] = name
+      end
+    end
+    eq("ui: every " .. background .. " plate is legible", illegible, {})
+  end
+  vim.o.background = previous_bg
+
+  -- A colour already clear of the target is left exactly alone -- a theme that
+  -- had its accents right keeps them.
+  eq("ui: a legible colour is untouched", theme.readable("#ffffff", "#000000", 3.2), "#ffffff")
+
+  -- Three rules that only a real colourscheme can break, so they are checked
+  -- against several. All three were found by looking at `morning`.
+  local scheme_before = vim.g.colors_name
+  for _, scheme in ipairs { "habamax", "morning", "default", "desert" } do
+    if pcall(vim.cmd.colorscheme, scheme) then
+      local c = theme.palette()
+
+      -- 1. Dim has to be DIMMER than body text. `morning` sets `Comment` to
+      -- pure blue against a black `Normal`, so every quiet label came out
+      -- louder than the words it was qualifying.
+      truthy(
+        "ui: dim text recedes behind body text on " .. scheme,
+        theme.contrast(c.grey, c.bg) <= theme.contrast(c.text, c.bg),
+        ("grey %s (%.1f) vs text %s (%.1f)"):format(
+          c.grey,
+          theme.contrast(c.grey, c.bg),
+          c.text,
+          theme.contrast(c.text, c.bg)
+        )
+      )
+
+      -- 2. ...and it has to be chrome-coloured, not syntax-coloured. A
+      -- saturated comment colour is quiet by luminance and loud by saturation,
+      -- which is the half a contrast check does not catch.
+      truthy(
+        "ui: dim text is neutral on " .. scheme,
+        theme.saturation(c.grey) <= theme.MAX_CHROME_SATURATION,
+        ("%s at %.2f"):format(c.grey, theme.saturation(c.grey))
+      )
+
+      -- 3. "Green" has to be green. Sourcing it from `String` meant that on
+      -- `morning` a tool that SUCCEEDED was drawn in magenta -- the colour of
+      -- a string literal, which is not a shade of "it worked". `Added` means
+      -- what we mean; `String` only happens to.
+      local hue = select(1, require("volt.color").hex2hsl(c.green))
+      truthy(
+        "ui: the success accent is actually green on " .. scheme,
+        hue >= 60 and hue <= 190,
+        ("%s at hue %.0f"):format(c.green, hue)
+      )
+    end
+  end
+  if scheme_before then
+    pcall(vim.cmd.colorscheme, scheme_before)
+  end
+
+  -- A bar's track is the ABSENCE of fill, so it is derived from the background
+  -- rather than from the comment colour. On `morning` a comment-derived track
+  -- came out pale blue and a 42% bar looked full.
+  local track = vim.api.nvim_get_hl(0, { name = "PaseoTrack" })
+  truthy("ui: the bar track is defined", track.fg ~= nil)
+
+  -- ---------------------------------------------------------------- layout
+
+  -- The chrome's row budget was three independent copies of the same
+  -- arithmetic -- `g.height - 4` in one place, `g.row + 3` in another, and a
+  -- bare `row - 5` in a third to turn a cursor line into a list index. The one
+  -- that got missed would not error; it would put the click targets a row off.
+  local layout = require "paseo.ui.layout"
+  for _, height in ipairs { 24, 40, 60 } do
+    local rows = layout.rows(height)
+    eq("ui: the body gets height - 4 rows at " .. height, rows.body_height, height - 4)
+    eq("ui: the footer owns the last row at " .. height, rows.footer, height)
+    eq("ui: the body ends above it at " .. height, rows.body_last, height - 1)
+
+    local g = { row = 2, col = 3, width = 100, height = height, composer = 7 }
+    local panes = layout.panes(g)
+    eq("ui: the panes start below the rule at " .. height, panes.top, g.row + 3)
+    -- The composer's bottom border lands ON the last body row, never on the
+    -- footer.
+    eq(
+      "ui: the composer's border lands on the last body row at " .. height,
+      panes.composer_row + panes.composer,
+      layout.screen_row(g, rows.body_last)
+    )
+  end
+
+  -- Two rows of chrome plus the panel's own heading. `item_at` returns nil
+  -- above the list rather than a zero or a negative, so a click on the heading
+  -- is "nothing", not "the item before the first one".
+  eq("ui: a cursor row maps to a list index", layout.item_at(8, 2), 3)
+  eq("ui: the first item is index 1", layout.item_at(6, 2), 1)
+  eq("ui: above the list is nothing", layout.item_at(4, 2), nil)
+
+  -- --------------------------------------------------------------- animate
+
+  local animate = require "paseo.ui.animate"
+  local scratch = vim.api.nvim_create_buf(false, true)
+
+  -- `animate = false` has to be INSTANT, not fast: a tween that still eases
+  -- when motion is off is motion.
+  require("paseo.config").setup { ui = { animate = false } }
+  eq("ui: motion off reports disabled", animate.enabled "bars", false)
+  eq(
+    "ui: motion off returns the target immediately",
+    animate.tween { key = "t.off", buf = scratch, section = "body", target = 73 },
+    73
+  )
+  eq("ui: motion off never reveals partially", animate.revealed("t.off", 12), 12)
+
+  require("paseo.config").setup {}
+
+  -- The FIRST sight of a value is not a transition. Animating from zero on the
+  -- first draw makes every panel open by sweeping its bars up, which is a lot
+  -- of motion to say nothing.
+  eq(
+    "ui: a first value is not animated",
+    animate.tween { key = "t.first", buf = scratch, section = "body", target = 61 },
+    61
+  )
+
+  -- A reveal may only ever draw FEWER rows, never more. volt records a
+  -- section's start row when the layout is measured and never recomputes it,
+  -- so a reveal that grew past the block's final height would draw every
+  -- section below it at the wrong row -- which surfaces as
+  -- `Invalid 'line': out of range` thrown from inside `vim.on_key`.
+  animate.reveal { key = "t.reveal", buf = scratch, section = "body" }
+  local shown = animate.revealed("t.reveal", 20)
+  truthy(
+    "ui: a reveal never draws more rows than it was given",
+    shown >= 1 and shown <= 20,
+    tostring(shown)
+  )
+
+  -- The two effects are independent. `reveal` used to delegate to `flash` --
+  -- same machine, a start time and a repaint clock -- and picked up its gate
+  -- along with it, so turning flash off silently turned reveal off too.
+  require("paseo.config").setup {
+    ui = { animate = { flash = false, reveal = true, bars = true, fps = 30 } },
+  }
+  animate.reveal { key = "t.indep", buf = scratch, section = "body" }
+  truthy("ui: reveal still runs with flash off", animate.revealed("t.indep", 20) < 20)
+  animate.flash { key = "t.indep.flash", buf = scratch, section = "body" }
+  eq("ui: and flash stays off", animate.flash_stop "t.indep.flash", nil)
+  require("paseo.config").setup {}
+
+  -- Tearing down must not throw. Every live effect holds a `uv` timer, which
+  -- is userdata -- so the obvious `vim.deepcopy(live)` to iterate safely over
+  -- a table being mutated raises "Cannot deepcopy object of type userdata",
+  -- from inside the dashboard's close path.
+  animate.flash { key = "t.flash", buf = scratch, section = "body" }
+  local torn = pcall(animate.stop_all)
+  truthy("ui: stopping every effect does not throw", torn)
+  eq("ui: and a stopped flash reports no stop", animate.flash_stop "t.flash", nil)
+
+  -- --------------------------------------------------------------- widgets
 
   local justified = widgets.row({ { "left" } }, { { "right" } }, 30)
   eq("ui: a justified row lands on its width", render.width(justified), 30)
@@ -1923,7 +2321,11 @@ local function test_ui()
   if opened then
     local squeezed = vim.api.nvim_get_current_buf()
     local drawn = #vim.api.nvim_buf_get_lines(squeezed, 0, -1, false)
-    eq("settings: the buffer is as long as the layout volt measured", drawn, require("volt.state")[squeezed].h)
+    eq(
+      "settings: the buffer is as long as the layout volt measured",
+      drawn,
+      require("volt.state")[squeezed].h
+    )
     truthy("settings: and fits the editor", vim.api.nvim_win_get_height(0) <= vim.o.lines - 4)
     settings.close()
   end
@@ -1943,7 +2345,11 @@ local function test_ui()
   }
   vim.api.nvim_feedkeys(vim.keycode "l", "x", false)
   local after = #vim.api.nvim_buf_get_lines(shrinking, 0, -1, false)
-  truthy("settings: dropping ten models shrinks the buffer", after < before, before .. " -> " .. after)
+  truthy(
+    "settings: dropping ten models shrinks the buffer",
+    after < before,
+    before .. " -> " .. after
+  )
 
   local per_row = {}
   for _, mark in
@@ -1973,10 +2379,7 @@ local function test_ui()
   -- and the sidebar is what `<C-f>` switches to.
   local defaults = config.defaults()
   eq("ui: the configured default surface is the dashboard", defaults.ui.surface, "float")
-  truthy(
-    "ui: whose z-index is below the 50 a float gets by default",
-    defaults.ui.float.zindex < 50
-  )
+  truthy("ui: whose z-index is below the 50 a float gets by default", defaults.ui.float.zindex < 50)
 
   -- Pasting an image is what `p` does now -- read the clipboard, fall through
   -- to an ordinary paste when it holds no picture -- so the composer no longer
@@ -2045,7 +2448,10 @@ local function test_ui()
   surface_chat.permissions = { { id = "x" } }
   local header = render.concat(sidebar.header(surface_chat))
   truthy("ui: the header shows the mode", header:find("acceptEdits", 1, true) ~= nil)
-  truthy("ui: and shouts when something is waiting on you", header:find("needs you", 1, true) ~= nil)
+  truthy(
+    "ui: and shouts when something is waiting on you",
+    header:find("needs you", 1, true) ~= nil
+  )
 
   -- The spinner. A static `●` looked identical at two seconds and at two
   -- minutes, so a wedged turn and a working one were the same picture; the
@@ -2076,7 +2482,8 @@ local function test_ui()
   -- NOT `vim.fn.getcwd()`: the review and ws-init suites `tcd` into fixture
   -- directories, so by the time this runs the cwd is wherever they left it and
   -- every one of these assertions silently skipped instead of failing.
-  local root_dir = vim.fs.dirname(vim.api.nvim_get_runtime_file("lua/paseo/ui/render.lua", false)[1])
+  local root_dir =
+    vim.fs.dirname(vim.api.nvim_get_runtime_file("lua/paseo/ui/render.lua", false)[1])
   root_dir = root_dir and vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(root_dir)))
 
   local function source_of(path)
@@ -2169,10 +2576,7 @@ local function test_ui()
       "ui: the ask overlay never hands its teardown to volt",
       ask_source:find("volt.mappings", 1, true) == nil
     )
-    truthy(
-      "ui: nor talks to the daemon itself",
-      ask_source:find("paseo.bridge", 1, true) == nil
-    )
+    truthy("ui: nor talks to the daemon itself", ask_source:find("paseo.bridge", 1, true) == nil)
     truthy(
       "ui: and answers in a buffer rather than a prompt",
       ask_source:find("vim.ui.input", 1, true) == nil
@@ -2195,10 +2599,7 @@ local function test_ui()
   truthy("ui: to_volt hands volt a different table", handed[1] ~= source_line)
   truthy("ui: and different cells within it", handed[1][1] ~= source_line[1])
   table.remove(handed[1][1], 3) -- what volt.draw does
-  truthy(
-    "ui: so volt stripping the actions cannot reach ours",
-    source_line[1][3] ~= nil
-  )
+  truthy("ui: so volt stripping the actions cannot reach ours", source_line[1][3] ~= nil)
 end
 
 -- --------------------------------------------------------- create strategy
@@ -2218,11 +2619,7 @@ local function test_strategy()
   local solo = workspaces.strategy(root .. "/solo")
   eq("strategy: a git repo gets a worktree Paseo cuts itself", solo.kind, "worktree")
   eq("strategy: cut from what is CHECKED OUT, not origin/HEAD", solo.base, "main")
-  truthy(
-    "strategy: cut from the repo toplevel",
-    (solo.repo or ""):find "/solo$" ~= nil,
-    solo.repo
-  )
+  truthy("strategy: cut from the repo toplevel", (solo.repo or ""):find "/solo$" ~= nil, solo.repo)
 
   eq(
     "strategy: a member repo with no manifest above it is just a repo",
@@ -2434,11 +2831,15 @@ local function test_questions()
 
   -- The whole bug: a request to ACT carries no questions and must stay on the
   -- allow/deny path rather than be answered as if it did.
-  eq("questions: a tool permission is not a question", questions.parse {
-    kind = "tool",
-    name = "Write",
-    input = { file_path = "/tmp/x", content = "y" },
-  }, nil)
+  eq(
+    "questions: a tool permission is not a question",
+    questions.parse {
+      kind = "tool",
+      name = "Write",
+      input = { file_path = "/tmp/x", content = "y" },
+    },
+    nil
+  )
 
   -- Two questions in one request: the shape that rendered as one.
   local pair = {
@@ -2469,7 +2870,11 @@ local function test_questions()
   )
 
   local input = questions.input(pair, both, { [1] = questions.join { "A", "B" }, [2] = "" })
-  eq("questions: answers are keyed by the question text", input.answers["Which ones apply?"], "A, B")
+  eq(
+    "questions: answers are keyed by the question text",
+    input.answers["Which ones apply?"],
+    "A, B"
+  )
   eq("questions: and by the header other providers read", input.answers["Applies"], "A, B")
   eq("questions: a skipped answer is sent as no answer", input.answers["Comment"], nil)
   eq("questions: the questions go back with them", #input.questions, 2)
@@ -2538,7 +2943,11 @@ local function test_questions()
   local single = questions.state(one)
   questions.choose(single, 2)
   questions.choose(single, 1)
-  eq("questions: single-select replaces rather than accumulating", questions.answers(single)[1], "Rebase")
+  eq(
+    "questions: single-select replaces rather than accumulating",
+    questions.answers(single)[1],
+    "Rebase"
+  )
 
   eq(
     "questions: the badge says what was answered, not just `allowed`",
@@ -2554,7 +2963,11 @@ local function test_questions()
     text[#text + 1] = render.concat(line)
   end
   text = table.concat(text, "\n")
-  truthy("questions: the inline card shows the second question too", text:find("Optional comment", 1, true) ~= nil, text)
+  truthy(
+    "questions: the inline card shows the second question too",
+    text:find("Optional comment", 1, true) ~= nil,
+    text
+  )
   truthy("questions: and the options under it", text:find("A", 1, true) ~= nil, text)
 end
 
@@ -2571,27 +2984,38 @@ local function test_provider_setup()
   local old_preference = config.get().paseo.provider
   local requests = {}
   local hold_features, held_feature_callback = false, nil
-  local catalogue = { entries = {
-    {
-      provider = "claude", status = "ready", label = "Claude", defaultModeId = "default",
-      modes = { { id = "plan", label = "Plan" }, { id = "default", label = "Ask" } },
-      models = { { id = "opus", label = "Opus", isDefault = true } },
-    },
-    {
-      provider = "codex", status = "ready", label = "Codex", defaultModeId = "auto-review",
-      modes = { { id = "auto-review", label = "Auto-review" } },
-      models = {
-        {
-          id = "gpt-5.6-sol", label = "GPT-5.6-Sol", isDefault = true,
-          thinkingOptions = { { id = "high", label = "High", isDefault = true } },
-        },
-        {
-          id = "gpt-5.6-luna", label = "GPT-5.6-Luna",
-          thinkingOptions = { { id = "medium", label = "Medium", isDefault = true } },
+  local catalogue = {
+    entries = {
+      {
+        provider = "claude",
+        status = "ready",
+        label = "Claude",
+        defaultModeId = "default",
+        modes = { { id = "plan", label = "Plan" }, { id = "default", label = "Ask" } },
+        models = { { id = "opus", label = "Opus", isDefault = true } },
+      },
+      {
+        provider = "codex",
+        status = "ready",
+        label = "Codex",
+        defaultModeId = "auto-review",
+        modes = { { id = "auto-review", label = "Auto-review" } },
+        models = {
+          {
+            id = "gpt-5.6-sol",
+            label = "GPT-5.6-Sol",
+            isDefault = true,
+            thinkingOptions = { { id = "high", label = "High", isDefault = true } },
+          },
+          {
+            id = "gpt-5.6-luna",
+            label = "GPT-5.6-Luna",
+            thinkingOptions = { { id = "medium", label = "Medium", isDefault = true } },
+          },
         },
       },
     },
-  } }
+  }
   local ok, err = pcall(function()
     bridge.ensure = function(callback)
       callback(nil)
@@ -2605,12 +3029,14 @@ local function test_provider_setup()
           held_feature_callback = callback
           return
         end
-        callback(nil, { features = args.provider:find("luna", 1, true)
-          and { { id = "plan_mode", type = "toggle", label = "Plan", value = false } }
-          or {
-            { id = "fast_mode", type = "toggle", label = "Fast", value = false },
-            { id = "plan_mode", type = "toggle", label = "Plan", value = false },
-          } })
+        callback(nil, {
+          features = args.provider:find("luna", 1, true)
+              and { { id = "plan_mode", type = "toggle", label = "Plan", value = false } }
+            or {
+              { id = "fast_mode", type = "toggle", label = "Fast", value = false },
+              { id = "plan_mode", type = "toggle", label = "Plan", value = false },
+            },
+        })
       elseif op == "agent.config" then
         callback(nil, chat.test_config)
       elseif op == "agent.setMode" then
@@ -2638,61 +3064,99 @@ local function test_provider_setup()
     create.select_model({ cwd = "/work" }, function(selection)
       chosen = selection
     end)
-    truthy("provider: picker completes", vim.wait(1000, function()
-      return chosen ~= nil
-    end))
+    truthy(
+      "provider: picker completes",
+      vim.wait(1000, function()
+        return chosen ~= nil
+      end)
+    )
     eq("provider: separate provider and model selections", select_count, 2)
     eq("provider: labeled Codex model is selected", chosen and chosen.provider, "codex/gpt-5.6-sol")
-    eq("provider: direct model ids are validated", create.find(catalogue.entries, "codex/nope"), nil)
+    eq(
+      "provider: direct model ids are validated",
+      create.find(catalogue.entries, "codex/nope"),
+      nil
+    )
     local draft = create.draft(chosen)
     eq("provider: default permissions come from daemon", draft.modeId, "auto-review")
     eq("provider: default reasoning comes from model", draft.thinkingOptionId, "high")
 
     create.preference("codex/gpt-5.6-sol", function() end)
-    eq("provider: preference changes without creating an agent", config.get().paseo.provider, "codex/gpt-5.6-sol")
-    truthy("provider: no creation op was sent", vim.iter(requests):all(function(request)
-      return request.op ~= "agent.ensure" and request.op ~= "agent.create"
-    end))
+    eq(
+      "provider: preference changes without creating an agent",
+      config.get().paseo.provider,
+      "codex/gpt-5.6-sol"
+    )
+    truthy(
+      "provider: no creation op was sent",
+      vim.iter(requests):all(function(request)
+        return request.op ~= "agent.ensure" and request.op ~= "agent.create"
+      end)
+    )
 
     local reviewed
     create.review({ cwd = "/work", preferred = "codex/gpt-5.6-sol" }, function(value)
       reviewed = value
     end)
-    truthy("provider: review screen opens", vim.wait(1000, function()
-      local buf = vim.api.nvim_get_current_buf()
-      return table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
-        :find("New Paseo session", 1, true) ~= nil
-    end))
+    truthy(
+      "provider: review screen opens",
+      vim.wait(1000, function()
+        local buf = vim.api.nvim_get_current_buf()
+        return table
+          .concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+          :find("New Paseo session", 1, true) ~= nil
+      end)
+    )
     chosen_model = "gpt-5.6-luna"
     hold_features = true
     vim.api.nvim_win_set_cursor(0, { 4, 0 })
     vim.api.nvim_feedkeys(vim.keycode "<CR>", "x", false)
-    truthy("provider: changing model re-fetches its features", vim.wait(1000, function()
-      local found = 0
-      for _, request in ipairs(requests) do
-        if request.op == "providers.features" then
-          found = found + 1
+    truthy(
+      "provider: changing model re-fetches its features",
+      vim.wait(1000, function()
+        local found = 0
+        for _, request in ipairs(requests) do
+          if request.op == "providers.features" then
+            found = found + 1
+          end
         end
-      end
-      return found >= 2
-    end))
+        return found >= 2
+      end)
+    )
     vim.api.nvim_feedkeys("c", "x", false)
     eq("provider: cannot create before the model features arrive", reviewed, nil)
     hold_features = false
-    held_feature_callback(nil, { features = {
-      { id = "plan_mode", type = "toggle", label = "Plan", value = false },
-    } })
-    truthy("provider: model features finish loading", vim.wait(1000, function()
-      local buf = vim.api.nvim_get_current_buf()
-      return table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
-        :find("Loading model features", 1, true) == nil
-    end))
+    held_feature_callback(nil, {
+      features = {
+        { id = "plan_mode", type = "toggle", label = "Plan", value = false },
+      },
+    })
+    truthy(
+      "provider: model features finish loading",
+      vim.wait(1000, function()
+        local buf = vim.api.nvim_get_current_buf()
+        return table
+          .concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+          :find("Loading model features", 1, true) == nil
+      end)
+    )
     vim.api.nvim_feedkeys("c", "x", false)
-    truthy("provider: review creates a draft", vim.wait(1000, function()
-      return reviewed ~= nil
-    end))
-    eq("provider: reviewed model is the changed model", reviewed and reviewed.provider, "codex/gpt-5.6-luna")
-    eq("provider: changed model drops absent features", reviewed and reviewed.featureValues.fast_mode, nil)
+    truthy(
+      "provider: review creates a draft",
+      vim.wait(1000, function()
+        return reviewed ~= nil
+      end)
+    )
+    eq(
+      "provider: reviewed model is the changed model",
+      reviewed and reviewed.provider,
+      "codex/gpt-5.6-luna"
+    )
+    eq(
+      "provider: changed model drops absent features",
+      reviewed and reviewed.featureValues.fast_mode,
+      nil
+    )
 
     vim.ui.select = function(_, _, callback)
       callback(nil)
@@ -2701,9 +3165,12 @@ local function test_provider_setup()
     create.review({ cwd = "/work" }, function(selection, review_err)
       cancelled = selection == nil and review_err == nil
     end)
-    truthy("provider: cancel creates nothing", vim.wait(1000, function()
-      return cancelled
-    end))
+    truthy(
+      "provider: cancel creates nothing",
+      vim.wait(1000, function()
+        return cancelled
+      end)
+    )
 
     local fake_chat = { agent_id = "agent", root = "/work" }
     chat.current = function()
@@ -2714,7 +3181,8 @@ local function test_provider_setup()
       toggled = id
     end
     chat.test_config = {
-      provider = "codex", modeId = "auto-review",
+      provider = "codex",
+      modeId = "auto-review",
       features = { { id = "plan_mode", type = "toggle", label = "Plan", value = false } },
       availableModes = { { id = "auto-review" } },
     }
@@ -2725,7 +3193,9 @@ local function test_provider_setup()
     eq("provider: Codex Plan uses feature toggle", toggled, "plan_mode")
 
     chat.test_config = {
-      provider = "claude", modeId = "default", features = {},
+      provider = "claude",
+      modeId = "default",
+      features = {},
       availableModes = { { id = "plan" }, { id = "default" } },
     }
     chat.load_settings = function() end
@@ -2736,7 +3206,9 @@ local function test_provider_setup()
     eq("provider: Claude Plan uses its mode", requests[#requests].args.modeId, "plan")
 
     local header = sidebar.header {
-      provider = "codex/gpt-5.6-sol", root = "/work", features = { plan_mode = true, fast_mode = true },
+      provider = "codex/gpt-5.6-sol",
+      root = "/work",
+      features = { plan_mode = true, fast_mode = true },
       feature_list = {
         { id = "fast_mode", label = "Fast", type = "toggle" },
         { id = "plan_mode", label = "Plan", type = "toggle" },
@@ -2747,7 +3219,10 @@ local function test_provider_setup()
       text[#text + 1] = cell[1]
     end
     text = table.concat(text)
-    truthy("provider: header shows all enabled feature labels", text:find("Fast", 1, true) and text:find("Plan", 1, true))
+    truthy(
+      "provider: header shows all enabled feature labels",
+      text:find("Fast", 1, true) and text:find("Plan", 1, true)
+    )
   end)
   bridge.ensure, bridge.request = old_ensure, old_request
   vim.ui.select, chat.current = old_select, old_current
@@ -2784,8 +3259,20 @@ local function test_plan()
     description = "Rip out the old permission dialog",
     input = { plan = "## Step one\n\nRip out the old thing.\n\n## Step two\n\nPut a new one in." },
     actions = {
-      { id = "reject", label = "Reject", behavior = "deny", variant = "danger", intent = "dismiss" },
-      { id = "implement", label = "Implement", behavior = "allow", variant = "primary", intent = "implement" },
+      {
+        id = "reject",
+        label = "Reject",
+        behavior = "deny",
+        variant = "danger",
+        intent = "dismiss",
+      },
+      {
+        id = "implement",
+        label = "Implement",
+        behavior = "allow",
+        variant = "primary",
+        intent = "implement",
+      },
     },
   }
 
@@ -2808,7 +3295,10 @@ local function test_plan()
 
   -- The plan text. `detail` is nil for these, so a dialog rendering `detail`
   -- showed an empty box and asked you to approve it.
-  truthy("plan: the text comes from input.plan", plan.text(request):find("Step one", 1, true) ~= nil)
+  truthy(
+    "plan: the text comes from input.plan",
+    plan.text(request):find("Step one", 1, true) ~= nil
+  )
   eq(
     "plan: metadata.planText is the fallback",
     plan.text { kind = "plan", metadata = { planText = "from metadata" } },
@@ -2848,10 +3338,14 @@ local function test_plan()
 
   -- No modes reported means nothing honest to offer: the request's own
   -- Implement/Reject stands rather than a guess.
-  truthy("plan: no reported modes falls back to the request's buttons", plan.actions(request, {}) == nil)
+  truthy(
+    "plan: no reported modes falls back to the request's buttons",
+    plan.actions(request, {}) == nil
+  )
   truthy(
     "plan: and so does a request with no allow action to build on",
-    plan.actions({ kind = "plan", actions = { { id = "reject", behavior = "deny" } } }, claude) == nil
+    plan.actions({ kind = "plan", actions = { { id = "reject", behavior = "deny" } } }, claude)
+      == nil
   )
 
   -- The daemon offers this one only when the session was in bypassPermissions
@@ -2872,7 +3366,11 @@ local function test_plan()
   -- The badge otherwise reads "allowed", which for a plan is true and useless:
   -- the whole point of the four buttons is that they differ.
   eq("plan: the badge says which mode you landed in", plan.label(actions[2]), "implemented, auto")
-  eq("plan: and a reject says you are still planning", plan.label(actions[4]), "rejected, still planning")
+  eq(
+    "plan: and a reject says you are still planning",
+    plan.label(actions[4]),
+    "rejected, still planning"
+  )
 
   -- Long plans are capped, and say so rather than just stopping.
   local long = { kind = "plan", input = { plan = string.rep("a line\n", 40) } }
@@ -2961,7 +3459,10 @@ local function test_answer()
         {
           question = "How should I reconcile your local work?",
           header = "Reconcile",
-          options = { { label = "Rebase", description = "Replay mine on top" }, { label = "Merge" } },
+          options = {
+            { label = "Rebase", description = "Replay mine on top" },
+            { label = "Merge" },
+          },
         },
         {
           question = "Which checks should run?",
@@ -2998,7 +3499,11 @@ local function test_answer()
   -- the editor. Anchoring is what makes "takes over the chat window" true on
   -- both surfaces without a branch per surface.
   truthy("ask: the card is a volt buffer", require("volt.state")[card] ~= nil)
-  eq("ask: and is anchored to the chat window", vim.api.nvim_win_get_config(card_win).relative, "win")
+  eq(
+    "ask: and is anchored to the chat window",
+    vim.api.nvim_win_get_config(card_win).relative,
+    "win"
+  )
   eq("ask: to THAT chat window", vim.api.nvim_win_get_config(card_win).win, chat.win_conversation)
   truthy(
     "ask: it fits inside it",
@@ -3027,7 +3532,11 @@ local function test_answer()
   -- buffer have to agree after a step that changed the line count.
   local function consistent(label)
     local state = require("volt.state")[card]
-    eq("ask: " .. label .. " -- volt's height is the buffer's", state.h, vim.api.nvim_buf_line_count(card))
+    eq(
+      "ask: " .. label .. " -- volt's height is the buffer's",
+      state.h,
+      vim.api.nvim_buf_line_count(card)
+    )
     eq("ask: " .. label .. " -- and the window's", state.h, vim.api.nvim_win_get_height(card_win))
     local overflow = 0
     for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(card, -1, 0, -1, {})) do
@@ -3066,10 +3575,17 @@ local function test_answer()
 
   vim.api.nvim_buf_set_lines(box, 0, -1, false, { "looks", "right" })
   press "<CR>"
-  truthy("ask: what was typed is shown back", drawn(card):find("looks right", 1, true) ~= nil, drawn(card))
+  truthy(
+    "ask: what was typed is shown back",
+    drawn(card):find("looks right", 1, true) ~= nil,
+    drawn(card)
+  )
 
   -- Complete, so now it sends -- and the hint said so first.
-  truthy("ask: the hint offers to send once nothing is missing", drawn(card):find "send the answers" ~= nil)
+  truthy(
+    "ask: the hint offers to send once nothing is missing",
+    drawn(card):find "send the answers" ~= nil
+  )
   vim.api.nvim_set_current_win(card_win)
   press "<CR>"
   eq("ask: the whole set is sent at once", sent and #sent, 3)
@@ -3133,18 +3649,20 @@ local function test_answer()
   }
   chat = chat_with_window(80)
   vim.api.nvim_win_set_height(chat.win_conversation, 14)
-  ask.open(
-    chat,
-    long_list,
-    { actions = long_list.actions, state = questions.parse(long_list) and questions.state(questions.parse(long_list)) },
-    handlers()
-  )
+  ask.open(chat, long_list, {
+    actions = long_list.actions,
+    state = questions.parse(long_list) and questions.state(questions.parse(long_list)),
+  }, handlers())
   for _ = 1, 9 do
     press "j"
   end
   card = vim.api.nvim_get_current_buf()
   shown = drawn(card)
-  truthy("ask: a long list keeps the focused option in view", shown:find("option 10", 1, true) ~= nil, shown)
+  truthy(
+    "ask: a long list keeps the focused option in view",
+    shown:find("option 10", 1, true) ~= nil,
+    shown
+  )
   truthy("ask: and says how many are above it", shown:find("↑", 1, true) ~= nil, shown)
   truthy("ask: and below", shown:find("↓", 1, true) ~= nil, shown)
   truthy(
@@ -3274,8 +3792,11 @@ local function test_permission_sync()
   eq("sync: and the one still pending is kept", chat.permissions[1].id, "b")
 
   local badge = chat.blocks[chat.permission_blocks["a"]]
-  eq("sync: the inline card says so rather than going quiet", badge.item.resolution,
-    "answered elsewhere")
+  eq(
+    "sync: the inline card says so rather than going quiet",
+    badge.item.resolution,
+    "answered elsewhere"
+  )
 
   -- Agreement must cost nothing -- this runs on every snapshot tick.
   permission.reconcile(chat, { request "b" })
@@ -3317,7 +3838,11 @@ local function test_terminals()
     cwd = root,
     entries = {
       { id = "t1", name = "zsh" },
-      { id = "t2", name = "claude", activity = { state = "attention", attentionReason = "needs_input" } },
+      {
+        id = "t2",
+        name = "claude",
+        activity = { state = "attention", attentionReason = "needs_input" },
+      },
     },
   }
   apply { kind = "snapshot", cwd = other, entries = { { id = "t3", name = "codex" } } }
@@ -3332,11 +3857,18 @@ local function test_terminals()
   eq("terminals: a changed root drops what it no longer lists", #terminals.for_root(root), 1)
   eq("terminals: and leaves other roots alone", #terminals.for_root(other), 1)
 
-  eq("terminals: one waiting on you is marked", terminals.glyph({
-    activity = { state = "attention" },
-  })[2], "PaseoDanger")
-  eq("terminals: a working one is not", terminals.glyph({ activity = { state = "working" } })[2],
-    "PaseoAgent")
+  eq(
+    "terminals: one waiting on you is marked",
+    terminals.glyph({
+      activity = { state = "attention" },
+    })[2],
+    "PaseoDanger"
+  )
+  eq(
+    "terminals: a working one is not",
+    terminals.glyph({ activity = { state = "working" } })[2],
+    "PaseoAgent"
+  )
   eq("terminals: nor an idle one", terminals.glyph({})[2], "PaseoDim")
 
   apply { kind = "snapshot", cwd = root, entries = {} }
@@ -3381,7 +3913,10 @@ local function test_settings()
     rebuilds = rebuilds + 1
   end
 
-  chat_mod.apply_settings(chat, { agentId = "spec-settings", modeId = "auto", availableModes = modes })
+  chat_mod.apply_settings(
+    chat,
+    { agentId = "spec-settings", modeId = "auto", availableModes = modes }
+  )
 
   -- THE BUG: this stored the raw id, while `agent.config` stored the label, so
   -- one session read "Plan Mode" or "plan" in the header depending on which
@@ -3424,7 +3959,10 @@ local function test_settings()
   eq("settings: the same feature again does not", rebuilds, 2)
 
   -- A mode the provider did not report is still better shown than dropped.
-  chat_mod.apply_settings(chat, { agentId = "spec-settings", modeId = "invented", availableModes = modes })
+  chat_mod.apply_settings(
+    chat,
+    { agentId = "spec-settings", modeId = "invented", availableModes = modes }
+  )
   eq("settings: an unknown id falls back to itself", chat.mode, "invented")
 
   float.rebuild = real_rebuild

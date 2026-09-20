@@ -18,6 +18,7 @@
 --- change is written, and both the dashboard panel and the standalone popup
 --- draw from here.
 
+local icons = require "paseo.ui.icons"
 local bridge = require "paseo.bridge"
 
 local M = {}
@@ -109,7 +110,7 @@ function M.groups(chat)
     {
       id = "mode",
       key = M.KEYS.mode,
-      icon = "",
+      icon = icons.ui.mode,
       label = "Permission mode",
       kind = "chips",
       entries = modes,
@@ -120,7 +121,7 @@ function M.groups(chat)
     {
       id = "thinking",
       key = M.KEYS.thinking,
-      icon = "󰧑",
+      icon = icons.ui.thinking,
       label = "Thinking",
       kind = "chips",
       entries = entries(config.thinkingOptions, default_note),
@@ -131,7 +132,7 @@ function M.groups(chat)
     {
       id = "features",
       key = M.KEYS.features,
-      icon = "⚡",
+      icon = icons.ui.features,
       label = "Features",
       kind = "toggles",
       entries = toggles,
@@ -141,7 +142,7 @@ function M.groups(chat)
     {
       id = "model",
       key = M.KEYS.model,
-      icon = "",
+      icon = icons.ui.model,
       label = "Model",
       kind = "radio",
       entries = entries(config.models, default_note),

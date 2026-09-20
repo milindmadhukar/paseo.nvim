@@ -6,7 +6,9 @@
 --- quickfix list, staging -- is yours to build on |paseo-git|.
 
 local git = require "paseo.git"
+local icons = require "paseo.ui.icons"
 local repos = require "paseo.repos"
+local widgets = require "paseo.ui.widgets"
 
 local M = {}
 
@@ -35,8 +37,14 @@ function M.lines(chat, width)
   for _, repo in ipairs(repos.list { path = chat.root }) do
     local changes = git.status(repo)
     if #changes > 0 then
+      -- A colour swatch per repo, hashed off the name so the same repo is the
+      -- same colour in every session. With several repos in one unit of work
+      -- the headings were four identical blue lines and the only thing telling
+      -- them apart was reading them.
       lines[#lines + 1] = {
-        { "  " .. repo.name, "PaseoHeader" },
+        { "  " },
+        widgets.swatch(repo.name),
+        { " " .. repo.name, "PaseoHeader" },
         { ("   %d changed"):format(#changes), "PaseoDim" },
       }
       for _, change in ipairs(changes) do
@@ -52,18 +60,33 @@ function M.lines(chat, width)
           vim.cmd.edit(vim.fn.fnameescape(file))
         end
         local status = status_cell(change)
-        lines[#lines + 1] = {
-          { "    ", nil, click },
-          { status[1], status[2], click },
-          { repos.relative(repo, change.path) or change.path, "PaseoPath", click },
+        local id = "changes." .. file
+        local action = widgets.hover(id, "body", click)
+        local row = {
+          { "    " },
+          { status[1], status[2] },
+          { repos.relative(repo, change.path) or change.path, "PaseoPath" },
         }
+
+        local row_hl = widgets.row_hl(id)
+        if row_hl then
+          lines[#lines + 1] = widgets.fill_row(row, width, row_hl, action)
+        else
+          for _, cell in ipairs(row) do
+            cell[3] = action
+          end
+          lines[#lines + 1] = row
+        end
       end
       lines[#lines + 1] = {}
     end
   end
 
   if total == 0 then
-    lines[#lines + 1] = { { "  nothing changed", "PaseoDim" } }
+    lines[#lines + 1] = {
+      { "  " .. icons.status.completed .. "  ", "PaseoToolOk" },
+      { "nothing changed", "PaseoDim" },
+    }
     return lines
   end
 

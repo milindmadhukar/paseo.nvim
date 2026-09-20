@@ -18,7 +18,10 @@
 --- section would drag the Changes panel -- which shells out to `git status` per
 --- repo -- through every one of those frames.
 
+local icons = require "paseo.ui.icons"
+local layout = require "paseo.ui.layout"
 local render = require "paseo.ui.render"
+local style = require "paseo.ui.style"
 local sidebar = require "paseo.ui.sidebar"
 local transcript = require "paseo.ui.transcript"
 
@@ -146,20 +149,61 @@ local function tab_lines()
   -- `g.height - 4` and the composer geometry are both measured against it.
   local inner = state.geometry.width - 2
 
-  ---@param named boolean  name every tab, or only the active one
+  ---A pill's text at a given level of detail.
+  ---@param i integer
+  ---@param name string
+  ---@param level "full"|"named"|"icon"|"number"
+  ---@return string
+  local function pill(i, name, level)
+    local icon = icons.panel[name] or ""
+    if level == "full" then
+      return (" %d %s %s "):format(i, icon, name)
+    end
+    if level == "named" then
+      return (" %d %s "):format(i, name)
+    end
+    if level == "icon" then
+      return (" %d %s "):format(i, icon)
+    end
+    return (" %d "):format(i)
+  end
+
+  ---@param level "full"|"named"|"icon"|"number"
   ---@return integer
-  local function measure(named)
-    local width = 0
+  local function measure(level)
+    local width = -1 -- the gap before the first pill is never drawn
     for i, name in ipairs(M.TABS) do
-      width = width + (i > 1 and 1 or 0) + #tostring(i) + 2
-      if named or name == state.tab then
-        width = width + 1 + vim.fn.strwidth(name)
-      end
+      -- At the narrowest level the ACTIVE tab still keeps its name: the row
+      -- has to say where you are even when it cannot say where everything
+      -- else is.
+      local at = (level == "number" and name == state.tab) and "named" or level
+      width = width + 1 + vim.fn.strwidth(pill(i, name, at))
     end
     return width
   end
 
-  local named = measure(true) <= inner
+  -- Truncation is not a neutral failure here: the bar is the only place that
+  -- says which number is which tab, and the tab that falls off the end is
+  -- always the last one, which is the one you had not discovered yet. So the
+  -- bar DEGRADES instead, a step at a time, and every level still says which
+  -- key goes where -- the one thing this row exists to say.
+  --
+  --   full    1 󰭻 Chat      number, icon and name
+  --   named   1 Chat        the icon goes first: the name is the thing you
+  --                         read, the icon is the thing you recognise, and a
+  --                         name you cannot read is worth less than one you can
+  --   icon    1 󰭻           seven of these fit in 41 columns
+  --   number  1             with the active tab alone keeping its name
+  --
+  -- The row count never changes at any level, because the body height and the
+  -- composer geometry are both measured against it.
+  local level = "number"
+  for _, candidate in ipairs { "full", "named", "icon" } do
+    if measure(candidate) <= inner then
+      level = candidate
+      break
+    end
+  end
 
   local tabs = {}
   for i, name in ipairs(M.TABS) do
@@ -171,16 +215,25 @@ local function tab_lines()
       tabs[#tabs + 1] = { " ", nil }
     end
     tabs[#tabs + 1] = {
-      (named or active) and (" %d %s "):format(i, name) or (" %d "):format(i),
+      pill(i, name, (level == "number" and active) and "named" or level),
       (active or hovered) and "PaseoChipFocus" or "PaseoChipOff",
       -- Hover paints a tab exactly as focus does, so pointing at one and
       -- being on one look like the same state, because they are.
       { click = goto_tab(name), hover = { id = id, redraw = "tabs" } },
     }
   end
+
+  -- The rule under the tabs is drawn only by the framed styles. On the
+  -- unframed ones it would be the third frame weight in a window that already
+  -- has the float's own edge and, until this change, a box around every card;
+  -- the pills delimit the bar perfectly well on their own. The ROW stays
+  -- either way -- dropping it would shift every section below it, which volt
+  -- measured once and will not recompute.
+  local framed = style.BOX[style.get().card] ~= nil
   return {
     render.truncate(tabs, inner),
-    { { string.rep("─", state.geometry.width - 2), "PaseoBorder" } },
+    framed and { { string.rep(style.BOX.square.h, state.geometry.width - 2), "PaseoBorder" } }
+      or {},
   }
 end
 
@@ -191,7 +244,7 @@ local function body_lines()
     return { {} }
   end
   local g = state.geometry
-  local height = g.height - 4
+  local height = layout.rows(g.height).body_height
   local lines = {}
 
   if state.tab ~= "Chat" then
@@ -203,7 +256,15 @@ local function body_lines()
       or {
         { { "  this panel is unavailable", "PaseoToolFail" } },
       }
-    for _, line in ipairs(body) do
+    -- How many rows the reveal has got to. `#body` when there is no reveal
+    -- running, which is the case for every redraw but the first after a tab
+    -- switch.
+    local shown = require("paseo.ui.animate").revealed("float.body", #body)
+
+    for i, line in ipairs(body) do
+      if i > shown then
+        break
+      end
       local row = { { "  ", nil } }
       vim.list_extend(row, render.truncate(vim.deepcopy(line), g.width - 4))
       lines[#lines + 1] = row
@@ -232,8 +293,8 @@ local function footer_lines()
   return {
     require("paseo.ui.widgets").hints {
       { "1-" .. #M.TABS, "tabs" },
-      { "⇥", "cycle" },
-      { "^F", "sidebar" },
+      { "<Tab>", "cycle" },
+      { "<C-f>", "sidebar" },
       { "q", "close" },
     },
   }
@@ -255,6 +316,16 @@ end
 ---@return table|nil
 function M.geometry_of()
   return state and state.geometry or nil
+end
+
+---The chrome buffer, for a panel that has to schedule a redraw of itself.
+---
+---A panel is handed a width and a height, not a buffer -- but an animated
+---readout has to tell volt WHICH buffer to repaint when its timer fires, and
+---there is only ever one dashboard.
+---@return integer|nil
+function M.chrome_buf()
+  return state and api.nvim_buf_is_valid(state.buf) and state.buf or nil
 end
 
 function M.rebuild()
@@ -397,35 +468,39 @@ local function show_chat_panes()
   local g = state.geometry
   local chat = state.chat
 
-  -- Buffer line 4 is the first body row -- header, tab bar, rule, then this --
-  -- and buffer line N sits at screen row `g.row + N - 1`, because `g.row` is
-  -- the chrome's first CONTENT row (the border is drawn outside it).
-  local top = g.row + 3
-  local composer_h = g.composer
-  -- The last body row is `g.height - 1`: the footer owns `g.height`. So the
-  -- composer's bottom border goes one row above the footer.
-  local composer_row = g.row + g.height - (composer_h + 2)
+  -- Where each pane goes is `ui/layout.lua`'s arithmetic, not ours: the same
+  -- numbers decide how many rows the body gets and which row the terminals
+  -- panel maps a click to, and they were three independent copies.
+  local panes = layout.panes(g)
+  local _, border = require("paseo.ui.style").window_border()
 
   chat.win_conversation = api.nvim_open_win(chat.conversation, false, {
     relative = "editor",
-    row = top,
-    col = g.col + 2,
-    width = g.width - 4,
-    height = math.max(5, composer_row - 1 - top),
+    row = panes.top,
+    col = panes.col,
+    width = panes.width,
+    height = panes.conversation,
     style = "minimal",
     border = "none",
     zindex = g.z_panes,
   })
   chat.win_composer = api.nvim_open_win(chat.composer, true, {
     relative = "editor",
-    row = composer_row,
-    col = g.col + 2,
-    width = g.width - 4,
-    height = composer_h,
+    row = panes.composer_row,
+    col = panes.col,
+    width = panes.width,
+    height = panes.composer,
     style = "minimal",
     border = "rounded",
     zindex = g.z_panes,
   })
+  -- The composer's border follows `ui.style` like everything else: on the
+  -- default it is painted fg == bg, so it reads as a ring of padding marking
+  -- the box off from the conversation rather than as a second frame inside a
+  -- window that already has one.
+  vim.wo[chat.win_composer].winhl = ("Normal:PaseoNormal,NormalFloat:PaseoNormal,FloatBorder:%s"):format(
+    border
+  )
 
   -- The surface reads as ONE sheet: the conversation shares the chrome's
   -- background, and the composer is a raised card -- the same tier the Session
@@ -534,6 +609,16 @@ function M.select(name)
       pcall(panel.load, state.chat)
     end
     panel_keys(name, "attach")
+
+    -- Stagger the rows in. Cheap because volt repaints one named section in
+    -- place, and safe because `revealed` only ever draws FEWER rows into a
+    -- block that is padded to its final height anyway -- a reveal that grew
+    -- the section would put every section below it at the wrong row.
+    require("paseo.ui.animate").reveal {
+      key = "float.body",
+      buf = state.buf,
+      section = "body",
+    }
   end
 
   M.rebuild()
@@ -568,6 +653,11 @@ function M.close()
 
   local held = state
   state = nil
+
+  -- Before the buffer goes. A tween's timer redraws a named section every
+  -- frame, and one left running against a deleted buffer is an error a frame
+  -- forever rather than once.
+  require("paseo.ui.animate").stop_all()
 
   unbind_tabs(held.chat.conversation, false)
   unbind_tabs(held.chat.composer, true)
@@ -637,6 +727,8 @@ function M.open(chat)
     vim.wo[backdrop_win].winblend = 25
   end
 
+  local edge, edge_hl = style.window_border()
+
   local buf = api.nvim_create_buf(false, true)
   local win = api.nvim_open_win(buf, true, {
     relative = "editor",
@@ -645,15 +737,17 @@ function M.open(chat)
     width = g.width,
     height = g.height,
     style = "minimal",
-    border = "rounded",
+    border = edge,
     zindex = g.z_chrome,
   })
 
-  -- fg == bg on the border group: `nvim_open_win`'s border glyphs render as
-  -- solid colour, so the box becomes a one-cell padding ring in the surface's
-  -- own background. This is the single change that stops the dashboard looking
-  -- like a framed rectangle and starts it looking like a card.
-  vim.wo[win].winhl = "Normal:PaseoNormal,NormalFloat:PaseoNormal,FloatBorder:PaseoNormalBorder"
+  -- On the default -- `ui.style`'s "invisible" -- `PaseoNormalBorder` is
+  -- fg == bg, so `nvim_open_win`'s border glyphs render as solid colour and
+  -- the box becomes a one-cell padding ring in the surface's own background.
+  -- That is the single change that stops the dashboard looking like a framed
+  -- rectangle and starts it looking like a card. The other border settings
+  -- paint the same glyphs in `PaseoBorder` and you get a visible edge.
+  vim.wo[win].winhl = ("Normal:PaseoNormal,NormalFloat:PaseoNormal,FloatBorder:%s"):format(edge_hl)
 
   state = {
     buf = buf,

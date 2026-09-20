@@ -365,7 +365,10 @@ end
 ---@param w integer
 ---@return table[][]
 local function card(self, group, focus, w)
-  local inner = math.max(8, w - 4)
+  -- What a card's body actually gets, asked of the style rather than assumed:
+  -- a framed card spends two columns on its sides that a plate does not, and
+  -- hardcoding either number truncates under the other.
+  local inner = math.max(8, widgets.card_inner(w))
   local body
 
   if group.kind == "chips" then

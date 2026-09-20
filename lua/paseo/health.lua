@@ -59,7 +59,7 @@ local function check_core()
   end
 
   -- volt is REQUIRED, not recommended. Every surface but the transcript is
-  -- drawn as volt extmarks -- the dashboard chrome, the six panels, the
+  -- drawn as volt extmarks -- the dashboard chrome, the seven panels, the
   -- settings popup and the permission dialog -- and there is no longer a
   -- plain-text fallback behind them, because a fallback that has to be kept in
   -- step with the real renderer is a second renderer nobody tests.
@@ -74,12 +74,46 @@ local function check_core()
     ok "volt is available (every surface but the transcript is drawn with it)"
   end
 
-  -- Which palette volt derives from, because it changes what the chat looks
+  -- Where the palette comes from, because it changes what everything looks
   -- like and is the first thing to check when the colours look wrong.
-  info(
-    vim.g.base46_cache and "volt colours come from base46 (NvChad)"
-      or "volt colours are derived from Normal/Comment"
-  )
+  if vim.g.base46_cache then
+    info "colours come from base46's palette (NvChad)"
+  else
+    info "colours are derived from Diagnostic*/Added/Removed/Function/Comment"
+  end
+
+  -- A Nerd Font cannot be detected from inside Neovim -- the terminal owns the
+  -- font and tells us nothing about it. What CAN be checked is that the glyphs
+  -- we are about to draw are non-empty, which is the failure that has actually
+  -- happened twice: the bytes of a Private Use Area glyph go missing from a
+  -- source file, and an empty icon draws as nothing rather than as an error.
+  local icons = require "paseo.ui.icons"
+  local blank = {}
+  for name, glyph in pairs(icons.all()) do
+    if vim.api.nvim_strwidth(glyph) < 1 then
+      blank[#blank + 1] = name
+    end
+  end
+  if #blank > 0 then
+    table.sort(blank)
+    err(
+      ("%d glyphs in the icon registry are EMPTY and will draw as nothing: %s"):format(
+        #blank,
+        table.concat(blank, ", ")
+      )
+    )
+  else
+    info(
+      ("%d glyphs in the registry, all non-empty -- a Nerd Font is required and "):format(
+        vim.tbl_count(icons.all())
+      ) .. "cannot be detected from here; if you see boxes, that is the font"
+    )
+  end
+
+  -- The style, since it is the first thing someone changes and the last thing
+  -- they remember changing.
+  local style = require("paseo.ui.style").get()
+  info(("ui.style: %s cards, %s border"):format(style.card, style.border))
 end
 
 local function check_paseo()

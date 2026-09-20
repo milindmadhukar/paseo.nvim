@@ -17,6 +17,7 @@
 --- request gets.
 
 local bridge = require "paseo.bridge"
+local icons = require "paseo.ui.icons"
 local hl = require "paseo.ui.hl"
 local plan = require "paseo.ui.plan"
 local questions = require "paseo.ui.questions"
@@ -70,11 +71,11 @@ end
 ---@param view paseo.PermissionView
 ---@return table[][]
 local function build(request, width, view)
-  local inner = width - 4
+  local inner = render.card_inner(width)
   local lines = {}
 
   lines[#lines + 1] = {
-    { "  ", "PaseoDanger" },
+    { icons.status.permission .. "  ", "PaseoDanger" },
     { request.title or request.name or "Permission required", "PaseoDanger" },
   }
   if request.kind and request.kind ~= "tool" then
@@ -91,8 +92,11 @@ local function build(request, width, view)
   -- are approving is shown rather than named.
   local body = timeline.detail_body(request.detail, inner)
   if #body > 0 then
-    local card =
-      render.card({ { request.name or "tool", "PaseoToolName" } }, body, { width = inner })
+    local card = render.card(
+      { { request.name or "tool", "PaseoToolName" } },
+      body,
+      { width = inner }
+    )
     for _, line in ipairs(card) do
       local row = { { "  ", nil } }
       vim.list_extend(row, line)

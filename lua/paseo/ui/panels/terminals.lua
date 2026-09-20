@@ -9,6 +9,8 @@
 --- by |paseo.agents|, so the activity column says which terminal is waiting on
 --- you without polling any of them.
 
+local layout = require "paseo.ui.layout"
+local widgets = require "paseo.ui.widgets"
 local terminals = require "paseo.terminals"
 
 local M = {}
@@ -17,9 +19,11 @@ M.title = "Terminals"
 
 ---Where a terminal draws, inside the dashboard body.
 ---
----Body row 1 is buffer line 4 -- header, tab bar, rule -- and this panel
----spends three rows on its own heading before the list, so a terminal opened
----from here covers the list and nothing else.
+---Rows this panel draws before its first terminal: a heading and a blank.
+local HEADING = 2
+
+---Where a terminal opened from here is floated: over the body, and over the
+---body only, so the chrome and the footer stay readable behind it.
 ---@return table|nil
 local function body_geometry()
   local float = require "paseo.ui.float"
@@ -27,12 +31,13 @@ local function body_geometry()
   if not g then
     return nil
   end
+  local rows = layout.rows(g.height)
   return {
-    row = g.row + 3,
+    row = layout.screen_row(g, rows.body_first),
     col = g.col + 2,
     width = g.width - 4,
-    -- The footer owns the last row.
-    height = math.max(5, g.height - 5),
+    -- One row short of the body, so the composer's border is never covered.
+    height = math.max(5, rows.body_height - 1),
     zindex = g.z_panes,
   }
 end
@@ -57,7 +62,10 @@ function M.create(chat, command)
     function(err, result)
       vim.schedule(function()
         if err then
-          vim.notify("paseo: could not start a terminal — " .. tostring(err), vim.log.levels.ERROR)
+          vim.notify(
+            "paseo: could not start a terminal — " .. tostring(err),
+            vim.log.levels.ERROR
+          )
           return
         end
         local terminal = result and result.terminal
@@ -142,27 +150,41 @@ function M.lines(chat, width)
       open_terminal(terminal.id)
     end
     local reason = terminal.activity and terminal.activity.attentionReason
-    lines[#lines + 1] = {
-      { "    ", nil, click },
-      { glyph[1] .. " ", glyph[2], click },
-      { terminal.title or terminal.name or terminal.id, nil, click },
-      { reason == "needs_input" and "   needs input" or "", "PaseoDanger", click },
-      { reason == "finished" and "   finished" or "", "PaseoDim", click },
+    local id = "terminals." .. terminal.id
+    local action = widgets.hover(id, "body", click)
+    local row = {
+      { "    " },
+      { glyph[1] .. " ", glyph[2] },
+      { terminal.title or terminal.name or terminal.id, nil },
+      { reason == "needs_input" and "   needs input" or "", "PaseoDanger" },
+      { reason == "finished" and "   finished" or "", "PaseoDim" },
     }
+
+    local row_hl = widgets.row_hl(id)
+    if row_hl then
+      lines[#lines + 1] = widgets.fill_row(row, width, row_hl, action)
+    else
+      for _, cell in ipairs(row) do
+        cell[3] = action
+      end
+      lines[#lines + 1] = row
+    end
   end
 
   lines[#lines + 1] = {}
-  lines[#lines + 1] = {
-    { "  ", "PaseoDim" },
-    { "<CR>", "PaseoKey" },
-    { " open · ", "PaseoDim" },
-    { "c", "PaseoKey" },
-    { " new · ", "PaseoDim" },
-    { "r", "PaseoKey" },
-    { " rename · ", "PaseoDim" },
-    { "d", "PaseoKey" },
-    { " kill", "PaseoDim" },
-  }
+  -- Through the one hint builder, so these keys are drawn as caps like every
+  -- other key in the plugin -- and spelled the way a keyboard spells them.
+  local hints = { { "  " } }
+  vim.list_extend(
+    hints,
+    widgets.hints {
+      { "<CR>", "open" },
+      { "c", "new" },
+      { "r", "rename" },
+      { "d", "kill" },
+    }
+  )
+  lines[#lines + 1] = hints
   return lines
 end
 
@@ -176,8 +198,11 @@ local function under_cursor(chat)
   local win = vim.api.nvim_get_current_win()
   local row = vim.api.nvim_win_get_cursor(win)[1]
   local list = terminals.for_root(chat.root)
-  local at = row - 5
-  local terminal = list[at]
+  -- HEADING rows before the first item, named rather than folded into a
+  -- constant: this used to be a bare `row - 5`, and the 5 was the chrome's
+  -- three rows plus this panel's two, with nothing saying so.
+  local at = layout.item_at(row, HEADING)
+  local terminal = at and list[at]
   return terminal and terminal.id or nil
 end
 
