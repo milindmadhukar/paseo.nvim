@@ -103,6 +103,13 @@ require("paseo").setup {
       composer = 8,               -- rows the composer gets
       position = "right",         -- or "left"
     },
+
+    answer = {                    -- where you answer a question, or decide a plan
+      width = 96,                 -- a CAP in cells, not a share of anything
+      min_width = 54,             -- narrower than this and it centres on the editor
+      backdrop = true,            -- dim the conversation behind it
+      zindex = 190,               -- above everything; see below
+    },
   },
 
   workspaces = {
@@ -352,15 +359,66 @@ answer the questions"*: allowing a question only consents to the **asking**. The
 answer rides back inside the tool input, so a bare allow is approval and
 silence, whichever button you pressed.
 
-So the dialog answers it instead. Every question in the request is shown at
-once — there is one response for the set, and a request may carry four —
-`1`-`9` picks for the question marked `▸`, `<Tab>` moves between them, `i`
-answers in your own words where the provider allows it, and `<CR>` sends. It
-refuses to send while a question that is not optional has no answer.
+So the dialog answers it instead — and it is not a dialog any more. It takes
+over the **chat window**: the conversation dims behind it and the questions are
+a card laid on top of the thing they are about, on either surface, rather than a
+float centred on the editor over whatever file you were reading.
 
-Multi-select ticks as many as apply and is serialised the one way the provider
-parses back: `", "`-joined, quoting any label that contains the separator —
-otherwise `Rebase, then push` returns as two answers matching no option.
+**One question at a time**, with `2 of 3` in the corner and a dot per question
+above it — `●` answered, `◉` where you are, `○` not yet:
+
+```
+╭─ 󰘦  The agent is asking 3 things ───────────────────────────╮
+│ ● ◉ ○                                               2 of 3  │
+│                                                             │
+│ Which checks should run?                                    │
+│                                                             │
+│  1   tests                                                  │
+│  2   lint                                                   │
+│  3   typecheck                                              │
+│    choose as many as apply                                  │
+╰─────────────────────────────────────────────────────────────╯
+
+  1-9  pick    ⏎  send the answers    ⇥  question    ␛  later
+```
+
+`1`-`9` picks, `j`/`k` reaches an option past the ninth, `<Space>` takes the one
+you are on, `x` clears the answer, `s` skips an optional question, and `<Tab>`
+moves between them. The marker is a checkbox where a second pick **adds** and a
+radio where it **replaces**, so the shape tells you which before you press
+anything.
+
+`<CR>` sends the moment nothing is missing, and until then it **takes you to the
+first thing that is** — which is what the old "that question still needs an
+answer" should have done, since with three questions on a stepper *which one* was
+the only part you needed.
+
+**The set is still sent as one response.** The stepper is presentation, not
+protocol. Showing all four at once was the previous answer to the same problem
+and it was the wrong one: four questions stacked in a float is a wall you skim,
+and the one fact you needed — that there are four — was still yours to count.
+`2 of 3` is that fact, stated, on every frame, and the hint bar says `⏎ next`
+until the last question and `⏎ send the answers` on it.
+
+`i` answers in your own words, in a box that is **a real buffer** inside the
+card — so your completion, abbreviations, insert-mode maps and undo all work,
+which a `vim.ui.input` prompt could never give you. A question with no options at
+all opens it for you and starts insert; there is nothing else to do on one.
+`<C-s>` or `<CR>` in normal mode saves, `<Esc>` twice discards. The same contract
+as the composer, because it is the same act.
+
+`<Esc>` is later, not no: the request stays pending and `gp` reopens it **with
+your answers still in it**. `n` declines to answer and `N` declines and stops the
+turn. There is no timeout — a question waits until it is answered here, or
+answered in the Paseo app, which closes this too.
+
+Multi-select is serialised the one way the provider parses back: `", "`-joined,
+quoting any label that contains the separator — otherwise `Rebase, then push`
+returns as two answers matching no option.
+
+Too narrow or too short a chat window — under 48 columns or 14 rows — or no chat
+window at all, and the same card opens centred on the editor instead. Same keys,
+same layout; only where it sits differs.
 
 ### Plans
 
@@ -389,10 +447,17 @@ applied afterwards — an invented id is rejected outright. The modes are filter
 against what the provider reports, so codex, which has no `acceptEdits`, is
 offered the ones it has.
 
-The plan itself is now on screen while you decide. A plan request carries no
-tool `detail` at all — the markdown travels in the tool input — so the dialog,
-which renders `detail` for everything else, was drawing an empty box and asking
-you to approve it.
+The plan itself is on screen while you decide, in the same overlay, as a **real
+buffer you can scroll and `/`-search** with the buttons as chrome around it.
+It has to be a real buffer: the card is drawn as virtual text, virtual text
+cannot be scrolled, and the version before this therefore budgeted the plan
+against `vim.o.lines - 16` and truncated it — so on any plan longer than the
+terminal you were approving the part that happened to fit, plus the words `… 84
+more lines`. `j`/`k`/`<C-d>` scroll it without ever leaving the buttons.
+
+A plan request also carries no tool `detail` at all — the markdown travels in the
+tool input — so the dialog, which renders `detail` for everything else, was
+drawing an empty box and asking you to approve it.
 
 ### Images
 

@@ -33,6 +33,10 @@ local M = {}
 ---@field initialised boolean  Subscribed, history fetched, settings loaded.
 ---@field config_snapshot table|nil  Last `agent.config`; the Session panel draws it.
 ---@field available_modes table[]|nil  `{id, label}`, per provider. Ids to labels.
+---@field answer_state table<string, table>|nil  Half-answered question sets, by
+---                         request id. What makes dismissing the overlay with
+---                         <Esc> and reopening it with `gp` resume rather than
+---                         start again. See |paseo.ui.answer|.
 
 ---Chats are keyed by AGENT, falling back to the directory until the agent is
 ---known. A workspace can hold several sessions, so keying on the directory
@@ -873,10 +877,26 @@ end
 ---`<C-f>`: swap to the other surface.
 function M.fullscreen()
   local chat = current
+  -- The answer overlay is anchored to the conversation WINDOW, and the swap closes
+  -- it -- so without this a question you were halfway through disappears on
+  -- `<C-f>`. Reopened rather than migrated: the picks live on the chat, so
+  -- reopening is the cheap half and there is no second window-moving path to get
+  -- wrong.
+  local pending = require("paseo.ui.answer").showing()
+
+  local result
   if chat and require("paseo.ui.float").is_open(chat) then
-    return M.surface "sidebar"
+    result = M.surface "sidebar"
+  else
+    result = M.surface "float"
   end
-  return M.surface "float"
+
+  if chat and pending then
+    vim.schedule(function()
+      require("paseo.ui.permission").reopen(chat)
+    end)
+  end
+  return result
 end
 
 ---@type boolean

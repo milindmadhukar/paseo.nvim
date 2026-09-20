@@ -256,6 +256,30 @@ ui.sidebar                                                          table
     there, so a bigger number is not a wider sidebar -- it is a number that
     quietly does not happen.
 
+                                                     *paseo-config.ui.answer*
+ui.answer                                                           table
+
+    The overlay that answers a question or decides a plan. See
+    |paseo-permission-overlay|. >lua
+        answer = {
+          width = 96,      -- a CAP in CELLS, not a share of anything
+          min_width = 54,  -- narrower than this and it leaves the chat window
+          backdrop = true, -- dim the conversation behind it
+          zindex = 190     -- above everything, deliberately
+        }
+<
+    `width` is cells rather than a percentage, and that is the one thing here
+    worth explaining: the overlay does not get a share of the screen, it gets
+    whatever the chat window has. So this is a ceiling on that, for the case
+    where the chat window is a full-screen dashboard and a 180-column card of
+    radio buttons would be absurd.
+
+    `zindex` is the opposite of |paseo-config.ui.float.zindex|, which sits
+    below the 50 a float gets by default so that pickers open on top of the
+    dashboard. This one is ABOVE everything, because a question you cannot see
+    is a turn that never finishes. The card sits 10 above this value and the
+    answer box 15.
+
                                                  *paseo-config.paseo.password*
 paseo.password                                            string, unset
 
@@ -1099,26 +1123,74 @@ any other, and it is NOT the same act:
                           user did not answer the questions" -- approved, and
                           silent. Whichever button was pressed.
 
-So the dialog answers a question rather than approving it, and `y` there sends
-your answers instead of a bare allow.
+So the overlay answers a question rather than approving it, and `<CR>` there
+sends your answers instead of a bare allow.
 
                                           *paseo-permission-question-keys*
-    1-9       pick that option, for the question marked `▸`
+    1-9       pick that option
+    j k       move among the options, for the ones past the ninth
+    <Space>   pick the one you are on
+    <CR>, y   SEND, once nothing is missing -- until then, go to what is
     <Tab>     the next question · <S-Tab> the previous
-    i         answer in your own words, where the question allows it
-    <CR>, y   send the answers
+    i, o      answer in your own words, in a box you can type in
+    x         clear this question's answer
+    s         skip, where the question may be skipped
     n, N      decline to answer (N also stops the turn)
     <Esc>, q  later; the request stays pending, `gp` reopens it
 
-Every question in the request is shown at once, because there is ONE response
-for the set: a request may carry four, and answering the first is not the
-reply. `<CR>` refuses to send while a question that is not optional has no
-answer -- half a reply is not a smaller answer, it is a wrong one.
+ONE question at a time, and the card says which: `2 of 3`, with a dot per
+question above it -- `●` answered, `◉` where you are, `○` not yet. A skipped
+optional question stays `○`, because skipped and answered are different things
+and should not look the same.
+
+The answers are still sent as ONE response; the stepper is how they are
+PRESENTED, and the counter is what says so. All of them at once was the
+previous answer to the same problem, and it was the wrong one: four questions
+stacked in a float is a wall you skim, and the number -- the one thing you
+needed -- was still yours to count. `2 of 3` is that number, on every frame,
+and the hint bar reads `next` until the last question and `send the answers`
+on it.
+
+`<CR>` sends only when nothing is missing. Until then it JUMPS to the first
+question that is, rather than refusing with a message that does not say which
+one: half a reply is not a smaller answer, it is a wrong one.
 
 A multi-select question ticks as many options as apply and stays put; a
-single-select one replaces and moves on. Several answers to one question are
-sent as `", "`-joined labels, quoting any label that contains the separator,
-because that is the one form the provider parses back.
+single-select one replaces and moves on. The marker says which before you
+press anything -- a checkbox where a second pick ADDS, a radio where it
+REPLACES. Several answers to one question are sent as `", "`-joined labels,
+quoting any label that contains the separator, because that is the one form
+the provider parses back.
+
+Typing an answer opens a REAL buffer inside the card, not a prompt: your
+completion, abbreviations, insert-mode maps and undo all work, and `<CR>` in
+insert mode is a newline. `<C-s>`, or `<CR>` in normal mode, saves it; `<Esc>`
+twice discards it. That is the composer's contract verbatim, because it is the
+same act. A question with no options at all opens the box for you and starts
+insert -- there is nothing else to do on one.
+
+There is no timeout, here or in the daemon. A question waits until it is
+answered.
+
+                                              *paseo-permission-overlay*
+Where it draws ~
+
+Over the CHAT WINDOW, not over your editor. The conversation dims behind it
+and the card is laid on top of the thing it is about, on either surface -- the
+sidebar's split or the dashboard's pane -- because a question is about the
+conversation and belongs in the conversation's space rather than over the file
+you happened to be reading.
+
+Too narrow or too short a chat window (under 48 columns or 14 rows), or no
+chat window at all -- `gp` pressed from somewhere else -- and the SAME card
+opens centred on the editor. Same keys, same layout; only where it sits
+differs. See |paseo-config.ui.answer|.
+
+While it is up it owns the keys, so the dashboard's `1`-`6` pick an option
+rather than switching tab. Dismiss with <Esc> and they come back. Switching
+surface with |paseo-chat-keys| `<C-f>` closes the chat window the overlay is
+anchored to, so the overlay is reopened on the new one -- with your answers,
+which are held on the chat rather than in the window.
 
 
                                                    *paseo-permission-plan*
@@ -1147,15 +1219,24 @@ is offered the modes it has rather than the ones Claude has.
     y         implement -- the same as `1`, the most cautious of them
     n         reject, and keep planning
     N         reject, and stop the turn
+    j k       scroll the plan · <C-d> <C-u> by pages · gg G the ends
     <Esc>, q  later; the request stays pending, `gp` reopens it
 
 Paseo adds a fourth Implement when the session was in `bypassPermissions`
 before it entered plan mode; that one restores it, and is the provider's own
 button rather than one of these.
 
-The plan itself is shown in the dialog. It has to be: a plan request carries
-no tool `detail` at all -- the markdown travels in the tool input -- so there
-is nothing else on screen that says what you are agreeing to. The transcript
-records it too, so which plan you approved is still readable tomorrow.
+A plan is decided in the same overlay a question is answered in
+(|paseo-permission-overlay|), and the plan itself is shown there as a REAL
+buffer -- scrollable and searchable with `/`, with the buttons as chrome
+around it. It has to be a real buffer: the card is drawn as virtual text,
+virtual text cannot be scrolled, and the version before this therefore
+budgeted the plan against the screen and truncated it -- so on a plan longer
+than the terminal you were approving the part that happened to fit.
+
+It has to be on screen at all because a plan request carries no tool `detail`
+whatsoever -- the markdown travels in the tool input -- so there is nothing
+else that says what you are agreeing to. The transcript records it too,
+capped, so which plan you approved is still readable tomorrow.
 
 `vim:tw=78:ts=8:ft=help:norl:`

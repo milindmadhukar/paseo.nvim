@@ -64,8 +64,12 @@ function M.reset(chat)
   -- hit the de-duplicate and returned early, taking the inline card with it.
   -- The requests themselves are not lost -- `reconcile` puts back whatever the
   -- daemon still considers pending, which is the authority on that anyway.
+  -- And the half-finished answers with them: `chat.answer_state` is keyed by
+  -- request id, and a reset means a different conversation. Picks resumed into a
+  -- request the daemon no longer has are answers to a question nobody asked.
   chat.permissions = {}
   chat.permission_blocks = {}
+  chat.answer_state = {}
 
   if chat.conversation and api.nvim_buf_is_valid(chat.conversation) then
     vim.bo[chat.conversation].modifiable = true

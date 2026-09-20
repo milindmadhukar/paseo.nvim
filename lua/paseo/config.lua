@@ -41,6 +41,7 @@ local M = {}
 ---                       narrower thing you switch TO with <C-f>.
 ---@field float paseo.Config.UI.Float
 ---@field sidebar paseo.Config.UI.Sidebar
+---@field ask paseo.Config.UI.Answer
 
 ---@class paseo.Config.UI.Float
 ---@field width number|fun(columns: integer): integer   PERCENT of the editor,
@@ -83,6 +84,21 @@ local M = {}
 ---                       too narrow here is a matter of taste.
 ---@field composer integer  Rows the composer gets, under the conversation.
 ---@field position "right"|"left"  Which side the pane opens on.
+
+---@class paseo.Config.UI.Answer
+---@field width integer   A CAP, in cells, not a share of anything. The overlay
+---                       takes over the chat window, so its width is whatever
+---                       the conversation has, less a margin, up to this.
+---@field min_width integer  Below this the overlay stops trying to fit inside
+---                       the chat window and centres on the editor instead. A
+---                       30-column sidebar cannot show an option label, and an
+---                       unreadable question is worse than one that is not
+---                       where you expected it.
+---@field backdrop boolean  Dim the conversation behind the overlay.
+---@field zindex integer  Base z-index. Above the dashboard's panes and above
+---                       anything opened over them, because a question you
+---                       cannot see is a turn that never finishes. The card
+---                       sits 10 above this and its children 15.
 
 ---@class paseo.Config.Workspaces
 ---@field dir string      Directory, relative to a project root, holding the
@@ -140,6 +156,19 @@ local defaults = {
       composer = 8,
       position = "right",
     },
+
+    -- The overlay that answers a question or a plan. It takes over the chat
+    -- window rather than floating in the middle of the editor, so its width is
+    -- a cap on what the conversation gives it rather than a share of the
+    -- screen -- and `min_width` is the point below which a narrow sidebar
+    -- cannot show an option label and the overlay centres on the editor
+    -- instead.
+    answer = {
+      width = 96,
+      min_width = 54,
+      backdrop = true,
+      zindex = 190,
+    },
   },
 
   workspaces = {
@@ -191,6 +220,20 @@ function M.setup(opts)
       end, "a percentage of the editor (1-100), or a function returning cells")
     end
   end
+
+  -- The overlay's widths are CELLS, not percentages, so they take neither a
+  -- function nor a value read through `M.cells`. Clamped for the same reason
+  -- the float's z-index is: `nvim_open_win` rejects a z-index below 1, and the
+  -- backdrop sits at this value with the card ten above it.
+  vim.validate("ui.answer.backdrop", config.ui.answer.backdrop, "boolean")
+  for _, key in ipairs { "width", "min_width", "zindex" } do
+    vim.validate(("ui.answer.%s"):format(key), config.ui.answer[key], "number")
+    config.ui.answer[key] = math.floor(config.ui.answer[key])
+  end
+  config.ui.answer.zindex = math.max(10, config.ui.answer.zindex)
+  -- A `min_width` above `width` would make the fallback unreachable in one
+  -- direction and permanent in the other.
+  config.ui.answer.min_width = math.max(20, math.min(config.ui.answer.min_width, config.ui.answer.width))
 
   return config
 end

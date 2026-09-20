@@ -245,6 +245,47 @@ function M.choose(state, option)
   table.insert(state.picked[index], label)
 end
 
+---The answers to this question that were TYPED rather than picked.
+---
+---The picked list holds labels and free text side by side, because to the
+---provider they are the same thing -- an answer. The dialog has to tell them
+---apart to draw them: a label belongs on its own option row, and typed text
+---belongs in the box you typed it into.
+---@param question paseo.Question
+---@param picked string[]
+---@return string[]
+function M.typed(question, picked)
+  local labels = {}
+  for _, option in ipairs(question.options) do
+    labels[option.label] = true
+  end
+  local out = {}
+  for _, chosen in ipairs(picked or {}) do
+    if not labels[chosen] then
+      out[#out + 1] = chosen
+    end
+  end
+  return out
+end
+
+---Say nothing about the current question, and move on.
+---
+---Only where the question says nothing is an acceptable answer. A skip on a
+---required question is not a smaller answer, it is the same wrong one
+---`M.missing` exists to refuse -- so this reports that it did nothing rather
+---than silently clearing what was there.
+---@param state paseo.QuestionState
+---@return boolean skipped
+function M.skip(state)
+  local index = state.current
+  if not state.questions[index].optional then
+    return false
+  end
+  state.picked[index] = {}
+  M.move(state, 1)
+  return true
+end
+
 ---An answer in the human's own words, for a question that allows one.
 ---@param state paseo.QuestionState
 ---@param typed string
