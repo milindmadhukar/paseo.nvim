@@ -620,7 +620,17 @@ end
 -- --------------------------------------------------------------------- API
 
 ---Open (or focus) a chat.
----@param opts? { root?: string, focus?: boolean, agent_id?: string, title?: string }
+---
+---`create = false` means "show me the agent in this directory, and say so if
+---there is not one" -- no provider picker. That is what an AUTOMATIC open
+---needs: `M.follow` re-points the window every time you change workspace, and
+---a modal asking which provider to use, unbidden, on a workspace you have not
+---started an agent in yet, is worse than the empty window it replaces.
+---
+---`surface` overrides where this chat last was. Only `M.follow` passes it: the
+---surface you are looking at belongs to the window, not to the conversation
+---you are switching to.
+---@param opts? { root?: string, focus?: boolean, agent_id?: string, title?: string, create?: boolean, surface?: "float"|"sidebar" }
 ---@param callback? fun(chat: paseo.Chat|nil, err: string|nil)
 function M.open(opts, callback)
   opts = opts or {}
@@ -646,6 +656,9 @@ function M.open(opts, callback)
     chats[key] = chat
   end
   current = chat
+  if opts.surface then
+    chat.surface = opts.surface
+  end
 
   layout(chat)
   if opts.focus ~= false and chat.win_composer and vim.api.nvim_win_is_valid(chat.win_composer) then
@@ -722,6 +735,10 @@ function M.open(opts, callback)
       end
       if found and found.id then
         return adopt(found)
+      end
+      if opts.create == false then
+        notice(chat, "no agent in this workspace yet — :Paseo chat starts one")
+        return callback(nil, nil)
       end
       notice(chat, "choose session settings…")
       require("paseo.ui.create").review({ cwd = root, preferred = preferred }, function(draft, review_err)
@@ -845,6 +862,55 @@ function M.toggle()
     return M.close()
   end
   M.open {}
+end
+
+---Re-point an OPEN chat at another directory.
+---
+---The bug this fixes: with the dashboard up full screen, switching workspace
+---left it showing the previous workspace's agent. The window is the one thing
+---on screen and it was describing somewhere you are no longer standing -- and
+---since a float belongs to the tab page it was opened on, the `"tab"` switch
+---did not even leave it visible.
+---
+---Three deliberate choices:
+---
+---  * NOTHING OPEN, NOTHING HAPPENS. Changing directory is not a request for a
+---    chat. This only ever moves a window that is already up.
+---  * It goes through `close` rather than handing the surface a new chat,
+---    because a float opened on the tab you just left is still a VALID window
+---    -- `is_open` says yes, `open` takes its "already up" branch, and you get
+---    yanked back to the old tab. Closing first is what puts the surface on the
+---    tab page you are actually on.
+---  * `create = false`: an automatic re-point must never open a provider
+---    picker. A workspace with no agent yet says so and waits.
+---
+---Focus follows the surface: the float covers the screen, so you need to be
+---able to type into it; the sidebar sits beside code you were editing, so it
+---must not steal your cursor.
+---@param root string
+---@param opts? { focus?: boolean }
+---@return boolean followed
+function M.follow(root, opts)
+  opts = opts or {}
+  local chat = current
+  if not chat or type(root) ~= "string" or root == "" then
+    return false
+  end
+
+  local float = require "paseo.ui.float"
+  if not (float.is_open(chat) or sidebar.is_open(chat)) then
+    return false
+  end
+
+  local surface = chat.surface or config.get().ui.surface
+  local focus = opts.focus
+  if focus == nil then
+    focus = surface == "float"
+  end
+
+  M.close()
+  M.open { root = root, surface = surface, focus = focus, create = false }
+  return true
 end
 
 ---Put the chat on a named surface, keeping the conversation and the draft.

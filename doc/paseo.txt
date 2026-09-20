@@ -384,6 +384,10 @@ workspaces.open                               string|function, default `"tab"`
     To keep the built-in switch and only decide what the new tab SHOWS, leave
     this alone and listen for |paseo-workspace-open-autocmd|.
 
+    An open chat comes WITH you, whichever of the three you pick -- see
+    |paseo-chat-follows|. A function that opens its own window does not move
+    this Neovim, so the chat in it stays where it is.
+
                                                   *paseo-config.review.agents*
 review.agents                                       boolean, default `true`
 
@@ -684,7 +688,8 @@ where Paseo's own worktree isolation already works.
 In the workspace picker (|:Paseo-workspaces|) ~
 
     <CR>      open it -- a new tab page `tcd`'d into the workspace, or
-              whatever |paseo-config.workspaces.open| says
+              whatever |paseo-config.workspaces.open| says. An open chat
+              follows: |paseo-chat-follows|
     <C-s>     its sessions
     <C-n>     create a workspace
     <C-d>     archive it -- refuses, and says what it would lose, if a member
@@ -799,6 +804,34 @@ require("paseo.git").stage({hunk}, {callback})
     A WHOLE-FILE DELETION (`hunk.file_deleted`) has no file on disk, so no
     buffer can open on it and gitsigns can never attach. Those, and untracked
     files, go through `git add` instead, which records a removal correctly.
+
+                                                          *paseo-chat-follows*
+THE CHAT FOLLOWS THE WORKSPACE YOU ARE IN.
+
+Switching workspace (|paseo-workspaces-keys|) re-points an OPEN chat at the
+agent in the workspace you just moved to. Without it the full-screen surface
+-- the one window on screen -- went on describing the workspace you had just
+left, and because a float belongs to the tab page it was opened on, the
+default `"tab"` switch did not even leave it visible.
+
+Three things it deliberately does not do:
+
+  - It does not OPEN a chat. Changing directory is not a request for one, so
+    with nothing on screen nothing happens.
+  - It does not ask which provider to use. A workspace you have not started an
+    agent in yet says so and waits; `:Paseo chat` is how you start one.
+  - It does not move your cursor out of your code. The full-screen surface
+    takes focus, because it covers the screen and you need to type into it;
+    the sidebar does not.
+
+`<C-r>` re-points the chat too, but never takes focus -- the cursor belongs in
+whatever |paseo-review-autocmd| opens.
+
+                                                        *paseo.ui.chat.follow*
+require("paseo.ui.chat").follow({root}, {opts})              -> boolean
+
+    Re-point the open chat at `root`. Returns false, having done nothing, when
+    no chat is on screen. `opts.focus` overrides the rule above.
 
                                                  *paseo-workspace-open-autocmd*
 Opening a workspace (|paseo-workspaces-keys|) fires `User PaseoWorkspaceOpen`

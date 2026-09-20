@@ -204,6 +204,10 @@ function M.open(opts)
             if entry and entry.value.directory then
               vim.cmd.tcd(vim.fn.fnameescape(entry.value.directory))
               require("paseo.repos").invalidate()
+              -- `focus = false` even on the full-screen surface: <C-r> is a
+              -- handoff to the review autocmd, and the cursor belongs in
+              -- whatever that opens.
+              require("paseo.ui.chat").follow(entry.value.directory, { focus = false })
               vim.api.nvim_exec_autocmds("User", {
                 pattern = "PaseoReview",
                 data = { root = entry.value.directory },

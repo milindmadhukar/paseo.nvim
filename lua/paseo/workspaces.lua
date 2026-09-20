@@ -308,6 +308,10 @@ end
 ---into it. A tab keeps them apart at the cost of one tab. `workspaces.open`
 ---picks something else, up to and including spawning that GUI window.
 ---
+---An open chat comes WITH you (`paseo.ui.chat.follow`). It used to stay on the
+---agent in the workspace you just left, which on the full-screen surface meant
+---the one window on screen was describing somewhere else entirely.
+---
 ---Fires `User PaseoWorkspaceOpen` with `data.root` afterwards, so a config can
 ---decide what the new tab should SHOW -- a file picker, oil, a dashboard --
 ---without having to replace the switch itself.
@@ -339,6 +343,11 @@ function M.open(ws)
   end
   vim.cmd[how == "cd" and "cd" or "tcd"](vim.fn.fnameescape(root))
   require("paseo.repos").invalidate()
+
+  -- After the `tcd`, so the chat that lands is looking at the directory this
+  -- Neovim is now in, and before the autocmd, so a config that opens something
+  -- in the new tab gets the last word on where the cursor ends up.
+  require("paseo.ui.chat").follow(root)
 
   vim.api.nvim_exec_autocmds("User", { pattern = "PaseoWorkspaceOpen", data = { root = root } })
   vim.notify("paseo: " .. vim.fn.fnamemodify(root, ":~"), vim.log.levels.INFO)

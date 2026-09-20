@@ -558,10 +558,73 @@ end
 
 -- ------------------------------------------------------------- open / close
 
+---Move a tab page off a window we are about to close.
+---
+---Closing a float that is another TAB PAGE'S CURRENT WINDOW leaves that tab
+---pointing at a window which no longer exists. Neovim does not recover: the
+---next `:tabclose`, or merely switching back, dies with `E315: ml_get: Invalid
+---lnum` -- and with the four windows this surface opens, it takes the whole
+---process down instead.
+---
+---The dashboard is always its tab's current window, so this is one keystroke
+---away: open the chat, `gt`, close it. `workspaces.open` with the default
+---`"tab"` does exactly that shape of thing on every workspace switch, which is
+---what turned a latent crash into a routine one.
+---
+---`nvim_tabpage_set_win` is 0.11. On 0.10 the only way to move another tab
+---page's cursor is to stand on it, and `noautocmd` keeps that round trip from
+---looking like navigation to a config that chdirs on `TabEnter`.
+---@param wins integer[]  Windows about to be closed.
+local function reseat(wins)
+  local doomed = {}
+  for _, win in ipairs(wins) do
+    if win and api.nvim_win_is_valid(win) then
+      doomed[win] = true
+    end
+  end
+
+  local here = api.nvim_get_current_tabpage()
+  local tabs = {}
+  for win in pairs(doomed) do
+    local tab = api.nvim_win_get_tabpage(win)
+    if tab ~= here then
+      tabs[tab] = true
+    end
+  end
+
+  for tab in pairs(tabs) do
+    if api.nvim_tabpage_is_valid(tab) and doomed[api.nvim_tabpage_get_win(tab)] then
+      local keep
+      for _, win in ipairs(api.nvim_tabpage_list_wins(tab)) do
+        -- A normal window for preference: seating the tab on another float is
+        -- the same bug one step along.
+        if not doomed[win] and api.nvim_win_get_config(win).relative == "" then
+          keep = win
+          break
+        end
+      end
+      if keep and api.nvim_tabpage_set_win then
+        pcall(api.nvim_tabpage_set_win, tab, keep)
+      elseif keep then
+        local there = api.nvim_tabpage_get_number(tab)
+        vim.cmd("noautocmd tabnext " .. there)
+        pcall(api.nvim_set_current_win, keep)
+        vim.cmd("noautocmd tabnext " .. api.nvim_tabpage_get_number(here))
+      end
+    end
+  end
+end
+
 function M.close()
   if not state then
     return
   end
+  reseat {
+    state.win,
+    state.backdrop_win,
+    state.chat.win_conversation,
+    state.chat.win_composer,
+  }
   -- Before `state` goes: `panel_keys` reads it, and a panel left attached
   -- would have its mappings outlive the buffer they were bound to.
   panel_keys(state.tab, "detach")

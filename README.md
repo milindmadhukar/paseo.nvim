@@ -692,6 +692,20 @@ Returning `false` **declines**, so one config can spawn a window under a GUI and
 switch in place in a terminal. Anything else — `nil` included — means you
 handled it.
 
+**An open chat comes with you.** It used to keep showing the agent in the
+workspace you had just left — and since a float belongs to the tab page it was
+opened on, the `"tab"` switch did not even leave it on screen. Now the surface
+is rebuilt on the tab you are standing on, pointed at that workspace's agent.
+
+It re-points an open chat and nothing more: with no chat up, switching
+directory opens nothing, and a workspace you have not started an agent in yet
+says so rather than opening a provider picker at you. The full-screen surface
+takes focus — it covers the screen, so you need to be able to type into it —
+and the sidebar does not, because your cursor is in your code. `<C-r>` follows
+too but never takes focus; that belongs to whatever your review autocmd opens.
+A `workspaces.open` function that spawns its own window doesn't move this
+Neovim, so the chat in it stays put.
+
 To keep the built-in switch and only decide what the new tab *shows*, listen for
 `User PaseoWorkspaceOpen` instead; it fires after the `tcd`, with the root in
 `data.root`:
