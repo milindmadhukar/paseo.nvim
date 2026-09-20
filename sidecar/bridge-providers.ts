@@ -76,6 +76,11 @@ export function providerOps(ctx: BridgeConnection): Ops {
         entries: (snapshot.entries ?? []).map((entry: any) => ({
           provider: entry.provider,
           status: entry.status,
+          // Separate from `status`, and both are needed. `status` is whether a
+          // model is ready to start an AGENT; `enabled` is whether the
+          // provider is configured at all -- which is the honest question for
+          // "should a terminal offer to run its CLI".
+          enabled: entry.enabled ?? null,
           label: entry.label ?? entry.provider,
           description: entry.description ?? null,
           defaultModeId: entry.defaultModeId ?? null,

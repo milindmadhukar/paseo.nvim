@@ -29,23 +29,24 @@ M.title = "Session"
 ---model replaces every thinking option -- and an index kept across that lands
 ---on whatever happens to be third now.
 ---@class paseo.SessionView
----@field chat table
+---@field source paseo.SettingsSource
 ---@field only string|nil   Draw just this group.
 ---@field section string    The volt section a hover repaints.
 ---@field compact boolean   Drop the padding inside every card.
 ---@field hints table[]|nil Extra footer hint pairs.
+---@field footer nil|fun(width: integer): table[][]  A row under the cards.
 ---@field focus { group: string|nil, entry: string|nil }
 ---@field redraw fun()
 local View = {}
 View.__index = View
 
----@param chat table
+---@param source paseo.SettingsSource  |paseo.ui.session|.source or |paseo.ui.draft|.source
 ---@param opts? { only?: string, section?: string, hints?: table[], redraw?: fun() }
 ---@return paseo.SessionView
-function M.new(chat, opts)
+function M.new(source, opts)
   opts = opts or {}
   return setmetatable({
-    chat = chat,
+    source = source,
     only = opts.only,
     -- Which volt section a hover has to repaint. The dashboard calls its
     -- panel area "body"; the popup draws one section of its own.
@@ -67,7 +68,7 @@ end
 ---The groups this view draws, after `only` has been applied.
 ---@return table[]|nil
 function View:groups()
-  local groups = session.groups(self.chat)
+  local groups = self.source:groups()
   if not groups then
     return nil
   end
@@ -187,14 +188,14 @@ function View:activate()
   if not (group and entry) then
     return
   end
-  session.apply(self.chat, group, entry, function()
+  self.source:apply(group, entry, function()
     self.redraw()
   end)
 end
 
 ---Re-fetch from the daemon.
 function View:reload()
-  session.load(self.chat, function()
+  self.source:load(function()
     self.redraw()
   end)
 end
@@ -245,7 +246,7 @@ end
 ---@return table[][]
 local function chips_body(self, group, focus, w)
   if #group.entries == 0 then
-    return { { { "(none reported by this provider)", "PaseoCardDim" } } }
+    return { { { group.placeholder or "(none reported by this provider)", "PaseoCardDim" } } }
   end
 
   local chips = {}
@@ -311,7 +312,7 @@ end
 ---@return table[][]
 local function radio_body(self, group, focus, w)
   if #group.entries == 0 then
-    return { { { "(none reported by this provider)", "PaseoCardDim" } } }
+    return { { { group.placeholder or "(none reported by this provider)", "PaseoCardDim" } } }
   end
   local lines = {}
   for _, entry in ipairs(group.entries) do
@@ -335,7 +336,7 @@ end
 ---@return table[][]
 local function toggles_body(self, group, focus, w)
   if #group.entries == 0 then
-    return { { { "(none on this provider)", "PaseoCardDim" } } }
+    return { { { group.placeholder or "(none on this provider)", "PaseoCardDim" } } }
   end
   local lines = {}
   for _, entry in ipairs(group.entries) do
@@ -374,6 +375,16 @@ local function card(self, group, focus, w)
     body = toggles_body(self, group, focus, inner)
   else
     body = radio_body(self, group, focus, inner)
+  end
+
+  -- A FLOOR on the body, for a group whose contents come and go. The features
+  -- card empties while the daemon is asked what the new mode supports, and a
+  -- card that shrinks and grows again moves every card below it -- which volt
+  -- turns from a flicker into a crash, because `gen_data` recorded the old
+  -- rows and `handle_hover` redraws at them. Holding the height across the
+  -- round trip is what keeps the layout still.
+  for _ = #body + 1, group.rows or 0 do
+    body[#body + 1] = { { "", "PaseoCardText" } }
   end
 
   -- A blank row above and below the body is what makes a card look like a
@@ -432,7 +443,7 @@ function View:draw(width)
     -- yet fired two `agent.config` requests per mouse-move event.
     if not self.loading then
       self.loading = true
-      session.load(self.chat, function()
+      self.source:load(function()
         self.loading = false
         self.redraw()
       end)
@@ -451,29 +462,34 @@ function View:draw(width)
     lines[#lines + 1] = {}
   end
 
-  -- Thinking and Features are both short; side by side they cost five rows
-  -- instead of ten, which is the difference between the model list fitting on
-  -- screen and not -- on an 80x24 terminal it is exactly the difference. Only
-  -- when there is room for two readable columns: a card narrower than ~32
-  -- starts truncating its own title, and two truncated cards are worse than
-  -- two full-width ones.
-  local paired = {}
+  -- Short cards go side by side: Thinking and Features together cost five rows
+  -- instead of ten, which on an 80x24 terminal is exactly the difference
+  -- between the model list fitting on screen and not. Which cards pair is the
+  -- SOURCE's business -- the new-session screen has a Provider card the
+  -- running-session one does not, and one more full-width card is one more
+  -- than a short editor has room for. Only when there is room for two
+  -- readable columns: a card narrower than ~32 truncates its own title, and
+  -- two truncated cards are worse than two full-width ones.
+  local partner, skip = {}, {}
   if not self.only and width >= 64 then
-    local thinking = session.group(groups, "thinking")
-    local features = session.group(groups, "features")
-    -- Both or neither: one card sized to half the width with nothing beside
-    -- it looks like a layout bug, not a choice.
-    if thinking and features then
-      paired.thinking, paired.features = thinking, features
+    for _, pair in ipairs(self.source.pairs or { { "thinking", "features" } }) do
+      local a = session.group(groups, pair[1])
+      local b = session.group(groups, pair[2])
+      -- Both or neither: one card sized to half the width with nothing beside
+      -- it looks like a layout bug, not a choice.
+      if a and b then
+        partner[a], skip[b] = b, true
+      end
     end
   end
 
   for _, group in ipairs(groups) do
-    if group == paired.thinking then
+    local other = partner[group]
+    if other then
       local left = math.floor((width - 2) / 2)
       local right = width - 2 - left
-      local a = card(self, paired.thinking, focus, left)
-      local b = card(self, paired.features, focus, right)
+      local a = card(self, group, focus, left)
+      local b = card(self, other, focus, right)
       -- Squared off before they are handed to `grid_col`, which pads a short
       -- column with unhighlighted space rather than with the card's own.
       local tall = math.max(#a, #b)
@@ -483,15 +499,32 @@ function View:draw(width)
         { lines = a, w = left, pad = 2 },
         { lines = b, w = right },
       })
-    elseif group ~= paired.features then
+    elseif not skip[group] then
       add(card(self, group, focus, width))
+    end
+  end
+
+  -- A surface may put a row of its own under the cards: the new-session screen
+  -- has a "create" action, which is not a setting and must not be drawn as a
+  -- card that looks like one.
+  if self.footer then
+    vim.list_extend(lines, self.footer(width))
+  end
+
+  -- The mnemonics come from the groups being DRAWN, not from a literal: this
+  -- view is also the one the new-session screen uses, and that one has a
+  -- Provider card the running-session one does not.
+  local keys = {}
+  for _, group in ipairs(groups) do
+    if group.key then
+      keys[#keys + 1] = group.key
     end
   end
 
   local hints = {
     { "h j k l", "move" },
     { "⏎", "apply" },
-    { "m t f s", "group" },
+    { table.concat(keys, " "), "group" },
     { "r", "reload" },
   }
   vim.list_extend(hints, self.hints or {})
@@ -530,7 +563,7 @@ function View:mappings()
   -- you arrive at the tab, and on a cold open that is before the daemon has
   -- answered. A mnemonic derived from a config that has not landed is a
   -- mnemonic that is never bound at all.
-  for _, key in pairs(session.KEYS) do
+  for _, key in pairs(self.source.keys or session.KEYS) do
     out[#out + 1] = {
       key,
       function()
@@ -557,46 +590,14 @@ end
 
 ---@param buf integer
 function View:bind(buf)
-  if not vim.api.nvim_buf_is_valid(buf) then
-    return
-  end
   -- Binding twice would capture our own mappings as the "previous" ones and
   -- there would be nothing left to restore.
   if self.bound then
     self:unbind(buf)
   end
-
-  self.bound = {}
-  for _, mapping in ipairs(self:mappings()) do
-    -- SAVE WHAT WE DISPLACE. The dashboard's six panels share one buffer, and
-    -- volt binds `<CR>` on it at open -- that is how every other panel's rows
-    -- are activated from the keyboard. Deleting ours on the way out would
-    -- take volt's with it and leave `<CR>` dead everywhere else.
-    --
-    -- Only a buffer-local mapping is ours to displace: a global one is not
-    -- overwritten, it is shadowed, and comes back by itself.
-    --
-    -- `maparg` reads the CURRENT buffer, not `buf`, and at attach time the
-    -- current buffer is usually not the chrome -- `float.select` focuses the
-    -- chrome window only after the panel is attached, so the cursor is still
-    -- in the composer, whose `<CR>` sends the prompt. Looking it up from the
-    -- wrong buffer would have restored *send the prompt* onto the chrome
-    -- buffer on the way out.
-    local existing
-    vim.api.nvim_buf_call(buf, function()
-      existing = vim.fn.maparg(mapping[1], "n", false, true)
-    end)
-    self.bound[#self.bound + 1] = {
-      lhs = mapping[1],
-      prev = (type(existing) == "table" and existing.buffer == 1) and existing or nil,
-    }
-    vim.keymap.set("n", mapping[1], mapping[2], {
-      buffer = buf,
-      nowait = true,
-      silent = true,
-      desc = "paseo: session settings",
-    })
-  end
+  -- Through |paseo.ui.keys|, which saves what it displaces -- the panels share
+  -- one chrome buffer and volt owns `<CR>` on it.
+  self.bound = require("paseo.ui.keys").take(buf, self:mappings(), "paseo: session settings")
 end
 
 ---Give the buffer its keys back.
@@ -608,21 +609,7 @@ end
 function View:unbind(buf)
   local saved = self.bound
   self.bound = nil
-  if not (buf and vim.api.nvim_buf_is_valid(buf)) then
-    return
-  end
-
-  for _, mapping in ipairs(saved or {}) do
-    pcall(vim.keymap.del, "n", mapping.lhs, { buffer = buf })
-    if mapping.prev then
-      -- `mapset` restores a buffer-local mapping to the CURRENT buffer, so it
-      -- has to run with the right one current -- otherwise volt's `<CR>` comes
-      -- back attached to whatever you happened to be looking at.
-      pcall(vim.api.nvim_buf_call, buf, function()
-        vim.fn.mapset("n", false, mapping.prev)
-      end)
-    end
-  end
+  require("paseo.ui.keys").release(buf, saved)
 end
 
 -- ------------------------------------------------- the dashboard panel API
@@ -634,8 +621,8 @@ local panel_view
 ---@param chat table
 ---@return paseo.SessionView
 local function view_for(chat)
-  if not panel_view or panel_view.chat ~= chat then
-    panel_view = M.new(chat, {
+  if not panel_view or panel_view.source.chat ~= chat then
+    panel_view = M.new(session.source(chat), {
       redraw = function()
         require("paseo.ui.float").rebuild()
       end,
@@ -648,7 +635,7 @@ end
 ---@param chat table
 function M.load(chat)
   local view = view_for(chat)
-  session.load(chat, view.redraw)
+  view.source:load(view.redraw)
 end
 
 ---@param chat table
