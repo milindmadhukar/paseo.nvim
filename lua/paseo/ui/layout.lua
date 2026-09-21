@@ -19,15 +19,28 @@
 
 local M = {}
 
+---The chrome's parts, each one row tall.
+---
+---Named rather than summed into a literal, which is what `above = 3` was --
+---in the file whose whole argument is that the number should be derived from
+---parts rather than written down. Adding the session strip was the change that
+---made that difference real: with a literal it is "find every 3 and hope".
+M.PARTS = { header = 1, tabs = 1, rule = 1, strip = 1, footer = 1 }
+
 ---Rows the chrome spends on itself, above and below the body.
 ---
----Above: the header, the tab bar, the rule under it. Below: the footer.
-M.CHROME = { above = 3, below = 1 }
+---Above: the header, the tab bar, the rule under it, the session strip.
+---Below: the footer.
+M.CHROME = {
+  above = M.PARTS.header + M.PARTS.tabs + M.PARTS.rule + M.PARTS.strip,
+  below = M.PARTS.footer,
+}
 
 ---@class paseo.Layout.Rows
 ---@field header integer    Buffer row of the header.
 ---@field tabs integer      Buffer row of the tab bar.
 ---@field rule integer      Buffer row of the rule under the tabs.
+---@field strip integer     Buffer row of the session strip.
 ---@field body_first integer  First buffer row the active panel gets.
 ---@field body_last integer   Last one.
 ---@field body_height integer
@@ -42,6 +55,7 @@ function M.rows(height)
     header = 1,
     tabs = 2,
     rule = 3,
+    strip = 4,
     body_first = M.CHROME.above + 1,
     body_last = M.CHROME.above + body_height,
     body_height = body_height,
@@ -49,58 +63,64 @@ function M.rows(height)
   }
 end
 
----Turn a cursor line in the chrome buffer into an index into the panel's list.
----
----This is what `local at = row - 5` was. The extra row over `body_first` is
----the panel's own heading, which every list panel draws before its first item
------ so the caller passes how many rows its own header occupies rather than
----folding that into a constant nobody can name.
----@param row integer      1-based cursor line.
----@param heading integer  Rows the panel draws before its first item.
----@return integer|nil     1-based index, or nil when the cursor is off the list.
-function M.item_at(row, heading)
-  local at = row - M.CHROME.above - (heading or 0)
-  return at >= 1 and at or nil
-end
-
 ---The screen row a 1-based BUFFER row of the chrome sits on.
 ---
----`g.row` is the chrome's first CONTENT row -- its border is drawn outside the
----window -- so buffer line 1 is at `g.row`, not at `g.row + 1`.
+---`g.row` is what `nvim_open_win` was HANDED, and for a bordered window that
+---is the border's own row -- the frame is drawn from there and the first
+---content row is one below it. So buffer line 1 sits at `g.row + 1` whenever
+---the chrome has a border, which is every `ui.style` except `border = "none"`.
+---
+---This was off by one, and invisible for as long as the first row the panes
+---covered was a row with nothing on it. `body_first` was 4, this answered
+---`g.row + 3`, and the conversation was floated one row too high -- over the
+---first line of the body, which on the Chat tab is blank by construction. The
+---session strip put real content there and the bug became a strip you could
+---only see the last three columns of.
+---
+---`g.border` says which: the caller knows what it opened the window with.
 ---@param g table
 ---@param row integer
 ---@return integer
 function M.screen_row(g, row)
-  return g.row + row - 1
+  return g.row + (g.border and 1 or 0) + row - 1
 end
 
 ---Screen geometry for the panes floated over the body.
+---
+---`body` is the whole of it, which is what a session with no composer gets --
+---a terminal fills the panel area outright. It shares `col` and `width` with
+---the conversation deliberately: switching between an agent session and a
+---terminal one must not shift the left edge under you.
 ---@param g table  The float's geometry.
 ---@param composer_h? integer  Rows the composer wants RIGHT NOW. Absent means
 ---                   the configured maximum. The composer grows with what you
 ---                   have typed rather than standing at its full height over
 ---                   an empty buffer, so this is a function of the content and
 ---                   not of the config alone -- see `float.composer_rows`.
----@return { top: integer, col: integer, width: integer, conversation: integer, composer_row: integer, composer: integer }
+---@return { top: integer, col: integer, width: integer, conversation: integer, composer_row: integer, composer: integer, body: { row: integer, col: integer, width: integer, height: integer } }
 function M.panes(g, composer_h)
   local rows = M.rows(g.height)
   local top = M.screen_row(g, rows.body_first)
   composer_h = math.max(1, math.min(composer_h or g.composer, g.composer))
 
-  -- The composer is bordered, so its bottom border sits one row BELOW its last
-  -- content row. Putting that border on the last body row -- rather than a row
-  -- further down, where the footer is -- means the composer's content starts
-  -- `composer_h` rows above it.
-  local composer_row = M.screen_row(g, rows.body_last) - composer_h
+  -- The composer is BORDERED, and `nvim_open_win` is handed the border's row,
+  -- not the content's -- so the window costs `composer_h + 2` rows and its
+  -- bottom border sits at `row + composer_h + 1`. Putting that border on the
+  -- last body row, rather than a row further down where the footer is, is what
+  -- the `- 1` buys: without it the composer covers the footer, which is the
+  -- row that says which keys the surface has.
+  local composer_row = M.screen_row(g, rows.body_last) - composer_h - 1
 
+  local col, width = g.col + 2, g.width - 4
   return {
     top = top,
-    col = g.col + 2,
-    width = g.width - 4,
+    col = col,
+    width = width,
     -- One row of gap between the conversation and the composer's top border.
     conversation = math.max(5, composer_row - 1 - top),
     composer_row = composer_row,
     composer = composer_h,
+    body = { row = top, col = col, width = width, height = rows.body_height },
   }
 end
 

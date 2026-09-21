@@ -3,7 +3,7 @@
 --- `render.lua` gives us a LINE -- a list of `{ text, highlight, click }`
 --- cells. That is the alphabet. This is the vocabulary built on top of it, and
 --- it exists because every panel had been spelling the same words out by hand:
---- `active and "  ● " or "  ○ "` in `panels/session.lua`, `mine and "  ▌ " or
+--- `active and "  ● " or "  ○ "` in `panels/settings.lua`, `mine and "  ▌ " or
 --- "    "` in two more, `string.rep("─", width - 2)` in a fourth, and the same
 --- footer hint row copied verbatim into five files.
 ---
@@ -590,15 +590,32 @@ end
 ---Hover and keyboard focus deliberately paint the SAME -- pointing at a row
 ---and moving to it are the same state, and showing them differently invites
 ---the reading that they mean different things.
+---
+---ACTIVE IS A DIFFERENT AXIS and a weaker claim: "this is the session you are
+---in", which is true of a row whether or not you are anywhere near it. It used
+---to WIN over hover, so the one row you were most likely to point at was the
+---one row that could not light up -- and, with focus now on the same group as
+---hover, it would have swallowed the focus ring too. Focus answers "what will
+---`<CR>` do", which is the more urgent question, so focus and hover win and
+---active falls back. Active is still legible while focused elsewhere: it is a
+---tier apart in the elevation ladder, and every list that draws it also draws
+---a `▌` in the gutter, which survives `fill_row` because it is a cell.
+---
+---The second argument takes a boolean for the old "active" spelling, so the
+---callers that mean only that need not all change at once.
 ---@param id string
----@param active? boolean
+---@param state? boolean|{ focused?: boolean, active?: boolean }
 ---@return string|nil
-function M.row_hl(id, active)
-  if active then
-    return "PaseoRowActive"
+function M.row_hl(id, state)
+  if type(state) == "boolean" then
+    state = { active = state }
   end
-  if M.hovered(id) then
+  state = state or {}
+  if state.focused or M.hovered(id) then
     return "PaseoRowHover"
+  end
+  if state.active then
+    return "PaseoRowActive"
   end
   return nil
 end

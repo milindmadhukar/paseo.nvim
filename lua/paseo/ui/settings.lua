@@ -9,7 +9,7 @@
 --- screen opens. Those two used to be a volt popup and a plain buffer, and the
 --- reason was only ever that the open sequence lived here.
 
-local panel = require "paseo.ui.panels.session"
+local panel = require "paseo.ui.panels.settings"
 local popup = require "paseo.ui.popup"
 local render = require "paseo.ui.render"
 local session = require "paseo.ui.session"

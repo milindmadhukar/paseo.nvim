@@ -11,6 +11,7 @@
 --- you without polling every one of them.
 
 local bridge = require "paseo.bridge"
+local config = require "paseo.config"
 
 local M = {}
 
@@ -274,6 +275,148 @@ function M.summary(root)
     return ("· %d running"):format(working)
   end
   return ("%d idle"):format(#list)
+end
+
+-- ---------------------------------------------------------------- the verbs
+
+---A redraw of whatever surface is showing terminals, if any.
+---
+---The directory has no idea what is drawing it, and should not: `float` is the
+---only surface left that does, and it answers a no-op when it is shut.
+local function repaint()
+  vim.schedule(function()
+    pcall(function()
+      require("paseo.ui.float").rebuild()
+    end)
+  end)
+end
+
+---Everything `c` can start: a shell, then one entry per provider the daemon
+---actually has, then whatever is configured, then a free-text escape hatch.
+---
+---The providers are read LIVE, so enabling one in Paseo makes it appear here
+---without a config change. The filter is `enabled ~= false` rather than
+---`status == "ready"`: a provider can be installed and configured while its
+---models are still being fetched, and a terminal running its CLI does not need
+---a model at all.
+---@param cwd string
+---@param callback fun(presets: table[])
+function M.presets(cwd, callback)
+  local out = { { label = "Shell", note = "$SHELL on the daemon's host" } }
+
+  for _, preset in ipairs(config.get().ui.terminal.presets or {}) do
+    if type(preset) == "string" then
+      out[#out + 1] = { label = preset, command = preset }
+    elseif type(preset) == "table" and preset.command then
+      out[#out + 1] = {
+        label = preset.label or preset.command,
+        command = preset.command,
+        args = preset.args,
+      }
+    end
+  end
+  out[#out + 1] = { label = "Command…", prompt = true, note = "type one" }
+
+  require("paseo.ui.create").catalogue(cwd, function(entries)
+    local providers = {}
+    for _, entry in ipairs(entries or {}) do
+      if entry.enabled ~= false and entry.provider then
+        providers[#providers + 1] = {
+          label = entry.label or entry.provider,
+          command = entry.provider,
+          note = entry.provider,
+        }
+      end
+    end
+    -- Providers go after the shell and before everything else, which is the
+    -- order you reach for them in.
+    for i, preset in ipairs(providers) do
+      table.insert(out, i + 1, preset)
+    end
+    callback(out)
+  end)
+end
+
+---Start a terminal in `cwd`.
+---
+---Nothing checks that the command exists, on purpose: the terminal runs on the
+---DAEMON's host, which is not necessarily this machine, so the honest failure
+---is the PTY printing `command not found`.
+---@param cwd string
+---@param preset table  `{ command?, args?, label? }`
+---@param size { rows: integer, cols: integer }
+---@param callback fun(id: string|nil, err: string|nil)
+function M.create(cwd, preset, size, callback)
+  preset = preset or {}
+  require("paseo.bridge").request("terminals.create", {
+    cwd = cwd,
+    command = preset.command,
+    args = preset.args,
+    name = preset.label ~= "Shell" and (preset.label or preset.command) or nil,
+    rows = size and size.rows or 24,
+    cols = size and size.cols or 80,
+  }, function(err, result)
+    vim.schedule(function()
+      if err then
+        return callback(nil, tostring(err))
+      end
+      local item = result and result.terminal
+      if not (item and item.id) then
+        return callback(nil, "the daemon started no terminal")
+      end
+      -- The directory is told by push and may not have caught up, so seed it
+      -- rather than waiting for the snapshot.
+      M.adopt(item, cwd)
+      if preset.label and preset.label ~= "Shell" then
+        M.set_label(item.id, preset.label)
+      end
+      callback(item.id, nil)
+    end)
+  end)
+end
+
+---@param id string
+function M.rename(id)
+  local item = M.get(id)
+  vim.ui.input({ prompt = "Name: ", default = item and M.label(item) or "" }, function(title)
+    if title == nil then
+      return
+    end
+    -- Ours first, because it is the one that survives. `renameTerminal` sets
+    -- the daemon's `title`, and `title` is also what the PTY reports for
+    -- itself -- so the shell overwrites your name with `user@host:~/dir`
+    -- within a second, and every terminal in one directory ends up labelled
+    -- identically. The daemon is told anyway, because a later one may keep
+    -- it and the name then shows up in the Paseo app too; nothing here waits
+    -- on that answer.
+    M.set_label(id, title)
+    repaint()
+    require("paseo.bridge").request(
+      "terminals.rename",
+      { terminalId = id, title = title },
+      function() end
+    )
+  end)
+end
+
+---@param id string
+function M.kill(id)
+  local item = M.get(id)
+  local name = item and M.label(item) or id
+  -- Killing a terminal kills whatever is running in it, and "whatever" is
+  -- routinely an agent mid-turn. Asked rather than assumed.
+  vim.ui.select({ "no", "yes" }, { prompt = ("Kill %s?"):format(name) }, function(choice)
+    if choice ~= "yes" then
+      return
+    end
+    require("paseo.bridge").request("terminals.kill", { terminalId = id }, function(err)
+      if err then
+        vim.schedule(function()
+          vim.notify("paseo: could not kill it — " .. tostring(err), vim.log.levels.ERROR)
+        end)
+      end
+    end)
+  end)
 end
 
 return M

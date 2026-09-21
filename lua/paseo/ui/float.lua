@@ -22,6 +22,7 @@ local icons = require "paseo.ui.icons"
 local layout = require "paseo.ui.layout"
 local render = require "paseo.ui.render"
 local style = require "paseo.ui.style"
+local widgets = require "paseo.ui.widgets"
 local sidebar = require "paseo.ui.sidebar"
 local transcript = require "paseo.ui.transcript"
 
@@ -34,7 +35,7 @@ local ns = api.nvim_create_namespace "paseo.float"
 ---@type table|nil
 local state
 
-M.TABS = { "Chat", "Session", "Sessions", "Changes", "Usage", "Workspaces" }
+M.TABS = { "Chat", "Sessions", "Settings", "Changes", "Usage", "Workspaces" }
 
 -- ------------------------------------------------------------------ geometry
 
@@ -78,6 +79,11 @@ local function geometry()
   return {
     width = w,
     height = h,
+    -- Whether the chrome window has a frame, which decides where its first
+    -- CONTENT row is -- `nvim_open_win` is handed the border's row, not the
+    -- content's. |paseo.ui.layout|.screen_row is the one place that matters,
+    -- and everything floated over the body is positioned through it.
+    border = select(1, style.window_border()) ~= "none",
     row = math.max(0, math.min(row, lines - h)),
     col = math.max(0, math.min(col, columns - w)),
     composer = composer,
@@ -115,11 +121,11 @@ local function header_lines()
   end
   local line = sidebar.header(state.chat)
 
-  -- Everything the header names is a thing the Session panel can change, so
+  -- Everything the header names is a thing the Settings panel can change, so
   -- the header is the shortest route to it. Cells carry volt's third element;
   -- `volt.events.add` on this buffer is what turns that into a click.
   for _, cell in ipairs(line) do
-    cell[3] = goto_tab "Session"
+    cell[3] = goto_tab "Settings"
   end
 
   return { render.truncate(line, state.geometry.width - 2) }
@@ -236,6 +242,102 @@ local function tab_lines()
   return { render.truncate(tabs, inner), {} }
 end
 
+---Which session the Chat tab is showing, and the others you could be in.
+---
+---THE ROW THAT SAYS WHERE YOU ARE. A terminal session has no composer to type
+---into and no transcript to read, so without this the dashboard could be
+---showing a PTY with nothing on screen saying which one, and no visible way
+---back. Drawn on EVERY tab, like the header, because "which session am I in"
+---is not a question that stops being worth answering when you look at Usage.
+---
+---EXACTLY ONE ROW, ALWAYS. volt records each section's start row once, in
+---`gen_data`, and `redraw` writes extmarks at those rows without clearing
+---anything -- so a strip that grew by a chip on hover would draw past the end
+---of the buffer and `handle_hover` would raise "Invalid 'line': out of range"
+---from inside `vim.on_key`. It degrades instead, the way the tab bar does.
+---@return table[][]
+local function strip_lines()
+  if not state then
+    return { {} }
+  end
+  local chat = state.chat
+  local here = state.session or { kind = "agent", id = chat.agent_id }
+
+  local items = {}
+  for _, agent in ipairs(require("paseo.agents").for_root(chat.root)) do
+    items[#items + 1] = {
+      kind = "agent",
+      id = agent.id,
+      label = agent.title or agent.id,
+      icon = icons.panel.Sessions,
+    }
+  end
+  for _, item in ipairs(require("paseo.terminals").for_root(chat.root)) do
+    items[#items + 1] = {
+      kind = "terminal",
+      id = item.id,
+      label = require("paseo.terminals").label(item),
+      icon = icons.panel.Terminals,
+    }
+  end
+
+  local line = { { "  " } }
+  if #items == 0 then
+    line[#line + 1] = { "no sessions here yet", "PaseoDim" }
+    line[#line + 1] = { "   " }
+  end
+
+  -- Named, then glyph-and-nothing, then dropped for a count. Same ladder as
+  -- the tab bar, and for the same reason: the row has to keep saying where you
+  -- are even when it cannot say where everything else is.
+  local inner = state.geometry.width - 2
+  local function build(level)
+    local out = { { "  " } }
+    local dropped = 0
+    for _, item in ipairs(items) do
+      local mine = item.kind == here.kind and item.id == here.id
+      local text
+      if level == "full" or mine then
+        text = (" %s %s "):format(item.icon, item.label)
+      elseif level == "icon" then
+        text = (" %s "):format(item.icon)
+      else
+        dropped = dropped + 1
+        text = nil
+      end
+      if text then
+        local id = "float.strip." .. item.kind .. "." .. item.id
+        out[#out + 1] = {
+          text,
+          mine and "PaseoChipFocus" or (widgets.hovered(id) and "PaseoChipFocus" or "PaseoChipOff"),
+          widgets.hover(id, "strip", function()
+            M.show_session { kind = item.kind, id = item.id }
+          end),
+        }
+        out[#out + 1] = { " " }
+      end
+    end
+    if dropped > 0 then
+      out[#out + 1] = { (" +%d "):format(dropped), "PaseoChipOff" }
+    end
+    return out
+  end
+
+  for _, level in ipairs { "full", "icon", "count" } do
+    local built = build(level)
+    if render.width(built) <= inner - 14 or level == "count" then
+      line = built
+      break
+    end
+  end
+
+  -- The way out, at the far end, always. `<C-s>` is bound in TERMINAL mode as
+  -- well as normal, which is the only way it is worth having: a key you must
+  -- first press `<C-\><C-n>` to reach is a key you do not reach.
+  local keys = require("paseo.config").get().ui.terminal.keys
+  return { widgets.row(line, widgets.hints { { keys.sessions, "sessions" } }, inner) }
+end
+
 ---The active panel, padded to the space between the tabs and the footer.
 ---@return table[][]
 local function body_lines()
@@ -274,22 +376,6 @@ local function body_lines()
     table.remove(lines)
   end
   return lines
-end
-
----The buffer line a panel's first line is drawn on.
----
----Header, tab bar, rule -- so body row 1 is buffer line 4. Exposed rather than
----re-derived by the panel that needs it: the Sessions panel maps cursor rows
----to sessions, and the panel this replaced hardcoded the sum as `row - 5`,
----which meant adding a heading line silently retargeted its kill key.
----
----The number itself comes from |paseo.ui.layout|, which is the one place the
----chrome's row budget is stated -- it is the same figure the body height and
----the composer geometry are computed from, and three copies of it is how the
----`row - 5` happened in the first place.
----@return integer
-function M.body_row_offset()
-  return layout.CHROME.above
 end
 
 ---@return table[][]
@@ -371,6 +457,12 @@ function M.rebuild()
           end,
         },
         {
+          name = "strip",
+          lines = function()
+            return render.to_volt(strip_lines())
+          end,
+        },
+        {
           name = "body",
           lines = function()
             return render.to_volt(body_lines())
@@ -406,7 +498,7 @@ function M.refresh_header(chat)
   if not state or state.chat ~= chat or not api.nvim_buf_is_valid(state.buf) then
     return
   end
-  local sections = { "header", "footer" }
+  local sections = { "header", "strip", "footer" }
   -- Usage is the other thing a running turn changes, and it is pure Lua -- no
   -- subprocess -- so it can afford to ride along.
   if state.tab == "Usage" then
@@ -421,7 +513,7 @@ end
 ---
 ---This is why "1-5 jump" did nothing. The keys were mapped on the chrome
 ---buffer, and on the Chat tab -- the tab it opens on -- the chrome buffer never
----holds the cursor: `show_chat_panes` enters the composer. Every one of those
+---holds the cursor: `show_agent_panes` enters the composer. Every one of those
 ---keystrokes went to a buffer that had no such mapping.
 ---@param buf integer
 ---@param cycle boolean  Also take `<Tab>`/`<S-Tab>`.
@@ -572,7 +664,7 @@ function M.resize_composer(chat)
 end
 
 ---Float the real conversation and composer over the Chat tab.
-local function show_chat_panes()
+local function show_agent_panes()
   if not state then
     return
   end
@@ -671,17 +763,139 @@ local function show_chat_panes()
   transcript.redraw(chat)
 end
 
----@param chat table
-local function hide_chat_panes(chat)
-  if not chat then
+---The keys a PTY buffer gets while it is the Chat tab.
+---
+---DIGITS ARE DELIBERATELY NOT AMONG THEM. A bare `5` in a terminal costs you
+---`50k` to scroll back, and `<M-5>` reaches the same tab. `<Esc>` is never
+---bound at all: it belongs to the PTY, so vim running inside one can still
+---leave insert mode.
+---
+---Bound in TERMINAL mode as well as normal, which is the only way any of it is
+---worth having -- a key you must press `<C-\><C-n>` to reach first is a key
+---you do not reach, and the whole point of this surface is that a terminal is
+---a session like any other rather than a place you get stuck in.
+---@param buf integer
+local function bind_terminal(buf)
+  if not api.nvim_buf_is_valid(buf) then
     return
   end
-  for _, win in ipairs { chat.win_composer, chat.win_conversation } do
-    if win and api.nvim_win_is_valid(win) then
+  local keys = require("paseo.config").get().ui.terminal.keys
+  local function map(mode, lhs, fn, desc)
+    if not lhs then
+      return
+    end
+    vim.keymap.set(mode, lhs, fn, { buffer = buf, nowait = true, silent = true, desc = desc })
+  end
+
+  for i, name in ipairs(M.TABS) do
+    map({ "n", "t" }, ("<M-%d>"):format(i), function()
+      M.select(name)
+    end, "paseo: tab " .. name)
+  end
+  map({ "n", "t" }, keys.sessions, function()
+    M.select "Sessions"
+  end, "paseo: the session list")
+  map({ "n", "t" }, keys.next, function()
+    M.cycle_session(1)
+  end, "paseo: next session")
+  map({ "n", "t" }, keys.prev, function()
+    M.cycle_session(-1)
+  end, "paseo: previous session")
+  -- Normal mode only. `q` in terminal mode is a letter, and `<C-c>` is SIGINT
+  -- and belongs to whatever is running -- which is the difference between a
+  -- terminal you work in and a terminal you visit.
+  map("n", "q", M.close, "paseo: close the dashboard")
+end
+
+---A terminal session: the PTY, filling the whole panel area.
+---
+---No composer, so no border either -- a bordered window costs two rows the
+---body does not have. The chat panes get away with one because the composer's
+---bottom border deliberately lands ON the last body row.
+local function show_terminal_pane()
+  if not state then
+    return
+  end
+  local terminals = require "paseo.terminals"
+  local terminal = require "paseo.ui.terminal"
+  local item = terminals.get(state.session.id)
+  if not item then
+    -- The terminal died while we were pointed at it -- a directory update that
+    -- no longer lists it, never a process exiting under us. Fall back rather
+    -- than leaving the tab blank.
+    state.session = { kind = "agent", id = state.chat.agent_id }
+    return show_agent_panes()
+  end
+
+  local g = state.geometry
+  local pane = layout.panes(g).body
+  state.term_win = api.nvim_open_win(api.nvim_create_buf(false, true), true, {
+    relative = "editor",
+    row = pane.row,
+    col = pane.col,
+    width = pane.width,
+    height = pane.height,
+    style = "minimal",
+    border = "none",
+    zindex = g.z_panes,
+  })
+  pcall(function()
+    vim.wo[state.term_win].winhl = "Normal:PaseoNormal,NormalFloat:PaseoNormal"
+  end)
+
+  local view = terminal.ensure(item, state.term_win)
+  terminal.show(view, state.term_win)
+  bind_terminal(view.buf)
+
+  M.refresh_header(state.chat)
+  -- Entered, and in insert. Landing on the chrome instead would send every
+  -- keystroke to the tab bar.
+  api.nvim_set_current_win(state.term_win)
+  vim.cmd.startinsert()
+end
+
+---Whatever the current session needs on the Chat tab.
+local function show_panes()
+  if not state then
+    return
+  end
+  if state.session and state.session.kind == "terminal" then
+    return show_terminal_pane()
+  end
+  show_agent_panes()
+end
+
+local function hide_panes()
+  if not state then
+    return
+  end
+  local chat = state.chat
+  -- Out of terminal mode BEFORE the window goes, or the editor is left in a
+  -- mode the next surface did not ask for.
+  if state.term_win and api.nvim_get_current_win() == state.term_win then
+    pcall(vim.cmd.stopinsert)
+  end
+  -- Built by appending rather than as a literal. `ipairs` stops at the first
+  -- nil, and these three are nil independently -- so `{ composer, conversation,
+  -- term_win }` with the first two already cleared iterates NOTHING, and the
+  -- PTY window survives the dashboard that owned it.
+  local doomed = {}
+  for _, win in pairs {
+    composer = chat and chat.win_composer,
+    conversation = chat and chat.win_conversation,
+    terminal = state.term_win,
+  } do
+    doomed[#doomed + 1] = win
+  end
+  for _, win in ipairs(doomed) do
+    if api.nvim_win_is_valid(win) then
       pcall(api.nvim_win_close, win, true)
     end
   end
-  chat.win_composer, chat.win_conversation = nil, nil
+  if chat then
+    chat.win_composer, chat.win_conversation = nil, nil
+  end
+  state.term_win = nil
 end
 
 -- ------------------------------------------------------------------- tabs
@@ -728,9 +942,9 @@ function M.select(name)
   state.tab = name
 
   if name == "Chat" and not was_chat then
-    show_chat_panes()
+    show_panes()
   elseif name ~= "Chat" then
-    hide_chat_panes(state.chat)
+    hide_panes()
     -- Arriving at a panel is the moment to refresh it. A panel that fetched
     -- once and cached the answer is a panel that shows you a workspace list
     -- from an hour ago -- or, if the daemon happened to be down then, an error
@@ -830,10 +1044,18 @@ function M.close()
     state.backdrop_win,
     state.chat.win_conversation,
     state.chat.win_composer,
+    -- THE PTY WINDOW BELONGS IN HERE. It is a float on this tab page and it is
+    -- routinely the tab's current window -- you were typing in it. Left out,
+    -- closing the dashboard from another tab leaves this one pointing at a
+    -- window that no longer exists, and the next `:tabclose` dies with `E315:
+    -- ml_get: Invalid lnum` or takes the process down outright.
+    state.term_win,
   }
   -- Before `state` goes: `panel_keys` reads it, and a panel left attached
-  -- would have its mappings outlive the buffer they were bound to.
+  -- would have its mappings outlive the buffer they were bound to. So does
+  -- `hide_panes`, which is why the windows go here rather than below.
   panel_keys(state.tab, "detach")
+  hide_panes()
 
   local held = state
   state = nil
@@ -843,9 +1065,19 @@ function M.close()
   -- forever rather than once.
   require("paseo.ui.animate").stop_all()
 
+  -- The PTY windows are shut, so there is nothing left showing the terminal
+  -- buffers and the daemon can stop base64-ing them across the pipe at a
+  -- surface nobody is looking at. The cost is that reopening replays the
+  -- scrollback, because `terminal.ensure` is only idempotent while the buffer
+  -- lives; that is the cheaper half of the trade.
+  require("paseo.ui.terminal").detach_all()
+
+  if held.augroup then
+    pcall(api.nvim_del_augroup_by_id, held.augroup)
+  end
+
   unbind_tabs(held.chat.conversation, false)
   unbind_tabs(held.chat.composer, true)
-  hide_chat_panes(held.chat)
   for _, win in ipairs { held.win, held.backdrop_win } do
     if win and api.nvim_win_is_valid(win) then
       pcall(api.nvim_win_close, win, true)
@@ -941,6 +1173,11 @@ function M.open(chat)
     chat = chat,
     geometry = g,
     tab = "Chat",
+    -- What the Chat tab is showing. A sibling of `chat` rather than something
+    -- folded into it: `state.chat` is identity-compared by `is_open`,
+    -- `refresh_header` and every panel, and none of them should have to learn
+    -- that a session might be a PTY.
+    session = { kind = "agent", id = chat.agent_id },
   }
   chat.surface = "float"
 
@@ -986,8 +1223,145 @@ function M.open(chat)
     chat.surface = "sidebar"
     sidebar.open(chat)
   end)
+  map(require("paseo.config").get().ui.terminal.keys.sessions, function()
+    M.select "Sessions"
+  end)
 
-  show_chat_panes()
+  -- THE DASHBOARD DID NOT FOLLOW A RESIZE. It registered no autocmds at all,
+  -- so making the terminal bigger left a float at its old size with the panes
+  -- floating wherever they had been. That was survivable while everything on
+  -- it was redrawn text; it is not once a PTY is one of the panes, because a
+  -- terminal that is not told its size renders to the wrong one.
+  state.augroup = api.nvim_create_augroup("paseo.float", { clear = true })
+  api.nvim_create_autocmd({ "VimResized", "WinResized" }, {
+    group = state.augroup,
+    callback = function()
+      vim.schedule(M.relayout)
+    end,
+    desc = "paseo: re-fit the dashboard",
+  })
+
+  show_panes()
+end
+
+---The size a PTY should run at here, for a terminal that does not exist yet.
+---
+---A terminal created before the surface is up gets the daemon's default and is
+---resized the moment it is shown, which is a visible reflow; asking first
+---costs nothing.
+---@return { rows: integer, cols: integer }|nil
+function M.body_size()
+  if not state then
+    return nil
+  end
+  local pane = layout.panes(state.geometry).body
+  return { rows = pane.height, cols = pane.width }
+end
+
+---The session the Chat tab is showing.
+---@return { kind: "agent"|"terminal", id: string|nil }|nil
+function M.session()
+  return state and state.session
+end
+
+---Show a session on the Chat tab.
+---
+---An agent that is not the one this surface is on is not ours to show: it is a
+---different `paseo.Chat`, and |paseo.ui.chat|.open is the thing that knows how
+---to subscribe to it, fetch its timeline and reseat this window. Anything else
+----- the agent we already have, or any terminal -- is a repaint.
+---@param session { kind: "agent"|"terminal", id: string|nil }
+function M.show_session(session)
+  if not state then
+    return
+  end
+  if session.kind == "agent" and session.id and session.id ~= state.chat.agent_id then
+    return require("paseo.ui.chat").open { root = state.chat.root, agent_id = session.id }
+  end
+
+  hide_panes()
+  state.session = { kind = session.kind, id = session.id }
+  if state.tab ~= "Chat" then
+    -- `select` shows the panes itself, and detaches whatever panel we are
+    -- leaving on the way.
+    return M.select "Chat"
+  end
+  show_panes()
+  M.rebuild()
+end
+
+---Step to the next or previous session in this workspace.
+---
+---Agents first, then terminals, which is the order the strip and the Sessions
+---list both draw them in -- three orderings of one list is how they start
+---disagreeing.
+---@param step integer
+function M.cycle_session(step)
+  if not state then
+    return
+  end
+  local chat = state.chat
+  local order = {}
+  for _, agent in ipairs(require("paseo.agents").for_root(chat.root)) do
+    order[#order + 1] = { kind = "agent", id = agent.id }
+  end
+  for _, item in ipairs(require("paseo.terminals").for_root(chat.root)) do
+    order[#order + 1] = { kind = "terminal", id = item.id }
+  end
+  if #order == 0 then
+    return
+  end
+
+  local here = state.session or {}
+  local at = 1
+  for i, item in ipairs(order) do
+    if item.kind == here.kind and item.id == here.id then
+      at = i
+    end
+  end
+  M.show_session(order[(at - 1 + step) % #order + 1])
+end
+
+---Re-fit everything to the editor's new size.
+---
+---A full `rebuild` rather than a `redraw`: the width changed, and volt records
+---each section's rows and widths once, in `gen_data`.
+function M.relayout()
+  if not state or not api.nvim_win_is_valid(state.win) then
+    return
+  end
+  local g = geometry()
+  state.geometry = g
+
+  pcall(api.nvim_win_set_config, state.win, {
+    relative = "editor",
+    row = g.row,
+    col = g.col,
+    width = g.width,
+    height = g.height,
+  })
+  if state.backdrop_win and api.nvim_win_is_valid(state.backdrop_win) then
+    pcall(api.nvim_win_set_config, state.backdrop_win, {
+      relative = "editor",
+      row = 0,
+      col = 0,
+      width = vim.o.columns,
+      height = vim.o.lines,
+    })
+  end
+
+  -- The panes are laid out from the geometry, so they are cheapest to close
+  -- and reopen -- and on any tab but Chat there are none.
+  if state.tab == "Chat" then
+    local was = api.nvim_get_current_win()
+    hide_panes()
+    show_panes()
+    if was == state.win and api.nvim_win_is_valid(state.win) then
+      pcall(api.nvim_set_current_win, state.win)
+    end
+  end
+
+  M.rebuild()
 end
 
 ---@param chat table
@@ -1001,6 +1375,37 @@ function M.is_open(chat)
   -- every other window when the last real buffer is wiped. Left alone, the
   -- state outlives the window, `is_open` lies, and `open` then takes its
   -- "already up, just focus it" branch and puts nothing on screen.
+  if not (state.win and api.nvim_win_is_valid(state.win)) then
+    M.close()
+    return false
+  end
+  -- AND ON THE TAB PAGE YOU ARE LOOKING AT. A float belongs to the tab it was
+  -- opened on, so after `workspaces.open`'s default `tabnew` the previous
+  -- dashboard is still a perfectly valid window -- just an invisible one. Left
+  -- unasked, `chat.toggle` saw "already open", took its close branch, and the
+  -- first press of the chat key in a new workspace did nothing you could see.
+  -- The second one opened it, which reads as a key that needs pressing twice.
+  if api.nvim_win_get_tabpage(state.win) ~= api.nvim_get_current_tabpage() then
+    return false
+  end
+  return state.chat == chat
+end
+
+---Is this chat's dashboard up AT ALL -- on any tab page?
+---
+---The other question, and not the one `is_open` answers. `is_open` means "is
+---it usable from where you are standing", because its callers go on to focus
+---a window or to decide that a toggle should close. This one means "is there
+---a chat on screen somewhere", which is what |paseo.ui.chat|.follow needs:
+---the whole point of following is to move a surface that is on the tab you
+---just LEFT onto the one you are on now, and a tab-aware test would answer
+---"nothing open" at exactly that moment and leave it behind.
+---@param chat table
+---@return boolean
+function M.showing(chat)
+  if not state then
+    return false
+  end
   if not (state.win and api.nvim_win_is_valid(state.win)) then
     M.close()
     return false
