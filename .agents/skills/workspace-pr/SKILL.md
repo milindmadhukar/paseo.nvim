@@ -9,8 +9,9 @@ Each member repository gets its own pull request. They are separate PRs in
 separate repos that happen to describe one piece of work, so each must be
 reviewable on its own AND point at its siblings.
 
-Read `workspace` first for the layout, and commit with `workspace-commit`
-before starting here.
+Read `workspace` first for the layout — it defines `$root` (the project root)
+and `$ws` (the workspace root), and how to list members. Commit with
+`workspace-commit` before starting here.
 
 ## The two rules that break things
 
@@ -32,12 +33,32 @@ hangs or fails with a misleading `Permission denied (publickey)`.
 
 ## Procedure
 
-1. `ws status --json` — find the members with commits to push. Skip the rest.
+1. Find the members with commits to push. Skip the rest:
+
+   ```bash
+   for m in $(find "$ws" -maxdepth 3 -name .git -not -path '*/node_modules/*' | sed 's:/\.git$::' | sort); do
+     if up=$(git -C "$m" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null); then
+       n=$(git -C "$m" rev-list --count "$up"..HEAD)
+       if [ "$n" -gt 0 ]; then
+         printf '%s\t%s commit(s) beyond %s\n' "$m" "$n" "$up"
+       fi
+     else
+       printf '%s\tno upstream -- compare against its base from the manifest\n' "$m"
+     fi
+   done
+   ```
+
+   **`@{upstream}` on a workspace branch is usually the *base*, not a remote
+   copy of `ws/<name>`.** Cutting the worktree sets it, so before the first push
+   the count above reads "commits this workspace added to that repo" — which is
+   what you want here. After `push -u` it becomes "unpushed commits", which is
+   also what you want. A member with *no* upstream at all (a base branch that
+   does not track a remote) needs its `base` read from the manifest instead.
 
 2. Per member, confirm the base:
 
    ```bash
-   grep -A5 "\[repos\.<name>\]" <project>/.ws/workspace.toml
+   grep -A5 "\[repos\.<name>\]" "$root/.ws/workspace.toml"
    ```
 
 3. Push that member's branch over HTTPS, as above.
@@ -75,5 +96,5 @@ about the others.
 
 ## Afterwards
 
-`ws rm <name>` once every PR is merged. It refuses if any member still holds
-work that exists nowhere else, which is the check you want at this point.
+`:Paseo ws rm <name>` once every PR is merged. It refuses if any member still
+holds work that exists nowhere else, which is the check you want at this point.
