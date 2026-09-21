@@ -1654,7 +1654,8 @@ sends your answers instead of a bare allow.
     <CR>, y   SEND, once nothing is missing -- until then, go to what is
     <Tab>     the next question · <S-Tab> the previous
     i, o      answer in your own words, in a box you can type in
-    x         clear this question's answer
+    c         note WHY, about the answer you picked
+    x         clear this question's answer (and its note)
     s         skip, where the question may be skipped
     n, N      decline to answer (N also stops the turn)
     <Esc>, q  later; the request stays pending, `gp` reopens it
@@ -1675,6 +1676,20 @@ on it.
 `<CR>` sends only when nothing is missing. Until then it JUMPS to the first
 question that is, rather than refusing with a message that does not say which
 one: half a reply is not a smaller answer, it is a wrong one.
+
+An option's DESCRIPTION is shown in full, wrapped under the option it belongs
+to rather than truncated onto one row -- the half that fell off the end was
+usually the half that told it apart from the option below. It is drawn for the
+option you are ON and for every option you have PICKED, so an answer does not
+lose its meaning the moment you choose it.
+
+`c` writes a NOTE about the answer: the caveat the options did not cover, like
+"the second one, but only for new workspaces". It never replaces the pick --
+the label still travels in `answers`, and the remark rides beside it in
+`annotations`, keyed the same way, so a reader that knows nothing about notes
+still gets an option it recognises. The note also appears in the transcript
+badge beside what was answered, because a caveat that exists only in the
+request nobody can find later is not a record of anything.
 
 A multi-select question ticks as many options as apply and stays put; a
 single-select one replaces and moves on. The marker says which before you
@@ -1741,6 +1756,7 @@ is offered the modes it has rather than the ones Claude has.
     n         reject, and keep planning
     N         reject, and stop the turn
     j k       scroll the plan · <C-d> <C-u> by pages · gg G the ends
+              -- and the mouse wheel, over the plan itself
     <Esc>, q  later; the request stays pending, `gp` reopens it
 
 Paseo adds a fourth Implement when the session was in `bypassPermissions`
@@ -1754,6 +1770,17 @@ around it. It has to be a real buffer: the card is drawn as virtual text,
 virtual text cannot be scrolled, and the version before this therefore
 budgeted the plan against the screen and truncated it -- so on a plan longer
 than the terminal you were approving the part that happened to fit.
+
+The body is FOCUSABLE, which is what makes the mouse wheel reach it: an
+unfocusable float is one the mouse lands straight through, so the wheel
+scrolled the conversation behind the plan while the plan sat still. It carries
+the same keys the card does, so landing in it with the mouse is not a dead
+end. The percentage and bar in the title say how far down it you are --
+without one, a document that scrolls cannot be told from one that does not.
+
+A plan takes the WHOLE width the conversation has, rather than the
+|paseo-config.ui.answer| `width` cap a question's options are held to: a plan
+is a document with code in it, and that cap wrapped every fenced block.
 
 It has to be on screen at all because a plan request carries no tool `detail`
 whatsoever -- the markdown travels in the tool input -- so there is nothing

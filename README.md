@@ -649,24 +649,39 @@ above it — `●` answered, `◉` where you are, `○` not yet:
 
 ```
 ╭─ 󰘦  The agent is asking 3 things ───────────────────────────╮
-│ ● ◉ ○                                               2 of 3  │
+│ ● ◉ ○                            2 of 3  ││││││││           │
 │                                                             │
 │ Which checks should run?                                    │
 │                                                             │
-│  1   tests                                                  │
-│  2   lint                                                   │
-│  3   typecheck                                              │
+│  1  ■ tests                                                 │
+│       The unit suite, about 40s                             │
+│  2  □ lint                                                  │
+│  3  □ typecheck                                             │
+│    󰎞 skip the slow ones on this branch                      │
 │    choose as many as apply                                  │
 ╰─────────────────────────────────────────────────────────────╯
 
-  1-9  pick    ⏎  send the answers    ⇥  question    ␛  later
+  1-9  pick    ⏎  send the answers    c  note    ⇥  question    ␛  later
 ```
 
 `1`-`9` picks, `j`/`k` reaches an option past the ninth, `<Space>` takes the one
 you are on, `x` clears the answer, `s` skips an optional question, and `<Tab>`
 moves between them. The marker is a checkbox where a second pick **adds** and a
 radio where it **replaces**, so the shape tells you which before you press
-anything.
+anything. The bar beside `2 of 3` is how much of the set is answered.
+
+**An option's description is shown in full**, wrapped under the option it
+belongs to rather than truncated onto one row — the half that used to fall off
+the end was usually the half that told it apart from the option below it. It is
+drawn for the option you are **on** and for every option you have **picked**, so
+an answer does not lose its meaning the moment you choose it.
+
+`c` writes a **note** about the answer — the caveat the options did not cover,
+like *"the second one, but only for new workspaces"*. It never replaces the
+pick: the label still travels in `answers`, and the remark rides beside it in
+`annotations`, so a reader that knows nothing about notes still gets a clean
+option. Clearing the answer with `x` clears its note too, and the note appears
+in the transcript badge beside what was answered.
 
 `<CR>` sends the moment nothing is missing, and until then it **takes you to the
 first thing that is** — which is what the old "that question still needs an
@@ -733,7 +748,18 @@ It has to be a real buffer: the card is drawn as virtual text, virtual text
 cannot be scrolled, and the version before this therefore budgeted the plan
 against `vim.o.lines - 16` and truncated it — so on any plan longer than the
 terminal you were approving the part that happened to fit, plus the words `… 84
-more lines`. `j`/`k`/`<C-d>` scroll it without ever leaving the buttons.
+more lines`. `j`/`k`/`<C-d>`/`<C-u>`/`gg`/`G` scroll it without ever leaving the
+buttons, **and so does the mouse wheel**: the body used to be an unfocusable
+float, which is one the mouse lands straight *through*, so the wheel scrolled
+the conversation behind the plan while the plan itself sat still. It is
+focusable now, and it carries the same keys the card does so landing in it with
+the mouse is not a dead end.
+
+A plan takes the **whole width** the conversation has, rather than the 96-column
+cap a question's options are held to: a plan is a document with code in it, and
+that cap wrapped every fenced block. The percentage and bar in the title say how
+far down it you are — without one, a document that scrolls cannot be told from
+one that does not, which is most of what "scrolling does not work" looks like.
 
 A plan request also carries no tool `detail` at all — the markdown travels in the
 tool input — so the dialog, which renders `detail` for everything else, was
