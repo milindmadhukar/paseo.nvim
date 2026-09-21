@@ -10,6 +10,7 @@ local M = {}
 ---@field backend "paseo"|"local"  Where agents run. See README, "Backend seam".
 ---@field paseo paseo.Config.Paseo
 ---@field ui paseo.Config.UI
+---@field voice paseo.Config.Voice
 ---@field workspaces paseo.Config.Workspaces
 ---@field skills paseo.Config.Skills
 ---@field review paseo.Config.Review
@@ -116,6 +117,13 @@ local M = {}
 ---                       way as the float's.
 ---@field min_composer integer  ...and what it sits at with nothing in it.
 ---@field position "right"|"left"  Which side the pane opens on.
+
+---@class paseo.Config.Voice
+---@field enabled boolean  Bind the dictation key at all.
+---@field key string|false  What starts and stops it, in the composer.
+---@field recorder string[]|nil  A full argv, or nil to find one.
+---@field rate integer    Sample rate. The daemon resamples, so this is about
+---                       what your microphone does well, not what it wants.
 
 ---@class paseo.Config.UI.Answer
 ---@field width integer   A CAP, in cells, not a share of anything. The overlay
@@ -308,6 +316,21 @@ local defaults = {
     },
   },
 
+  -- Speaking into the composer. Speech-to-TEXT only -- the daemon also has a
+  -- duplex voice mode with synthesised replies, and an editor that talks back
+  -- needs a player, an interrupt and somewhere to put the transcript, which is
+  -- a surface rather than a key.
+  voice = {
+    enabled = true,
+    key = "<C-t>",
+    -- Absent means "find one": arecord, then rec (sox), then ffmpeg. A table
+    -- is a full argv, for a machine with two sound cards or a device that has
+    -- to be named. It must produce RAW PCM16 mono at `rate` on stdout --
+    -- headerless, no container -- because that is what the daemon parses.
+    recorder = nil,
+    rate = 16000,
+  },
+
   workspaces = {
     dir = ".workspaces",
     branch_prefix = "ws/",
@@ -373,6 +396,15 @@ function M.setup(opts)
     config.ui.animate = { bars = true, flash = true, fps = 30 }
   end
   config.ui.animate.fps = math.max(1, math.min(60, math.floor(config.ui.animate.fps or 30)))
+  vim.validate("voice.enabled", config.voice.enabled, "boolean")
+  vim.validate("voice.key", config.voice.key, function(v)
+    return v == false or type(v) == "string"
+  end, "a key, or false to leave it unbound")
+  vim.validate("voice.recorder", config.voice.recorder, function(v)
+    return v == nil or (type(v) == "table" and #v > 0 and type(v[1]) == "string")
+  end, "a full argv, or nil to find one")
+  config.voice.rate = math.max(8000, math.floor(config.voice.rate or 16000))
+
   vim.validate("workspaces.open", config.workspaces.open, function(v)
     return type(v) == "function" or v == "tab" or v == "tcd" or v == "cd"
   end, '"tab", "tcd", "cd", or a function taking the workspace')

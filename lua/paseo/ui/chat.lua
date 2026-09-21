@@ -35,6 +35,7 @@ local M = {}
 ---@field resize_group integer|nil    Augroup holding the debounced resize watch.
 ---@field resize_pending boolean|nil  A redraw is already scheduled.
 ---@field last_turn_usage table|nil   Tokens and cost from the last completed turn.
+---@field dictating boolean|nil      The microphone is open. Drawn on the header.
 ---@field config_snapshot table|nil  Last `agent.config`; the Session panel draws it.
 ---@field available_modes table[]|nil  `{id, label}`, per provider. Ids to labels.
 ---@field answer_state table<string, table>|nil  Half-answered question sets, by
@@ -372,6 +373,37 @@ local function send(chat)
   end)
 end
 
+---Put text in the composer, at the cursor when that is where you are.
+---
+---The same rule the image placeholder follows: at the cursor when the composer
+---is focused, appended when it is not -- dictating from a code buffer should
+---not need the chat focused. Multi-line because a spoken paragraph comes back
+---as one, and splitting it here is what keeps the composer a buffer rather
+---than a field.
+---@param chat paseo.Chat
+---@param text string
+function M.insert(chat, text)
+  local lines = vim.split(vim.trim(text), "\n", { plain = true })
+  local win = chat.win_composer
+
+  if win and vim.api.nvim_win_is_valid(win) and vim.api.nvim_get_current_win() == win then
+    local row, col = unpack(vim.api.nvim_win_get_cursor(win))
+    vim.api.nvim_buf_set_text(chat.composer, row - 1, col, row - 1, col, lines)
+    local last = #lines == 1 and (col + #lines[1]) or #lines[#lines]
+    pcall(vim.api.nvim_win_set_cursor, win, { row + #lines - 1, last })
+  else
+    local existing = vim.api.nvim_buf_get_lines(chat.composer, 0, -1, false)
+    local tail = existing[#existing] or ""
+    existing[#existing] = tail == "" and lines[1] or (tail .. " " .. lines[1])
+    for i = 2, #lines do
+      existing[#existing + 1] = lines[i]
+    end
+    vim.api.nvim_buf_set_lines(chat.composer, 0, -1, false, existing)
+  end
+
+  M.fit_composer(chat)
+end
+
 -- ------------------------------------------------------------------- images
 
 ---Put an image in the composer.
@@ -585,6 +617,30 @@ local function make_buffers(chat)
     vim.keymap.set("n", "<C-s>", function()
       send(chat)
     end, vim.tbl_extend("force", opts, { desc = "paseo: send" }))
+    -- Speak it instead of typing it. Neovim cannot record audio, so this
+    -- shells out to arecord/sox/ffmpeg -- see `paseo.voice` for why that is
+    -- the feature rather than a workaround for it.
+    --
+    -- One key for both halves. A hold-to-talk key would be better and is not
+    -- available: Neovim delivers a keypress, never a key RELEASE, so "while
+    -- held" cannot be expressed. Press to start, press to stop and insert.
+    local voice_key = (config.get().voice or {}).key
+    if voice_key and (config.get().voice or {}).enabled ~= false then
+      for _, mode in ipairs { "n", "i" } do
+        vim.keymap.set(mode, voice_key, function()
+          require("paseo.voice").toggle {
+            on_state = function(recording)
+              chat.dictating = recording or nil
+              set_winbar(chat)
+            end,
+            insert = function(text)
+              M.insert(chat, text)
+            end,
+          }
+        end, vim.tbl_extend("force", opts, { desc = "paseo: dictate" }))
+      end
+    end
+
     -- In insert mode too: you are usually typing the next thing when you
     -- decide the current thing should stop.
     for _, mode in ipairs { "n", "i" } do

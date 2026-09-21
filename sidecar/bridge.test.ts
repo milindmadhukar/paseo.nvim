@@ -10,6 +10,7 @@ import { providerOps, describeSettings } from "./bridge-providers.ts";
 import { describeItem } from "./bridge-timeline.ts";
 import { terminalOps } from "./bridge-terminals.ts";
 import { workspaceOps } from "./bridge-workspaces.ts";
+import { voiceOps } from "./bridge-voice.ts";
 import { emit } from "./bridge-io.ts";
 
 /** stdout IS the protocol, so asserting on it is asserting on the wire. */
@@ -395,6 +396,79 @@ test("stopping a turn goes through the raw client, which is the only one that ha
   );
   assert.deepEqual(canceled, ["a1"]);
   await assert.rejects(() => ops["agent.cancel"]({ op: "agent.cancel" }));
+});
+
+test("dictation is raw PCM16 with the rate in the format string", async () => {
+  // The format string is not decoration: the daemon parses the sample rate out
+  // of it with /rate\s*=\s*(\d+)/ and resamples from there, and what rides
+  // in `audio` is headerless little-endian PCM16 -- no wav, no webm, no opus.
+  // Getting either wrong transcribes at the wrong speed rather than failing.
+  const calls: any[] = [];
+  const ctx = new BridgeConnection();
+  ctx.raw = (() => ({
+    async startDictationStream(id: string, format: string) {
+      calls.push(["start", id, format]);
+    },
+    sendDictationStreamChunk(
+      id: string,
+      seq: number,
+      audio: string,
+      format: string,
+    ) {
+      calls.push(["chunk", id, seq, audio, format]);
+    },
+    async finishDictationStream(id: string, finalSeq: number) {
+      calls.push(["finish", id, finalSeq]);
+      return { dictationId: id, text: "hello there" };
+    },
+    cancelDictationStream(id: string) {
+      calls.push(["cancel", id]);
+    },
+  })) as any;
+
+  const ops = voiceOps(ctx);
+  const format = "pcm16;rate=16000";
+  await ops["dictation.start"]({ op: "dictation.start", dictationId: "d1", format });
+  await ops["dictation.chunk"]({
+    op: "dictation.chunk",
+    dictationId: "d1",
+    seq: 1,
+    audio: "AAEC",
+    format,
+  });
+  const done: any = await ops["dictation.finish"]({
+    op: "dictation.finish",
+    dictationId: "d1",
+    finalSeq: 1,
+  });
+  assert.equal(done.text, "hello there");
+  assert.deepEqual(calls, [
+    ["start", "d1", format],
+    ["chunk", "d1", 1, "AAEC", format],
+    ["finish", "d1", 1],
+  ]);
+
+  await ops["dictation.cancel"]({ op: "dictation.cancel", dictationId: "d1" });
+  assert.deepEqual(calls.at(-1), ["cancel", "d1"]);
+
+  // A daemon with no speech model rejects the START, and that rejection is the
+  // message worth showing -- `dispatch` turns it into {ok:false,error}, so the
+  // op must not swallow it.
+  const broken = new BridgeConnection();
+  broken.raw = (() => ({
+    async startDictationStream() {
+      throw new Error("speech models are not downloaded");
+    },
+  })) as any;
+  await assert.rejects(
+    () =>
+      voiceOps(broken)["dictation.start"]({
+        op: "dictation.start",
+        dictationId: "d2",
+        format,
+      }),
+    /speech models are not downloaded/,
+  );
 });
 
 test("a timeline item keeps its kind on the payload, not just in the event name", async () => {

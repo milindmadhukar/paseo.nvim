@@ -232,6 +232,40 @@ local function check_images()
   end
 end
 
+---Whether anything on this machine can hold a microphone open.
+---
+---Reported for the same reason the image readers are: the failure is a key
+---that appears to do nothing, and the fix is one package away but only if you
+---know which.
+local function check_voice()
+  start "paseo.nvim: dictation"
+
+  local voice = require("paseo.config").get().voice or {}
+  if voice.enabled == false then
+    info "disabled (voice.enabled = false)"
+    return
+  end
+
+  local recorder, why = require("paseo.voice").recorder()
+  if recorder then
+    ok(
+      ("%s at %dHz, on %s"):format(
+        table.concat(recorder.cmd, " "),
+        voice.rate or 16000,
+        voice.key or "(no key bound)"
+      )
+    )
+  else
+    warn(why or "no recorder")
+  end
+
+  -- The daemon has to be able to transcribe, and that is a separate thing from
+  -- having a microphone: it answers `dictation_stream_error` with a reason --
+  -- models not downloaded, most often -- and nothing here can find that out
+  -- without opening a stream.
+  info "the daemon does the transcribing; if it has no speech model it says so when you press the key"
+end
+
 ---The bundled agent skills, and whether anything can see them.
 ---
 ---THIS SECTION IS THE POINT. The skills only load when an agent's cwd is
@@ -282,7 +316,13 @@ local function check_skills()
     elseif installed == 0 then
       warn(("%s — none installed; run `:Paseo skills install`"):format(short))
     else
-      warn(("%s — %d of %d installed; run `:Paseo skills install`"):format(short, installed, #bundled))
+      warn(
+        ("%s — %d of %d installed; run `:Paseo skills install`"):format(
+          short,
+          installed,
+          #bundled
+        )
+      )
     end
     for _, problem in ipairs(problems) do
       warn(("%s: %s"):format(short, problem))
@@ -293,7 +333,7 @@ local function check_skills()
   -- project skills from that repo, not from the project root two levels up --
   -- so a project install is invisible to exactly the agent these are for, and
   -- somebody will otherwise reach for it as "the tidier option".
-  local project = skills.targets("project")
+  local project = skills.targets "project"
   if project then
     info(
       "a `project` install lands at "
@@ -307,6 +347,7 @@ function M.check()
   check_core()
   check_paseo()
   check_images()
+  check_voice()
   check_skills()
 end
 

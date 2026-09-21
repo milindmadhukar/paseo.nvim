@@ -314,6 +314,7 @@ local function footer_lines()
       { "<Tab>", "cycle" },
       { "<C-f>", "sidebar" },
       { "<C-c>", "stop" },
+      { "<C-t>", "speak" },
       { "q", "close" },
     },
   }

@@ -55,6 +55,16 @@ end
 function M.header(chat)
   local line = {}
 
+  -- RECORDING FIRST, because while it is true it is the only thing on this bar
+  -- that is about you rather than about the agent -- and it is the state most
+  -- worth being certain of. Drawn on the header rather than on the composer's
+  -- own hint bar so it works on both surfaces: the dashboard's composer has no
+  -- winbar at all.
+  if chat.dictating then
+    line[#line + 1] = { " " .. icons.ui.mic .. " ", "PaseoToolFail" }
+    line[#line + 1] = { "listening ", "PaseoDim" }
+  end
+
   -- A spinner and an elapsed count rather than a static dot: `●` looked the
   -- same at two seconds and at two minutes, so a wedged turn was
   -- indistinguishable from a working one without opening the app to check.
@@ -187,6 +197,8 @@ function M.open(chat)
     { " full screen · ", "PaseoDim" },
     { "<C-c>", "PaseoKey" },
     { " stop · ", "PaseoDim" },
+    { "<C-t>", "PaseoKey" },
+    { " speak · ", "PaseoDim" },
     { "q", "PaseoKey" },
     { " close", "PaseoDim" },
   }

@@ -471,6 +471,24 @@ Daemon discovery ~
 
     `:checkhealth paseo` prints every candidate and what it answered.
 
+                                                       *paseo-config.voice*
+voice                                                               table
+
+    Dictation -- |paseo-dictation|. >lua
+        voice = {
+          enabled = true,
+          key = "<C-t>",   -- in the composer; false to bind nothing
+          recorder = nil,  -- nil finds one; a table is a full argv
+          rate = 16000     -- what your microphone does well
+        }
+<
+    `recorder` must write RAW PCM16 mono at `rate` to stdout -- headerless,
+    no container. That is what the daemon parses; nothing here checks it,
+    because nothing can.
+
+    The daemon resamples, so `rate` is about what your microphone does well
+    rather than about what the transcriber wants.
+
                                                  *paseo-config.workspaces.dir*
 workspaces.dir                              string, default `".workspaces"`
 
@@ -1353,6 +1371,7 @@ In the composer ~
     <Tab>     next tab, <S-Tab> the previous one
     <C-f>     switch surface
     <C-c>     stop the turn -- normal or insert. See |paseo-chat-stop|
+    <C-t>     speak instead of typing. See |paseo-dictation|
     q         close the chat
 
 The box is the size of what is in it: |paseo-config.ui.sidebar| `composer` is
@@ -1406,6 +1425,42 @@ hit reflexively.
 The other interrupt is |paseo-permission-overlay|'s "decline and stop", which
 only works while a permission request is waiting to be answered -- it cannot
 stop a turn that is running freely, which is what this is for.
+
+                                                          *paseo-dictation*
+Dictation ~
+
+`<C-t>` in the composer opens the microphone; `<C-t>` again closes it and puts
+what you said in at the cursor. The header says `listening` while it is open,
+on either surface.
+
+One key for both halves, and not a hold-to-talk one, because Neovim delivers a
+keypress and never a key RELEASE -- "while held" cannot be expressed.
+
+NEOVIM CANNOT RECORD AUDIO, so this shells out. The first of these that is
+installed is used: >
+
+    arecord     ALSA; on essentially every Linux box with sound
+    rec         sox
+    ffmpeg      PulseAudio on Linux, avfoundation on macOS
+<
+`:checkhealth paseo` reports which one it found, or that it found none.
+|paseo-config.voice| `recorder` overrides the search with a full argv, for a
+machine with two sound cards or a device that has to be named -- it still has
+to produce RAW PCM16 mono on stdout, headerless, because that is what goes
+over the wire.
+
+Audio is streamed WHILE YOU SPEAK rather than recorded and then uploaded: the
+daemon transcribes as it goes, so by the time you stop talking most of the
+work is done and the text arrives in about as long as it takes to lift your
+finger.
+
+THE DAEMON DOES THE TRANSCRIBING. A microphone is not enough -- if it has no
+speech model it says so, in its own words, the first time you press the key.
+That is a Paseo setting, not one of this plugin's.
+
+Speech-to-TEXT only. Paseo also has a duplex voice mode with synthesised
+replies; an editor that talks back needs a player, an interrupt and somewhere
+to put the transcript, which is a surface rather than a key.
 
 The composer is an ORDINARY buffer, so your insert-mode keymaps, completion,
 abbreviations and undo all work. That is the difference between writing a

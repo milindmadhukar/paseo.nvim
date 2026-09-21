@@ -134,6 +134,13 @@ require("paseo").setup {
     },
   },
 
+  voice = {                       -- dictation; see below
+    enabled = true,
+    key = "<C-t>",                -- in the composer; false binds nothing
+    recorder = nil,               -- nil finds one; a table is a full argv
+    rate = 16000,
+  },
+
   workspaces = {
     dir = ".workspaces",          -- relative to a project root
     branch_prefix = "ws/",        -- used when there is no manifest to ask
@@ -782,6 +789,31 @@ abbreviations and undo, and cannot hold a question with a blank line in it.
 paragraph.
 
 `:Paseo explain` does not open the box; it already has a question, the rubric.
+
+### Dictation
+
+`<C-t>` in the composer opens the microphone; `<C-t>` again closes it and puts
+what you said in at the cursor. The header says `listening` while it is open,
+on either surface. One key for both halves, and not hold-to-talk, because
+Neovim delivers a keypress and never a key *release* — "while held" cannot be
+expressed.
+
+Neovim cannot record audio, so this shells out to the first of `arecord`,
+`rec` (sox) or `ffmpeg` that is installed. `:checkhealth paseo` says which one
+it found, or that it found none — the failure mode otherwise is a key that
+appears to do nothing.
+
+Audio is streamed **while you speak** rather than recorded and then uploaded:
+the daemon transcribes as it goes, so the text arrives in about as long as it
+takes to lift your finger. What goes over the wire is raw PCM16 mono, base64,
+with the sample rate in the format string — no container.
+
+The **daemon** does the transcribing, and a microphone is not enough: if it has
+no speech model it says so, in its own words, the first time you press the key.
+
+Speech-to-*text* only. Paseo also has a duplex voice mode with synthesised
+replies; an editor that talks back needs a player, an interrupt and somewhere
+to put the transcript, which is a surface rather than a key.
 
 ### References are locations, not quotations
 
