@@ -83,6 +83,42 @@ local function short_path(path)
   return vim.fn.fnamemodify(path, ":~:.")
 end
 
+---A value out of a tool's raw input or output, as ONE string.
+---
+---JSON, not `vim.inspect`: inspect renders Lua, and the decoder hands us
+---`vim.empty_dict()` for a JSON `{}` -- so an argument-less call rendered as
+---the literal text `vim.empty_dict()`, which is a sentinel from the transport
+---and says nothing about the call.
+---@param value any
+---@return string
+local function as_text(value)
+  if type(value) == "string" then
+    return value
+  end
+  local ok, encoded = pcall(vim.json.encode, value)
+  return ok and encoded or tostring(value)
+end
+
+---Nothing worth drawing: absent, or an empty table however it was decoded.
+---@param value any
+---@return boolean
+local function blank(value)
+  return value == nil or (type(value) == "table" and vim.tbl_isempty(value))
+end
+
+---Cut to `limit` CHARACTERS, not bytes -- `sub` on a byte offset lands inside
+---a multibyte sequence and writes a broken one into the buffer, and a tool's
+---arguments are exactly where a path with an accent in it turns up.
+---@param text string
+---@param limit integer
+---@return string
+local function clip(text, limit)
+  if vim.fn.strchars(text) <= limit then
+    return text
+  end
+  return vim.fn.strcharpart(text, 0, limit) .. "…"
+end
+
 ---@param text string|nil
 ---@param limit integer
 ---@return string[]
@@ -100,6 +136,56 @@ local function tail_lines(text, limit)
 end
 
 -- ------------------------------------------------------- tool detail bodies
+
+---The body of a call nothing here has a schema for -- an MCP tool, mostly, and
+---EVERY tool call for its first few frames.
+---
+---That second case is the one that matters. The daemon emits a `tool_call` the
+---moment the model names the tool and fills `detail` in only once the arguments
+---have finished streaming, so every call arrives as `{ type = "unknown", input
+---= {} }` first. A running card draws open, so that frame is on screen -- and
+---this arm used to draw it as `vim.inspect(detail.input)`, which for an empty
+---table is the literal text `vim.empty_dict()`. A sub-agent, whose prompt is
+---long enough to stream for seconds, sat there saying it.
+---
+---So: nothing at all until there is something, then the arguments by name, then
+---what the tool answered -- which this never showed, leaving an expanded MCP
+---card as a header and a blank.
+---@param detail table
+---@param inner integer
+---@return table[][]
+local function unknown_body(detail, inner)
+  local lines = {}
+
+  local input = detail.input
+  if type(input) == "table" and not blank(input) then
+    local keys = vim.tbl_keys(input)
+    table.sort(keys, function(a, b)
+      return tostring(a) < tostring(b)
+    end)
+    for _, key in ipairs(keys) do
+      -- A colon, not two spaces: `render.wrap` re-splits on whitespace, so any
+      -- run of spaces inside the text collapses to one and the label stops
+      -- reading as a label.
+      local text = ("%s: %s"):format(key, clip(as_text(input[key]), inner * 3))
+      vim.list_extend(lines, render.wrap(text, inner, "PaseoToolArg"))
+    end
+  elseif input ~= nil and type(input) ~= "table" then
+    vim.list_extend(lines, render.wrap(as_text(input), inner, "PaseoToolArg"))
+  end
+
+  -- Unwrapped one level: the daemon returns an MCP result as `{ output = … }`,
+  -- and the outer key is a word of noise in front of every one of them.
+  local output = detail.output
+  if type(output) == "table" and vim.tbl_count(output) == 1 and output.output ~= nil then
+    output = output.output
+  end
+  if not blank(output) then
+    vim.list_extend(lines, render.wrap(clip(as_text(output), inner * 12), inner, "PaseoDim"))
+  end
+
+  return lines
+end
 
 ---The expanded body of a tool card, per detail type.
 ---
@@ -196,7 +282,12 @@ local function detail_body(detail, width, summary)
       }
     end
   elseif detail.type == "sub_agent" then
-    if detail.description then
+    -- A sub-agent's `description` IS its summary -- `buildToolCallDisplayModel`
+    -- takes one straight from the other -- so drawing it here put the same
+    -- sentence on the header line and on the line under it. Guarded the way the
+    -- shell and read arms already guard theirs; what the header cannot say is
+    -- the list of actions below.
+    if detail.description and detail.description ~= summary then
       vim.list_extend(lines, render.wrap(detail.description, inner, "PaseoDim"))
     end
     for _, action in ipairs(detail.actions or {}) do
@@ -205,6 +296,17 @@ local function detail_body(detail, width, summary)
         { action.toolName or "?", "PaseoToolName" },
         { " " .. (action.summary or ""), "PaseoDim" },
       }
+    end
+
+    -- `actions` is empty for the whole of a Claude sub-agent's run -- measured,
+    -- over two of them: 64 updates, `#actions == 0` in every one. `log` is
+    -- where that provider puts the work, one `[Tool] summary` line per call,
+    -- and without it an expanded sub-agent card was a header and a blank for
+    -- the minute you most wanted to watch it.
+    if #(detail.actions or {}) == 0 and detail.log and detail.log ~= "" then
+      for _, line in ipairs(tail_lines(detail.log, 12)) do
+        lines[#lines + 1] = render.truncate({ { "· ", "PaseoDim" }, { line, "PaseoDim" } }, inner)
+      end
     end
   elseif detail.type == "worktree_setup" then
     -- The one detail type with no arm here, so an expanded worktree-setup card
@@ -237,7 +339,7 @@ local function detail_body(detail, width, summary)
   elseif detail.type == "plan" or detail.type == "plain_text" then
     vim.list_extend(lines, render.wrap(detail.text or "", inner, "PaseoDim"))
   elseif detail.type == "unknown" then
-    vim.list_extend(lines, render.wrap(vim.inspect(detail.input), inner, "PaseoDim"))
+    vim.list_extend(lines, unknown_body(detail, inner))
   end
 
   return lines
