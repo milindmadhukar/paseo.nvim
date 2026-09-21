@@ -31,6 +31,10 @@ local M = {}
 ---@field seq integer|nil    Highest timeline seq rendered.
 ---@field epoch string|nil   The epoch those seqs belong to.
 ---@field initialised boolean  Subscribed, history fetched, settings loaded.
+---@field rendered_width integer|nil  Width the transcript is currently drawn at.
+---@field resize_group integer|nil    Augroup holding the debounced resize watch.
+---@field resize_pending boolean|nil  A redraw is already scheduled.
+---@field last_turn_usage table|nil   Tokens and cost from the last completed turn.
 ---@field config_snapshot table|nil  Last `agent.config`; the Session panel draws it.
 ---@field available_modes table[]|nil  `{id, label}`, per provider. Ids to labels.
 ---@field answer_state table<string, table>|nil  Half-answered question sets, by
@@ -391,6 +395,52 @@ end
 -- ------------------------------------------------------------------- layout
 
 ---@param chat paseo.Chat
+---Re-render the transcript when the window it is drawn into changes width.
+---
+---GLOBAL, not `buffer = chat.conversation`, and that is a bug fix rather than
+---a tidy-up. `WinResized`'s pattern is matched against the window-ID of the
+---FIRST window that resized, and a buffer-local autocmd is matched against
+---that window's buffer -- so with the default right-hand sidebar, which sorts
+---last in the layout, dragging the separator from your code resized the pane
+---and fired nothing at all. Measured, not reasoned about.
+---
+---Debounced, because the other half of the old bug was that when it DID fire
+---it fired per column of the drag, and each one re-rendered every block in the
+---transcript. 50ms and the pending flag are the answer overlay's, which has
+---the same problem for the same reason.
+---
+---The width guard in `transcript.redraw` is what makes a global autocmd
+---affordable: a resize that did not change OUR width -- another split, the
+---composer growing, a height-only drag -- costs one `nvim_win_get_width`.
+---@param chat paseo.Chat
+local function watch_size(chat)
+  chat.resize_group = vim.api.nvim_create_augroup(
+    "paseo.chat.resize." .. tostring(chat.conversation),
+    { clear = true }
+  )
+  vim.api.nvim_create_autocmd({ "VimResized", "WinResized" }, {
+    group = chat.resize_group,
+    callback = function()
+      if chat.resize_pending then
+        return
+      end
+      chat.resize_pending = true
+      vim.defer_fn(function()
+        chat.resize_pending = false
+        -- Only while the transcript is on screen. Without a window
+        -- `transcript.width` falls back to 72, and re-rendering a closed chat
+        -- to a fallback width is both wasted work and a wrong `rendered_width`
+        -- for whatever surface opens next.
+        local win = chat.win_conversation
+        if win and vim.api.nvim_win_is_valid(win) then
+          transcript.redraw(chat)
+        end
+      end, 50)
+    end,
+    desc = "paseo: re-render the transcript at the new width",
+  })
+end
+
 local function make_buffers(chat)
   if not (chat.conversation and vim.api.nvim_buf_is_valid(chat.conversation)) then
     chat.conversation = vim.api.nvim_create_buf(false, true)
@@ -428,15 +478,7 @@ local function make_buffers(chat)
       })
     )
 
-    -- Cards are drawn to the window width, so a resize leaves every box either
-    -- short or wrapped. Re-render rather than live with it.
-    vim.api.nvim_create_autocmd("WinResized", {
-      buffer = chat.conversation,
-      callback = function()
-        transcript.redraw(chat)
-      end,
-      desc = "paseo: re-render the transcript at the new width",
-    })
+    watch_size(chat)
   end
 
   if not (chat.composer and vim.api.nvim_buf_is_valid(chat.composer)) then

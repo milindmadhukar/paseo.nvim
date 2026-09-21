@@ -554,8 +554,95 @@ local function test_transcript()
   eq("ui: and the blocks they pointed at", next(chat.permission_blocks), nil)
 end
 
+--- The transcript's two redraw economies: the width guard and the card memo.
+---
+--- Both are invisible when they work and silently wrong when they do not, so
+--- they are asserted on `changedtick` -- the only thing that answers "did this
+--- write to the buffer" without caring what it wrote.
+local function test_transcript_cache()
+  require("paseo.ui.hl").setup()
+
+  local chat = { conversation = vim.api.nvim_create_buf(false, true) }
+  transcript.reset(chat)
+  transcript.upsert(chat, { kind = "user", text = "go" })
+  transcript.upsert(chat, {
+    kind = "tool",
+    callId = "c1",
+    name = "Bash",
+    status = "completed",
+    display = { displayName = "Shell", summary = "ls" },
+    detail = { type = "shell", command = "ls", output = "a.txt", exitCode = 0 },
+  })
+  transcript.stream(chat, "done")
+
+  -- A redraw at a width nothing has changed at is a redraw that writes
+  -- nothing. This is the whole of the resize fix: a drag fires per column, and
+  -- every one of them used to rebuild and rewrite every block.
+  local tick = vim.api.nvim_buf_get_changedtick(chat.conversation)
+  transcript.redraw(chat)
+  eq(
+    "ui: the first redraw is already free",
+    vim.api.nvim_buf_get_changedtick(chat.conversation),
+    tick
+  )
+  transcript.redraw(chat)
+  eq("ui: and so is the second", vim.api.nvim_buf_get_changedtick(chat.conversation), tick)
+  eq("ui: redraw records the width it drew at", chat.rendered_width, 72)
+
+  -- `force` is for what the width cannot see -- `ui.style` or `ui.expand`
+  -- changing under a live session. It must reach past BOTH economies, so it
+  -- invalidates the memo rather than merely skipping the width guard.
+  transcript.redraw(chat, { force = true })
+  truthy("ui: force redraws anyway", vim.api.nvim_buf_get_changedtick(chat.conversation) > tick)
+
+  -- THE MEMO MUST NOT OUTLIVE AN IN-PLACE MUTATION. `stream` appends onto
+  -- `block.item.text` rather than replacing the item, so a cache keyed on the
+  -- item alone would show the first chunk forever -- a reply that arrives as
+  -- "READ" + "Y" would render as READ.
+  transcript.stream(chat, "!!")
+  truthy(
+    "ui: a streamed chunk survives the card cache",
+    table
+      .concat(vim.api.nvim_buf_get_lines(chat.conversation, 0, -1, false), "\n")
+      :find("done!!", 1, true) ~= nil
+  )
+
+  -- Expansion is in the key, so `<Tab>` needs no invalidation of its own.
+  local tool = chat.blocks[chat.by_call["c1"]]
+  tool.expanded = true
+  tool.pinned = true
+  transcript.rerender(chat, tool)
+  truthy(
+    "ui: expanding through the cache reveals the output",
+    table
+      .concat(vim.api.nvim_buf_get_lines(chat.conversation, 0, -1, false), "\n")
+      :find("a.txt", 1, true) ~= nil
+  )
+  tool.expanded = false
+  transcript.rerender(chat, tool)
+  truthy(
+    "ui: and collapsing hides it again",
+    table
+      .concat(vim.api.nvim_buf_get_lines(chat.conversation, 0, -1, false), "\n")
+      :find("a.txt", 1, true) == nil
+  )
+
+  -- A cache that outlived its blocks would guard the refetched history out of
+  -- ever being drawn -- `replaced` resets and refetches at the SAME width.
+  transcript.reset(chat)
+  eq("ui: reset forgets the width it drew at", chat.rendered_width, nil)
+  transcript.upsert(chat, { kind = "user", text = "again" })
+  truthy(
+    "ui: and the new history draws",
+    table
+      .concat(vim.api.nvim_buf_get_lines(chat.conversation, 0, -1, false), "\n")
+      :find("again", 1, true) ~= nil
+  )
+end
+
 return {
   { "ui.render", test_render },
   { "ui.timeline", test_timeline },
   { "ui.transcript", test_transcript },
+  { "ui.transcript.cache", test_transcript_cache },
 }
