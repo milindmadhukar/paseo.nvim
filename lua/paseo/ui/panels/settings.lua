@@ -23,7 +23,7 @@ local widgets = require "paseo.ui.widgets"
 
 local M = {}
 
-M.title = "Session"
+M.title = "Settings"
 
 ---Focus is stored BY ID, never by index: the lists change under us -- switching
 ---model replaces every thinking option -- and an index kept across that lands

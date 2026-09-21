@@ -102,7 +102,7 @@ require("paseo").setup {
       composer = 7,               -- rows the composer gets
       zindex = 30,                -- BELOW the 50 a float gets by default
       backdrop = true,
-      tab_keys = true,            -- bare 1-7 switch tabs; see below
+      tab_keys = true,            -- bare 1-6 switch tabs; see below
     },
 
     sidebar = {
@@ -112,15 +112,9 @@ require("paseo").setup {
       position = "right",         -- or "left"
     },
 
-    terminal = {                  -- the terminal surface; see below
-      width = 84,                 -- percent of the editor, 1-100
-      height = 78,
-      -- row and col are absent: absent means centred
-      list = 22,                  -- the terminal list, in CELLS
-      zindex = 45,                -- over the dashboard, under a picker
-      backdrop = true,
+    terminal = {                  -- terminals are sessions; see below
       keys = { next = "<C-j>", prev = "<C-k>",
-               list = "<C-h>", terminal = "<C-l>" },
+               sessions = "<C-s>", terminal = "<C-l>" },
       presets = {},               -- extra entries for `c`
     },
 
@@ -208,7 +202,7 @@ On the sidebar it is the conversation window's winbar. On the full-screen
 surface it is **not**: a winbar belongs to a window, the conversation window
 only exists on the Chat tab, and every other tab therefore had no header and
 could not tell you which model it was on. There it is a volt section in the
-chrome, drawn above the tab bar, true on all seven tabs — and clicking it takes
+chrome, drawn above the tab bar, true on all six tabs — and clicking it takes
 you to the panel that can change what it says.
 
 ### The full-screen surface
@@ -217,8 +211,8 @@ The default. `:Paseo chat` opens it, `:Paseo chat` again closes it, `<C-f>`
 swaps to the sidebar and back.
 
 ```
-  ⠹ 14s  claude/sonnet-5 · acceptEdits · 󰧑 think · ⚡ · 21%   ~/Code/paseo.nvim
-   1 󰀄 Chat   2 󱕂 Session   3 󱙺 Sessions   4 󰘬 Changes   5 󰄨 Usage   6 󰙅 Workspaces   7 󰆍 Terminals
+  ⠹ 14s  claude/sonnet-5 · acceptEdits · 󰧑 think · ⚡ · ││││││ 42% left   ~/Code/paseo.nvim
+   1 󰀄 Chat   2 󱙺 Sessions   3 󱕂 Settings   4 󰘬 Changes   5 󰄨 Usage   6 󰙅 Workspaces
 ```
 
 The tab bar **degrades rather than truncates**, because the tab that would
@@ -229,7 +223,7 @@ discovered yet. Four levels, widest that fits:
 |---|---|
 | `1 󰀄 Chat` | number, icon and name |
 | `1 Chat` | the icon goes first: the name is what you read, the icon is what you recognise |
-| `1 󰀄` | seven of these fit in 41 columns |
+| `1 󰀄` | six of these fit in 36 columns |
 | `1` | and at the last level the active tab alone keeps its name |
 
 The row count never changes at any level, because the body height and the
@@ -238,14 +232,28 @@ composer geometry are both measured against it.
 | | |
 |---|---|
 | `Chat` | the conversation and the composer, real buffers floated on top |
-| `Session` | mode, thinking level, model, feature toggles — keyboard or click |
 | `Sessions` | the agents **and terminals** here, live; open one |
-| `Changes` | what is changed on disk, per repo; click a file to open it |
+| `Settings` | mode, thinking level, model, feature toggles — keyboard or click |
+| `Changes` | what is changed on disk, per repo; open one |
 | `Usage` | context window, tokens, cost |
 | `Workspaces` | every workspace Paseo knows, plus the repos in this unit of work |
 
-`1`–`7` jump, `<M-1>`–`<M-7>` and `<Tab>`/`<S-Tab>` do the same, and
-everything that does something responds to a click.
+`Sessions`, `Workspaces` and `Changes` are one kind of screen and take one set
+of keys — `j`/`k` to move, `h`/`l` by section, `g`/`G` to the ends, `<CR>` to
+open, `r` to re-fetch — plus their own verbs: `c`/`a`/`R`/`d` on Sessions,
+`n`/`o`/`d` on Workspaces. **The focused row is painted**, in the colour hover
+uses, and arriving at a tab puts focus on a row so the first `<CR>` does
+something.
+
+None of that was true before. Selection lived on the **cursor**, which volt
+resets to line 1 after every click, nothing was drawn to say where it was, and
+the cursor was never put on a row — so Sessions had working keymaps and read as
+a tab you could only click, and Workspaces had no keymaps at all. Focus is held
+by **id** now, so a list that moves under you — and these are push-fed, so they
+do — does not take it with it.
+
+`1`–`6` jump, `<M-1>`–`<M-6>` and `<Tab>`/`<S-Tab>` do the same, and
+everything that does something responds to a click as well.
 
 A bare digit is also a **count**, and the two panes these are bound on are
 ordinary buffers — so while the dashboard is open, `3p` and `5j` in the
@@ -309,7 +317,7 @@ header repaints ten times a second while a turn runs, and a single section
 would drag the `Changes` panel — one `git status` per repo — through every
 frame.
 
-### The Session tab
+### The Settings tab
 
 Everything this session is set to, at once, with the current value **filled in**
 rather than marked with a dot:
@@ -409,51 +417,63 @@ applied, which is what two quick mode changes used to produce.
 ### Terminals
 
 Paseo runs terminals as well as agents — the `claude` and `codex` sessions you
-started in the app are PTYs on the daemon — and `:Paseo term` is where you
-drive them:
+started in the app are PTYs on the daemon — and **a terminal is a session.** It
+lists on the `Sessions` tab beside the agents, and opening one shows it **on
+the Chat tab**, where the conversation would be:
 
 ```
- ╭────────────────────╮ ╭───────────────────────────────────────────────╮
- │  Terminals         │ │  Claude   ✳ Claude Code        ~/Code/kora    │
- │ ────────────────── │ ╰───────────────────────────────────────────────╯
- │ ▌· Claude       1  │ ╭───────────────────────────────────────────────╮
- │  · reviewer     2  │ │ ▐▛███▜▌ Claude Code v2.1.263                  │
- │  · Terminal 3   3  │ │ ▝▜█████▛▘ Opus 5 (1M context)                 │
- │                    │ │                                               │
- │ ────────────────── │ │ > _                                           │
- │  c  new    d  kill │ │                                               │
- │  r  name   q  close│ │                                               │
- ╰────────────────────╯ ╰───────────────────────────────────────────────╯
+ ╭──────────────────────────────────────────────────────────────────────╮
+ │  claude/opus-5 · acceptEdits · ││││││ 58% left        ~/Code/kora     │
+ │  1 󰀄 Chat   2 󱙺 Sessions   3 󱕂 Settings   4 󰘬 Changes   5 󰄨 Usage    │
+ │ ──────────────────────────────────────────────────────────────────── │
+ │  󱙺 main   󱙺 reviewer   󰆍 lazygit   󰆍 shell      Ctrl + s  sessions   │
+ │                                                                      │
+ │  ▐▛███▜▌ Claude Code v2.1.263                                        │
+ │  ▝▜█████▛▘ Opus 5 (1M context)                                       │
+ │                                                                      │
+ │  > _                                                                 │
+ ╰──────────────────────────────────────────────────────────────────────╯
 ```
 
-**Several at once** — that is the point, and it is what the dashboard tab this
-replaced could not do. It held exactly one terminal, in a module-local, and
-closed it the moment you switched tabs. The shape is
-[floaterm](https://github.com/nvzone/floaterm)'s, and so is the geometry: three
-windows, every one `relative = "editor"` with pre-floored coordinates, because
-hanging the bar off the rail makes its position the sum of two independently
-rounded numbers and the rig lines up at some terminal sizes and not others.
+It used to be a surface of its own — a rail of names, a title bar, the terminal
+and a backdrop, four windows over the top of whatever you were looking at, with
+its own geometry, its own z-index and its own keymaps. That shape was
+[floaterm](https://github.com/nvzone/floaterm)'s, and it was the wrong one to
+borrow: a terminal you open a second application to reach is not a session,
+it is a place you get stuck, and the way back out was `q`.
 
-In the list: `<CR>` opens, `1`-`9` open the *n*th, `c` starts one, `r` names
-it, `d` kills it (asked first — something is usually running in there), `<C-l>`
-goes to the terminal, `q` closes. In a terminal: `<C-j>`/`<C-k>` cycle,
-`<C-h>` goes back to the list, `<M-1>`-`<M-9>` open the *n*th, `q` closes.
+Now there is **one surface**, and what changes is what fills the panel area — a
+conversation and its composer for an agent, the PTY outright for a terminal.
 
-Those four navigation keys are bound in **terminal mode** too, which is the
-only way cycling is worth having — otherwise it starts with `<C-\><C-n>`. That
-does take them from whatever is running inside, which is right for `claude` and
-wrong for `tmux`, so `ui.terminal.keys` renames or disables any of them. The
-**digits are deliberately not bound in a terminal**: a bare `5` there costs you
-`50k` to scroll back, and `<M-5>` reaches the same terminal. `<Esc>` is never
-bound at all — it belongs to the PTY, so vim running inside one can still leave
-insert mode.
+**The session strip** under the tab bar is what makes that legible: one chip per
+session in this workspace, agents then terminals, the one you are in lit. It is
+on **every** tab, like the header, because "which session am I in" does not stop
+being worth answering when you look at Usage — and a terminal has no transcript
+and no composer, so without it the dashboard could be showing a PTY with nothing
+on screen naming it. A chip is a click; `<C-s>` is the keyboard.
 
-`c` offers a shell, then one entry per provider the daemon has — read live, so
-enabling one in Paseo makes it appear here without a config change — then
-anything in `ui.terminal.presets`, then a free-text command. Nothing checks
-that a command exists, on purpose: the terminal runs on the **daemon's** host,
-which is not necessarily this machine, so the honest failure is the PTY
-printing `command not found`.
+In a terminal: `<C-s>` to the session list, `<C-j>`/`<C-k>` to the next and
+previous session here, `<M-1>`–`<M-6>` for the tabs, `q` (normal mode) to close.
+**All of them are bound in terminal mode too**, which is the only way any of
+them is worth having — otherwise each starts with `<C-\><C-n>`. That does take
+them from whatever is running inside, which is right for `claude` and wrong for
+`tmux`, so `ui.terminal.keys` renames or disables any of them.
+
+The **digits are deliberately not bound**: a bare `5` in a terminal costs you
+`50k` to scroll back, and `<M-5>` reaches the same tab. `<C-c>` is not bound
+either — it is SIGINT and belongs to the program. `<Esc>` is never bound at all:
+it belongs to the PTY, so vim running inside one can still leave insert mode.
+
+On the `Sessions` tab, `c` starts a terminal, `R` renames one and `d` kills it
+(asked first — something is usually running in there). `c` opens a **screen, not
+a prompt**: a shell, then one entry per provider the daemon has — read live, so
+enabling one in Paseo makes it appear without a config change — then anything in
+`ui.terminal.presets`, then a free-text command. It was a `vim.ui.select` of
+bare labels opened over a surface that was itself an overlay; it is the same
+card renderer every other choice in this plugin uses. Nothing checks that a
+command exists, on purpose: the terminal runs on the **daemon's** host, which is
+not necessarily this machine, so the honest failure is the PTY printing
+`command not found`.
 
 **A name you give is kept here**, by the plugin, and the daemon is told as
 well. That is not belt and braces. `renameTerminal` sets a terminal's `title`,
@@ -461,23 +481,19 @@ and `title` is also what the PTY reports for itself — so the shell overwrites
 your name with `milind@host:~/dir` within a second, and every terminal in one
 directory ends up labelled identically. The list shows, in order: the name you
 gave, the stable one the daemon assigned (`Terminal 3`), then the live title.
-The bar shows the live title *beside* the name, where there is room for it and
-where it is actually useful.
 
 A terminal is a **real** terminal — `nvim_open_term`, the same libvterm behind
 `:terminal`, fed the PTY's own bytes, so colour, the cursor and a TUI redrawing
 itself all work. One `terminal_output` listener routes to a registry keyed by
 id, which is the whole of how several are fed at once; `bridge.on` has no
 `off`, so a listener per attach would stack up one dead closure per terminal
-you opened.
+you opened. That registry owns no window, which is why deleting the surface
+above it was a deletion and not a rewrite.
 
 A terminal **dying** is a directory update that no longer lists it, never a
 process exiting under us — Paseo owns the process, not Neovim, so none of
-floaterm's reaping machinery applies. The row goes and the surface stays open
-showing an empty pane. floaterm closes itself when its last terminal dies;
-pressing `d` on the last row and having the window vanish is jarring, and not
-doing it removes the ordering problem between a window closing and a terminal
-ending outright.
+floaterm's reaping machinery applies. The Chat tab falls back to the agent and
+the dashboard stays open.
 
 ### Style
 
@@ -1029,6 +1045,16 @@ and the sidebar does not, because your cursor is in your code. `<C-r>` follows
 too but never takes focus; that belongs to whatever your review autocmd opens.
 A `workspaces.open` function that spawns its own window doesn't move this
 Neovim, so the chat in it stays put.
+
+**And if you open the chat afterwards instead**, `:Paseo chat` resolves the
+directory you are *standing in* — the workspace containing the cwd, else the
+repo containing it, else the cwd. It used to read the git toplevel of the
+**buffer**, falling back to the cwd only for an unnamed one, which is what
+made "switch workspace, open the chat" land you back in the workspace you
+left: with `workspaces.open = "tcd"` the switch reuses the tab, so the file
+you had open in the old worktree is still the current buffer. Anything that
+means a particular *file* — `:Paseo ask`, `:Paseo explain` — still resolves
+from that file; only "open the chat", which means *here*, reads the cwd.
 
 To keep the built-in switch and only decide what the new tab *shows*, listen for
 `User PaseoWorkspaceOpen` instead; it fires after the `tcd`, with the root in

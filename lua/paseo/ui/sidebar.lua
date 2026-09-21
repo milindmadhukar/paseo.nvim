@@ -46,6 +46,57 @@ end
 
 -- -------------------------------------------------------------------- header
 
+---How much of the context window is LEFT, as a gauge.
+---
+---This was a bare `42%` in `PaseoDim`, wedged between the feature toggles and
+---the path. Two things were wrong with it and they compound: nothing said what
+---the number counted, and it counted the wrong direction -- it was the
+---fraction USED, so the figure you watched climbing was the one you wanted to
+---watch falling, and a reader who assumed the obvious read it exactly
+---backwards at the one moment it matters.
+---
+---So: a gauge that FILLS, over a number that counts down. Those agree -- a
+---bar nearly full and `5% left` are one reading, "the tank is nearly full and
+---there is not much room" -- and filling is the direction that puts the weight
+---in the right place. A bar that drained instead was empty and colourless at
+---exactly the moment it mattered: the pressure colour lives on the filled run,
+---so at 5% left there was no filled run to carry it and the red never showed.
+---
+---The colour is pressure, from the thresholds |paseo.ui.widgets|.pressure_hl
+---already holds for the Usage panel, so amber and red mean the same thing on
+---both screens.
+---
+---Drawn INLINE rather than right-aligned. `header` has no width to align
+---against -- it is rendered both into a `winbar` string and into a volt line
+---that the dashboard truncates itself -- and the readout belongs beside the
+---model and the mode anyway, which is the cluster you are already reading.
+---@param chat table
+---@return table[]  Cells; empty until the daemon has reported any usage.
+function M.context(chat)
+  local usage = chat.usage
+  local used, max = nil, nil
+  if usage then
+    used, max = usage.contextWindowUsedTokens, usage.contextWindowMaxTokens
+  end
+  if not (used and max and max > 0) then
+    return {}
+  end
+
+  local widgets = require "paseo.ui.widgets"
+  -- Clamped: a context window can report over 100% once the overhead is
+  -- counted, and "-4% left" is a worse answer than "0% left".
+  local spent = math.max(0, math.min(100, (used / max) * 100))
+  local left = 100 - spent
+
+  local cells = { { " · ", "PaseoDim" } }
+  -- Six cells is the smallest bar that still reads as a bar rather than as
+  -- three punctuation marks, and the header has room for it on both surfaces.
+  local gauge = widgets.bar { w = 6, val = spent, hl = widgets.pressure_hl(spent), thin = true }
+  vim.list_extend(cells, gauge)
+  cells[#cells + 1] = { (" %d%% left"):format(math.floor(left)), "PaseoDim" }
+  return cells
+end
+
 ---The status line above the conversation, as cells.
 ---
 ---Exposed because the float draws the same information through volt, and two
@@ -86,17 +137,7 @@ function M.header(chat)
     end
   end
 
-  -- Context-window fill, once the daemon has reported any. This is the number
-  -- you actually want in front of you during a long session.
-  local usage = chat.usage
-  if usage and usage.contextWindowUsedTokens and usage.contextWindowMaxTokens then
-    local pct = math.floor((usage.contextWindowUsedTokens / usage.contextWindowMaxTokens) * 100)
-    line[#line + 1] = { " · ", "PaseoDim" }
-    line[#line + 1] = {
-      ("%d%%"):format(pct),
-      pct >= 90 and "PaseoToolFail" or pct >= 70 and "PaseoToolRunning" or "PaseoDim",
-    }
-  end
+  vim.list_extend(line, M.context(chat))
 
   -- Something is waiting on you. Worth shouting about: the agent is blocked
   -- until it is answered.

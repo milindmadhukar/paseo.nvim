@@ -38,7 +38,7 @@ local function test_surfaces()
 
   -- THE "1-5 JUMP DOES NOT WORK" BUG. The tab keys were mapped on the chrome
   -- buffer alone, and on the Chat tab -- the tab it opens on -- the chrome
-  -- never holds the cursor, because `show_chat_panes` enters the composer. So
+  -- never holds the cursor, because `show_agent_panes` enters the composer. So
   -- every one of those keystrokes went to a buffer with no such mapping, while
   -- the footer advertised them.
   ---@param buf integer
@@ -215,25 +215,23 @@ local function test_surfaces()
   -- and the conversation window only exists on the Chat tab -- so every other
   -- tab had no header at all and the dashboard could not tell you which model
   -- it was on. It is a volt section in the chrome now.
-  -- The Sessions tab maps CURSOR ROWS to sessions, and the only thing between
-  -- a panel's own line numbering and the buffer's is `body_row_offset`. It is
-  -- a constant, so it is checked against a real open dashboard rather than
-  -- against itself -- the panel this replaced hardcoded the same sum and was
-  -- wrong about it.
+  -- The Sessions tab used to map CURSOR ROWS to sessions, and the only thing
+  -- between a panel's own line numbering and the buffer's was a constant it
+  -- had to agree with. It holds focus by ID now, so the thing worth checking
+  -- against a REAL open dashboard is different: that the row reaches the
+  -- chrome buffer at all, and that exactly one of them is lit.
   do
     local agents = require "paseo.agents"
     local old_for_root, old_watch = agents.for_root, agents.watch
     agents.watch = function() end
     agents.for_root = function()
-      return { { id = "row-probe", title = "row-probe", status = "idle" } }
+      return {
+        { id = "row-probe", title = "row-probe", status = "idle" },
+        { id = "row-other", title = "row-other", status = "idle" },
+      }
     end
     float.select "Sessions"
-    local probe
-    for line, row in pairs(require("paseo.ui.panels.sessions")._rows) do
-      if row.id == "row-probe" then
-        probe = line
-      end
-    end
+
     local chrome
     for _, win in ipairs(vim.api.nvim_list_wins()) do
       local buf = vim.api.nvim_win_get_buf(win)
@@ -241,28 +239,45 @@ local function test_surfaces()
         chrome = buf
       end
     end
-    local on_that_row = ""
-    if chrome and probe then
-      local marks = vim.api.nvim_buf_get_extmarks(
-        chrome,
-        -1,
-        { probe - 1, 0 },
-        { probe - 1, -1 },
-        { details = true }
-      )
-      local parts = {}
-      for _, mark in ipairs(marks) do
+
+    local drawn, lit = {}, 0
+    if chrome then
+      for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(chrome, -1, 0, -1, { details = true })) do
+        local row, banded = {}, false
         for _, cell in ipairs(mark[4].virt_text or {}) do
-          parts[#parts + 1] = cell[1]
+          row[#row + 1] = cell[1]
+          if cell[2] == "PaseoRowHover" then
+            banded = true
+          end
+        end
+        drawn[#drawn + 1] = table.concat(row)
+        if banded then
+          lit = lit + 1
         end
       end
-      on_that_row = table.concat(parts)
     end
+    local joined = table.concat(drawn, "\n")
     truthy(
-      "ui: a Sessions row is on the buffer line its map claims",
-      on_that_row:find("row-probe", 1, true) ~= nil,
-      ("row %s holds %q"):format(tostring(probe), on_that_row)
+      "ui: a Sessions row reaches the chrome buffer",
+      joined:find("row-probe", 1, true) ~= nil,
+      joined
     )
+
+    -- THE BUG THIS TAB HAD. The keys were bound and the rows were reachable,
+    -- and nothing on screen said which one you were on -- so it read as a tab
+    -- you could only click. Arriving at it now lands focus on a row and paints
+    -- it, without anyone having to move first.
+    truthy("ui: and arriving on the tab lights exactly one of them", lit == 1, lit)
+    local function bound(lhs)
+      local found
+      vim.api.nvim_buf_call(chrome, function()
+        found = vim.fn.maparg(lhs, "n", false, true)
+      end)
+      return type(found) == "table" and found.buffer == 1
+    end
+    truthy("ui: the list takes the movement keys", chrome and bound "j")
+    truthy("ui: and its per-row verbs", chrome and bound "d")
+
     agents.for_root, agents.watch = old_for_root, old_watch
   end
 
@@ -335,10 +350,10 @@ local function test_surfaces()
 
     local volt_cr = buf_map "<CR>"
     truthy("ui: volt binds <CR> on the chrome buffer", volt_cr ~= nil)
-    eq("ui: and the Session keys are not bound on another tab", buf_map "h", nil)
+    eq("ui: and the Settings keys are not bound on another tab", buf_map "h", nil)
 
-    float.select "Session"
-    truthy("ui: the Session panel takes the movement keys", buf_map "h" ~= nil)
+    float.select "Settings"
+    truthy("ui: the Settings panel takes the movement keys", buf_map "h" ~= nil)
     truthy("ui: and its group mnemonics", buf_map "s" ~= nil)
     truthy("ui: and displaces volt's <CR>", buf_map("<CR>").callback ~= volt_cr.callback)
 
@@ -366,6 +381,163 @@ local function test_surfaces()
   -- to leave the panel to change would be worse than the prompts.
 end
 
+--- A terminal is a SESSION, shown on the Chat tab.
+---
+--- It used to be a surface of its own -- a rail, a title bar, a pane and a
+--- backdrop, four windows over the top of whatever you were looking at, with
+--- its own keymaps and its own geometry. The PTY half was always window-
+--- agnostic; only the surface is gone.
+local function test_terminal_session()
+  local float = require "paseo.ui.float"
+  local terminal = require "paseo.ui.terminal"
+  local terminals = require "paseo.terminals"
+  local agents = require "paseo.agents"
+  local bridge = require "paseo.bridge"
+
+  local saved = {
+    ensure = bridge.ensure,
+    request = bridge.request,
+    on = bridge.on,
+    watch = terminals.watch,
+    ready = terminals.ready,
+    for_root = terminals.for_root,
+    get = terminals.get,
+    summary = terminals.summary,
+    awatch = agents.watch,
+    afor_root = agents.for_root,
+  }
+
+  bridge.ensure = function(done)
+    done(nil)
+  end
+  bridge.request = function(_, _, done)
+    done(nil, {})
+  end
+  bridge.on = function() end
+  terminals.watch = function() end
+  terminals.ready = function()
+    return true
+  end
+  terminals.for_root = function()
+    return { { id = "t1", name = "lazygit" } }
+  end
+  terminals.get = function(id)
+    return id == "t1" and { id = "t1", name = "lazygit" } or nil
+  end
+  terminals.summary = function()
+    return "1 here"
+  end
+  agents.watch = function() end
+  agents.for_root = function()
+    return { { id = "a1", title = "main", status = "idle" } }
+  end
+
+  local chat = {
+    root = vim.uv.cwd(),
+    agent_id = "a1",
+    provider = "test",
+    pending = {},
+    conversation = vim.api.nvim_create_buf(false, true),
+    composer = vim.api.nvim_create_buf(false, true),
+  }
+  transcript.reset(chat)
+
+  local wins_before = #vim.api.nvim_list_wins()
+  local ok, err = pcall(function()
+    float.open(chat)
+    eq("terminal: a fresh dashboard is on its agent", float.session().kind, "agent")
+    truthy("terminal: which has a composer", chat.win_composer ~= nil)
+
+    float.show_session { kind = "terminal", id = "t1" }
+    eq("terminal: showing one stays on the Chat tab", float.tab(), "Chat")
+    eq("terminal: and the session is that terminal", float.session().id, "t1")
+
+    -- A terminal has nothing to type INTO the way an agent does; it has the
+    -- PTY. The composer is not hidden, it is gone.
+    eq("terminal: a terminal session has no composer", chat.win_composer, nil)
+
+    local view = terminal.view "t1"
+    truthy("terminal: the PTY is attached", view ~= nil)
+    local on_screen = false
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+      if view and vim.api.nvim_win_get_buf(win) == view.buf then
+        on_screen = true
+      end
+    end
+    truthy("terminal: and on screen", on_screen)
+
+    -- The keys, in the PTY buffer. Bound in TERMINAL mode as well as normal,
+    -- because a key you must press `<C-\><C-n>` to reach first is a key you
+    -- do not reach -- and a bare digit is NOT bound, because `5` in a terminal
+    -- costs you `50k` to scroll back.
+    local function bound(lhs, mode)
+      local found
+      vim.api.nvim_buf_call(view.buf, function()
+        found = vim.fn.maparg(lhs, mode, false, true)
+      end)
+      return type(found) == "table" and found.buffer == 1
+    end
+    truthy("terminal: <M-2> reaches a tab from normal mode", bound("<M-2>", "n"))
+    truthy("terminal: and from inside the terminal", bound("<M-2>", "t"))
+    truthy("terminal: <C-s> is the way out, in both", bound("<C-s>", "n") and bound("<C-s>", "t"))
+    eq("terminal: a bare digit is left to the PTY", bound("2", "n"), false)
+    eq("terminal: and so is <Esc>", bound("<Esc>", "t"), false)
+
+    -- Back to the agent, and the composer comes back with it.
+    float.show_session { kind = "agent", id = "a1" }
+    eq("terminal: going back lands on the agent", float.session().kind, "agent")
+    truthy("terminal: and the composer returns", chat.win_composer ~= nil)
+
+    -- THE ROW THAT SAYS WHERE YOU ARE, on every tab -- a terminal session has
+    -- no header of its own and no transcript, so without it the dashboard
+    -- could show a PTY with nothing naming it.
+    float.show_session { kind = "terminal", id = "t1" }
+    float.select "Usage"
+    eq("terminal: the strip survives a tab change", float.session().id, "t1")
+
+    ---The session strip, as `{ text = highlight }`. Row 4 of the chrome: the
+    ---header, the tab bar, the rule, then this.
+    local function strip()
+      local out = {}
+      local buf = float.chrome_buf()
+      for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, -1, 0, -1, { details = true })) do
+        if mark[2] + 1 == require("paseo.ui.layout").rows(0).strip then
+          for _, cell in ipairs(mark[4].virt_text or {}) do
+            local text = vim.trim(cell[1])
+            if text ~= "" then
+              out[text] = cell[2]
+            end
+          end
+        end
+      end
+      return out
+    end
+
+    local on_terminal = strip()
+    eq(
+      "terminal: the strip lights the session you are in",
+      on_terminal["󰆍 lazygit"],
+      "PaseoChipFocus"
+    )
+    eq("terminal: and not the one you are not", on_terminal["󱙺 main"], "PaseoChipOff")
+
+    float.show_session { kind = "agent", id = "a1" }
+    local on_agent = strip()
+    eq("terminal: and it follows you back", on_agent["󱙺 main"], "PaseoChipFocus")
+    eq("terminal: leaving the terminal unlit", on_agent["󰆍 lazygit"], "PaseoChipOff")
+  end)
+
+  float.close()
+  eq("terminal: closing takes the PTY window with it", #vim.api.nvim_list_wins(), wins_before)
+
+  bridge.ensure, bridge.request, bridge.on = saved.ensure, saved.request, saved.on
+  terminals.watch, terminals.ready = saved.watch, saved.ready
+  terminals.for_root, terminals.get, terminals.summary = saved.for_root, saved.get, saved.summary
+  agents.watch, agents.for_root = saved.awatch, saved.afor_root
+  truthy("terminal: the session cases ran", ok, err)
+end
+
 return {
   { "ui.surfaces", test_surfaces },
+  { "ui.terminal-session", test_terminal_session },
 }

@@ -118,10 +118,9 @@ local function test_terminals()
   apply { kind = "snapshot", cwd = root, entries = {} }
   truthy("terminals: the registry cases ran", ok_registry, registry_err)
 
-  -- The merged list. `under_cursor` resolves through a map rebuilt on every
-  -- draw, never by arithmetic on the cursor row -- which is the regression the
-  -- panel this replaced could not survive, because its `row - 5` was the
-  -- number of heading lines it happened to have that week.
+  -- The merged list. Selection is held BY ID, so what has to survive is not a
+  -- line number but the list moving under it -- which, for a directory fed by
+  -- push, it does constantly.
   local panel = require "paseo.ui.panels.sessions"
   local agents = require "paseo.agents"
   local old_for_root, old_watch = agents.for_root, agents.watch
@@ -148,33 +147,47 @@ local function test_terminals()
     truthy("sessions: agents are listed", joined:find("reviewer", 1, true) ~= nil)
     truthy("sessions: and terminals beside them", joined:find("shell", 1, true) ~= nil)
 
-    local rows = panel._rows
-    local at_agent, at_terminal
-    for line, row in pairs(rows) do
-      if row.kind == "agent" then
-        at_agent = line
-      elseif row.kind == "terminal" and row.id == "t1" then
-        at_terminal = line
-      end
-    end
-    truthy("sessions: the row map carries both kinds", at_agent and at_terminal)
-    truthy("sessions: and they are on different rows", at_agent ~= at_terminal)
+    -- Focus lands on a row without anyone moving first: arriving at a tab
+    -- whose first <CR> does nothing is the bug this panel actually had.
+    local view = panel._view(chat)
+    local focused = view:resolve()
+    truthy("sessions: focus is seeded on a real row", focused ~= nil and focused.id ~= nil)
 
-    -- Reorder, redraw, and the map must follow. Sorted by name, so renaming
-    -- `shell` to `aaa` moves it above `zzz-last`.
+    -- Walk to the terminal and stand on it.
+    for _ = 1, 8 do
+      if (view:resolve()).id == "terminal.t1" then
+        break
+      end
+      view:move(1)
+    end
+    eq("sessions: and the keyboard reaches a terminal row", (view:resolve()).id, "terminal.t1")
+
+    -- REORDER, REDRAW, AND FOCUS MUST NOT WANDER. Sorted by name, so renaming
+    -- `shell` to `aaa` moves `t1` below `t2` -- a row that held selection by
+    -- position would now be pointing at the other terminal, silently, while
+    -- you were reading.
     apply {
       kind = "snapshot",
       cwd = root,
       entries = { { id = "t1", title = "zzz-renamed" }, { id = "t2", name = "aaa" } },
     }
     panel.lines(chat, 80)
-    local moved
-    for line, row in pairs(panel._rows) do
-      if row.id == "t1" then
-        moved = line
-      end
-    end
-    truthy("sessions: a reordered list retargets its rows", moved ~= at_terminal)
+    eq(
+      "sessions: a reordered list keeps focus on the same session",
+      (view:resolve()).id,
+      "terminal.t1"
+    )
+
+    -- And a row that DIES hands focus on rather than dropping it.
+    apply { kind = "snapshot", cwd = root, entries = { { id = "t2", name = "aaa" } } }
+    panel.lines(chat, 80)
+    local after = view:resolve()
+    truthy("sessions: killing the focused row leaves focus somewhere real", after ~= nil, after)
+    truthy(
+      "sessions: and not on the row that went",
+      after and after.id ~= "terminal.t1",
+      after and after.id
+    )
   end)
   agents.for_root, agents.watch = old_for_root, old_watch
   apply { kind = "snapshot", cwd = root, entries = {} }
