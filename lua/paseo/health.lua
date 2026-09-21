@@ -34,10 +34,10 @@ end
 local function check_core()
   start "paseo.nvim: requirements"
 
-  if vim.fn.has "nvim-0.10" == 1 then
+  if vim.fn.has "nvim-0.11" == 1 then
     ok("neovim " .. tostring(vim.version()))
   else
-    err "neovim 0.10+ is required (vim.system, vim.fs.dir, vim.validate)"
+    err "neovim 0.11+ is required (vim.system, vim.fs.dir, vim.validate by name)"
   end
 
   local git = version_of "git"

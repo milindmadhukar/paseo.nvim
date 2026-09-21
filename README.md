@@ -48,7 +48,7 @@ which reads like a broken install.
 
 | Needed for | |
 |---|---|
-| Everything | Neovim 0.10+, `git`, a Nerd Font |
+| Everything | Neovim 0.11+, `git`, a Nerd Font |
 | The chat UI | nvzone/volt |
 | The workspace and session pickers | telescope.nvim |
 | The hunk under the cursor | gitsigns.nvim |
