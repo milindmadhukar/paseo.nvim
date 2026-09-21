@@ -75,6 +75,7 @@ local open_overlay
 ---@field box_buf integer|nil     The answer box, while one is open.
 ---@field box_win integer|nil
 ---@field box_row integer|nil     Window row the box covers, 0-indexed.
+---@field box_note boolean|nil   The open box writes a note, not an answer.
 ---@field body_buf integer|nil    The plan's markdown.
 ---@field body_win integer|nil
 ---@field body_row integer|nil
@@ -85,6 +86,7 @@ local open_overlay
 ---@field augroup integer
 ---@field busy boolean|nil        Re-entry guard for the resize handlers.
 ---@field resize_pending boolean|nil
+---@field scroll_pending boolean|nil
 
 -- Below either of these the overlay stops trying to fit inside the chat window.
 -- 48 columns is where an option label plus its keycap and marker stops fitting
@@ -107,9 +109,14 @@ local MIN_W, MIN_H = 48, 14
 ---rescale (hence `M.refresh` recomputing this).
 ---@param chat table|nil
 ---@return table
-local function frame(chat)
+local function frame(chat, kind)
   local ui = require("paseo.config").get().ui.answer
   local anchor = chat and chat.win_conversation
+  -- A plan is a DOCUMENT, and the width cap that keeps a question's options
+  -- from stretching into an unreadable line is the wrong instrument for it: a
+  -- plan is prose with code in it, and the cap made every fenced block wrap.
+  -- It gets whatever the conversation has.
+  local cap = kind == "plan" and math.huge or ui.width
 
   if anchor and api.nvim_win_is_valid(anchor) then
     local aw = api.nvim_win_get_width(anchor)
@@ -121,7 +128,7 @@ local function frame(chat)
         win = anchor,
         -- Inset rather than flush: an overlay touching the conversation's edges
         -- reads as a repaint of it, not as a card laid on top.
-        w = math.min(ui.width, aw - 4),
+        w = math.min(cap, aw - 4),
         avail = ah - 2,
         parent_w = aw,
         parent_h = ah,
@@ -133,7 +140,7 @@ local function frame(chat)
 
   return {
     relative = "editor",
-    w = math.max(MIN_W, math.min(ui.width, vim.o.columns - 8)),
+    w = math.max(MIN_W, math.min(cap, vim.o.columns - 8)),
     avail = math.max(8, vim.o.lines - 4),
     parent_w = vim.o.columns,
     parent_h = vim.o.lines,
@@ -248,7 +255,7 @@ local function stepper(o)
           or answered and icons.marker.bullet
           or icons.marker.radio_off
         ),
-      here and "PaseoCardTitle" or answered and "PaseoCardText" or "PaseoCardDim",
+      here and "PaseoCardTitle" or answered and "PaseoAgent" or "PaseoCardDim",
       { click = goto_question(o, index) },
     }
   end
@@ -270,11 +277,23 @@ local function question_body(o, w, avail)
   local head, tail = {}, {}
 
   if #state.questions > 1 then
-    head[#head + 1] = widgets.row(
-      stepper(o),
-      { { ("%d of %d"):format(index, #state.questions), "PaseoCardDim" } },
-      w
-    )
+    -- How much of the SET is done, on the same two-tone track the Usage panel
+    -- measures a context window with. The dots say which question you are on;
+    -- the bar says how much is left, which is the thing you actually want to
+    -- know before starting to read a four-question set.
+    local done = 0
+    for at = 1, #state.questions do
+      done = done + (#state.picked[at] > 0 and 1 or 0)
+    end
+    head[#head + 1] = widgets.row(stepper(o), {
+      { ("%d of %d  "):format(index, #state.questions), "PaseoCardDim" },
+      unpack(widgets.bar {
+        w = math.max(6, math.min(12, math.floor(w / 5))),
+        val = done / #state.questions * 100,
+        hl = "PaseoAgent",
+        thin = true,
+      }),
+    }, w)
     head[#head + 1] = { { "", "PaseoCardText" } }
   end
   vim.list_extend(head, render.wrap(question.question, w, "PaseoHeader"))
@@ -285,7 +304,7 @@ local function question_body(o, w, avail)
     local typed = questions.typed(question, picked)
     tail[#tail + 1] = render.truncate(#typed > 0 and {
       widgets.keycap "i",
-      { " " .. widgets.icons.radio_on .. " ", "PaseoCardTitle" },
+      { " " .. widgets.icons.radio_on .. " ", "PaseoAgent" },
       { table.concat(typed, ", "), "PaseoCardTitle" },
       { "  typed", "PaseoCardDim" },
     } or {
@@ -296,6 +315,20 @@ local function question_body(o, w, avail)
         "PaseoCardDim",
       },
     }, w)
+  end
+
+  -- The note itself, on the card. A remark you cannot see after writing it is
+  -- one you cannot tell you wrote, or correct.
+  local said = state.notes[index]
+  if said and said ~= "" then
+    -- The icon LEADS the note; it does not repeat down the left of it. A
+    -- wrapped remark is one remark, and an icon on every line reads as one
+    -- note per line.
+    local wrapped = render.wrap(said, w, "PaseoCardText", { { "     ", "PaseoCardText" } })
+    if wrapped[1] then
+      wrapped[1][1] = { "   " .. icons.status.note .. " ", "PaseoToolRunning" }
+    end
+    vim.list_extend(tail, wrapped)
   end
 
   local notes = {}
@@ -315,46 +348,73 @@ local function question_body(o, w, avail)
     )
   end
 
-  -- The focused option's description, on ONE row drawn under the option it
-  -- belongs to and reserved whether or not that option has one: volt lays a
-  -- section out by row, and a row that comes and goes as you move shifts
-  -- everything under it. One line that changes is one you read; a line per
-  -- option is a wall, and a line under the whole list describes whichever
-  -- option you were not looking at.
-  local function description_row()
-    local described = question.options[focus]
-    return render.truncate({
-      { "      ", "PaseoCardText" },
-      { described and described.description or "", "PaseoCardDim" },
-    }, w)
+  -- An option's description, WRAPPED under the option it belongs to rather
+  -- than truncated onto one row. A description exists to tell you what the
+  -- option means, and the half of it that fell off the end of a single row was
+  -- usually the half that distinguished it from the option below -- which made
+  -- the descriptions decorative and the choice a guess.
+  --
+  -- It is shown for the option you are LOOKING at and for every option you
+  -- have PICKED. The focused one is what you are deciding about; the picked
+  -- one is what you are about to send, and an answer whose meaning disappeared
+  -- the moment you chose it cannot be checked before it goes.
+  ---@param at integer
+  ---@return table[][]
+  local function description_rows(at)
+    local described = question.options[at]
+    if not (described and described.description) then
+      return {}
+    end
+    return render.wrap(described.description, w, "PaseoCardDim", { { "      ", "PaseoCardText" } })
   end
 
-  -- The description row is reserved only when some option actually HAS one: a
-  -- blank line in the middle of a list of bare labels reads as a gap, not as a
-  -- slot waiting to be filled.
-  local has_description = 0
-  for _, option in ipairs(question.options) do
-    if option.description then
-      has_description = 1
-      break
-    end
+  ---What one option costs: its own row, plus its description when that is
+  ---drawn under it.
+  ---@param at integer
+  ---@return integer
+  local function cost(at)
+    return 1 + #description_rows(at)
   end
 
   -- Options get whatever rows are left, and when there are more options than
   -- rows the list is WINDOWED around the focus. The two alternatives are both
   -- wrong: drawing all fifteen pushes the hint bar off the card, and cutting the
   -- list off makes the fifteenth unreachable however the keys are bound.
-  local room = math.max(1, avail - #head - #tail - has_description)
+  --
+  -- Rows, not options, is what the window is measured in: a description is
+  -- several rows tall now, so counting options would overflow the card by
+  -- however many rows the focused description happened to wrap to.
+  local room = math.max(1, avail - #head - #tail)
+  local total = 0
+  for at = 1, #question.options do
+    total = total + cost(at)
+  end
   local from, to = 1, #question.options
   local more_above, more_below = 0, 0
-  if #question.options > room then
+  if total > room then
     -- The `n more` markers cost a row each -- unless the room is so small that
     -- spending two rows on them would leave nowhere to draw an option, in which
     -- case the list scrolls silently rather than becoming two counts and
     -- nothing to choose from.
-    local visible = room > 2 and room - 2 or room
-    from = math.max(1, math.min(focus - math.floor(visible / 2), #question.options - visible + 1))
-    to = from + visible - 1
+    local budget = room > 2 and room - 2 or room
+    -- Grown outwards from the focus, which is the one option that must be on
+    -- screen: it is the option the keys act on and the only one whose
+    -- description is guaranteed to be drawn.
+    from, to = focus, focus
+    local used = cost(focus)
+    while true do
+      local before, after =
+        from > 1 and cost(from - 1) or nil, to < #question.options and cost(to + 1) or nil
+      -- Downwards first on a tie, so the list reads as a list that scrolled
+      -- rather than one that starts in an arbitrary place.
+      if after and used + after <= budget then
+        used, to = used + after, to + 1
+      elseif before and used + before <= budget then
+        used, from = used + before, from - 1
+      else
+        break
+      end
+    end
     if room > 2 then
       more_above, more_below = from - 1, #question.options - to
     end
@@ -381,15 +441,19 @@ local function question_body(o, w, avail)
     }
     lines[#lines + 1] = render.truncate({
       at <= 9 and widgets.keycap(tostring(at)) or { "   ", "PaseoCardDim" },
-      { " " .. marker .. " ", chosen and "PaseoCardTitle" or "PaseoCardDim", action },
+      -- Colour in the MARKER, not the label -- the restraint `widgets.tile`
+      -- uses, and the reason the Usage panel reads as designed: an accented
+      -- label competes with the words you came to read, while an accented
+      -- marker is legible from the corner of your eye.
+      { " " .. marker .. " ", chosen and "PaseoAgent" or "PaseoCardDim", action },
       {
         option.label,
         at == focus and "PaseoChipFocus" or chosen and "PaseoCardTitle" or "PaseoCardText",
         action,
       },
     }, w)
-    if at == focus and has_description == 1 then
-      lines[#lines + 1] = description_row()
+    if at == focus or chosen then
+      vim.list_extend(lines, description_rows(at))
     end
   end
   if more_below > 0 then
@@ -409,15 +473,13 @@ end
 ---card draws here is the space it lives in. Inside the card's border rather
 ---than below it, so there is one frame on screen and not two.
 ---@param w integer
+---@param note boolean|nil  A remark about the pick, rather than the answer.
 ---@return table[][]
-local function box_body(w)
+local function box_body(w, note)
   local lines = {
-    widgets.row(
-      { { widgets.icons.radio_on .. " your answer ", "PaseoCardTitle" } },
-      { { "⏎ save · ␛␛ discard ", "PaseoCardDim" } },
-      w,
-      "PaseoCardRule"
-    ),
+    widgets.row({
+      { widgets.icons.radio_on .. (note and " your note " or " your answer "), "PaseoCardTitle" },
+    }, { { "⏎ save · ␛␛ discard ", "PaseoCardDim" } }, w, "PaseoCardRule"),
   }
   for _ = 1, 3 do
     lines[#lines + 1] = { { "", "PaseoCardText" } }
@@ -462,7 +524,7 @@ local function build(o, f)
     local overhead = 2 + 1 + 2 + (o.box_buf and 4 or 0)
     body = question_body(o, inner, math.max(4, f.avail - overhead))
     if o.box_buf then
-      vim.list_extend(body, box_body(inner))
+      vim.list_extend(body, box_body(inner, o.box_note))
       -- The box covers the three blank rows `box_body` ends with. Buffer line N
       -- is window row N - 1, and the card's top border is line 1.
       o.box_row = (1 + #body - 3) - 1
@@ -490,6 +552,9 @@ local function build(o, f)
     if question.free then
       hints[#hints + 1] = { "i", "type" }
     end
+    if #state.picked[state.current] > 0 then
+      hints[#hints + 1] = { "c", state.notes[state.current] and "edit note" or "note" }
+    end
     if question.optional then
       hints[#hints + 1] = { "s", "skip" }
     end
@@ -500,6 +565,33 @@ local function build(o, f)
       { ICON.plan .. "  ", "PaseoCardTitle" },
       { "The agent has a plan", "PaseoCardTitle" },
     }
+
+    -- How far down the plan you are, in the title. A scrolling document with no
+    -- position indicator cannot be told apart from one that is not scrolling,
+    -- which is most of what "the scroll doesn't work" looks like from outside:
+    -- the plan DID move, and nothing on screen said so.
+    if o.body_win and api.nvim_win_is_valid(o.body_win) and o.body_buf then
+      local total = api.nvim_buf_line_count(o.body_buf)
+      local shown = o.body_h or 1
+      if total > shown then
+        local top = vim.fn.line("w0", o.body_win)
+        local pct = total > shown and math.floor((top - 1) / (total - shown) * 100) or 0
+        title[#title + 1] = {
+          ("   %d%%"):format(math.max(0, math.min(100, pct))),
+          "PaseoCardDim",
+        }
+        title[#title + 1] = { "  ", "PaseoCardText" }
+        vim.list_extend(
+          title,
+          widgets.bar {
+            w = 10,
+            val = math.max(0, math.min(100, pct)),
+            hl = "PaseoAgent",
+            thin = true,
+          }
+        )
+      end
+    end
 
     local chips = {}
     for i, action in ipairs(o.view.actions or {}) do
@@ -570,7 +662,7 @@ local function paint(o, f, lines)
               -- `table.remove(marks, 3)` on what it is handed, so a cached line
               -- list loses its click actions after the first draw.
               lines = function()
-                local built = build(o, frame(o.chat))
+                local built = build(o, frame(o.chat, o.kind))
                 -- Never more rows than the buffer has. volt writes an extmark
                 -- per row at a precomputed line, and a row past the end raises
                 -- `Invalid 'line': out of range` -- from inside `vim.on_key`,
@@ -651,9 +743,13 @@ local function place_children(o)
     o.box_win = child(o, o.box_buf, o.box_row, 3, o.box_win, true)
   end
   if o.body_buf and o.body_row then
-    -- Unfocusable: the plan is scrolled from the card with `nvim_win_call`, so
-    -- `<C-w>w` landing in it would only create a window you cannot answer from.
-    o.body_win = child(o, o.body_buf, o.body_row, o.body_h or 3, o.body_win, false)
+    -- FOCUSABLE, so the mouse can reach it. It used to be unfocusable on the
+    -- grounds that the plan is scrolled from the card -- but an unfocusable
+    -- float is one the mouse cannot land in either, so the wheel went to
+    -- whatever was underneath and the plan sat still while the conversation
+    -- behind it scrolled. The keys still work from the card; `bind` gives this
+    -- window the same ones so they also work once the mouse has put you in it.
+    o.body_win = child(o, o.body_buf, o.body_row, o.body_h or 3, o.body_win, true)
   end
 end
 
@@ -675,7 +771,7 @@ function M.refresh()
   end
   o.busy = true
 
-  local f = frame(o.chat)
+  local f = frame(o.chat, o.kind)
   o.w = f.w
   local lines = build(o, f)
 
@@ -743,7 +839,7 @@ end
 ---@param o paseo.Answer
 local function close_box(o)
   local buf, win = o.box_buf, o.box_win
-  o.box_buf, o.box_win, o.box_row = nil, nil, nil
+  o.box_buf, o.box_win, o.box_row, o.box_note = nil, nil, nil, nil
   if win and api.nvim_win_is_valid(win) then
     pcall(api.nvim_win_close, win, true)
   end
@@ -764,11 +860,19 @@ end
 ---popup over a float over a backdrop -- which is what `vim.ui.input` was.
 ---@param o paseo.Answer
 ---@param insert boolean
-local function open_box(o, insert)
+---@param note boolean|nil  Write a remark ABOUT the answer, not the answer.
+local function open_box(o, insert, note)
   local question = o.state.questions[o.state.current]
-  if not question.free then
+  if not note and not question.free then
     return vim.notify("paseo: that question takes one of its options", vim.log.levels.INFO)
   end
+  -- A note annotates a pick, so there has to BE one. Otherwise the remark
+  -- travels attached to nothing and is dropped on the way out, which looks
+  -- exactly like the key not working.
+  if note and #o.state.picked[o.state.current] == 0 then
+    return vim.notify("paseo: pick an option first, then note why", vim.log.levels.INFO)
+  end
+  o.box_note = note or nil
   if o.box_buf then
     if o.box_win and api.nvim_win_is_valid(o.box_win) then
       api.nvim_set_current_win(o.box_win)
@@ -789,8 +893,9 @@ local function open_box(o, insert)
   pcall(api.nvim_buf_set_name, buf, "paseo://answer/" .. vim.fs.basename(o.chat.root or "paseo"))
   -- Seeded with whatever is already typed, so an answer can be edited rather
   -- than retyped from nothing.
-  local typed = questions.typed(question, o.state.picked[o.state.current])
-  api.nvim_buf_set_lines(buf, 0, -1, false, { table.concat(typed, ", ") })
+  local seed = note and (o.state.notes[o.state.current] or "")
+    or table.concat(questions.typed(question, o.state.picked[o.state.current]), ", ")
+  api.nvim_buf_set_lines(buf, 0, -1, false, { seed })
   o.box_buf = buf
 
   local function commit()
@@ -803,7 +908,11 @@ local function open_box(o, insert)
     local text = table.concat(api.nvim_buf_get_lines(buf, 0, -1, false), " ")
     text = vim.trim((text:gsub("%s+", " ")))
     close_box(o)
-    questions.write(o.state, text)
+    if note then
+      questions.annotate(o.state, text)
+    else
+      questions.write(o.state, text)
+    end
     o.focus[o.state.current] = o.focus[o.state.current] or 1
     M.refresh()
   end
@@ -904,6 +1013,13 @@ local function bind(o, buf)
       end)
     end
 
+    -- A remark about the pick you just made. `c` for comment, and separate
+    -- from `i` because they are different acts: `i` answers a question the
+    -- options did not cover, `c` qualifies the option that did.
+    map("c", function()
+      open_box(o, true, true)
+    end)
+
     map("s", function()
       if not questions.skip(o.state) then
         return vim.notify("paseo: that question needs an answer", vim.log.levels.WARN)
@@ -916,6 +1032,9 @@ local function bind(o, buf)
     -- single-select question can be un-answered only by answering it again.
     map("x", function()
       o.state.picked[o.state.current] = {}
+      -- The note went with the pick, so it goes with the unpick: a remark
+      -- about an answer nobody gave would be sent attached to nothing.
+      questions.annotate(o.state, nil)
       M.refresh()
     end)
   else
@@ -938,13 +1057,38 @@ local function bind(o, buf)
     -- has to give up focus and there is never a "which window am I in"
     -- question. `<C-f>` deliberately shadows the chat's fullscreen toggle: the
     -- overlay owns the keys while it is up.
-    for _, key in ipairs { "j", "k", "<C-d>", "<C-u>", "<C-f>", "<C-b>", "gg", "G" } do
+    for _, key in ipairs {
+      "j",
+      "k",
+      "<C-d>",
+      "<C-u>",
+      "<C-f>",
+      "<C-b>",
+      "gg",
+      "G",
+      "<Down>",
+      "<Up>",
+      "<PageDown>",
+      "<PageUp>",
+    } do
       map(key, function()
-        if o.body_win and api.nvim_win_is_valid(o.body_win) then
+        if not (o.body_win and api.nvim_win_is_valid(o.body_win)) then
+          return
+        end
+        -- Straight through when the body is already where you are -- which it
+        -- can be now that the mouse can focus it. Proxying into the window you
+        -- are standing in works, but only by accident, and `nvim_win_call` on
+        -- the current window is a round trip for nothing.
+        if api.nvim_get_current_win() == o.body_win then
+          pcall(vim.cmd, "normal! " .. vim.keycode(key))
+        else
           api.nvim_win_call(o.body_win, function()
             pcall(vim.cmd, "normal! " .. vim.keycode(key))
           end)
         end
+        -- Repaint the CARD, not the body: the percentage in the title is the
+        -- only thing on screen that says the scroll did anything.
+        M.refresh()
       end)
     end
   end
@@ -1063,7 +1207,7 @@ function M.open(chat, request, view, handlers)
     o.focus[o.state.current] = o.focus[o.state.current] or 1
   end
 
-  local f = frame(chat)
+  local f = frame(chat, o.kind)
   o.anchor = f.anchor
   o.w = f.w
 
@@ -1142,6 +1286,13 @@ function M.open(chat, request, view, handlers)
   end
 
   bind(o, o.card_buf)
+  -- The plan's body is focusable so the wheel can reach it, which means you can
+  -- also END UP there -- and a window holding every scroll key but none of the
+  -- answer keys is a dead end you have to guess your way out of. Same bindings,
+  -- so `y`, `1`-`9`, `n` and `<Esc>` mean what they mean on the card.
+  if o.body_buf then
+    bind(o, o.body_buf)
+  end
 
   -- A win-relative float does NOT close with its parent -- it is left valid,
   -- frozen at its old position, holding a stale window id. So `<C-f>` or a tab
@@ -1173,6 +1324,31 @@ function M.open(chat, request, view, handlers)
     end,
     desc = "paseo: resize the answer overlay",
   })
+
+  -- The wheel does not go through a keymap, so the position in the title would
+  -- otherwise be right for the keys and stale for the mouse -- which is worse
+  -- than not having it. Throttled, because a wheel event is many scrolls.
+  if o.kind == "plan" then
+    api.nvim_create_autocmd("WinScrolled", {
+      group = o.augroup,
+      callback = function(ev)
+        if not (o.body_win and api.nvim_win_is_valid(o.body_win)) then
+          return
+        end
+        if tonumber(ev.match) ~= o.body_win or o.scroll_pending then
+          return
+        end
+        o.scroll_pending = true
+        vim.schedule(function()
+          o.scroll_pending = false
+          if open_overlay == o then
+            M.refresh()
+          end
+        end)
+      end,
+      desc = "paseo: track the plan's scroll position",
+    })
+  end
 
   -- A question with nothing but free text has one thing to do; do it. Making
   -- you press `i` on a field is the friction that makes people press `<Esc>`.

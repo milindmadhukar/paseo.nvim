@@ -23,7 +23,9 @@ local function display(ws, widths)
   local shape = ws.assembled and ("%d repos"):format(#ws.members)
     or (ws.ownedWorktree and "worktree" or "local")
   return ("%-" .. widths.project .. "s  %-" .. widths.name .. "s  %-8s  %s"):format(
-    (ws.project or "?"):sub(1, widths.project),
+    -- The GROUP, not the daemon's project: a `ws` workspace is registered as
+    -- its own top-level project named after itself. See `workspaces.group`.
+    (ws.group or ws.project or "?"):sub(1, widths.project),
     (ws.name or "?"):sub(1, widths.name),
     shape,
     agents.summary(ws.directory or "")
@@ -115,39 +117,6 @@ function M.create(root, after)
   end)
 end
 
----@param ws paseo.PaseoWorkspace
----@param after? fun()
-local function archive(ws, after)
-  local label = ws.name or ws.directory or ws.id
-
-  local function go(force)
-    workspaces.archive(ws, { force = force }, function(err)
-      if not err then
-        vim.notify("paseo: archived " .. label, vim.log.levels.INFO)
-        return after and vim.schedule(after)
-      end
-
-      -- A refusal over unsaved work is the one case worth a second question:
-      -- it names exactly what would be lost.
-      if not force and err:find "refusing" then
-        vim.schedule(function()
-          vim.ui.select({ "No, keep it", "Yes, discard that work" }, {
-            prompt = err:gsub("\n.*", "") .. " — discard?",
-          }, function(choice)
-            if choice and choice:find "Yes" then
-              go(true)
-            end
-          end)
-        end)
-        return
-      end
-      vim.notify("paseo: " .. err, vim.log.levels.ERROR)
-    end)
-  end
-
-  go(false)
-end
-
 ---@param opts? table
 function M.open(opts)
   opts = opts or {}
@@ -180,7 +149,7 @@ function M.open(opts)
 
       local widths = { project = 0, name = 0 }
       for _, ws in ipairs(list) do
-        widths.project = math.min(22, math.max(widths.project, #(ws.project or "")))
+        widths.project = math.min(22, math.max(widths.project, #(ws.group or ws.project or "")))
         widths.name = math.min(38, math.max(widths.name, #(ws.name or "")))
       end
 
@@ -195,7 +164,7 @@ function M.open(opts)
               display = function()
                 return display(ws, widths)
               end,
-              ordinal = ("%s %s"):format(ws.project or "", ws.name or ""),
+              ordinal = ("%s %s"):format(ws.group or ws.project or "", ws.name or ""),
               path = ws.directory,
             }
           end,
@@ -233,7 +202,7 @@ function M.open(opts)
             local entry = state.get_selected_entry()
             actions.close(bufnr)
             if entry then
-              archive(entry.value, reopen)
+              workspaces.confirm_archive(entry.value, reopen)
             end
           end)
 

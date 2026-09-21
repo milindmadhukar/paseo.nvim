@@ -291,8 +291,8 @@ local function handlers(chat, request, view)
         -- A question is allowed AND answered in the same message: the answers
         -- ride in `updatedInput`, and an allow without them reaches the agent as
         -- "The user did not answer the questions" -- approved, and silent.
-        updatedInput = questions.input(request, state.questions, answers),
-        label = questions.label(state.questions, answers),
+        updatedInput = questions.input(request, state.questions, answers, state.notes),
+        label = questions.label(state.questions, answers, state.notes),
       })
     end,
 
@@ -564,6 +564,9 @@ function M.resolved(chat, request_id, resolution)
     local label = resolution
       and (resolution.label or (resolution.behavior == "allow" and "allowed" or "denied"))
     block.item.resolution = label or "answered"
+    -- Written onto the item the transcript already holds, so the rendered card
+    -- it cached against that table is now a lie. Say so before redrawing.
+    transcript.invalidate(block)
     transcript.rerender(chat, block)
   end
 

@@ -139,6 +139,30 @@ export function providerOps(ctx: BridgeConnection): Ops {
       return { features: result.features ?? [] };
     },
 
+    /**
+     * Plan limits: the 5-hour and weekly windows, and what plan they belong to.
+     *
+     * NOT the same thing as the `usage` field above, which is per AGENT --
+     * context window fill, tokens and cost for one session. This is per
+     * PROVIDER and account-wide, and it is the one that answers "can I keep
+     * going today".
+     *
+     * `listProviderUsage` lives on the raw DaemonClient rather than the typed
+     * API, the same way `setAgentMode` does. The daemon fetches it per
+     * provider from that provider's own account endpoint, so a provider with
+     * no fetcher -- fable and gemini have none -- simply does not appear, and
+     * one that is unauthenticated appears with `status: "unavailable"` and an
+     * `error` to show. Both are the panel's problem, not ours: pass it
+     * through whole.
+     */
+    async "providers.usage"() {
+      const payload: any = await raw().listProviderUsage();
+      return {
+        fetchedAt: payload?.fetchedAt ?? null,
+        providers: payload?.providers ?? [],
+      };
+    },
+
     async "agent.config"(req) {
       const api = connected();
       const agent: any = api.agents.ref(String(need(req.agentId, "agentId")));

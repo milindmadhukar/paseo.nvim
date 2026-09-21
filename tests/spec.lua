@@ -46,6 +46,7 @@ local files = {
   "answer",
   "permission",
   "terminals",
+  "voice",
   "draft",
   "settings",
   "fork",

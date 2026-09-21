@@ -79,6 +79,10 @@ export function workspaceOps(ctx: BridgeConnection): Ops {
           name: ws.name ?? ws.title ?? null,
           directory: ws.workspaceDirectory ?? ws.project?.checkout?.cwd ?? null,
           project: ws.projectDisplayName ?? ws.projectId ?? null,
+          // The project RECORD, not its display name. Removing a project --
+          // which the app offers and this dropped one line before it was
+          // useful -- is keyed on this and on nothing else.
+          projectId: ws.projectId ?? null,
           projectRoot: ws.projectRootPath ?? null,
           projectKind: ws.projectKind ?? null,
           kind: ws.workspaceKind ?? null,
@@ -108,6 +112,24 @@ export function workspaceOps(ctx: BridgeConnection): Ops {
         ...(req.title ? { title: String(req.title) } : {}),
       });
       return await createdWorkspace(workspace);
+    },
+
+    /**
+     * Forget a project. NOT its files, and not its workspaces' files.
+     *
+     * The app offers this beside archiving a workspace, and the two are
+     * genuinely different acts: archiving retires one unit of work, removing a
+     * project drops the daemon's whole record of a directory tree -- which for
+     * a `ws` workspace is how you get rid of the top-level project the daemon
+     * invented for `<project>/.workspaces/<name>` in the first place.
+     *
+     * `removeProject` is on the raw client, like `cancelAgent`.
+     */
+    async "project.remove"(req) {
+      const result: any = await ctx
+        .raw()
+        .removeProject(String(need(req.projectId, "projectId")));
+      return { removed: result?.removed ?? true };
     },
 
     async "workspace.archive"(req) {

@@ -119,8 +119,9 @@ end
 ---@param request table
 ---@param questions paseo.Question[]
 ---@param answers table<integer, string>  Keyed by question index; "" is a skip.
+---@param notes table<integer, string>|nil  Remarks about the answers, same keying.
 ---@return table
-function M.input(request, questions, answers)
+function M.input(request, questions, answers, notes)
   local input = vim.deepcopy(type(request.input) == "table" and request.input or {})
   -- An empty Lua table encodes as `[]`, and an `answers` ARRAY is not an
   -- answers object -- the provider would ignore it and the agent would be told
@@ -137,6 +138,25 @@ function M.input(request, questions, answers)
     end
   end
   input.answers = map
+  if notes and next(notes) then
+    -- Keyed by question text the way `answers` is, and an OBJECT per question
+    -- rather than a bare string: the schema puts the remark under `notes`, and
+    -- leaving room beside it is what lets a note travel with whatever else a
+    -- future answer carries without moving this key again.
+    local annotated = vim.empty_dict()
+    for index, question in ipairs(questions) do
+      local note = notes[index]
+      if note and note ~= "" and answers[index] and answers[index] ~= "" then
+        annotated[question.question] = { notes = note }
+        if question.header and question.header ~= question.question then
+          annotated[question.header] = { notes = note }
+        end
+      end
+    end
+    if next(annotated) then
+      input.annotations = annotated
+    end
+  end
   return input
 end
 
@@ -175,15 +195,21 @@ end
 ---useless: the record of a five-option question would be the word "allow".
 ---@param questions paseo.Question[]
 ---@param answers table<integer, string>
+---@param notes table<integer, string>|nil
 ---@return string
-function M.label(questions, answers)
+function M.label(questions, answers, notes)
   local parts = {}
   for index, question in ipairs(questions) do
     local answer = answers[index]
     if answer and answer ~= "" then
-      parts[#parts + 1] = #questions > 1 and question.header
-          and ("%s: %s"):format(question.header, answer)
-        or answer
+      local note = notes and notes[index]
+      -- The note goes in the badge too, in parentheses: a caveat that only
+      -- exists in the request the agent read is one nobody can find later.
+      local said = note and note ~= "" and ("%s (%s)"):format(answer, note) or answer
+      parts[#parts + 1] = #questions > 1
+          and question.header
+          and ("%s: %s"):format(question.header, said)
+        or said
     end
   end
   return #parts > 0 and table.concat(parts, " · ") or "answered"
@@ -200,6 +226,7 @@ end
 ---@field questions paseo.Question[]
 ---@field current integer                        The question the keys act on.
 ---@field picked table<integer, string[]>        Chosen labels, in the order chosen.
+---@field notes table<integer, string>           What was said ABOUT the pick.
 
 ---@param questions paseo.Question[]
 ---@return paseo.QuestionState
@@ -208,7 +235,7 @@ function M.state(questions)
   for index = 1, #questions do
     picked[index] = {}
   end
-  return { questions = questions, current = 1, picked = picked }
+  return { questions = questions, current = 1, picked = picked, notes = {} }
 end
 
 ---@param state paseo.QuestionState
@@ -301,6 +328,21 @@ function M.write(state, typed)
     state.picked[index] = { typed }
     M.move(state, 1)
   end
+end
+
+---A remark ABOUT an answer, rather than an answer.
+---
+---A picked option says which; a note says why, or what is different about the
+---case at hand -- "the second one, but only for new workspaces". It never
+---replaces the pick, so unlike `M.write` it is kept apart from `picked` and
+---travels in `annotations` rather than in `answers`: a reader that only knows
+---about answers still gets a clean label, and one that knows about both gets
+---the caveat attached to it.
+---@param state paseo.QuestionState
+---@param typed string|nil  Empty or nil clears it.
+function M.annotate(state, typed)
+  typed = vim.trim(typed or "")
+  state.notes[state.current] = typed ~= "" and typed or nil
 end
 
 ---@param state paseo.QuestionState

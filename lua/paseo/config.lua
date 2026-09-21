@@ -7,9 +7,9 @@
 local M = {}
 
 ---@class paseo.Config
----@field backend "paseo"|"local"  Where agents run. See README, "Backend seam".
 ---@field paseo paseo.Config.Paseo
 ---@field ui paseo.Config.UI
+---@field voice paseo.Config.Voice
 ---@field workspaces paseo.Config.Workspaces
 ---@field skills paseo.Config.Skills
 ---@field review paseo.Config.Review
@@ -47,16 +47,49 @@ local M = {}
 ---                       changes. "plate" is the default and draws NO frame
 ---                       around a card: sections are separated by background
 ---                       elevation and padding instead. See `paseo.ui.style`.
+---@field colors "auto"|"fixed"  Where the eight base colours come from.
+---                       "auto" derives them from the colourscheme, which is
+---                       what makes the dashboard look like it belongs to
+---                       whatever you have loaded. "fixed" uses the plugin's
+---                       own instead -- for a theme whose colours the agent
+---                       surfaces read badly in, or which simply is not what
+---                       you want them to look like.
+---@field palette paseo.Config.UI.Palette  Those eight colours, by name, laid
+---                       over whichever source `colors` names. Everything
+---                       downstream still runs: naming `bg` and `blue` alone
+---                       gets a full elevation ladder and four accent ramps
+---                       built from them.
 ---@field theme table<string, vim.api.keyset.highlight>  Highlight overrides,
----                       laid over the derived groups. This is a config key
----                       rather than "set the group again after setup()"
----                       because the derivation re-runs on `ColorScheme` and
----                       used to overwrite anything set that way.
+---                       laid over the derived groups. The LAST word, and a
+---                       different question from `palette`: a colour set there
+---                       is a token every derived group is built from, while
+---                       one set here is the one group you named. This is a
+---                       config key rather than "set the group again after
+---                       setup()" because the derivation re-runs on
+---                       `ColorScheme` and used to overwrite anything set that
+---                       way.
 ---@field animate boolean|paseo.Config.UI.Animate  Motion. `false` is instant.
 ---@field float paseo.Config.UI.Float
 ---@field sidebar paseo.Config.UI.Sidebar
 ---@field ask paseo.Config.UI.Answer
 ---@field terminal paseo.Config.UI.Terminal
+
+---@class paseo.Config.UI.Palette
+---@field red string?     Failure, and a destructive permission.
+---@field green string?   Success, and the agent's own voice.
+---@field blue string?    Your voice, headings, paths, and the seed the eight
+---                       identity swatches are rotated off.
+---@field yellow string?  Running, and a warning.
+---@field grey string?    Everything that has to recede: dividers, labels,
+---                       disabled rows.
+---@field border string?  Frames, where a style draws them.
+---@field text string?    Body text.
+---@field bg string?      The editor background the five elevation tiers are
+---                       stepped off, and the colour every accent ramp blends
+---                       towards. Leave it unset on a TRANSPARENT theme:
+---                       absent is what tells the derivation there is nothing
+---                       to build tiers on, and painting an opaque rectangle
+---                       over someone's wallpaper is worse than having no card.
 
 ---@class paseo.Config.UI.Animate
 ---@field bars boolean    Ease a progress bar towards its new value rather than
@@ -80,8 +113,11 @@ local M = {}
 ---@field col integer?    not sizes. Absent means CENTRED, with the same
 ---                       `(total - size) / 2` floaterm centres with -- so the
 ---                       two at one size land in one place.
----@field composer integer  Rows the composer gets. The rest of the box, less
----                       the header, tab bar and footer, is the conversation.
+---@field composer integer  The MOST rows the composer grows to. It stands at
+---                       one row over an empty buffer and grows with what you
+---                       type, so this is a ceiling rather than a size. The
+---                       rest of the box, less the header, tab bar and footer,
+---                       is the conversation.
 ---@field zindex integer  Base z-index of the surface. DELIBERATELY BELOW 50,
 ---                       which is what floating windows and plenary popups get
 ---                       by default: a dashboard that outranks them hides the
@@ -108,8 +144,17 @@ local M = {}
 ---                       read a tool card in, and unlike the float -- whose
 ---                       floor is a hard layout requirement -- how narrow is
 ---                       too narrow here is a matter of taste.
----@field composer integer  Rows the composer gets, under the conversation.
+---@field composer integer  The MOST rows the composer grows to, under the
+---                       conversation -- a ceiling, not a size, read the same
+---                       way as the float's.
 ---@field position "right"|"left"  Which side the pane opens on.
+
+---@class paseo.Config.Voice
+---@field enabled boolean  Bind the dictation key at all.
+---@field key string|false  What starts and stops it, in the composer.
+---@field recorder string[]|nil  A full argv, or nil to find one.
+---@field rate integer    Sample rate. The daemon resamples, so this is about
+---                       what your microphone does well, not what it wants.
 
 ---@class paseo.Config.UI.Answer
 ---@field width integer   A CAP, in cells, not a share of anything. The overlay
@@ -126,33 +171,30 @@ local M = {}
 ---                       cannot see is a turn that never finishes. The card
 ---                       sits 10 above this and its children 15.
 ---@class paseo.Config.UI.Terminal
----@field width number|fun(columns: integer): integer   PERCENT of the editor,
----@field height number|fun(lines: integer): integer    1-100, the same unit
----                      `ui.float` and floaterm's `size` take, so a number
----                      means the same thing in all three.
----@field row integer?    Absolute editor cells. Absent means centred.
----@field col integer?
----@field list integer    Width of the terminal list, in CELLS. The one
----                      exception to the percentage rule, and deliberately:
----                      the rail holds NAMES, and 10% of a 300-column monitor
----                      is thirty columns of mostly nothing.
----@field zindex integer  Base z-index. Above the dashboard's 30 -- this opens
----                      over it -- and below the 50 telescope and
----                      `vim.ui.select` take, so a picker opened from here is
----                      on top of it.
----@field backdrop boolean  Dim the editor behind the surface.
+---
+---A terminal is a SESSION now, shown on the dashboard's Chat tab, so this no
+---longer describes a surface of its own: `width`, `height`, `row`, `col`,
+---`list`, `zindex` and `backdrop` all belonged to the rail-and-pane window
+---that used to open over the top, and are gone with it. A terminal is the size
+---of the dashboard, because it IS the dashboard.
 ---@field keys paseo.Config.UI.Terminal.Keys
----@field presets (string|table)[]  Extra entries for the new-terminal picker,
+---@field presets (string|table)[]  Extra entries for the new-terminal screen,
 ---                      beside a shell and one per provider the daemon has.
 ---                      `"lazygit"`, or `{ label = "Lazygit", command = … }`.
 
 ---@class paseo.Config.UI.Terminal.Keys
----@field next string|false   Next terminal. Bound in TERMINAL mode too, which
----@field prev string|false   is what makes it worth having -- and which takes
----                      the key from whatever is running inside. Fine for
----                      `claude`; set false if you run `tmux` in there.
----@field list string|false   From the terminal to the rail.
----@field terminal string|false  From the rail back to the terminal.
+---
+---All of these are bound in TERMINAL mode as well as normal, which is the only
+---way any of them is worth having: a key you must press `<C-\><C-n>` to reach
+---first is a key you do not reach. That does take them from whatever is
+---running inside -- right for `claude`, wrong for `tmux` -- so any of them can
+---be `false`.
+---@field next string|false   The next session in this workspace, agent or
+---@field prev string|false   terminal. Stays on the Chat tab.
+---@field sessions string|false  To the Sessions tab -- the way OUT of a
+---                      terminal, and the reason it is not a place you get
+---                      stuck. Was `keys.list`, which meant the rail.
+---@field terminal string|false  From the chrome back into the PTY.
 
 ---@class paseo.Config.Workspaces
 ---@field dir string      Directory, relative to a project root, holding the
@@ -208,8 +250,6 @@ local M = {}
 
 ---@type paseo.Config
 local defaults = {
-  backend = "paseo",
-
   paseo = {
     -- url, home, password and provider are all deliberately absent rather than
     -- nil-valued: absent means "work it out", and a discovered endpoint is
@@ -218,6 +258,11 @@ local defaults = {
 
   ui = {
     surface = "float",
+
+    -- Derived from the colourscheme. The alternative is a plugin that looks
+    -- pasted in, which is why this is the default and not the other way round.
+    colors = "auto",
+    palette = {},
 
     -- No frame around a card. This is the single biggest visual change and it
     -- is the default because a box per card, drawn inside the float's own
@@ -265,6 +310,8 @@ local defaults = {
     sidebar = {
       width = 40,
       min_width = 60,
+      -- A CEILING, read exactly as the float's is: the box is one row over an
+      -- empty buffer and grows with what you type.
       composer = 8,
       position = "right",
     },
@@ -283,20 +330,29 @@ local defaults = {
     },
 
     terminal = {
-      width = 84,
-      height = 78,
-      -- row and col are deliberately absent: absent means centred.
-      list = 22,
-      zindex = 45,
-      backdrop = true,
       keys = {
         next = "<C-j>",
         prev = "<C-k>",
-        list = "<C-h>",
+        sessions = "<C-s>",
         terminal = "<C-l>",
       },
       presets = {},
     },
+  },
+
+  -- Speaking into the composer. Speech-to-TEXT only -- the daemon also has a
+  -- duplex voice mode with synthesised replies, and an editor that talks back
+  -- needs a player, an interrupt and somewhere to put the transcript, which is
+  -- a surface rather than a key.
+  voice = {
+    enabled = true,
+    key = "<C-t>",
+    -- Absent means "find one": arecord, then rec (sox), then ffmpeg. A table
+    -- is a full argv, for a machine with two sound cards or a device that has
+    -- to be named. It must produce RAW PCM16 mono at `rate` on stdout --
+    -- headerless, no container -- because that is what the daemon parses.
+    recorder = nil,
+    rate = 16000,
   },
 
   workspaces = {
@@ -335,9 +391,6 @@ local config = vim.deepcopy(defaults)
 function M.setup(opts)
   config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts or {})
 
-  vim.validate("backend", config.backend, function(v)
-    return v == "paseo" or v == "local"
-  end, '"paseo" or "local"')
   vim.validate("review.agents", config.review.agents, "boolean")
   vim.validate("quit.warn_active_agents", config.quit.warn_active_agents, "boolean")
   vim.validate("ui.surface", config.ui.surface, function(v)
@@ -357,6 +410,20 @@ function M.setup(opts)
     require("paseo.ui.style").valid,
     'a preset name ("plate", "rule", "rounded", "square") or a table of card/border'
   )
+  vim.validate("ui.colors", config.ui.colors, function(v)
+    return v == "auto" or v == "fixed"
+  end, '"auto" or "fixed"')
+  -- Checked HERE rather than where it is read, so `#00ff0` is reported against
+  -- the key that holds it. A bad hex reaching `volt.color` comes back as the
+  -- input unchanged, which surfaces as one tier of the elevation ladder
+  -- silently collapsing into the one below it -- a bug with no error and no
+  -- obvious cause.
+  vim.validate("ui.palette", config.ui.palette, "table")
+  for _, role in ipairs(require("paseo.ui.theme").ROLES) do
+    vim.validate("ui.palette." .. role, config.ui.palette[role], function(v)
+      return v == nil or (type(v) == "string" and v:match "^#%x%x%x%x%x%x$" ~= nil)
+    end, "a #rrggbb colour")
+  end
   vim.validate("ui.theme", config.ui.theme, "table")
   vim.validate("ui.animate", config.ui.animate, function(v)
     return type(v) == "boolean" or type(v) == "table"
@@ -369,6 +436,15 @@ function M.setup(opts)
     config.ui.animate = { bars = true, flash = true, fps = 30 }
   end
   config.ui.animate.fps = math.max(1, math.min(60, math.floor(config.ui.animate.fps or 30)))
+  vim.validate("voice.enabled", config.voice.enabled, "boolean")
+  vim.validate("voice.key", config.voice.key, function(v)
+    return v == false or type(v) == "string"
+  end, "a key, or false to leave it unbound")
+  vim.validate("voice.recorder", config.voice.recorder, function(v)
+    return v == nil or (type(v) == "table" and #v > 0 and type(v[1]) == "string")
+  end, "a full argv, or nil to find one")
+  config.voice.rate = math.max(8000, math.floor(config.voice.rate or 16000))
+
   vim.validate("workspaces.open", config.workspaces.open, function(v)
     return type(v) == "function" or v == "tab" or v == "tcd" or v == "cd"
   end, '"tab", "tcd", "cd", or a function taking the workspace')
@@ -404,9 +480,6 @@ function M.setup(opts)
   -- below 1 outright, and the backdrop sits five below this.
   vim.validate("ui.float.zindex", config.ui.float.zindex, "number")
   config.ui.float.zindex = math.max(10, math.floor(config.ui.float.zindex))
-  vim.validate("ui.terminal.zindex", config.ui.terminal.zindex, "number")
-  config.ui.terminal.zindex = math.max(10, math.floor(config.ui.terminal.zindex))
-  vim.validate("ui.terminal.backdrop", config.ui.terminal.backdrop, "boolean")
   vim.validate("ui.terminal.presets", config.ui.terminal.presets, "table")
   for name, key in pairs(config.ui.terminal.keys) do
     vim.validate(("ui.terminal.keys.%s"):format(name), key, function(v)

@@ -230,16 +230,30 @@ commands.agents = {
 commands.sessions = commands.agents
 
 commands.term = {
-  desc = "The Paseo terminals in this workspace (toggle)",
+  desc = "The terminals in this workspace, on the Sessions tab",
   run = function()
-    require("paseo.ui.termfloat").toggle()
+    -- A terminal is a SESSION, so there is nowhere else to go: the dashboard's
+    -- Sessions tab lists the agents and the PTYs together, and opening either
+    -- shows it on the Chat tab. This used to open a rail-and-pane window of
+    -- its own, over the top of whatever you were looking at.
+    --
+    -- Through `open` with a callback rather than `surface` then `select`.
+    -- With no chat yet, `surface` defers to an `open` of its own and reaches
+    -- the float only once the daemon has answered -- so a `select` written
+    -- after it races that answer and, against a real daemon rather than a
+    -- synchronous stub, asks for a tab on a surface that is not up yet.
+    -- `select` is a no-op then, and you arrive at Chat.
+    require("paseo.ui.chat").open({ surface = "float" }, function(chat)
+      if chat then
+        require("paseo.ui.float").select "Sessions"
+      end
+    end)
   end,
 }
 
--- The old name. It used to mean "the tab listing them", and that tab is gone:
--- the list is on the Agents & terminals tab now and terminals also have their
--- own focused surface.
--- Kept because the help tag is published.
+-- The old name. It used to mean "the tab listing them"; the list is on the
+-- Sessions tab and this lands there too. Kept because the help tag is
+-- published.
 commands.terminals = commands.term
 
 commands.chat = {
@@ -256,6 +270,13 @@ commands.dash = {
     -- the dashboard, and with the dashboard already the default surface a
     -- toggle would have answered by closing it.
     require("paseo.ui.chat").surface "float"
+  end,
+}
+
+commands.stop = {
+  desc = "Interrupt the turn the current chat's agent is running",
+  run = function()
+    require("paseo.ui.chat").stop()
   end,
 }
 
@@ -353,8 +374,11 @@ commands.model = {
   end,
 }
 
+-- `agent stop` shuts down the SIDECAR PROCESS. It reads like it stops an
+-- agent, and now that `:Paseo stop` interrupts a turn the difference is worth
+-- spelling out in the one place you would look for it.
 commands.agent = {
-  desc = "Sidecar status; `agent stop` shuts it down",
+  desc = "Sidecar status; `agent stop` shuts the sidecar down (`:Paseo stop` is the turn)",
   run = function(args)
     local b = require "paseo.bridge"
     if args[1] == "stop" then

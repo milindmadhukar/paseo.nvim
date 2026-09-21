@@ -1,9 +1,7 @@
 --- `:checkhealth paseo`
 ---
---- Split into hard requirements (the review layer), and the Paseo backend
---- (which degrades to the `local` backend rather than breaking anything).
-
-local config = require "paseo.config"
+--- Split into hard requirements (the review layer), which work with nothing
+--- running, and the daemon the agent half needs.
 
 local M = {}
 
@@ -117,13 +115,8 @@ local function check_core()
 end
 
 local function check_paseo()
-  local cfg = config.get()
   local daemon = require "paseo.daemon"
-  start "paseo.nvim: Paseo backend"
-
-  if cfg.backend ~= "paseo" then
-    info(('backend is "%s"; the Paseo checks below are informational'):format(cfg.backend))
-  end
+  start "paseo.nvim: the Paseo daemon"
 
   -- WHICH `paseo` is on PATH matters, and it is worth reporting.
   --
@@ -232,6 +225,40 @@ local function check_images()
   end
 end
 
+---Whether anything on this machine can hold a microphone open.
+---
+---Reported for the same reason the image readers are: the failure is a key
+---that appears to do nothing, and the fix is one package away but only if you
+---know which.
+local function check_voice()
+  start "paseo.nvim: dictation"
+
+  local voice = require("paseo.config").get().voice or {}
+  if voice.enabled == false then
+    info "disabled (voice.enabled = false)"
+    return
+  end
+
+  local recorder, why = require("paseo.voice").recorder()
+  if recorder then
+    ok(
+      ("%s at %dHz, on %s"):format(
+        table.concat(recorder.cmd, " "),
+        voice.rate or 16000,
+        voice.key or "(no key bound)"
+      )
+    )
+  else
+    warn(why or "no recorder")
+  end
+
+  -- The daemon has to be able to transcribe, and that is a separate thing from
+  -- having a microphone: it answers `dictation_stream_error` with a reason --
+  -- models not downloaded, most often -- and nothing here can find that out
+  -- without opening a stream.
+  info "the daemon does the transcribing; if it has no speech model it says so when you press the key"
+end
+
 ---The bundled agent skills, and whether anything can see them.
 ---
 ---THIS SECTION IS THE POINT. The skills only load when an agent's cwd is
@@ -313,6 +340,7 @@ function M.check()
   check_core()
   check_paseo()
   check_images()
+  check_voice()
   check_skills()
 end
 

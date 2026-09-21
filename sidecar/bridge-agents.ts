@@ -370,6 +370,23 @@ export function agentOps(ctx: BridgeConnection): Ops {
       };
     },
 
+    /**
+     * Interrupt a running turn. A no-op for an idle agent.
+     *
+     * `cancelAgent` is on the raw DaemonClient; `PaseoAgentHandle` has no
+     * cancel in 0.8.0, so the typed API cannot express this at all. That is
+     * not a workaround -- `paseo agent stop` calls exactly this method, and
+     * so does the app's stop button.
+     *
+     * The result arrives as a `turn_canceled` on the timeline, which the Lua
+     * already listens for, so there is nothing to report back beyond having
+     * asked.
+     */
+    async "agent.cancel"(req) {
+      await ctx.raw().cancelAgent(String(need(req.agentId, "agentId")));
+      return { canceled: true };
+    },
+
     async "agent.archive"(req) {
       const agent = connected().agents.ref(
         String(need(req.agentId, "agentId")),

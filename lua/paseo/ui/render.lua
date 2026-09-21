@@ -129,6 +129,39 @@ function M.truncate(line, w)
   return out
 end
 
+-- ------------------------------------------------------------------ duration
+
+---An elapsed count, in the units a person thinks in.
+---
+---`1729s` is not a duration, it is arithmetic homework. Past a minute the
+---seconds have to be carried rather than accumulated, or the number stops
+---meaning anything at exactly the point the wait starts being worth measuring.
+---
+---Seconds are dropped at the hour mark. At that scale they are noise -- nobody
+---reading `2h 14m` is helped by the 37 -- and dropping them keeps the field
+---from growing a third segment that shifts everything beside it.
+---
+---   9        ->  9s
+---   64       ->  1m 4s
+---   1729     ->  28m 49s
+---   5077     ->  1h 24m
+---@param seconds integer|nil
+---@return string
+function M.duration(seconds)
+  if not seconds or seconds < 0 then
+    return "0s"
+  end
+  seconds = math.floor(seconds)
+
+  if seconds < 60 then
+    return ("%ds"):format(seconds)
+  end
+  if seconds < 3600 then
+    return ("%dm %ds"):format(math.floor(seconds / 60), seconds % 60)
+  end
+  return ("%dh %dm"):format(math.floor(seconds / 3600), math.floor((seconds % 3600) / 60))
+end
+
 -- -------------------------------------------------------------------- wrapping
 
 ---Split plain text into lines of cells, wrapped at `w` columns on word
@@ -232,9 +265,12 @@ function M.card(header, body, opts)
     end
 
     if kind == "rule" then
+      -- Inset past the text on the right, the same way `widgets.card`'s is:
+      -- a hairline that stops exactly where the content stops is a table
+      -- border rather than a divider. The accent bar already holds the left.
       lines[#lines + 1] = {
         vim.deepcopy(bar),
-        { string.rep(style.BOX.square.h, math.max(0, w - 3)), "PaseoCardRule" },
+        { string.rep(style.BOX.square.h, math.max(0, w - 5)), "PaseoCardRule" },
       }
     end
 

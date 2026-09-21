@@ -39,6 +39,7 @@ import { agentOps } from "./bridge-agents.ts";
 import { workspaceOps } from "./bridge-workspaces.ts";
 import { timelineOps } from "./bridge-timeline.ts";
 import { terminalOps } from "./bridge-terminals.ts";
+import { voiceOps } from "./bridge-voice.ts";
 
 const ctx = new BridgeConnection();
 const ops: Ops = {
@@ -46,6 +47,7 @@ const ops: Ops = {
   ...providerOps(ctx),
   ...agentOps(ctx),
   ...workspaceOps(ctx),
+  ...voiceOps(ctx),
   ...timelineOps(ctx),
   ...terminalOps(ctx),
 };
@@ -81,7 +83,14 @@ async function dispatch(req: Request): Promise<void> {
  * it reaches the front: it still cannot start before an earlier `connect`, but
  * it does not hold up everything behind it.
  */
-const CONCURRENT = new Set(["agent.run"]);
+// `dictation.finish` waits for the daemon to transcribe, with no deadline of
+// its own, and the microphone keeps feeding `dictation.chunk` while it does.
+// Neither may sit in front of a `timeline.history` or an `agent.send`.
+const CONCURRENT = new Set([
+  "agent.run",
+  "dictation.chunk",
+  "dictation.finish",
+]);
 let queue: Promise<void> = Promise.resolve();
 
 function handle(line: string): void {

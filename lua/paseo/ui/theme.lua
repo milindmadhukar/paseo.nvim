@@ -186,6 +186,48 @@ function M.readable(fg, bg, target)
   return best
 end
 
+---The palette used when `ui.colors` is `"fixed"`: the plugin's own, owing
+---nothing to whatever colourscheme is loaded.
+---
+---Deriving from the colourscheme is right by default -- a plugin that ignores
+---your theme looks pasted in -- but it is a default, not a law. A theme whose
+---`Function` colour is a shade the dashboard reads badly in, or one that
+---simply is not what you want the agent surfaces to look like, has no way out
+---of derivation except this.
+---
+---Both variants are the One Dark / One Light families: widely recognised,
+---measured rather than guessed, and legible at every contrast this file goes
+---on to check. They are a STARTING palette, not a finished theme -- the
+---elevation ladder, the accent ramps and the contrast corrections all still
+---run on top, so `ui.palette` naming two colours still gets a coherent set.
+M.FIXED = {
+  dark = {
+    red = "#e06c75",
+    green = "#98c379",
+    blue = "#61afef",
+    yellow = "#e5c07b",
+    grey = "#7f8490",
+    border = "#4b5263",
+    text = "#c5cdd9",
+    bg = "#1e222a",
+  },
+  light = {
+    red = "#ca1243",
+    green = "#50a14f",
+    blue = "#4078f2",
+    yellow = "#c18401",
+    grey = "#a0a1a7",
+    border = "#c9c9c9",
+    text = "#383a42",
+    bg = "#fafafa",
+  },
+}
+
+---The eight roles `ui.palette` may name. Anything else in that table is
+---ignored rather than carried, so a typo cannot reach the renderer as a nil
+---colour that silently disables a whole tier.
+M.ROLES = { "red", "green", "blue", "yellow", "grey", "border", "text", "bg" }
+
 ---Volt's palette, or a usable stand-in.
 ---
 ---`require "volt.highlights"` is a SIDE-EFFECTING module: requiring it defines
@@ -193,7 +235,7 @@ end
 ---where volt is not on the runtimepath -- the fallbacks below are ordinary
 ---Neovim groups that always exist.
 ---@return paseo.Theme.Palette
-function M.palette()
+local function from_colourscheme()
   pcall(require, "volt.highlights")
 
   -- `Normal` first, not `NormalFloat`. The dashboard covers most of the screen
@@ -202,7 +244,18 @@ function M.palette()
   -- themes make markedly greyer -- `morning` links `NormalFloat` to `Pmenu` at
   -- #b2b2b2 against a #e4e4e4 editor, and deriving from that put a grey slab
   -- over a white screen.
-  local bg = bg_of "Normal" or bg_of "NormalFloat"
+  --
+  -- A THEME MAY STATE NO BACKGROUND AT ALL. `morning` does: it sets `Normal`'s
+  -- foreground and leaves the background to the terminal. Everything derived
+  -- by blending towards the background then comes back nil, and each of those
+  -- falls through to a fallback picked for its HUE rather than its
+  -- neutrality -- `PaseoTrack` landed on `LineNr`, which on `morning` is
+  -- brown, so the EMPTY half of every bar was drawn in a saturated red and a
+  -- bar at 3% read as a bar at 97%. Assuming the obvious background is both
+  -- right and the only thing that keeps those derivations neutral.
+  local bg = bg_of "Normal"
+    or bg_of "NormalFloat"
+    or (vim.o.background == "light" and "#ffffff" or "#000000")
   local text = fg_of "Normal"
 
   -- volt's `Ex*` groups are only trustworthy when base46 is: its OTHER path
@@ -258,6 +311,45 @@ function M.palette()
     text = text,
     bg = bg,
   }
+end
+
+---The base colours, from whichever source `ui.colors` names, with anything
+---`ui.palette` states laid on top.
+---
+---THREE levels, and they are different questions:
+---
+---   ui.colors   where the eight base colours come from -- the colourscheme
+---               ("auto", the default) or the plugin's own ("fixed").
+---   ui.palette  those eight colours, by name. Everything below still runs:
+---               naming `bg` and `blue` alone gets a full elevation ladder and
+---               four accent ramps built from them.
+---   ui.theme    finished highlight groups, laid over the derived ones by
+---               `ui/hl.lua`. The escape hatch for one group in particular.
+---
+---`ui.palette` is applied to BOTH sources, so it is a correction to a theme
+---that got one colour wrong as readily as it is a whole palette on top of
+---"fixed". That is the difference between this and `ui.theme`: a colour set
+---here is a token the widgets read, and it reaches every group derived from
+---it rather than the one group you happened to name.
+---@return paseo.Theme.Palette
+function M.palette()
+  local ui = require("paseo.config").get().ui
+
+  local base
+  if ui.colors == "fixed" then
+    base = vim.deepcopy(M.FIXED[vim.o.bg == "light" and "light" or "dark"])
+  else
+    base = from_colourscheme()
+  end
+
+  local chosen = type(ui.palette) == "table" and ui.palette or {}
+  for _, role in ipairs(M.ROLES) do
+    if type(chosen[role]) == "string" then
+      base[role] = chosen[role]
+    end
+  end
+
+  return base
 end
 
 ---How saturated a colour is, 0 (grey) to 1.
@@ -504,7 +596,15 @@ function M.groups(t)
     -- the comment colour, because a track is the absence of fill and has to
     -- read as such -- on `morning`, a comment-derived track came out pale blue
     -- and the bar looked full at 42%.
-    PaseoTrack = { fg = bg.bg4 or M.blend(c.grey, c.bg, 70) or c.border },
+    -- ...and never `c.border` as a last resort, whatever happens above: a
+    -- track is the absence of fill and has to read as such, while `border` is
+    -- whatever hue the theme gave `LineNr`.
+    PaseoTrack = {
+      fg = bg.bg4
+        or M.blend(c.grey, c.bg, 70)
+        or M.shift(c.bg, vim.o.bg == "dark" and 12 or -12)
+        or c.grey,
+    },
   }
 
   -- Identity swatches: one per hue, legible on the surface they are drawn on.
@@ -531,8 +631,32 @@ function M.groups(t)
     -- surface's own colour instead of a drawn box.
     groups.PaseoNormalBorder = { fg = bg.bg1, bg = bg.bg1 }
 
+    -- The same ring, for the styles that draw a REAL edge on it.
+    --
+    -- `PaseoBorder` was used here and has no background, so the border glyphs
+    -- rendered on the EDITOR's background rather than on the sheet -- which
+    -- cost the framed styles the one cell of padding the unframed ones get,
+    -- and made the frame read as a hairline pasted onto the editor instead of
+    -- as the edge of a raised surface. Same glyphs, same colour, on the right
+    -- background.
+    groups.PaseoSurfaceBorder = { fg = M.blend(c.border, bg.bg1, 25) or c.border, bg = bg.bg1 }
+
     groups.PaseoCard = { bg = bg.bg2 }
     groups.PaseoCardBorder = { fg = bg.bg2, bg = bg.bg2 }
+
+    -- The composer, which is a CONTROL and not a card, and has to look like
+    -- one. Painted fg == bg like a card border it was a ring of padding, which
+    -- left the whole box one flat slab of card colour -- the largest and
+    -- emptiest shape on the screen, with no edge and nothing saying you could
+    -- type in it. A drawn rule, a prompt chevron in the top border and the
+    -- send keys in the bottom one is the same box reading as a field.
+    --
+    -- Its own groups rather than the card's, so `ui.theme` can move the
+    -- composer without moving every card with it.
+    groups.PaseoComposerBorder = { fg = M.blend(c.border, bg.bg2, 30) or c.border, bg = bg.bg2 }
+    groups.PaseoComposerLabel = { fg = ink(c.blue, bg.bg2), bg = bg.bg2, bold = true }
+    groups.PaseoComposerHint = { fg = M.blend(c.grey, bg.bg2, 30) or c.grey, bg = bg.bg2 }
+    groups.PaseoComposerKey = { fg = ink(c.yellow, bg.bg2), bg = bg.bg2 }
     groups.PaseoCardRule = { fg = M.blend(c.border, bg.bg2, 45) or c.border, bg = bg.bg2 }
     groups.PaseoCardTitle = { fg = ink(c.blue, bg.bg2), bg = bg.bg2, bold = true }
     groups.PaseoCardDim = { fg = c.grey, bg = bg.bg2 }
@@ -588,8 +712,17 @@ function M.groups(t)
     -- does on the same constraint.
     groups.PaseoNormal = {}
     groups.PaseoNormalBorder = { fg = c.border }
+    groups.PaseoSurfaceBorder = { fg = c.border }
     groups.PaseoCard = {}
     groups.PaseoCardBorder = { fg = c.border }
+
+    -- On a transparent theme the composer has no plate to be raised off, so
+    -- the drawn edge is the ONLY thing separating it from the transcript --
+    -- which makes it more load-bearing here, not less.
+    groups.PaseoComposerBorder = { fg = c.border }
+    groups.PaseoComposerLabel = { fg = c.blue, bold = true }
+    groups.PaseoComposerHint = { fg = c.grey }
+    groups.PaseoComposerKey = { fg = c.yellow }
     groups.PaseoCardRule = { fg = c.border }
     groups.PaseoCardTitle = { fg = c.blue, bold = true }
     groups.PaseoCardDim = { fg = c.grey }

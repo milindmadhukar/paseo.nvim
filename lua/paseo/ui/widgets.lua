@@ -3,7 +3,7 @@
 --- `render.lua` gives us a LINE -- a list of `{ text, highlight, click }`
 --- cells. That is the alphabet. This is the vocabulary built on top of it, and
 --- it exists because every panel had been spelling the same words out by hand:
---- `active and "  ● " or "  ○ "` in `panels/session.lua`, `mine and "  ▌ " or
+--- `active and "  ● " or "  ○ "` in `panels/settings.lua`, `mine and "  ▌ " or
 --- "    "` in two more, `string.rep("─", width - 2)` in a fourth, and the same
 --- footer hint row copied verbatim into five files.
 ---
@@ -169,8 +169,13 @@ function M.card(opts)
   lines[#lines + 1] = header
 
   if kind == "rule" then
+    -- INSET by two, not by one. At one cell the hairline starts exactly where
+    -- the content starts and ends exactly where it ends, which is a table
+    -- border -- the thing the style's own docstring says it is not. Pulling it
+    -- in past the text on both sides is what makes the same glyph read as a
+    -- divider under a heading.
     lines[#lines + 1] = {
-      { " " .. string.rep(style.BOX.square.h, math.max(0, w - 2)) .. " ", rule },
+      { "  " .. string.rep(style.BOX.square.h, math.max(0, w - 4)) .. "  ", rule },
     }
   end
 
@@ -200,10 +205,15 @@ end
 ---@param h integer
 ---@param w integer  The card's width.
 ---@param rule? string
+---@param kind? string  The style the card was BUILT with. Defaults to the live
+---                 one, which is right for every current caller -- but a card
+---                 built with an explicit `opts.kind` and then grown would
+---                 otherwise get filler rows in a different shape from its own
+---                 sides, which draws as a box with a gap punched in it.
 ---@return table[][]
-function M.card_to_height(lines, h, w, rule)
+function M.card_to_height(lines, h, w, rule, kind)
   rule = rule or "PaseoCardRule"
-  local box = style.BOX[style.get().card]
+  local box = style.BOX[kind or style.get().card]
 
   while #lines < h do
     -- Inserted one from the end, so the filler lands INSIDE the card: above
@@ -328,15 +338,30 @@ end
 ---tabs.
 ---@param pairs_ table[]  `{ { "h l", "move" }, … }`
 ---@param hl? string  Background for the gaps, when drawn inside a card.
+---@param w? integer  Stop before overflowing this many columns.
 ---@return table[]
-function M.hints(pairs_, hl)
+function M.hints(pairs_, hl, w)
   local line = {}
   for i, pair in ipairs(pairs_) do
+    local part = {}
     if i > 1 then
-      line[#line + 1] = { "   ", hl }
+      part[#part + 1] = { "   ", hl }
     end
-    line[#line + 1] = M.keycap(pair[1])
-    line[#line + 1] = { " " .. pair[2], hl or "PaseoDim" }
+    part[#part + 1] = M.keycap(pair[1])
+    part[#part + 1] = { " " .. pair[2], hl or "PaseoDim" }
+
+    -- DEGRADES RATHER THAN TRUNCATES, the way the tab bar does, and for the
+    -- same reason: the hint that falls off the end is the least important
+    -- one, whereas a bar cut to fit loses whichever end the renderer happens
+    -- to cut -- in the sidebar's winbar that is the LEFT, so the first thing
+    -- to go was how to send.
+    if w then
+      local after = M.line_w(line) + M.line_w(part)
+      if after > w then
+        break
+      end
+    end
+    vim.list_extend(line, part)
   end
   return line
 end
@@ -580,15 +605,32 @@ end
 ---Hover and keyboard focus deliberately paint the SAME -- pointing at a row
 ---and moving to it are the same state, and showing them differently invites
 ---the reading that they mean different things.
+---
+---ACTIVE IS A DIFFERENT AXIS and a weaker claim: "this is the session you are
+---in", which is true of a row whether or not you are anywhere near it. It used
+---to WIN over hover, so the one row you were most likely to point at was the
+---one row that could not light up -- and, with focus now on the same group as
+---hover, it would have swallowed the focus ring too. Focus answers "what will
+---`<CR>` do", which is the more urgent question, so focus and hover win and
+---active falls back. Active is still legible while focused elsewhere: it is a
+---tier apart in the elevation ladder, and every list that draws it also draws
+---a `▌` in the gutter, which survives `fill_row` because it is a cell.
+---
+---The second argument takes a boolean for the old "active" spelling, so the
+---callers that mean only that need not all change at once.
 ---@param id string
----@param active? boolean
+---@param state? boolean|{ focused?: boolean, active?: boolean }
 ---@return string|nil
-function M.row_hl(id, active)
-  if active then
-    return "PaseoRowActive"
+function M.row_hl(id, state)
+  if type(state) == "boolean" then
+    state = { active = state }
   end
-  if M.hovered(id) then
+  state = state or {}
+  if state.focused or M.hovered(id) then
     return "PaseoRowHover"
+  end
+  if state.active then
+    return "PaseoRowActive"
   end
   return nil
 end

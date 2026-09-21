@@ -14,7 +14,7 @@
 --- repo and WHICH SIBLINGS are shared context rather than junk that happens to
 --- sit in the directory. Both are one keypress here.
 ---
---- It is |paseo.ui.panels.session|'s view over a draft, the way the new-agent
+--- It is |paseo.ui.panels.settings|'s view over a draft, the way the new-session
 --- screen is -- same cards, same focus model, same footer. A second renderer of
 --- "a list of things with a state each" is how the two drift.
 ---
@@ -451,7 +451,7 @@ end
 ---@param opts { root: string, manifest?: paseo.ws.Manifest, notes?: table[] }
 ---@param callback fun(m: paseo.ws.Manifest|nil, notes: table[]|nil)
 function M.review(opts, callback)
-  local panel = require "paseo.ui.panels.session"
+  local panel = require "paseo.ui.panels.settings"
   local popup = require "paseo.ui.popup"
   local render = require "paseo.ui.render"
   local widgets = require "paseo.ui.widgets"

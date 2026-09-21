@@ -5,7 +5,7 @@
 --- never recomputes it on redraw. A section that grows or shrinks mid-flight
 --- therefore draws every section BELOW it at the wrong row, and the failure
 --- mode is an `Invalid 'line': out of range` thrown from inside `vim.on_key`.
---- `panels/session.lua` already reserves a description row for exactly this
+--- `panels/settings.lua` already reserves a description row for exactly this
 --- reason.
 ---
 --- So nothing in this file changes a height. A tween moves a number inside a

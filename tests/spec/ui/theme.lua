@@ -153,7 +153,16 @@ local function test_theme()
         ("%s at %.2f"):format(c.grey, theme.saturation(c.grey))
       )
 
-      -- 3. "Green" has to be green. Sourcing it from `String` meant that on
+      -- 3. THE BACKGROUND IS NEVER UNKNOWN. `morning` states `Normal`'s
+      -- foreground and leaves the background to the terminal, so `bg_of`
+      -- came back nil -- and every colour derived by blending towards the
+      -- background came back nil with it, falling through to a fallback
+      -- picked for its HUE rather than its neutrality. That is how the EMPTY
+      -- half of a bar ended up drawn in `LineNr`'s brown: a quota bar at 3%
+      -- read as a quota bar at 97%.
+      truthy("ui: the background is known on " .. scheme, c.bg ~= nil)
+
+      -- 4. "Green" has to be green. Sourcing it from `String` meant that on
       -- `morning` a tool that SUCCEEDED was drawn in magenta -- the colour of
       -- a string literal, which is not a shade of "it worked". `Added` means
       -- what we mean; `String` only happens to.
@@ -169,11 +178,57 @@ local function test_theme()
     pcall(vim.cmd.colorscheme, scheme_before)
   end
 
+  -- The box is the size of what is in it, up to a ceiling. Pure, so it needs
+  -- no window: the buffer path is the one both surfaces fall back to before
+  -- their window exists.
+  local layout = require "paseo.ui.layout"
+  local fitted = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(fitted, 0, -1, false, { "one", "two", "three", "four" })
+  eq("ui: a draft sizes the box to itself", layout.composer_rows { buf = fitted, max = 12 }, 4)
+  eq("ui: a long one stops at the ceiling", layout.composer_rows { buf = fitted, max = 2 }, 2)
+  eq(
+    "ui: and an empty one is a single row, never nothing",
+    layout.composer_rows { buf = vim.api.nvim_create_buf(false, true), max = 12 },
+    1
+  )
+  -- Wrapping counts. Before a window exists the width it is ABOUT to have is
+  -- the only thing to measure against, and a box that said "1" while holding
+  -- three rows of text is a box you type into blind.
+  vim.api.nvim_buf_set_lines(fitted, 0, -1, false, { ("x"):rep(30) })
+  eq(
+    "ui: a wrapped line counts as the rows it occupies",
+    layout.composer_rows { buf = fitted, width = 10, max = 12 },
+    3
+  )
+  vim.api.nvim_buf_delete(fitted, { force = true })
+
   -- A bar's track is the ABSENCE of fill, so it is derived from the background
   -- rather than from the comment colour. On `morning` a comment-derived track
   -- came out pale blue and a 42% bar looked full.
-  local track = vim.api.nvim_get_hl(0, { name = "PaseoTrack" })
-  truthy("ui: the bar track is defined", track.fg ~= nil)
+  --
+  -- Checked against every scheme, and for NEUTRALITY rather than mere
+  -- existence: a track is only honest if it reads as empty, and a saturated
+  -- one reads as fill. This is the assertion that would have caught the
+  -- brown track on `morning`.
+  for _, scheme in ipairs { "habamax", "morning", "default", "desert" } do
+    if pcall(vim.cmd.colorscheme, scheme) then
+      require("paseo.ui.hl").setup()
+      local track = vim.api.nvim_get_hl(0, { name = "PaseoTrack", link = false })
+      truthy("ui: the bar track is defined on " .. scheme, track.fg ~= nil)
+      if track.fg then
+        local hex = ("#%06x"):format(track.fg)
+        truthy(
+          "ui: and reads as empty rather than as fill on " .. scheme,
+          theme.saturation(hex) <= theme.MAX_CHROME_SATURATION,
+          ("%s at %.2f"):format(hex, theme.saturation(hex))
+        )
+      end
+    end
+  end
+  if scheme_before then
+    pcall(vim.cmd.colorscheme, scheme_before)
+    require("paseo.ui.hl").setup()
+  end
 end
 
 local function test_layout()
@@ -186,28 +241,70 @@ local function test_layout()
   local layout = require "paseo.ui.layout"
   for _, height in ipairs { 24, 40, 60 } do
     local rows = layout.rows(height)
-    eq("ui: the body gets height - 4 rows at " .. height, rows.body_height, height - 4)
+    eq("ui: the body gets height - 5 rows at " .. height, rows.body_height, height - 5)
     eq("ui: the footer owns the last row at " .. height, rows.footer, height)
     eq("ui: the body ends above it at " .. height, rows.body_last, height - 1)
 
-    local g = { row = 2, col = 3, width = 100, height = height, composer = 7 }
+    -- BORDERED, which every `ui.style` but `border = "none"` is. That matters
+    -- and is where an off-by-one lived: `nvim_open_win` is handed the BORDER's
+    -- row, not the content's, so chrome buffer line 1 is at `g.row + 1`. The
+    -- panes were floated a row too high for as long as the row they covered
+    -- was blank; the session strip put content there and it became visible as
+    -- a strip you could see the last three columns of.
+    local g = { row = 2, col = 3, width = 100, height = height, composer = 7, border = true }
     local panes = layout.panes(g)
-    eq("ui: the panes start below the rule at " .. height, panes.top, g.row + 3)
+    eq("ui: the panes start below the strip at " .. height, panes.top, g.row + 5)
+    eq(
+      "ui: and the strip is the row above them at " .. height,
+      layout.screen_row(g, rows.strip),
+      panes.top - 1
+    )
+
+    -- Unbordered, the content starts where it was asked to.
+    local flat = vim.tbl_extend("force", g, { border = false })
+    eq(
+      "ui: without a border there is no row to skip at " .. height,
+      layout.panes(flat).top,
+      g.row + 4
+    )
+
+    -- A terminal session has no composer and gets the body outright. Same
+    -- left edge and same width as the conversation, so switching session kind
+    -- does not shift the frame under you.
+    eq(
+      "ui: the body pane is the whole panel area at " .. height,
+      panes.body.height,
+      rows.body_height
+    )
+    eq("ui: and shares the conversation's left edge at " .. height, panes.body.col, panes.col)
+    eq("ui: and its width at " .. height, panes.body.width, panes.width)
     -- The composer's bottom border lands ON the last body row, never on the
     -- footer.
+    -- The composer is bordered too, so it costs `composer + 2` rows and its
+    -- BOTTOM BORDER is at `row + composer + 1`. That border belongs on the
+    -- last body row; a row lower is the footer, which is the row that says
+    -- which keys the surface has.
     eq(
       "ui: the composer's border lands on the last body row at " .. height,
-      panes.composer_row + panes.composer,
+      panes.composer_row + panes.composer + 1,
       layout.screen_row(g, rows.body_last)
+    )
+    truthy(
+      "ui: so the footer is never covered at " .. height,
+      panes.composer_row + panes.composer + 1 < layout.screen_row(g, rows.footer)
     )
   end
 
-  -- Two rows of chrome plus the panel's own heading. `item_at` returns nil
-  -- above the list rather than a zero or a negative, so a click on the heading
-  -- is "nothing", not "the item before the first one".
-  eq("ui: a cursor row maps to a list index", layout.item_at(8, 2), 3)
-  eq("ui: the first item is index 1", layout.item_at(6, 2), 1)
-  eq("ui: above the list is nothing", layout.item_at(4, 2), nil)
+  -- The chrome's height is the sum of its named parts, not a literal. That is
+  -- the file's whole argument, and adding the session strip is what made the
+  -- difference matter: with a literal it is "find every 3 and hope".
+  local parts = layout.PARTS
+  eq(
+    "ui: the chrome above the body is its parts",
+    layout.CHROME.above,
+    parts.header + parts.tabs + parts.rule + parts.strip
+  )
+  eq("ui: and below it is the footer", layout.CHROME.below, parts.footer)
 end
 
 local function test_animate()

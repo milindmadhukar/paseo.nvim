@@ -130,7 +130,7 @@ end
 ---@param callback fun(draft: table|nil, err: string|nil)
 function M.review(opts, callback)
   local draft_model = require "paseo.ui.draft"
-  local panel = require "paseo.ui.panels.session"
+  local panel = require "paseo.ui.panels.settings"
   local popup = require "paseo.ui.popup"
   local render = require "paseo.ui.render"
   local widgets = require "paseo.ui.widgets"

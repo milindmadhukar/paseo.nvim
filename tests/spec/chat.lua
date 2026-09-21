@@ -153,6 +153,49 @@ local function test_chat_follow()
       end)
     )
 
+    -- THE REPORTED BUG, in the shape it was actually hit: switch FIRST, open
+    -- the chat SECOND, with a file from the workspace you left still the
+    -- current buffer.
+    --
+    -- `follow` deliberately does nothing when no chat is on screen, so the
+    -- whole answer comes from how `chat.open {}` resolves "here" -- and it
+    -- used to resolve it from `ref.file()`, the git toplevel of the BUFFER.
+    -- With `workspaces.open = "tcd"` the switch reuses the tab, so that buffer
+    -- is still the old worktree's file and the chat opened on the workspace
+    -- you had just left.
+    chat.close()
+    chat.forget()
+    config.setup { workspaces = { open = "tcd" } }
+
+    -- A real file, in a real repo, in the workspace we are about to leave.
+    vim.fn.system { "git", "-C", here, "init", "-q" }
+    local stale = here .. "/stale.txt"
+    vim.fn.writefile({ "left open behind us" }, stale)
+    vim.cmd.edit(vim.fn.fnameescape(stale))
+    eq("follow: the old workspace's file is the current buffer", vim.fn.expand "%:p", stale)
+
+    workspaces.open { directory = there, name = "there" }
+    eq("follow: and the switch moved the editor", vim.fn.getcwd(), there)
+    truthy(
+      "follow: the old workspace's file is STILL the current buffer",
+      vim.fn.expand "%:p" == stale
+    )
+
+    chat.toggle()
+    truthy(
+      "follow: opening the chat after a switch lands on the new workspace",
+      vim.wait(1000, function()
+        return chat.current() ~= nil and chat.current().root == there
+      end)
+    )
+    eq(
+      "follow: and on that workspace's agent, not the one we left",
+      chat.current().agent_id,
+      "agent-" .. vim.fs.basename(there)
+    )
+    chat.close()
+    vim.cmd "silent! bwipeout!"
+
     -- A handler that opens its own window is on its own: we did not move, so
     -- neither does the chat.
     chat.open { root = here }
@@ -244,7 +287,64 @@ local function test_follow()
   vim.api.nvim_buf_delete(buf, { force = true })
 end
 
+--- Stopping a turn.
+---
+--- The plugin had no way to do this at all. The only interrupt it owned was
+--- the permission dialog's "decline AND stop the turn", which is reachable
+--- only while something is waiting to be answered -- so a turn that had gone
+--- off on its own could be watched and not halted.
+local function test_stop()
+  local bridge = require "paseo.bridge"
+  local chat = require "paseo.ui.chat"
+
+  local old_request = bridge.request
+  local asked = {}
+  bridge.request = function(op, args, callback)
+    asked[#asked + 1] = { op = op, agentId = args and args.agentId }
+    if callback then
+      callback(nil, { canceled = true })
+    end
+  end
+
+  local buf = vim.api.nvim_create_buf(false, true)
+  local session = {
+    agent_id = "a1",
+    conversation = buf,
+    streaming = true,
+    root = vim.uv.cwd(),
+    pending = {},
+  }
+  require("paseo.ui.transcript").reset(session)
+
+  chat.stop(session)
+  eq("stop: the daemon is asked to cancel", asked[1] and asked[1].op, "agent.cancel")
+  eq("stop: for this chat's agent", asked[1] and asked[1].agentId, "a1")
+  -- Optimistic, and it has to be: the header is the only thing saying a turn
+  -- is running, and leaving the spinner going until the daemon says otherwise
+  -- reads as the key not having worked.
+  eq("stop: and the header stops spinning straight away", session.streaming, false)
+  truthy(
+    "stop: with a line in the transcript saying so",
+    table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n"):find("stopped", 1, true)
+      ~= nil
+  )
+
+  -- Nothing running is a no-op, never an error: `<C-c>` is a reflex, and being
+  -- told off for stopping something already stopped is noise.
+  asked = {}
+  chat.stop(session)
+  eq("stop: an idle agent is left alone", #asked, 0)
+
+  local agentless = { conversation = buf, streaming = true, pending = {} }
+  chat.stop(agentless)
+  eq("stop: and so is a chat with no agent yet", #asked, 0)
+
+  bridge.request = old_request
+  vim.api.nvim_buf_delete(buf, { force = true })
+end
+
 return {
   { "chat follows", test_chat_follow },
   { "follow", test_follow },
+  { "stop", test_stop },
 }
