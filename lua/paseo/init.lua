@@ -234,8 +234,18 @@ commands.term = {
     -- Sessions tab lists the agents and the PTYs together, and opening either
     -- shows it on the Chat tab. This used to open a rail-and-pane window of
     -- its own, over the top of whatever you were looking at.
-    require("paseo.ui.chat").surface "float"
-    require("paseo.ui.float").select "Sessions"
+    --
+    -- Through `open` with a callback rather than `surface` then `select`.
+    -- With no chat yet, `surface` defers to an `open` of its own and reaches
+    -- the float only once the daemon has answered -- so a `select` written
+    -- after it races that answer and, against a real daemon rather than a
+    -- synchronous stub, asks for a tab on a surface that is not up yet.
+    -- `select` is a no-op then, and you arrive at Chat.
+    require("paseo.ui.chat").open({ surface = "float" }, function(chat)
+      if chat then
+        require("paseo.ui.float").select "Sessions"
+      end
+    end)
   end,
 }
 

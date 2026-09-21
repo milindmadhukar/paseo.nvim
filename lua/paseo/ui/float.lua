@@ -79,6 +79,11 @@ local function geometry()
   return {
     width = w,
     height = h,
+    -- Whether the chrome window has a frame, which decides where its first
+    -- CONTENT row is -- `nvim_open_win` is handed the border's row, not the
+    -- content's. |paseo.ui.layout|.screen_row is the one place that matters,
+    -- and everything floated over the body is positioned through it.
+    border = select(1, style.window_border()) ~= "none",
     row = math.max(0, math.min(row, lines - h)),
     col = math.max(0, math.min(col, columns - w)),
     composer = composer,

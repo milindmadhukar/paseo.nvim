@@ -65,13 +65,24 @@ end
 
 ---The screen row a 1-based BUFFER row of the chrome sits on.
 ---
----`g.row` is the chrome's first CONTENT row -- its border is drawn outside the
----window -- so buffer line 1 is at `g.row`, not at `g.row + 1`.
+---`g.row` is what `nvim_open_win` was HANDED, and for a bordered window that
+---is the border's own row -- the frame is drawn from there and the first
+---content row is one below it. So buffer line 1 sits at `g.row + 1` whenever
+---the chrome has a border, which is every `ui.style` except `border = "none"`.
+---
+---This was off by one, and invisible for as long as the first row the panes
+---covered was a row with nothing on it. `body_first` was 4, this answered
+---`g.row + 3`, and the conversation was floated one row too high -- over the
+---first line of the body, which on the Chat tab is blank by construction. The
+---session strip put real content there and the bug became a strip you could
+---only see the last three columns of.
+---
+---`g.border` says which: the caller knows what it opened the window with.
 ---@param g table
 ---@param row integer
 ---@return integer
 function M.screen_row(g, row)
-  return g.row + row - 1
+  return g.row + (g.border and 1 or 0) + row - 1
 end
 
 ---Screen geometry for the panes floated over the body.
@@ -87,11 +98,13 @@ function M.panes(g)
   local top = M.screen_row(g, rows.body_first)
   local composer_h = g.composer
 
-  -- The composer is bordered, so its bottom border sits one row BELOW its last
-  -- content row. Putting that border on the last body row -- rather than a row
-  -- further down, where the footer is -- means the composer's content starts
-  -- `composer_h` rows above it.
-  local composer_row = M.screen_row(g, rows.body_last) - composer_h
+  -- The composer is BORDERED, and `nvim_open_win` is handed the border's row,
+  -- not the content's -- so the window costs `composer_h + 2` rows and its
+  -- bottom border sits at `row + composer_h + 1`. Putting that border on the
+  -- last body row, rather than a row further down where the footer is, is what
+  -- the `- 1` buys: without it the composer covers the footer, which is the
+  -- row that says which keys the surface has.
+  local composer_row = M.screen_row(g, rows.body_last) - composer_h - 1
 
   local col, width = g.col + 2, g.width - 4
   return {

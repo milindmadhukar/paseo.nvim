@@ -190,9 +190,28 @@ local function test_layout()
     eq("ui: the footer owns the last row at " .. height, rows.footer, height)
     eq("ui: the body ends above it at " .. height, rows.body_last, height - 1)
 
-    local g = { row = 2, col = 3, width = 100, height = height, composer = 7 }
+    -- BORDERED, which every `ui.style` but `border = "none"` is. That matters
+    -- and is where an off-by-one lived: `nvim_open_win` is handed the BORDER's
+    -- row, not the content's, so chrome buffer line 1 is at `g.row + 1`. The
+    -- panes were floated a row too high for as long as the row they covered
+    -- was blank; the session strip put content there and it became visible as
+    -- a strip you could see the last three columns of.
+    local g = { row = 2, col = 3, width = 100, height = height, composer = 7, border = true }
     local panes = layout.panes(g)
-    eq("ui: the panes start below the strip at " .. height, panes.top, g.row + 4)
+    eq("ui: the panes start below the strip at " .. height, panes.top, g.row + 5)
+    eq(
+      "ui: and the strip is the row above them at " .. height,
+      layout.screen_row(g, rows.strip),
+      panes.top - 1
+    )
+
+    -- Unbordered, the content starts where it was asked to.
+    local flat = vim.tbl_extend("force", g, { border = false })
+    eq(
+      "ui: without a border there is no row to skip at " .. height,
+      layout.panes(flat).top,
+      g.row + 4
+    )
 
     -- A terminal session has no composer and gets the body outright. Same
     -- left edge and same width as the conversation, so switching session kind
@@ -206,10 +225,18 @@ local function test_layout()
     eq("ui: and its width at " .. height, panes.body.width, panes.width)
     -- The composer's bottom border lands ON the last body row, never on the
     -- footer.
+    -- The composer is bordered too, so it costs `composer + 2` rows and its
+    -- BOTTOM BORDER is at `row + composer + 1`. That border belongs on the
+    -- last body row; a row lower is the footer, which is the row that says
+    -- which keys the surface has.
     eq(
       "ui: the composer's border lands on the last body row at " .. height,
-      panes.composer_row + panes.composer,
+      panes.composer_row + panes.composer + 1,
       layout.screen_row(g, rows.body_last)
+    )
+    truthy(
+      "ui: so the footer is never covered at " .. height,
+      panes.composer_row + panes.composer + 1 < layout.screen_row(g, rows.footer)
     )
   end
 
