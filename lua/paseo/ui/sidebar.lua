@@ -185,6 +185,8 @@ function M.open(chat)
     { " send · ", "PaseoDim" },
     { "<C-f>", "PaseoKey" },
     { " full screen · ", "PaseoDim" },
+    { "<C-c>", "PaseoKey" },
+    { " stop · ", "PaseoDim" },
     { "q", "PaseoKey" },
     { " close", "PaseoDim" },
   }

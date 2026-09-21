@@ -377,6 +377,26 @@ test("a workspace carries its project id, and a project can be forgotten", async
   await assert.rejects(() => ops["project.remove"]({ op: "project.remove" }));
 });
 
+test("stopping a turn goes through the raw client, which is the only one that has it", async () => {
+  // `PaseoAgentHandle` has no cancel in 0.8.0 -- the typed API cannot express
+  // this at all -- so the op reaches for `ctx.raw()`. That is not a
+  // workaround: `paseo agent stop` calls exactly this method.
+  const canceled: string[] = [];
+  const ctx = new BridgeConnection();
+  ctx.raw = (() => ({
+    async cancelAgent(id: string) {
+      canceled.push(id);
+    },
+  })) as any;
+  const ops = agentOps(ctx);
+  assert.deepEqual(
+    await ops["agent.cancel"]({ op: "agent.cancel", agentId: "a1" }),
+    { canceled: true },
+  );
+  assert.deepEqual(canceled, ["a1"]);
+  await assert.rejects(() => ops["agent.cancel"]({ op: "agent.cancel" }));
+});
+
 test("a timeline item keeps its kind on the payload, not just in the event name", async () => {
   // THE BUG THAT MADE EVERY TOOL CARD INVISIBLE. `kind` is the event name the
   // Lua listens on AND the field its renderer dispatches on; emitting it as

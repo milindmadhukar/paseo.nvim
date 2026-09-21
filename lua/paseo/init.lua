@@ -75,8 +75,7 @@ commands.ws = {
           where = args[i]
         end
       end
-      local root = where and vim.fn.fnamemodify(vim.fn.expand(where), ":p")
-        or assert(vim.uv.cwd())
+      local root = where and vim.fn.fnamemodify(vim.fn.expand(where), ":p") or assert(vim.uv.cwd())
       root = root:gsub("/+$", "")
 
       local ui = require "paseo.ui.manifest"
@@ -256,6 +255,13 @@ commands.dash = {
   end,
 }
 
+commands.stop = {
+  desc = "Interrupt the turn the current chat's agent is running",
+  run = function()
+    require("paseo.ui.chat").stop()
+  end,
+}
+
 commands.sidebar = {
   desc = "Open the chat in the sidebar, beside your code",
   run = function()
@@ -347,8 +353,11 @@ commands.model = {
   end,
 }
 
+-- `agent stop` shuts down the SIDECAR PROCESS. It reads like it stops an
+-- agent, and now that `:Paseo stop` interrupts a turn the difference is worth
+-- spelling out in the one place you would look for it.
 commands.agent = {
-  desc = "Sidecar status; `agent stop` shuts it down",
+  desc = "Sidecar status; `agent stop` shuts the sidecar down (`:Paseo stop` is the turn)",
   run = function(args)
     local b = require "paseo.bridge"
     if args[1] == "stop" then
@@ -448,11 +457,7 @@ commands.skills = {
           action.reason and (" — " .. action.reason) or ""
         )
       end
-      return vim.notify(
-        table.concat(lines, "\n"),
-        vim.log.levels.INFO,
-        { title = "paseo: skills" }
-      )
+      return vim.notify(table.concat(lines, "\n"), vim.log.levels.INFO, { title = "paseo: skills" })
     end
 
     local lines, refused, backed_up = skills.apply(plan)
@@ -462,9 +467,7 @@ commands.skills = {
     end
     vim.notify(
       table.concat(lines, "\n"),
-      refused and vim.log.levels.ERROR
-        or backed_up and vim.log.levels.WARN
-        or vim.log.levels.INFO,
+      refused and vim.log.levels.ERROR or backed_up and vim.log.levels.WARN or vim.log.levels.INFO,
       { title = "paseo: skills" }
     )
   end,

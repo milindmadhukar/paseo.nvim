@@ -578,6 +578,13 @@ skills.method                                       `"link"`|`"copy"`, default `
     Put the chat in the sidebar, beside your code. The same conversation and
     the same draft; only the windows change.
 
+:Paseo stop                                                  *:Paseo-stop*
+
+    Interrupt the turn the current chat's agent is running. A no-op if it is
+    not running. `<C-c>` in the chat does the same. See |paseo-chat-stop|.
+
+    NOT `:Paseo agent stop`, which shuts down the sidecar process.
+
 :Paseo model [provider/model]                               *:Paseo-model*
 
     Set the preference for agents this plugin creates; this command creates
@@ -1345,7 +1352,11 @@ In the composer ~
     <M-1>..6  the same, without taking the count keys
     <Tab>     next tab, <S-Tab> the previous one
     <C-f>     switch surface
+    <C-c>     stop the turn -- normal or insert. See |paseo-chat-stop|
     q         close the chat
+
+The box is the size of what is in it: |paseo-config.ui.sidebar| `composer` is
+a ceiling it grows to, not a fixed height.
 
 In the conversation ~
 
@@ -1355,6 +1366,7 @@ In the conversation ~
     <M-1>..6  the same, without taking the count keys
     gp        reopen a pending permission prompt
     <C-f>     switch surface
+    <C-c>     stop the turn. See |paseo-chat-stop|
     q         close the chat
 
 On the Session tab ~
@@ -1375,6 +1387,25 @@ On the Sessions tab ~
 These are bound only while that tab is showing, and whatever they displaced
 is put back on the way out -- the six panels share one buffer, so a `<CR>`
 left bound here would try to apply a session setting from the Changes tab.
+
+                                                          *paseo-chat-stop*
+Stopping a turn ~
+
+`<C-c>`, or |:Paseo-stop|. One `cancelAgent` -- the same thing the app's stop
+button does and the same thing `paseo agent stop` does. Nothing local is torn
+down, because nothing local is what is running: the agent lives on the daemon
+and the cancellation comes back as a `turn_canceled` on the timeline, like any
+other turn outcome.
+
+Nothing running is a NO-OP, deliberately not an error. `<C-c>` is a key you
+hit reflexively.
+
+    NOTE: `:Paseo agent stop` is a different command and shuts down the
+    SIDECAR PROCESS, not a turn.
+
+The other interrupt is |paseo-permission-overlay|'s "decline and stop", which
+only works while a permission request is waiting to be answered -- it cannot
+stop a turn that is running freely, which is what this is for.
 
 The composer is an ORDINARY buffer, so your insert-mode keymaps, completion,
 abbreviations and undo all work. That is the difference between writing a

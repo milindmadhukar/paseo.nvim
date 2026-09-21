@@ -281,6 +281,42 @@ end
 
 -- ------------------------------------------------------------------ sending
 
+---Interrupt the turn this chat's agent is running.
+---
+---What the app's stop button does and what `paseo agent stop` does: one
+---`cancelAgent`. Nothing local is torn down, because nothing local is what is
+---running -- the agent lives on the daemon, and the cancellation comes back
+---as a `turn_canceled` on the timeline like any other turn outcome.
+---
+---A no-op when nothing is running, deliberately not an error. `<C-c>` is a key
+---you hit reflexively, and telling you off for stopping something that had
+---already stopped is noise.
+---@param chat? paseo.Chat
+function M.stop(chat)
+  chat = chat or current
+  if not (chat and chat.agent_id) then
+    return
+  end
+  if not chat.streaming then
+    return
+  end
+
+  bridge.request("agent.cancel", { agentId = chat.agent_id }, function(err)
+    if err then
+      vim.schedule(function()
+        notice(chat, "stop failed: " .. err, "error")
+      end)
+    end
+  end)
+
+  -- Optimistic, and it has to be: the header is the only thing that says a
+  -- turn is running, and leaving the spinner going until the daemon gets round
+  -- to saying so reads as the key not having worked. A `turn_*` event puts it
+  -- right either way.
+  M.set_streaming(chat, false)
+  notice(chat, "stopped", "warning")
+end
+
 ---@param chat paseo.Chat
 local function send(chat)
   local body = vim.api.nvim_buf_get_lines(chat.composer, 0, -1, false)
@@ -497,6 +533,14 @@ local function make_buffers(chat)
         desc = "paseo: sidebar <-> full screen",
       })
     )
+    -- The key you already reach for. Free on both buffers: the transcript is
+    -- not modifiable, so `<C-c>` here meant nothing at all, and there was no
+    -- way to stop a running turn from the editor -- the only interrupt this
+    -- plugin had was the permission dialog's "decline AND stop", which only
+    -- works while something is waiting to be answered.
+    vim.keymap.set("n", "<C-c>", function()
+      M.stop(chat)
+    end, vim.tbl_extend("force", conv, { desc = "paseo: stop the turn" }))
 
     watch_size(chat)
   end
@@ -541,6 +585,16 @@ local function make_buffers(chat)
     vim.keymap.set("n", "<C-s>", function()
       send(chat)
     end, vim.tbl_extend("force", opts, { desc = "paseo: send" }))
+    -- In insert mode too: you are usually typing the next thing when you
+    -- decide the current thing should stop.
+    for _, mode in ipairs { "n", "i" } do
+      vim.keymap.set(mode, "<C-c>", function()
+        if mode == "i" then
+          vim.cmd.stopinsert()
+        end
+        M.stop(chat)
+      end, vim.tbl_extend("force", opts, { desc = "paseo: stop the turn" }))
+    end
     -- PASTE IS PASTE. An image on the clipboard is invisible to Neovim's
     -- registers -- `"+p` yields nothing for a screenshot -- so the ordinary
     -- paste cannot reach it without help. The help used to be a key of its

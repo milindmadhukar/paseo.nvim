@@ -313,6 +313,7 @@ local function footer_lines()
       { "1-" .. #M.TABS, "tabs" },
       { "<Tab>", "cycle" },
       { "<C-f>", "sidebar" },
+      { "<C-c>", "stop" },
       { "q", "close" },
     },
   }

@@ -216,7 +216,8 @@ you to the panel that can change what it says.
 ### The full-screen surface
 
 The default. `:Paseo chat` opens it, `:Paseo chat` again closes it, `<C-f>`
-swaps to the sidebar and back.
+swaps to the sidebar and back. `<C-c>` stops the turn — from the composer or
+the conversation, normal mode or insert.
 
 ```
   ⠹ 14s  claude/sonnet-5 · acceptEdits · 󰧑 think · ⚡ · 21%   ~/Code/paseo.nvim
