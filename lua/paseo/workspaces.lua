@@ -179,39 +179,13 @@ function M.describe(plan)
   return ("%d worktree(s)"):format(plan.members or 0)
 end
 
----What discovery guessed, said out loud.
----
----`ws init` put these in a buffer and made you read them before anything
----happened. Nothing reads the file now, so they have to arrive as a message:
----the guessed base branch and the `shared` list are the two things discovery
----genuinely cannot decide, and both are wrong often enough to matter.
----@param plan paseo.Strategy
-local function report(plan)
-  local manifest = require "paseo.workspace.manifest"
-  local lines = {
-    ("wrote %s — %d repo(s)"):format(
-      vim.fn.fnamemodify(manifest.path(plan.project), ":~"),
-      vim.tbl_count(plan.manifest.repos)
-    ),
-  }
-  if #(plan.manifest.shared or {}) > 0 then
-    lines[#lines + 1] = ("shared = %s — prune what does not belong"):format(
-      table.concat(plan.manifest.shared, ", ")
-    )
-  end
-  for _, note in ipairs(plan.notes or {}) do
-    lines[#lines + 1] = ("%s: %s"):format(note.repo, note.text)
-  end
-  vim.notify(table.concat(lines, "\n"), vim.log.levels.WARN, { title = "paseo: manifest" })
-end
-
 ---Create a workspace, whatever kind of project this is.
 ---
 ---ONE ENTRY POINT. `strategy` decides the shape, not the caller, and all three
 ---paths converge on the same thing: an ordinary Paseo workspace with a
 ---directory. That is the seam -- Paseo never learns whether it is looking at
 ---six assembled worktrees, one it cut itself, or a plain checkout.
----@param opts { name: string, root?: string }
+---@param opts { name: string, root?: string, configure?: fun(ctx: table, done: fun(m: table|nil, notes: table[]|nil)) }
 ---@param callback fun(id: string|nil, err: string|nil, plan: paseo.Strategy|nil)
 function M.create(opts, callback)
   if not opts.name or opts.name == "" then
@@ -226,25 +200,59 @@ function M.create(opts, callback)
 
   local plan = M.strategy(opts.root or assert(vim.uv.cwd()))
 
-  -- A discovered manifest is WRITTEN rather than offered for review: being sent
-  -- to read a TOML file is exactly the "which kind of project is this?" detour
-  -- this entry point exists to remove. Its notes are not swallowed, though --
-  -- they are what `ws init` would have shown, and `report` says them.
+  -- A discovered manifest is OFFERED before it is written. It used to be
+  -- written outright, on the grounds that being sent to read a TOML file is
+  -- the "which kind of project is this?" detour this entry point exists to
+  -- remove -- but that traded one detour for a worse one, because the two
+  -- things discovery cannot decide (each repo's base branch, and which
+  -- siblings are shared context rather than junk) were then asked in comments
+  -- inside a file nobody opens. The dialog asks them where you already are.
+  --
+  -- HANDED IN rather than reached for, so the whole path is drivable in a test
+  -- with no window. The default is the dialog.
   if plan.kind == "discover" then
-    local manifest = require "paseo.workspace.manifest"
-    local ok, err = manifest.save(plan.project, plan.manifest, plan.notes)
-    if not ok then
-      return callback(
-        nil,
-        ("could not write %s: %s"):format(manifest.path(plan.project), tostring(err))
-      )
-    end
-    report(plan)
-    -- From here it is an ordinary manifested project, including on every later
-    -- run: the file is now on disk, so `strategy` answers `assemble` next time.
-    plan.kind = "assemble"
+    local configure = opts.configure
+      or function(ctx, done)
+        require("paseo.ui.manifest").review(ctx, done)
+      end
+    return configure({
+      root = plan.project,
+      manifest = plan.manifest,
+      notes = plan.notes,
+    }, function(edited, notes)
+      -- Nothing confirmed, nothing written. A half-decided manifest is worse
+      -- than none: `strategy` would answer `assemble` from then on and never
+      -- ask again.
+      if not edited then
+        return callback(nil, nil, nil)
+      end
+      local manifest = require "paseo.workspace.manifest"
+      local ok, err = manifest.save(plan.project, edited, notes or plan.notes)
+      if not ok then
+        return callback(
+          nil,
+          ("could not write %s: %s"):format(manifest.path(plan.project), tostring(err))
+        )
+      end
+      -- From here it is an ordinary manifested project, including on every
+      -- later run: the file is now on disk, so `strategy` answers `assemble`.
+      plan.manifest = edited
+      plan.kind = "assemble"
+      M.assemble(plan, opts, callback)
+    end)
   end
 
+  M.assemble(plan, opts, callback)
+end
+
+---Everything after the manifest question is settled.
+---
+---Split out of `create` only because the dialog made that question
+---asynchronous; the three shapes still converge here exactly as before.
+---@param plan paseo.Strategy
+---@param opts { name: string, root?: string }
+---@param callback fun(id: string|nil, err: string|nil, plan: paseo.Strategy|nil)
+function M.assemble(plan, opts, callback)
   local directory = plan.root
   if plan.kind == "assemble" then
     local m, load_err = require("paseo.workspace.manifest").load(plan.project)

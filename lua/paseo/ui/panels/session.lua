@@ -238,6 +238,52 @@ local function click(self, group, entry)
   }
 end
 
+---The focused entry's description, under the options it belongs to.
+---
+---The description belongs to whatever is focused IN THIS GROUP -- handing
+---the one focused entry to every card printed the permission mode's
+---description under the thinking levels. Four descriptions stacked under
+---four options is four lines you read once; one line that changes as you
+---move is one you actually use.
+---
+---ITS HEIGHT IS RESERVED, not computed from the focused entry. Two reasons,
+---and the second is a crash. It stops the cards below jumping a row as you
+---move along a chip row. And volt records each section's starting row once,
+---in `gen_data`, then draws at those offsets without clearing or re-padding
+---- so a section that changed height because you MOVED THE MOUSE writes
+---extmarks past the end of the buffer, and `handle_hover` raises
+---"Invalid 'line': out of range" from inside `vim.on_key`.
+---
+---`description` only, never `note`. A note is one word -- "default", or a
+---base branch -- and reserving two rows of a card to say it about one entry
+---costs the footer its place on a short editor. Notes belong beside the
+---entry, which is where `widgets.radio` and the toggles put them.
+---@param group table
+---@param focused table|nil
+---@param w integer
+---@return table[][]
+local function description_block(group, focused, w)
+  local reserved = 0
+  for _, entry in ipairs(group.entries) do
+    if entry.description then
+      reserved = math.max(reserved, #render.wrap(entry.description, w, "PaseoCardDim"))
+    end
+  end
+  if reserved == 0 then
+    return {}
+  end
+
+  local lines = { {} }
+  local wrapped = focused
+      and focused.description
+      and render.wrap(focused.description, w, "PaseoCardDim")
+    or {}
+  for i = 1, reserved do
+    lines[#lines + 1] = wrapped[i] or {}
+  end
+  return lines
+end
+
 ---The body of a chips group: the pills, then the focused one's description.
 ---@param self paseo.SessionView
 ---@param group table
@@ -271,42 +317,7 @@ local function chips_body(self, group, focus, w)
   end
 
   local lines = widgets.chiprow(chips, w)
-
-  -- The description belongs to whatever is focused IN THIS GROUP -- handing
-  -- the one focused entry to every card printed the permission mode's
-  -- description under the thinking levels. Four descriptions stacked under
-  -- four options is four lines you read once; one line that changes as you
-  -- move is one you actually use.
-  --
-  -- ITS HEIGHT IS RESERVED, not computed from the focused entry. Two reasons,
-  -- and the second is a crash. It stops the cards below jumping a row as you
-  -- move along a chip row. And volt records each section's starting row once,
-  -- in `gen_data`, then draws at those offsets without clearing or re-padding
-  -- -- so a section that changed height because you MOVED THE MOUSE writes
-  -- extmarks past the end of the buffer, and `handle_hover` raises
-  -- "Invalid 'line': out of range" from inside `vim.on_key`.
-  -- `description` only, never `note`. A note is one word -- "default" -- and
-  -- reserving two rows of a card to say it about one thinking level costs the
-  -- footer its place on a short editor. Notes belong beside the entry, which
-  -- is where `widgets.radio` puts them.
-  local reserved = 0
-  for _, entry in ipairs(group.entries) do
-    if entry.description then
-      reserved = math.max(reserved, #render.wrap(entry.description, w, "PaseoCardDim"))
-    end
-  end
-
-  if reserved > 0 then
-    lines[#lines + 1] = {}
-    local wrapped = focused
-        and focused.description
-        and render.wrap(focused.description, w, "PaseoCardDim")
-      or {}
-    for i = 1, reserved do
-      lines[#lines + 1] = wrapped[i] or {}
-    end
-  end
-
+  vim.list_extend(lines, description_block(group, focused, w))
   return lines
 end
 
@@ -344,9 +355,13 @@ local function toggles_body(self, group, focus, w)
     return { { { group.placeholder or "(none on this provider)", "PaseoCardDim" } } }
   end
   local lines = {}
+  local focused
   for _, entry in ipairs(group.entries) do
     local id = "paseo:" .. group.id .. ":" .. entry.id
     local lit = is_focused(focus, group, entry) or hovered(id)
+    if lit then
+      focused = entry
+    end
     local action = click(self, group, entry)
     -- volt's own checkbox: one segment, glyph plus label, state in the
     -- highlight. Ours only supplies the icons and the two colours.
@@ -359,8 +374,20 @@ local function toggles_body(self, group, focus, w)
       hloff = lit and "PaseoChipFocus" or "PaseoCardDim",
       actions = action,
     }
-    lines[#lines + 1] = widgets.row({ { " ", "PaseoCardText" }, cell }, {}, w)
+    -- A note sits to the right of the row it belongs to, the way
+    -- `widgets.radio` puts it there: the manifest screen writes each repo's
+    -- base branch into one, and the thing discovery most often gets wrong
+    -- should be readable without focusing every repo in turn.
+    local right = entry.note and { { entry.note .. " ", "PaseoCardDim", action } } or {}
+    local line = widgets.row({ { " ", "PaseoCardText" }, cell }, right, w)
+    -- The gap between the label and the note carries the action too, so the
+    -- target is the row rather than the words on it.
+    for _, cell_ in ipairs(line) do
+      cell_[3] = cell_[3] or action
+    end
+    lines[#lines + 1] = line
   end
+  vim.list_extend(lines, description_block(group, focused, w))
   return lines
 end
 

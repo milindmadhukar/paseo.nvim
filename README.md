@@ -907,13 +907,36 @@ wcreate` answers it:
 | A git repository | Paseo **cuts the worktree** itself, on `ws/<name>` off whatever is checked out | `worktree` |
 | Neither | A plain workspace on the directory as it stands | `local` |
 
-No manifest in the first case? One is discovered and written on the way past,
-and what it *guessed* is reported rather than swallowed — the base branch it
-had to infer, and the `shared` list you should prune. Every later `wcreate` in
-that project reads the file. `:Paseo ws init` still exists for when you would
-rather read it before anything happens, and `:Paseo ws create <name> repo,repo`
-is still the only way to pick which repos a workspace gets — but neither is a
-prerequisite any more.
+No manifest in the first case? One is discovered and **offered**, on a screen:
+
+```
+ 󰙅  Workspace                              ~/Code/openfin
+
+  󰳏  Repos   m                  󰉋  Shared   s
+   ■  clm                dev     ■  Docs
+   □  clm_api            dev     □  test quotes
+   ■  fos-pwa            dev     □  test-s3
+
+  c  write the manifest             2 repo(s), 1 shared
+```
+
+Discovery works out nearly everything by looking at the project. The two
+things it cannot are **which branch each repo is based on** and **which of the
+directories beside your repos are shared context rather than junk that happens
+to be there** — so those are what it asks. `<CR>` toggles, `b` sets the
+focused repo's base, `t` drops to the raw TOML, `c` writes it. `q` writes
+nothing and creates nothing.
+
+Those questions used to be asked in *comments inside the generated file* —
+`# init lists every non-repo directory it found; PRUNE THIS` — which is a
+question posed in a medium you cannot answer in. The openfin manifest still
+listed `test quotes` and `test-s3` months later because of it. Opening the
+screen on a project that already has a manifest **loads** it, and a sibling
+you pruned stays pruned even though it is still on disk.
+
+`:Paseo ws init` opens the same screen; `:Paseo ws init raw` is the old TOML
+buffer. `:Paseo ws create <name> repo,repo` is still the only way to pick
+which repos one workspace gets — but none of it is a prerequisite.
 
 The point is that "is this the `ws init` kind of project?" is a question about
 plumbing, and you should be able to type one command without answering it.
@@ -995,6 +1018,41 @@ The suite runs Neovim, the sidecar typecheck, and TypeScript tests. Install
 the sidecar dependencies first with `bun install` or `npm install`; the test
 harness uses Bun when present and Node plus the local TypeScript otherwise.
 
+## Agent skills
+
+The plugin ships five skills in `.agents/skills/` — `workspace`,
+`workspace-commit`, `workspace-pr` (multi-repo workspaces), `explain-change`
+(the rubric `:Paseo explain` uses) and `paseo-sdk`. They are plain markdown
+over plain git and `.ws/workspace.toml`; nothing in them needs a binary this
+plugin does not ship.
+
+An agent only discovers skills near its working directory, so bundled ones are
+invisible everywhere **except inside this repository** — which is backwards,
+since three of them are about projects that live somewhere else entirely:
+
+```vim
+:Paseo skills              " what is bundled, and where it has got to
+:Paseo skills install      " symlink them into ~/.claude/skills
+```
+
+**Global is the default, and that is not taste.** An agent working in a
+workspace has a cwd of `<project>/.workspaces/<name>/<repo>` — a *member
+worktree*. It reads project skills from there and the repo around it, so
+`<project>/.claude/skills` is two levels up in a different tree: invisible to
+the one agent these are for. `install project` exists anyway, and refuses when
+that root is itself a git repository.
+
+Installing is idempotent, and refuses to clobber: a directory it did not
+create is left alone unless you add `force`, which *moves* it to
+`<name>.paseo-backup` rather than deleting it. A link left dangling by a
+plugin reinstall repairs without `force` — a link to nothing is nobody's data.
+`dry` prints the plan without touching the disk.
+
+It never runs on its own. Writing into `~/.claude/skills` changes the
+behaviour of a different program, and a plugin does not get to do that as a
+side effect of a command about worktrees. `:checkhealth paseo` names the
+bundled skills and the command; that is the whole discovery mechanism.
+
 ## Layout
 
 ```
@@ -1008,12 +1066,16 @@ lua/paseo/          the plugin
     animate.lua     motion, none of which may change a height
     render.lua      the cell/line alphabet and the three sinks
     widgets.lua     the vocabulary: cards, chips, keycaps, tiles, bars, tables
+    manifest.lua    the workspace manifest, as a screen you answer
     panels/         one per dashboard tab
   workspace/        assembling N worktrees into one unit of work
   pickers/          workspaces, sessions
   backends/         the no-daemon fallback
+  plugin.lua        where this plugin's own files are, asked once
+  skills.lua        installing the bundled skills where an agent can see them
 sidecar/            paseo-bridge.ts entry point, bridge-*.ts modules, SDK deps
-.agents/skills/     skills, symlinked from .claude/skills
+.agents/skills/     the bundled agent skills -- the source of truth
+.claude/skills/     symlinks into .agents/skills, for Claude Code
 tests/              fixtures + spec, run by tests/run.sh
 doc/                :help paseo
 ```
@@ -1049,7 +1111,7 @@ others.
 
 ### The seam that makes multi-repo work
 
-`ws` assembles the composite directory, then registers it with Paseo as an
+Assembly builds the composite directory, then registers it with Paseo as an
 ordinary **local** workspace:
 
 ```sh
@@ -1215,7 +1277,9 @@ everything after it.
 - **Phase 3 — workspace layer.** Workspace picker with a live, push-driven
   agent status column; `<CR>` switches this Neovim, or runs whatever
   `workspaces.open` is.
-- **Phase 4 — commit, PR, merge.** Agent-agnostic skills over `ws … --json`.
+- **Phase 4 — commit, PR, merge.** Agent-agnostic skills over plain git and
+  the manifest -- no CLI of our own to install, which is what makes them
+  usable by whatever agent the reader happens to be running.
 
 ## Licence
 

@@ -232,10 +232,82 @@ local function check_images()
   end
 end
 
+---The bundled agent skills, and whether anything can see them.
+---
+---THIS SECTION IS THE POINT. The skills only load when an agent's cwd is
+---inside this repository, so the projects they describe -- multi-repo
+---workspaces -- never see them, and the only way anyone learned they existed
+---was by accident. Naming them in the check people already run is the fix;
+---the installer is just what you type next.
+local function check_skills()
+  start "paseo.nvim: agent skills"
+
+  local skills = require "paseo.skills"
+  local plugin = require "paseo.plugin"
+
+  local root = plugin.root()
+  if not root then
+    return err "cannot locate this plugin's own directory; skills cannot be installed"
+  end
+
+  local bundled = skills.bundled()
+  if #bundled == 0 then
+    return err(
+      ("no skills found in %s/%s — an archive that dropped dotfiles, or an incomplete install"):format(
+        vim.fn.fnamemodify(root, ":~"),
+        skills.DIR
+      )
+    )
+  end
+
+  for _, skill in ipairs(bundled) do
+    info(("%s — %s"):format(skill.name, (skill.description or ""):sub(1, 70)))
+  end
+
+  local dirs = skills.targets "global" or {}
+  for _, dir in ipairs(dirs) do
+    local short = vim.fn.fnamemodify(dir, ":~")
+    local installed, problems = 0, {}
+    for _, skill in ipairs(bundled) do
+      local at = skills.inspect(skill, dir)
+      if at == "ours_link" or at == "ours_copy" then
+        installed = installed + 1
+      elseif at ~= "absent" then
+        problems[#problems + 1] = ("%s: %s"):format(skill.name, at)
+      end
+    end
+
+    if installed == #bundled then
+      ok(("%s — all %d installed"):format(short, installed))
+    elseif installed == 0 then
+      warn(("%s — none installed; run `:Paseo skills install`"):format(short))
+    else
+      warn(("%s — %d of %d installed; run `:Paseo skills install`"):format(short, installed, #bundled))
+    end
+    for _, problem in ipairs(problems) do
+      warn(("%s: %s"):format(short, problem))
+    end
+  end
+
+  -- Said only where it applies. An agent whose cwd is a member worktree reads
+  -- project skills from that repo, not from the project root two levels up --
+  -- so a project install is invisible to exactly the agent these are for, and
+  -- somebody will otherwise reach for it as "the tidier option".
+  local project = skills.targets("project")
+  if project then
+    info(
+      "a `project` install lands at "
+        .. vim.fn.fnamemodify(project[1] or "?", ":~")
+        .. ", which an agent working inside a member worktree does NOT read"
+    )
+  end
+end
+
 function M.check()
   check_core()
   check_paseo()
   check_images()
+  check_skills()
 end
 
 return M

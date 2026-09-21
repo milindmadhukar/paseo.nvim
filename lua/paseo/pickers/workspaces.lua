@@ -30,6 +30,43 @@ local function display(ws, widths)
   )
 end
 
+---Said once per session, at the only moment it is relevant.
+---
+---A HINT, NEVER AN INSTALL. Writing into `~/.claude/skills` changes the
+---behaviour of a DIFFERENT program, and no Neovim plugin gets to do that as a
+---side effect of a command about worktrees. The plugin's own stance is the
+---opposite one: `:Paseo ws init` shows you the manifest and makes you `:w` it.
+---The problem was only ever discovery, and one line of it is the whole fix.
+local hinted = false
+
+---@param plan paseo.Strategy|nil
+local function hint_skills(plan)
+  if hinted or not plan or (plan.kind ~= "assemble" and plan.kind ~= "discover") then
+    return
+  end
+  hinted = true
+
+  local skills = require "paseo.skills"
+  local bundled = skills.bundled()
+  if #bundled == 0 then
+    return
+  end
+  for _, dir in ipairs(skills.targets "global" or {}) do
+    for _, skill in ipairs(bundled) do
+      local at = skills.inspect(skill, dir)
+      if at == "ours_link" or at == "ours_copy" then
+        return
+      end
+    end
+  end
+
+  vim.notify(
+    "paseo: this plugin ships skills that teach an agent this layout — "
+      .. "`:Paseo skills install`",
+    vim.log.levels.INFO
+  )
+end
+
 ---Create a workspace by name.
 ---
 ---"creating", not "assembling": assembly is one of three shapes this may turn
@@ -48,10 +85,18 @@ function M.named(name, root, after)
     if err then
       return vim.notify("paseo: " .. err, vim.log.levels.ERROR)
     end
+    -- No id, no error, no plan: the manifest dialog was dismissed, so nothing
+    -- was written and nothing was created. Said out loud only because the
+    -- "creating…" above it would otherwise be the last word on screen, and a
+    -- message that never completed reads as a hang.
+    if not plan then
+      return vim.notify("paseo: cancelled — nothing was written", vim.log.levels.INFO)
+    end
     vim.notify(
       ("paseo: created %s — %s"):format(name, workspaces.describe(plan)),
       vim.log.levels.INFO
     )
+    hint_skills(plan)
     if after then
       vim.schedule(after)
     end

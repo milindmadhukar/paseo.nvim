@@ -1107,7 +1107,9 @@ end
 -- ------------------------------------------------------------ ws init
 
 local function test_ws_init()
-  -- The regression: `:Paseo ws init` named the buffer <root>/.ws/workspace.toml
+  -- `raw`, because plain `ws init` now opens the configuration dialog. The
+  -- buffer is the escape hatch behind it, and it is the half that carries the
+  -- regression: `:Paseo ws init` named the buffer <root>/.ws/workspace.toml
   -- without creating .ws/, so `:w` failed with E212 "Can't open file for
   -- writing: no such file or directory" -- which reads like a permissions
   -- problem rather than a missing parent directory.
@@ -1128,29 +1130,29 @@ local function test_ws_init()
   vim.system({ "git", "-C", repo, "-c", "commit.gpgsign=false", "commit", "-qm", "init" }):wait()
 
   in_dir(project, function()
-    vim.cmd "Paseo ws init"
+    vim.cmd "Paseo ws init raw"
     vim.wait(2000, function()
       return vim.api.nvim_buf_get_name(0):find "workspace%.toml" ~= nil
     end, 50)
 
     local named = vim.api.nvim_buf_get_name(0)
     truthy(
-      "ws init: the buffer is named after the manifest",
+      "ws init raw: the buffer is named after the manifest",
       named:find "%.ws/workspace%.toml" ~= nil,
       named
     )
-    truthy("ws init: .ws/ exists BEFORE you write", vim.uv.fs_stat(vim.fs.dirname(named)) ~= nil)
+    truthy("ws init raw: .ws/ exists BEFORE you write", vim.uv.fs_stat(vim.fs.dirname(named)) ~= nil)
 
     local ok = pcall(vim.cmd, "write")
-    truthy("ws init: :w succeeds", ok)
-    truthy("ws init: the manifest is on disk", vim.uv.fs_stat(named) ~= nil)
+    truthy("ws init raw: :w succeeds", ok)
+    truthy("ws init raw: the manifest is on disk", vim.uv.fs_stat(named) ~= nil)
 
     -- A second init must reuse the buffer already sitting on that path rather
     -- than failing on a duplicate name.
-    truthy("ws init: running it twice does not error", pcall(vim.cmd, "Paseo ws init"))
+    truthy("ws init raw: running it twice does not error", pcall(vim.cmd, "Paseo ws init raw"))
 
     local loaded = require("paseo.workspace.manifest").load(project)
-    truthy("ws init: what it wrote parses back", loaded ~= nil and loaded.repos.repo ~= nil)
+    truthy("ws init raw: what it wrote parses back", loaded ~= nil and loaded.repos.repo ~= nil)
     vim.cmd "tabonly"
   end)
 
@@ -2952,6 +2954,377 @@ end
 --- one person's setup: a terminal Neovim has no GUI to spawn and `<CR>` looked
 --- like it did nothing. The spawn is still available -- as a function you
 --- write -- and everything here is about that seam holding.
+-- --------------------------------------------------- the manifest dialog
+
+---A plain directory holding `names` as repos, each on its own branch.
+---@param names table<string, string>  repo name -> branch
+---@return string project
+local function multi_repo(names)
+  local project = vim.fn.tempname()
+  for name, branch in pairs(names) do
+    local repo = vim.fs.joinpath(project, name)
+    vim.fn.mkdir(repo, "p")
+    for _, args in ipairs {
+      { "init", "-q", "-b", branch, "." },
+      { "config", "user.email", "t@example.com" },
+      { "config", "user.name", "t" },
+    } do
+      vim.system(vim.list_extend({ "git", "-C", repo }, args)):wait()
+    end
+    local fd = assert(io.open(vim.fs.joinpath(repo, "f.txt"), "w"))
+    fd:write "x\n"
+    fd:close()
+    vim.system({ "git", "-C", repo, "add", "-A" }):wait()
+    vim.system({ "git", "-C", repo, "-c", "commit.gpgsign=false", "commit", "-qm", "i" }):wait()
+  end
+  return project
+end
+
+---@param group table
+---@param id string
+---@return table|nil
+local function entry_of(group, id)
+  for _, entry in ipairs(group.entries) do
+    if entry.id == id then
+      return entry
+    end
+  end
+end
+
+local function test_manifest()
+  local ui = require "paseo.ui.manifest"
+  local manifest = require "paseo.workspace.manifest"
+
+  local project = multi_repo { alpha = "main", beta = "dev" }
+  vim.fn.mkdir(vim.fs.joinpath(project, "Docs"), "p")
+  vim.fn.mkdir(vim.fs.joinpath(project, "junk"), "p")
+
+  local draft = assert(ui.draft(project))
+  local groups = ui.groups(draft)
+  eq("manifest: two cards -- repos and shared", #groups, 2)
+  eq("manifest: both repos are offered", #groups[1].entries, 2)
+
+  -- The base on the right of the row is the whole reason toggles grew a note:
+  -- it is what discovery most often gets wrong.
+  eq("manifest: each repo carries its base as a note", entry_of(groups[1], "beta").note, "dev")
+
+  -- Everything is in by default on a first run, siblings included.
+  eq("manifest: a fresh repo starts included", entry_of(groups[1], "beta").value, true)
+  eq("manifest: a fresh sibling starts kept", entry_of(groups[2], "junk").value, true)
+
+  -- Unchecking a repo writes `default = false`, which is the ONLY thing
+  -- `manifest.select` reads. A checked repo must carry no key at all --
+  -- `default = true` is not a thing the renderer emits.
+  ui.apply(draft, groups[1], entry_of(groups[1], "beta"))
+  ui.apply(draft, groups[2], entry_of(groups[2], "junk"))
+  local result = ui.result(draft)
+  eq("manifest: an unchecked repo is opted out", result.repos.beta.default, false)
+  eq("manifest: a checked repo carries no default key", result.repos.alpha.default, nil)
+  eq("manifest: a pruned sibling is gone from shared", result.shared, { "Docs" })
+
+  -- What the screen shows is what the file says.
+  local parsed = manifest.parse(manifest.render(result, ui.notes(draft)))
+  eq("manifest: the opt-out survives a round trip", parsed.repos.beta.default, false)
+  eq("manifest: and so does the pruning", parsed.shared, { "Docs" })
+
+  -- THE REGRESSION THIS SCREEN EXISTS FOR. The generated file says "PRUNE
+  -- THIS" in a comment and openfin's `shared` still lists `test quotes`,
+  -- because nothing that re-read the project ever honoured the pruning. A
+  -- second open must not re-add a sibling that is still sitting on disk.
+  truthy("manifest: it saves", manifest.save(project, result, ui.notes(draft)))
+  local reopened = assert(ui.draft(project))
+  local regroups = ui.groups(reopened)
+  eq("manifest: a pruned sibling is still offered", entry_of(regroups[2], "junk") ~= nil, true)
+  eq("manifest: but stays pruned", entry_of(regroups[2], "junk").value, false)
+  eq("manifest: and the opted-out repo stays out", entry_of(regroups[1], "beta").value, false)
+
+  -- Reloading re-walks the project. It must not undo either decision.
+  ui.reload(reopened)
+  local after = ui.groups(reopened)
+  eq("manifest: a reload keeps the pruning", entry_of(after[2], "junk").value, false)
+  eq("manifest: and keeps the opt-out", entry_of(after[1], "beta").value, false)
+
+  -- Cancelling writes NOTHING. A half-decided manifest is worse than none:
+  -- `strategy` would answer `assemble` from then on and never ask again.
+  local fresh = multi_repo { solo = "main" }
+  local created, err, plan = "unset", "unset", "unset"
+  require("paseo.workspaces").create({
+    name = "x",
+    root = fresh,
+    configure = function(_, done)
+      done(nil)
+    end,
+  }, function(id, e, p)
+    created, err, plan = id, e, p
+  end)
+  eq("manifest: cancelling creates nothing", created, nil)
+  eq("manifest: and is not an error", err, nil)
+  eq("manifest: and reports no plan, so the caller stays quiet", plan, nil)
+  eq(
+    "manifest: cancelling leaves no manifest on disk",
+    vim.uv.fs_stat(manifest.path(fresh)),
+    nil
+  )
+
+  -- Confirming writes what the hook handed back, not what discovery guessed.
+  local edited = { workspaces_dir = ".workspaces", branch_prefix = "ws/", shared = {}, repos = {
+    solo = { base = "main", default = false },
+  } }
+  require("paseo.workspaces").create({
+    name = "y",
+    root = fresh,
+    configure = function(_, done)
+      done(edited, {})
+    end,
+  }, function() end)
+  local written = manifest.load(fresh)
+  truthy("manifest: confirming writes the file", written ~= nil)
+  eq("manifest: and writes the EDITED manifest, not the discovered one",
+    written and written.repos.solo.default, false)
+end
+
+---A toggles card must not change height when focus moves onto an entry that
+---has a description. Volt records each section's starting row once, in
+---`gen_data`, then draws at those offsets without clearing or re-padding -- so
+---a card that grew because you MOVED THE MOUSE writes extmarks past the end of
+---the buffer and `handle_hover` raises "Invalid 'line': out of range" from
+---inside `vim.on_key`. `chips_body` has always reserved that height; this is
+---the same guard for the toggles that now carry descriptions.
+local function test_toggle_height()
+  local panel = require "paseo.ui.panels.session"
+
+  local source = {
+    keys = {},
+    groups = function()
+      return {
+        {
+          id = "g",
+          key = "g",
+          icon = "",
+          label = "G",
+          kind = "toggles",
+          entries = {
+            { id = "plain", label = "Plain", value = true },
+            {
+              id = "wordy",
+              label = "Wordy",
+              value = false,
+              note = "dev",
+              description = ("wordy "):rep(60),
+            },
+          },
+        },
+      }
+    end,
+    apply = function(_, _, _, done)
+      done()
+    end,
+    load = function(_, done)
+      done()
+    end,
+  }
+
+  local view = panel.new(source)
+  local on_plain = #view:draw(60)
+  view:move(1)
+  local on_wordy = #view:draw(60)
+  eq("toggles: a card's height does not depend on which entry is focused", on_wordy, on_plain)
+
+  -- The note is drawn, and on the row it belongs to rather than swallowed.
+  local found = false
+  for _, line in ipairs(view:draw(60)) do
+    for _, cell in ipairs(line) do
+      if type(cell[1]) == "string" and cell[1]:find "dev" then
+        found = true
+      end
+    end
+  end
+  truthy("toggles: an entry's note is drawn beside it", found)
+
+  -- Every cell of a toggle row is a click target, including the gap: the
+  -- target is the row, not the two words on it.
+  local clickable = 0
+  for _, line in ipairs(view:draw(60)) do
+    for _, cell in ipairs(line) do
+      if type(cell[3]) == "table" and type(cell[3].click) == "function" then
+        clickable = clickable + 1
+      end
+    end
+  end
+  truthy("toggles: the whole row is clickable, not just the label", clickable >= 4, clickable)
+end
+
+-- ------------------------------------------------------- bundled skills
+
+---A fake plugin root with `names` as skills, plus one directory that is not
+---one and one file that is not a skill either.
+---@param names string[]
+---@return string root
+local function fake_plugin(names)
+  local root = vim.fn.tempname()
+  local base = vim.fs.joinpath(root, ".agents", "skills")
+  for _, name in ipairs(names) do
+    local dir = vim.fs.joinpath(base, name)
+    vim.fn.mkdir(dir, "p")
+    local fd = assert(io.open(vim.fs.joinpath(dir, "SKILL.md"), "w"))
+    fd:write(("---\nname: %s\ndescription: what %s is for\n---\n\n# %s\n"):format(name, name, name))
+    fd:close()
+  end
+  -- A directory with no SKILL.md is not a skill, and a loose file is not one
+  -- either. Both have to be skipped rather than offered.
+  vim.fn.mkdir(vim.fs.joinpath(base, "notaskill"), "p")
+  local fd = assert(io.open(vim.fs.joinpath(base, "README.md"), "w"))
+  fd:write "not a skill\n"
+  fd:close()
+  return root
+end
+
+local function test_skills()
+  local skills = require "paseo.skills"
+  local config = require "paseo.config"
+
+  local root = fake_plugin { "alpha", "beta" }
+
+  local found = skills.bundled(root)
+  eq("skills: discovered by SKILL.md, not by a list", #found, 2)
+  eq("skills: and named after the directory", found[1].name, "alpha")
+  eq("skills: with the front matter description", found[1].description, "what alpha is for")
+
+  -- Read from `.agents/skills`, never `.claude/skills`: those are git symlinks
+  -- and a clone without symlink support materialises them as text files
+  -- holding a path, which scans as one-line "skills".
+  eq("skills: the bundled directory is .agents/skills", skills.DIR, ".agents/skills")
+  truthy(
+    "skills: bundled() reads out of .agents/skills",
+    found[1].path:find("%.agents/skills/alpha$") ~= nil,
+    found[1].path
+  )
+
+  local state_home = vim.env.XDG_STATE_HOME
+  local saved = vim.deepcopy(config.get().skills)
+  vim.env.XDG_STATE_HOME = vim.fn.tempname()
+  local target = vim.fn.tempname()
+  vim.fn.mkdir(target, "p")
+  config.setup { skills = { dirs = { target } } }
+
+  local ok = pcall(function()
+    -- `plan` is pure. Nothing it looked at may exist afterwards.
+    local probe = vim.fn.tempname()
+    config.setup { skills = { dirs = { probe } } }
+    truthy("skills: plan() succeeds against a directory that does not exist", skills.plan {
+      action = "install",
+      root = root,
+    } ~= nil)
+    eq("skills: and plan() wrote nothing", vim.uv.fs_stat(probe), nil)
+    config.setup { skills = { dirs = { target } } }
+
+    local first = assert(skills.plan { action = "install", root = root })
+    eq("skills: a fresh target is all installs", first[1].verb, "link")
+    skills.apply(first)
+    truthy(
+      "skills: install makes a link to the bundled skill",
+      vim.uv.fs_realpath(vim.fs.joinpath(target, "alpha"))
+        == vim.uv.fs_realpath(vim.fs.joinpath(root, ".agents", "skills", "alpha"))
+    )
+
+    -- Idempotent: the second run is all `skip`, not a second link and not an
+    -- error.
+    local again = assert(skills.plan { action = "install", root = root })
+    eq("skills: installing twice is a no-op", again[1].verb, "skip")
+    eq("skills: for every skill", again[2].verb, "skip")
+
+    -- A directory paseo did not install is REFUSED, and its contents survive.
+    vim.fn.delete(vim.fs.joinpath(target, "beta"), "rf")
+    vim.fn.mkdir(vim.fs.joinpath(target, "beta"), "p")
+    local mine = vim.fs.joinpath(target, "beta", "MINE.md")
+    local fd = assert(io.open(mine, "w"))
+    fd:write "mine\n"
+    fd:close()
+
+    local squatter = assert(skills.plan { action = "install", root = root })
+    eq("skills: a foreign directory is refused", squatter[2].verb, "refuse")
+    local _, refused = skills.apply(squatter)
+    truthy("skills: and the run reports the refusal", refused)
+    truthy("skills: and the foreign contents survive", vim.uv.fs_stat(mine) ~= nil)
+
+    -- `force` MOVES it aside. One level of force, and it still does not
+    -- destroy anything.
+    local forced = assert(skills.plan { action = "install", root = root, force = true })
+    eq("skills: force replaces rather than refusing", forced[2].verb, "replace")
+    local _, force_refused, backed_up = skills.apply(forced)
+    truthy("skills: a forced run refuses nothing", not force_refused)
+    truthy("skills: and says it took a backup", backed_up)
+    truthy(
+      "skills: force backs the directory up rather than deleting it",
+      vim.uv.fs_stat(vim.fs.joinpath(target, "beta" .. skills.BACKUP, "MINE.md")) ~= nil
+    )
+
+    -- A link pointing somewhere else is refused, and force replaces it with
+    -- NO backup: a symlink is a pointer, not data.
+    vim.fn.delete(vim.fs.joinpath(target, "alpha"), "rf")
+    -- The target has to EXIST, or this is the dangling case below rather than
+    -- the foreign one: a link to nothing is nobody's data.
+    local elsewhere = vim.fn.tempname()
+    vim.fn.mkdir(elsewhere, "p")
+    vim.uv.fs_symlink(elsewhere, vim.fs.joinpath(target, "alpha"), nil)
+    local foreign = assert(skills.plan { action = "install", root = root })
+    eq("skills: a link pointing elsewhere is refused", foreign[1].verb, "refuse")
+    eq(
+      "skills: and force replaces it with no backup, because a pointer is not data",
+      assert(skills.plan { action = "install", root = root, force = true })[1].verb,
+      "replace"
+    )
+
+    -- A DANGLING link repairs without force. This is what a plugin reinstall
+    -- leaves behind, and needing `force` to recover from it would make the
+    -- normal case feel dangerous.
+    vim.fn.delete(vim.fs.joinpath(target, "alpha"), "rf")
+    vim.uv.fs_symlink("/definitely/not/here", vim.fs.joinpath(target, "alpha"), nil)
+    local dangling = assert(skills.plan { action = "install", root = root })
+    eq("skills: a dangling link is repaired without force", dangling[1].verb, "repair")
+    skills.apply(dangling)
+    truthy(
+      "skills: and the repair points back at the bundled skill",
+      vim.uv.fs_realpath(vim.fs.joinpath(target, "alpha"))
+        == vim.uv.fs_realpath(vim.fs.joinpath(root, ".agents", "skills", "alpha"))
+    )
+
+    -- Uninstall takes back only what we installed.
+    local removal = assert(skills.plan { action = "uninstall", root = root })
+    skills.apply(removal)
+    eq("skills: uninstall removes ours", vim.uv.fs_lstat(vim.fs.joinpath(target, "alpha")), nil)
+    truthy(
+      "skills: and leaves a backup it did not create alone",
+      vim.uv.fs_stat(vim.fs.joinpath(target, "beta" .. skills.BACKUP, "MINE.md")) ~= nil
+    )
+
+    -- A copy is tracked, so a plugin update is noticed and refreshed rather
+    -- than reported as already installed.
+    local copied = assert(skills.plan { action = "install", root = root, method = "copy" })
+    eq("skills: copy is an available method", copied[1].verb, "copy")
+    skills.apply(copied)
+    truthy(
+      "skills: a copy is a real directory, not a link",
+      vim.uv.fs_lstat(vim.fs.joinpath(target, "alpha")).type == "directory"
+    )
+    local fresh = assert(skills.plan { action = "install", root = root })
+    eq("skills: an unchanged copy is left alone", fresh[1].verb, "skip")
+    local touch = assert(io.open(vim.fs.joinpath(target, "alpha", "SKILL.md"), "a"))
+    touch:write "drifted\n"
+    touch:close()
+    local stale = assert(skills.plan { action = "install", root = root })
+    eq("skills: a drifted copy is refreshed, not skipped", stale[1].verb, "refresh")
+
+    -- An unknown name is an error naming it, never a silent no-op.
+    local _, name_err = skills.plan { action = "install", root = root, names = { "nope" } }
+    truthy("skills: an unknown skill name is an error", name_err ~= nil, tostring(name_err))
+  end)
+
+  vim.env.XDG_STATE_HOME = state_home
+  config.setup { skills = saved }
+  truthy("skills: the suite ran without throwing", ok, tostring(ok))
+end
+
 local function test_workspace_open()
   local config = require "paseo.config"
   local workspaces = require "paseo.workspaces"
@@ -4635,6 +5008,9 @@ function M.run()
     { "follow", test_follow },
     { "settings", test_settings },
     { "strategy", test_strategy },
+    { "manifest", test_manifest },
+    { "toggles", test_toggle_height },
+    { "skills", test_skills },
     { "workspace open", test_workspace_open },
     { "chat follows", test_chat_follow },
   }

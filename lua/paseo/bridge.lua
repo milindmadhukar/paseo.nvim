@@ -52,23 +52,11 @@ end
 
 ---Where the sidecar script lives.
 ---
----Derived from THIS file's own path, not from the runtimepath. lazy.nvim
----resolves a plugin's Lua modules through its own loader, so `require` works
----long before the plugin directory is added to `rtp` -- and until it is,
----`nvim_get_runtime_file("bin/paseo-bridge.ts")` returns nothing. The sidecar
----then "could not start" on a plugin that was installed and working.
+---|paseo.plugin| owns the "where is this plugin" question, and the reason it
+---cannot be answered from the runtimepath is written there.
 ---@return string|nil
 local function script_path()
-  local source = debug.getinfo(1, "S").source
-  if source:sub(1, 1) == "@" then
-    -- @<root>/lua/paseo/bridge.lua -> <root>/sidecar/paseo-bridge.ts
-    local root = vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(source:sub(2))))
-    local candidate = vim.fs.joinpath(root, "sidecar", "paseo-bridge.ts")
-    if vim.uv.fs_stat(candidate) then
-      return candidate
-    end
-  end
-  return vim.api.nvim_get_runtime_file("sidecar/paseo-bridge.ts", false)[1]
+  return require("paseo.plugin").file("sidecar", "paseo-bridge.ts")
 end
 
 ---@return string[]|nil argv

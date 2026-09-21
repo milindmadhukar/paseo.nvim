@@ -11,6 +11,7 @@ local M = {}
 ---@field paseo paseo.Config.Paseo
 ---@field ui paseo.Config.UI
 ---@field workspaces paseo.Config.Workspaces
+---@field skills paseo.Config.Skills
 ---@field review paseo.Config.Review
 
 ---@class paseo.Config.Paseo
@@ -181,6 +182,17 @@ local M = {}
 ---                       in place in a terminal). Any other return value, `nil`
 ---                       included, means you handled it.
 
+---@class paseo.Config.Skills
+---@field dirs string[]  Where `:Paseo skills install` puts the bundled skills.
+---                      Absolute; `~` is expanded at setup. The default is the
+---                      one directory an agent can see from INSIDE a workspace
+---                      member worktree, which a project-local one cannot.
+---@field project_dirs string[]  Relative to the ws project root, for
+---                      `:Paseo skills install project`.
+---@field method "link"|"copy"  A symlink keeps the plugin the source of
+---                      truth, so `:Lazy update` updates the skills. Defaults
+---                      to "copy" on Windows, where symlinks need privileges.
+
 ---@class paseo.Config.Review
 ---@field agents boolean  Whether `:Paseo explain` and `:Paseo ask` list the
 ---                       other Paseo agents working in this tree, so the review
@@ -292,6 +304,15 @@ local defaults = {
   review = {
     agents = true,
   },
+
+  skills = {
+    -- `~/.claude/skills` ONLY. `~/.agents/skills` is one person's stow
+    -- convention rather than a standard, and a default that writes into two
+    -- places is a default that is wrong in one of them.
+    dirs = { "~/.claude/skills" },
+    project_dirs = { ".claude/skills" },
+    method = "link",
+  },
 }
 
 ---@type paseo.Config
@@ -339,6 +360,34 @@ function M.setup(opts)
   vim.validate("workspaces.open", config.workspaces.open, function(v)
     return type(v) == "function" or v == "tab" or v == "tcd" or v == "cd"
   end, '"tab", "tcd", "cd", or a function taking the workspace')
+
+  for _, key in ipairs { "dirs", "project_dirs" } do
+    vim.validate("skills." .. key, config.skills[key], function(v)
+      if type(v) ~= "table" then
+        return false
+      end
+      for _, item in ipairs(v) do
+        if type(item) ~= "string" then
+          return false
+        end
+      end
+      return true
+    end, "a list of strings")
+  end
+  vim.validate("skills.method", config.skills.method, function(v)
+    return v == "link" or v == "copy"
+  end, '"link" or "copy"')
+  -- Expanded here so nothing downstream has to: a `~` reaching `fs_symlink`
+  -- creates a directory literally called "~" in the cwd.
+  for i, dir in ipairs(config.skills.dirs) do
+    config.skills.dirs[i] = (vim.fn.expand(dir):gsub("/+$", ""))
+  end
+  -- Platform-aware, but only when nobody chose. Windows symlinks need
+  -- Developer Mode or elevation; an explicit "link" there is someone who has
+  -- it and means it.
+  if vim.fn.has "win32" == 1 and not (opts and opts.skills and opts.skills.method) then
+    config.skills.method = "copy"
+  end
   -- Clamped rather than merely validated: `nvim_open_win` rejects anything
   -- below 1 outright, and the backdrop sits five below this.
   vim.validate("ui.float.zindex", config.ui.float.zindex, "number")

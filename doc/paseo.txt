@@ -16,6 +16,7 @@ CONTENTS                                                      *paseo-contents*
   9. The agent bridge ........................... |paseo-bridge|
  10. The chat window ........................... |paseo-chat|
  11. Permissions ............................... |paseo-permission|
+ 12. Agent skills .............................. |paseo-skills|
 
 ==============================================================================
 1. INTRODUCTION                                           *paseo-introduction*
@@ -510,6 +511,26 @@ review.agents                                       boolean, default `true`
     created are excluded: asking the agent you are talking to what it did is a
     loop. Set `false` and the prompt is the reference and nothing else.
 
+                                                       *paseo-config.skills.dirs*
+skills.dirs                             string[], default `{ "~/.claude/skills" }`
+
+    Where |:Paseo-skills| `install` puts the bundled skills. Absolute; `~` is
+    expanded at setup. See |paseo-skills-where| for why the default is a
+    global directory rather than a project-local one.
+
+                                               *paseo-config.skills.project_dirs*
+skills.project_dirs                       string[], default `{ ".claude/skills" }`
+
+    Relative to the ws project root, for |:Paseo-skills| `install project`.
+
+                                                     *paseo-config.skills.method*
+skills.method                                       `"link"`|`"copy"`, default `"link"`
+
+    A symlink keeps this plugin the source of truth, so updating the plugin
+    updates the skills with no second step. Defaults to `"copy"` on Windows,
+    where symlinks need Developer Mode or elevation -- unless you set it
+    explicitly, which is someone who has it and means it.
+
 ==============================================================================
 5. COMMANDS                                                   *paseo-commands*
 
@@ -597,12 +618,14 @@ review.agents                                       boolean, default `true`
     The manifest-level controls, for when you want to see the machinery
     rather than have it decided for you. |:Paseo-wcreate| needs none of this.
 
-    `init` opens the generated manifest for you to read before you `:w` it --
-    the comments in it are what init could not decide for you. `create <name>
-    [repo,repo]` assembles worktrees, and is the only way to pick WHICH repos
-    a workspace gets; `rm <name> [force]` dismantles one and refuses if there
-    is unsaved work. `create` with no repo list is just |:Paseo-wcreate|, and
-    works with no manifest at all.
+    `init` opens the manifest as a SCREEN -- see |paseo-ws-dialog|. `init raw`
+    is the old behaviour: the generated TOML in a buffer you `:w` yourself.
+    Both load an existing manifest rather than replacing it.
+
+    `create <name> [repo,repo]` assembles worktrees, and is the only way to
+    pick WHICH repos a workspace gets; `rm <name> [force]` dismantles one and
+    refuses if there is unsaved work. `create` with no repo list is just
+    |:Paseo-wcreate|, and works with no manifest at all.
 
                                                      *paseo-workspace-kinds*
 One intention, three mechanisms ~
@@ -617,10 +640,10 @@ the directory rather than asking you:
                 Paseo's own isolation needs a git repository and
                 `~/Code/openfin` is not one.
 
-                No manifest yet? One is discovered and written on the way
-                past, and what it could not decide is reported rather than
-                swallowed -- the guessed base branch, and the `shared` list
-                to prune. Run |:Paseo-ws| `init` instead to read it first.
+                No manifest yet? One is discovered and OFFERED -- the
+                dialog at |paseo-ws-dialog| opens on what it guessed, and
+                nothing is written until you accept it. Cancelling writes
+                nothing and creates nothing.
 
     worktree    A git repository. Paseo cuts and owns the worktree itself,
                 on `branch_prefix .. name`, off whatever is CHECKED OUT.
@@ -655,6 +678,17 @@ got.
 
     List the repos in the current unit of work: the member worktrees of the
     containing workspace, or the single repo containing the cwd.
+
+:Paseo skills [status|install|uninstall]                      *:Paseo-skills*
+
+    The bundled agent skills, and getting them where an agent can see them.
+    See |paseo-skills|.
+
+    With no argument: `status`, which writes nothing. `install` and
+    `uninstall` take optional words in any order -- `global` (the default) or
+    `project`, `link` or `copy`, `force`, `dry` -- followed by skill names to
+    narrow it to those. An unrecognised word is an error rather than being
+    ignored, because a dropped `force` is a no-op that reads as a bug.
 
 :Paseo health                                                *:Paseo-health*
 
@@ -800,6 +834,48 @@ It is driven by `<project>/.ws/workspace.toml`, which |:Paseo-ws| generates.
 Without a manifest, creating a workspace just registers the directory with
 Paseo -- which is the right behaviour for an ordinary single-repo project,
 where Paseo's own worktree isolation already works.
+
+                                                          *paseo-ws-dialog*
+Configuring the manifest ~
+
+Discovery can work out nearly all of a manifest by looking at the project. Two
+things it cannot: WHICH BRANCH each repo should be based on, and WHICH of the
+directories sitting beside your repos are shared context rather than junk that
+happens to be there. Those are the two it asks about, and it asks on a screen.
+
+|:Paseo-wcreate| in a multi-repo directory with no manifest opens it, and so
+does |:Paseo-ws| `init`: >
+
+    󰙅  Workspace                              ~/Code/openfin
+
+     󰳏  Repos   m                  󰉋  Shared   s
+      ■  clm                dev     ■  Docs
+      □  clm_api            dev     □  test quotes
+      ■  fos-pwa            dev     □  test-s3
+
+     c  write the manifest             2 repo(s), 1 shared
+<
+    <CR>      include this repo / keep this sibling
+    b         set the focused repo's base branch
+    t         edit the whole file as TOML instead
+    c         write it
+    q         cancel -- and NOTHING is written
+
+Each repo carries its base branch on the right of its own row, and whatever
+discovery could not decide about it appears under the card as you move. An
+unchecked repo becomes `default = false`; an unchecked sibling is dropped from
+`shared`.
+
+Cancelling writes nothing and creates nothing. A half-decided manifest is
+worse than none, because the project would answer "assembled" from then on and
+never ask again.
+
+                                                       *paseo-ws-dialog-again*
+Opening it on a project that already has a manifest LOADS that manifest rather
+than replacing it, and a sibling you pruned stays pruned even though it is
+still sitting there on disk. That is the whole point: the generated file used
+to say `PRUNE THIS` in a comment, and nothing that re-read the project ever
+honoured the answer.
 
                                                           *paseo-workspaces-keys*
 In the workspace picker (|:Paseo-workspaces|) ~
@@ -1578,5 +1654,70 @@ It has to be on screen at all because a plan request carries no tool `detail`
 whatsoever -- the markdown travels in the tool input -- so there is nothing
 else that says what you are agreeing to. The transcript records it too,
 capped, so which plan you approved is still readable tomorrow.
+
+==============================================================================
+12. AGENT SKILLS                                                *paseo-skills*
+
+This plugin ships five agent skills in its own `.agents/skills/`:
+
+    workspace           finding your way around a multi-repo workspace
+    workspace-commit    one conventional commit per repo, across a workspace
+    workspace-pr        one pull request per member repo, cross-linked
+    explain-change      the rubric |:Paseo-explain| uses
+    paseo-sdk           writing a program against the Paseo daemon
+
+They are plain markdown over plain git and `<project>/.ws/workspace.toml`.
+Nothing in them needs a binary this plugin does not ship, which is what makes
+them usable by whatever agent you happen to be running.
+
+                                                          *paseo-skills-where*
+Where they go ~
+
+An agent only discovers skills near its working directory, so bundled ones are
+invisible everywhere except inside this repository -- which is exactly
+backwards, because three of them describe multi-repo workspaces and those live
+somewhere else. |:Paseo-skills| `install` fixes that.
+
+GLOBAL IS THE DEFAULT, and it is not a matter of taste. An agent working in a
+workspace has a working directory of `<project>/.workspaces/<name>/<repo>` --
+a MEMBER worktree. It reads project skills from there and from the repository
+around it, so `<project>/.claude/skills` is two levels up and in a different
+tree: invisible to the one agent these are for. `~/.claude/skills` is the only
+target visible from inside a member, and it is also right on the merits, since
+these describe a workflow rather than a project.
+
+`install project` exists for the case where the agent really does run at the
+project root. It refuses when that root is itself a git repository, because
+adding files to your repo uninvited is not a thing a plugin does.
+
+                                                           *paseo-skills-link*
+Links, or copies ~
+
+A symlink by default: this plugin stays the source of truth, so updating it
+updates the skills with no second step. |paseo-config.skills.method| `= "copy"`
+is the alternative, and is the default on Windows.
+
+Removing and reinstalling the plugin leaves a link pointing at nothing.
+`install` repairs that WITHOUT `force` -- a link to nothing is nobody's data,
+and needing `force` to recover from the ordinary case would make it feel
+dangerous.
+
+                                                         *paseo-skills-safety*
+What it refuses ~
+
+    already installed      skipped, and said so
+    a link pointing at nothing      repaired, no `force` needed
+    a link pointing somewhere else  refused; `force` replaces it
+    a directory paseo did not create   refused; `force` MOVES it to
+                                       `<name>.paseo-backup` and names the path
+
+`force` never deletes anything you have. It moves a real directory aside; it
+replaces a symlink, because a symlink is a pointer rather than data. `dry`
+prints the same plan without touching the disk.
+
+Nothing here ever happens on its own. Writing into `~/.claude/skills` changes
+the behaviour of a DIFFERENT program, and no Neovim plugin gets to do that as
+a side effect of a command about worktrees. The most you will see is one line
+after assembling a workspace, once per session, naming the command.
 
 `vim:tw=78:ts=8:ft=help:norl:`

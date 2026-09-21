@@ -58,65 +58,54 @@ local function split(text)
 end
 
 commands.ws = {
-  desc = "Manifest-level: init | create <name> [repos] | rm <name> [force] | ls | status",
+  desc = "Manifest-level: init [raw] | create <name> [repos] | rm <name> [force] | ls | status",
   run = function(args)
     local sub = args[1] or "ls"
     local workspace = require "paseo.workspace"
     local registry = require "paseo.registry"
 
     if sub == "init" then
-      local root = args[2] and vim.fn.fnamemodify(vim.fn.expand(args[2]), ":p")
+      -- `raw` anywhere in the words after `init`; whatever else is there is
+      -- the root. Same word-flag shape as `ws rm <name> force`.
+      local raw, where = false, nil
+      for i = 2, #args do
+        if args[i] == "raw" then
+          raw = true
+        else
+          where = args[i]
+        end
+      end
+      local root = where and vim.fn.fnamemodify(vim.fn.expand(where), ":p")
         or assert(vim.uv.cwd())
       root = root:gsub("/+$", "")
 
-      local path = workspace.manifest.path(root)
-      local existing = vim.uv.fs_stat(path)
-
-      local m, notes = workspace.discover(root)
-      if not m then
-        return vim.notify("paseo: " .. tostring(notes), vim.log.levels.ERROR)
+      local ui = require "paseo.ui.manifest"
+      local draft, derr = ui.draft(root)
+      if not draft then
+        return vim.notify("paseo: " .. tostring(derr), vim.log.levels.ERROR)
       end
 
-      -- The directory has to exist BEFORE the buffer is named, or `:w` fails
-      -- with E212 "Can't open file for writing: no such file or directory" --
-      -- which reads like a permissions problem rather than a missing parent.
-      -- Creating it is harmless even if you never write the file.
-      vim.fn.mkdir(vim.fs.dirname(path), "p")
-
-      -- A buffer may already be sitting on this path -- a second `init`, or the
-      -- file simply being open. Reuse it rather than failing on a duplicate
-      -- name.
-      local buf = vim.fn.bufnr(path)
-      vim.cmd "tabnew"
-      if buf ~= -1 then
-        vim.api.nvim_win_set_buf(0, buf)
-      else
-        buf = vim.api.nvim_get_current_buf()
-        vim.api.nvim_buf_set_name(buf, path)
+      -- `raw` is the old behaviour kept whole: the generated TOML in a buffer
+      -- you `:w` yourself. It gets the same MERGED draft the dialog would, so
+      -- opening the file by hand does not silently discard a pruned `shared`
+      -- list the way re-running discovery into it would.
+      if raw then
+        return ui.edit(root, ui.result(draft), ui.notes(draft))
       end
 
-      vim.api.nvim_buf_set_lines(
-        buf,
-        0,
-        -1,
-        false,
-        vim.split(workspace.manifest.render(m, notes), "\n")
-      )
-      vim.bo[buf].filetype = "toml"
-
-      -- Shown before it is written, never written behind your back: the
-      -- comments are the whole value of the file and they are what you have to
-      -- check -- which base branch, which repo is opt-in, which shared siblings
-      -- to prune.
-      vim.notify(
-        existing
-            and ("paseo: %s already exists -- this REPLACES it. Review, then :w"):format(
-              vim.fn.fnamemodify(path, ":~")
-            )
-          or "paseo: review this, then :w to accept it",
-        existing and vim.log.levels.WARN or vim.log.levels.INFO
-      )
-      return
+      return ui.review({ root = root }, function(edited, notes)
+        if not edited then
+          return
+        end
+        local ok, save_err = workspace.manifest.save(root, edited, notes)
+        if not ok then
+          return vim.notify("paseo: " .. tostring(save_err), vim.log.levels.ERROR)
+        end
+        vim.notify(
+          ("paseo: wrote %s"):format(vim.fn.fnamemodify(workspace.manifest.path(root), ":~")),
+          vim.log.levels.INFO
+        )
+      end)
     end
 
     local m, root, err = project { root = nil }
@@ -395,6 +384,89 @@ commands.health = {
   desc = "Run :checkhealth paseo",
   run = function()
     vim.cmd "checkhealth paseo"
+  end,
+}
+
+commands.skills = {
+  desc = "Agent skills: status | install | uninstall [global|project] [link|copy|force|dry] [name...]",
+  run = function(args)
+    local skills = require "paseo.skills"
+
+    local VERBS = { status = true, install = true, uninstall = true }
+    local FLAGS = {
+      global = "target",
+      project = "target",
+      link = "method",
+      copy = "method",
+      force = "force",
+      dry = "dry",
+    }
+
+    -- `status` is the bare default. A command that writes into ~/.claude the
+    -- moment you type it to find out what it does is a bad command.
+    local verb = "status"
+    local opts, names = {}, {}
+    for i, word in ipairs(args) do
+      if i == 1 and VERBS[word] then
+        verb = word
+      elseif FLAGS[word] then
+        local key = FLAGS[word]
+        opts[key] = (key == "force" or key == "dry") and true or word
+      elseif VERBS[word] then
+        return vim.notify(
+          ("paseo: %q is a verb and only makes sense first"):format(word),
+          vim.log.levels.ERROR
+        )
+      else
+        -- NOT ignored. A dropped `force` typo is a no-op that reads as a bug.
+        names[#names + 1] = word
+      end
+    end
+
+    if verb == "status" then
+      return vim.notify(
+        table.concat(skills.status(opts), "\n"),
+        vim.log.levels.INFO,
+        { title = "paseo: skills" }
+      )
+    end
+
+    local plan, err = skills.plan(vim.tbl_extend("force", opts, {
+      action = verb,
+      names = names,
+    }))
+    if not plan then
+      return vim.notify("paseo: " .. tostring(err), vim.log.levels.ERROR)
+    end
+
+    if opts.dry then
+      local lines = { ("would %s:"):format(verb) }
+      for _, action in ipairs(plan) do
+        lines[#lines + 1] = ("  %-7s %s%s"):format(
+          action.verb,
+          vim.fn.fnamemodify(action.path, ":~"),
+          action.reason and (" — " .. action.reason) or ""
+        )
+      end
+      return vim.notify(
+        table.concat(lines, "\n"),
+        vim.log.levels.INFO,
+        { title = "paseo: skills" }
+      )
+    end
+
+    local lines, refused, backed_up = skills.apply(plan)
+    if refused then
+      lines[#lines + 1] = ""
+      lines[#lines + 1] = "add `force` to move what is in the way aside"
+    end
+    vim.notify(
+      table.concat(lines, "\n"),
+      refused and vim.log.levels.ERROR
+        or backed_up and vim.log.levels.WARN
+        or vim.log.levels.INFO,
+      { title = "paseo: skills" }
+    )
   end,
 }
 
