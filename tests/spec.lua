@@ -1083,6 +1083,22 @@ default = false
       worktrees(name),
       before[name]
     )
+
+    -- And the branch with it. `git worktree remove` leaves it standing, so a
+    -- project collected one dead `ws/<name>` per member per workspace anyone
+    -- ever made -- kora still had a full set three days after the workspace
+    -- that made them was gone.
+    local left = vim
+      .system(
+        { "git", "-C", vim.fs.joinpath(project, name), "branch", "--list", "ws/spec" },
+        { text = true }
+      )
+      :wait()
+    eq(
+      "workspace: and " .. name .. " has no ws/spec branch left behind",
+      vim.trim(left.stdout or ""),
+      ""
+    )
   end
 
   -- And it refuses when there IS work.
@@ -1100,6 +1116,30 @@ default = false
     local blockers = workspace.unsaved(ws2)
     truthy("workspace: an unpushed commit blocks removal", #blockers > 0, vim.inspect(blockers))
     truthy("workspace: and says why", (blockers[1] or ""):find "unpushed" ~= nil, blockers[1])
+
+    -- A repository holding a DIRECTORY named after its base branch. kora-backend
+    -- is one: `main/` sits next to `main`, git calls `HEAD --not --remotes main`
+    -- ambiguous and fails, `git()` returns nil, and a nil answer to "is there
+    -- unpushed work?" read as NO -- so the one repo where the check could not
+    -- run was the one where removal went ahead and took the commits with it.
+    vim.fn.mkdir(vim.fs.joinpath(dir, "main"), "p")
+    local collide = assert(io.open(vim.fs.joinpath(dir, "main", "x.txt"), "w"))
+    collide:write "x\n"
+    collide:close()
+    vim.system({ "git", "-C", dir, "add", "-A" }, { text = true }):wait()
+    vim
+      .system(
+        { "git", "-C", dir, "-c", "commit.gpgsign=false", "commit", "-qm", "path named main" },
+        { text = true }
+      )
+      :wait()
+    local ambiguous = workspace.unsaved(ws2)
+    truthy(
+      "workspace: a base branch that is also a path still blocks removal",
+      #ambiguous > 0 and (ambiguous[#ambiguous]):find "unpushed" ~= nil,
+      vim.inspect(ambiguous)
+    )
+
     truthy("workspace: force removes anyway", workspace.remove(ws2, { force = true }))
   end
 end

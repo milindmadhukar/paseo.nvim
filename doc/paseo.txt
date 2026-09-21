@@ -627,6 +627,11 @@ skills.method                                       `"link"`|`"copy"`, default `
     refuses if there is unsaved work. `create` with no repo list is just
     |:Paseo-wcreate|, and works with no manifest at all.
 
+    Dismantling takes the members out with `git worktree remove` -- never
+    `rm -rf` -- and deletes the `ws/<name>` branch with them, with a plain
+    `git branch -d` that refuses an unmerged branch rather than discarding it.
+    Left alone, every workspace ever made leaves one dead branch per member.
+
                                                      *paseo-workspace-kinds*
 One intention, three mechanisms ~
 
@@ -886,7 +891,8 @@ In the workspace picker (|:Paseo-workspaces|) ~
     <C-s>     its sessions
     <C-n>     create a workspace
     <C-d>     archive it -- refuses, and says what it would lose, if a member
-              holds work that exists nowhere else
+              holds work that exists nowhere else. Its worktrees and their
+              `ws/<name>` branches go with it
     <C-r>     review it here: `tcd` into the workspace so the repo list widens
               to every member, then fire |paseo-review-autocmd| -- what
               "review" means is your config's to say
