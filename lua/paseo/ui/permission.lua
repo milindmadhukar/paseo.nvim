@@ -253,7 +253,7 @@ local function viewer(chat, request)
 
   if plan.parse(request) then
     view.plan = true
-    -- `availableModes` is per PROVIDER and loaded with the rest of the session
+    -- `availableModes` is per PROVIDER and loaded with the rest of the agent session
     -- settings, so the buttons are the modes this agent can actually be put
     -- into. Without a snapshot there is nothing honest to offer and the
     -- request's own Implement/Reject stands.
@@ -588,7 +588,7 @@ end
 ---
 ---`M.resolved` handles the one case the event stream covers: somebody answered
 ---and the daemon said so. It is not the only case. The daemon replaces its
----pending map wholesale on a session refresh and emits no resolution for what
+---pending map wholesale on an agent-session refresh and emits no resolution for what
 ---vanished; a resolution that lands while the socket is down is never
 ---replayed; and a request that arrived while no chat was open was dropped on
 ---the floor. Each of those leaves this side holding a prompt that is already

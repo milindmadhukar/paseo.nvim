@@ -175,14 +175,14 @@ test("ensure rechecks after workspace lookup before creating", async () => {
 });
 
 test("fresh workspace sessions receive initial settings", async () => {
-  let createdConfig: any;
+  let createdOptions: any;
   const api = {
     workspaces: {
       ref() {
         return {
           agents: {
             async create(options: any) {
-              createdConfig = options.config;
+              createdOptions = options;
               return { id: "new" };
             },
           },
@@ -199,9 +199,94 @@ test("fresh workspace sessions receive initial settings", async () => {
     modeId: "full-access",
     thinkingOptionId: "medium",
     featureValues: { plan_mode: false, fast_mode: true },
+    prompt: "continue from here",
+    attachments: [
+      {
+        type: "text",
+        mimeType: "text/plain",
+        contextKind: "chat_history",
+        text: "history",
+      },
+    ],
   };
   await agentOps(ctx)["agent.create"](request);
-  assert.deepEqual(createdConfig, creationConfig(request, request.provider));
+  assert.deepEqual(createdOptions.config, creationConfig(request, request.provider));
+  assert.equal(createdOptions.prompt, request.prompt);
+  assert.deepEqual(createdOptions.attachments, request.attachments);
+});
+
+test("fork context is capability-gated and snapshots the complete conversation", async () => {
+  const snapshot = {
+    workspaceId: "ws-source",
+    cwd: "/work/source",
+    title: "Source",
+    currentModeId: "full-access",
+    runtimeInfo: {
+      provider: "codex",
+      model: "gpt-5.6-sol",
+      thinkingOptionId: "high",
+    },
+    features: [{ id: "fast_mode", type: "toggle", value: true }],
+  };
+  let buildArgs: any[] = [];
+  const ctx = new BridgeConnection();
+  ctx.connected = (() => ({
+    agents: {
+      ref() {
+        return {
+          async refresh() {},
+          current() {
+            return snapshot;
+          },
+        };
+      },
+    },
+  })) as any;
+  (ctx as any).daemon = {
+    getLastServerInfoMessage: () => ({ features: { agentForkContext: true } }),
+    async buildAgentForkContext(...args: any[]) {
+      buildArgs = args;
+      return {
+        attachment: {
+          type: "text",
+          mimeType: "text/plain",
+          contextKind: "chat_history",
+          text: "complete",
+        },
+        itemCount: 17,
+      };
+    },
+  };
+  const result: any = await agentOps(ctx)["agent.forkContext"]({
+    op: "agent.forkContext",
+    agentId: "agent-source",
+  });
+  assert.deepEqual(buildArgs, ["agent-source"]);
+  assert.deepEqual(result.attachment, {
+    type: "text",
+    mimeType: "text/plain",
+    contextKind: "chat_history",
+    text: "complete",
+  });
+  assert.equal(result.itemCount, 17);
+  assert.equal(result.workspaceId, "ws-source");
+  assert.equal(result.cwd, "/work/source");
+  assert.deepEqual(result.config, {
+    provider: "codex/gpt-5.6-sol",
+    modeId: "full-access",
+    thinkingOptionId: "high",
+    featureValues: { fast_mode: true },
+  });
+
+  (ctx as any).daemon.getLastServerInfoMessage = () => ({ features: {} });
+  await assert.rejects(
+    () =>
+      agentOps(ctx)["agent.forkContext"]({
+        op: "agent.forkContext",
+        agentId: "agent-source",
+      }),
+    /does not support agent forking/,
+  );
 });
 
 test("catalog retains choices and feature lookup follows the model", async () => {

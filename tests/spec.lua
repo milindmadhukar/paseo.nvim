@@ -49,6 +49,8 @@ local files = {
   "voice",
   "draft",
   "settings",
+  "fork",
+  "quit",
   "workspace_create",
   "skills",
   "chat",

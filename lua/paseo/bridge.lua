@@ -145,7 +145,7 @@ end
 ---
 ---Permissions: `permission`, `permission_resolved`.
 ---
----Session: `settings`, `usage`, `attention`, `turn`.
+---Agent session: `settings`, `usage`, `attention`, `turn`.
 ---
 ---Connection: `restored`, `replaced`, `stream_error`, `protocol_error`,
 ---`ready`, `agents`.

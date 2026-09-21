@@ -44,8 +44,8 @@ local M = {}
 ---                         start again. See |paseo.ui.answer|.
 
 ---Chats are keyed by AGENT, falling back to the directory until the agent is
----known. A workspace can hold several sessions, so keying on the directory
----alone meant the second session took over the first one's window.
+---known. A workspace can hold several agent sessions, so keying on the directory
+---alone meant the second agent session took over the first one's window.
 ---@type table<string, paseo.Chat>
 local chats = {}
 
@@ -61,7 +61,7 @@ local initialise
 ---
 ---The header itself lives in `ui/sidebar.lua`, and the float draws the same
 ---cells, so the two surfaces cannot drift into disagreeing about which mode the
----session is in.
+---agent session is in.
 ---@param chat paseo.Chat
 local function set_winbar(chat)
   sidebar.refresh(chat)
@@ -71,7 +71,7 @@ end
 ---
 ---The header shows LABELS -- "Plan Mode", not "plan" -- and there are two
 ---routes into it, a pulled `agent.config` and a pushed `settings` event. The
----pushed one used to store the raw id, so the same session read "Plan Mode"
+---pushed one used to store the raw id, so the same agent session read "Plan Mode"
 ---or "plan" in the header depending on which had spoken last.
 ---@param entries table[]|nil
 ---@param id any
@@ -90,7 +90,7 @@ end
 
 ---Fold a settings payload into a chat, and repaint.
 ---
----Also patches `config_snapshot`, which the Session panel draws its `●` from.
+---Also patches `config_snapshot`, which the Agent panel draws its `●` from.
 ---Leaving that stale meant the header could report a mode the panel below it
 ---still marked as something else.
 ---
@@ -102,7 +102,7 @@ end
 ---@param payload table
 function M.apply_settings(chat, payload)
   local snapshot = chat.config_snapshot
-  -- The Session panel draws modes, thinking levels, models and features, and
+  -- The Agent panel draws modes, thinking levels, models and features, and
   -- redrawing it is a full volt regeneration. It is gated on a real CHANGE
   -- rather than on a field being present, because this payload arrives on
   -- every usage tick -- seven times in one short turn, measured -- and the
@@ -172,7 +172,7 @@ function M.apply_settings(chat, payload)
 
   -- The pending list rides this payload now, and it is AUTHORITATIVE -- it is
   -- the daemon's own, it arrives on reconnect, and it is the only thing that
-  -- reports a request cleared by a session refresh or answered while the
+  -- reports a request cleared by an agent-session refresh or answered while the
   -- socket was down. Nil means the sidecar is older than this field; an empty
   -- table means "nothing is pending" and must still be acted on.
   if payload.pendingPermissions then
@@ -183,7 +183,7 @@ function M.apply_settings(chat, payload)
   end
 
   set_winbar(chat)
-  -- The dashboard draws the Session panel from the snapshot above, and nothing
+  -- The dashboard draws the Agent panel from the snapshot above, and nothing
   -- else asks it to redraw. Cheap when it is closed: `rebuild` returns early.
   if panel then
     pcall(function()
@@ -559,6 +559,9 @@ local function make_buffers(chat)
     vim.keymap.set("n", "gp", function()
       require("paseo.ui.permission").reopen(chat)
     end, vim.tbl_extend("force", conv, { desc = "paseo: reopen permission prompt" }))
+    vim.keymap.set("n", "f", function()
+      require("paseo.fork").start(chat)
+    end, vim.tbl_extend("force", conv, { desc = "paseo: fork into a new workspace" }))
     vim.keymap.set(
       "n",
       "<C-f>",
@@ -706,6 +709,9 @@ local function make_buffers(chat)
     vim.keymap.set("n", "gq", function()
       M.close()
     end, vim.tbl_extend("force", opts, { desc = "paseo: close chat" }))
+    vim.keymap.set("n", "f", function()
+      require("paseo.fork").start(chat)
+    end, vim.tbl_extend("force", opts, { desc = "paseo: fork into a new workspace" }))
     for _, mode in ipairs { "n", "i" } do
       vim.keymap.set(mode, "<C-f>", function()
         vim.cmd.stopinsert()
@@ -784,7 +790,7 @@ local function load_history(chat)
 
       -- An agent that blocked BEFORE this window opened never fires
       -- `permission_requested` at us -- that event fired once, while we were
-      -- not listening. Without this the session looks idle when it is actually
+      -- not listening. Without this the agent session looks idle when it is actually
       -- waiting on an answer.
       --
       -- Reconciled rather than merely offered: this also runs on a `restored`
@@ -796,7 +802,7 @@ local function load_history(chat)
 end
 
 ---Everything a chat needs once its agent is known: a clean buffer, the live
----subscription, the conversation so far, and the session's current settings.
+---subscription, the conversation so far, and the agent's current settings.
 ---
 ---One function because these belong together -- an agent that is subscribed but
 ---whose history was never fetched looks like an empty conversation, and one
@@ -902,9 +908,9 @@ function M.open(opts, callback)
   -- An agent we were HANDED still needs everything an agent we created needs.
   --
   -- This used to return early when `chat.agent_id` was already set, which is
-  -- exactly the case when you open an existing session from the sessions
+  -- exactly the case when you open an existing agent session from the agent
   -- picker -- so it never subscribed, never fetched the conversation, and
-  -- never loaded the mode. You got an empty window onto a session with
+  -- never loaded the mode. You got an empty window onto an agent session with
   -- history.
   if chat.agent_id and chat.initialised then
     M.load_settings(chat)
@@ -971,7 +977,7 @@ function M.open(opts, callback)
         notice(chat, "no agent in this workspace yet — :Paseo chat starts one")
         return callback(nil, nil)
       end
-      notice(chat, "choose session settings…")
+      notice(chat, "choose agent settings…")
       require("paseo.ui.create").review(
         { cwd = root, preferred = preferred },
         function(draft, review_err)
@@ -1432,13 +1438,13 @@ function M.attach_events()
   end)
 end
 
----Redraw the winbar after a session setting changed.
+---Redraw the winbar after an agent setting changed.
 ---@param chat paseo.Chat
 function M.refresh(chat)
   set_winbar(chat)
 end
 
----Load the session's current mode, thinking level and features into the
+---Load the agent's current mode, thinking level and features into the
 ---winbar. Called once the agent is known, so the bar reflects reality rather
 ---than only what you changed from here.
 ---@param chat paseo.Chat

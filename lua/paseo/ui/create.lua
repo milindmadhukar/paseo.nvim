@@ -115,12 +115,12 @@ function M.catalogue(cwd, callback)
   fetch_catalogue(cwd, callback)
 end
 
----Everything a new session is set to, before it exists, on one screen.
+---Everything a new agent session is set to, before it exists, on one screen.
 ---
 ---This used to be a plain buffer -- `("%-15s %s"):format(label, value)`, no
----highlights, a `vim.ui.select` for every choice -- while the Session tab drew
+---highlights, a `vim.ui.select` for every choice -- while the Agent tab drew
 ---the same settings as cards. It is now the SAME VIEW as that tab, over a
----draft instead of a running agent, so the screen you set a session up on and
+---draft instead of a running agent, so the screen you set an agent up on and
 ---the screen you change it on are one renderer.
 ---
 ---Which also retires the picker: a cold open lands on the Provider card with
@@ -194,7 +194,7 @@ function M.review(opts, callback)
       -- `widgets.radio` is clickable: the action on every cell, so the target
       -- is the row and not the two words on it.
       view.footer = function(w)
-        local label = draft.loading and "waiting for this model's features…" or "create session"
+        local label = draft.loading and "waiting for this model's features…" or "create agent"
         local line = widgets.row(
           { widgets.keycap "c", { "  " .. label, draft.loading and "PaseoDim" or nil } },
           { { draft.provider, "PaseoDim" } },
@@ -218,7 +218,7 @@ function M.review(opts, callback)
           return {
             render.truncate(
               widgets.row(
-                { { "  New session", "PaseoHeader" } },
+                { { "  New agent", "PaseoHeader" } },
                 { { vim.fn.fnamemodify(opts.cwd, ":~"), "PaseoDim" } },
                 inner,
                 "PaseoNormal"
@@ -230,7 +230,7 @@ function M.review(opts, callback)
           }
         end,
         keys = {
-          { "c", create, "paseo: create this session" },
+          { "c", create, "paseo: create this agent session" },
         },
         -- volt owns `q` and `<Esc>`; both land here.
         on_close = function()

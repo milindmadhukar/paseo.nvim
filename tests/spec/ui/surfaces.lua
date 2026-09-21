@@ -62,6 +62,11 @@ local function test_surfaces()
     "ui: and on the conversation, which is the other pane you read from",
     mapping(surface_chat.conversation, "5") ~= nil
   )
+  local chat_file = assert(io.open(vim.fs.joinpath(t.repo_root, "lua", "paseo", "ui", "chat.lua")))
+  local chat_source = chat_file:read "*a"
+  chat_file:close()
+  local _, fork_maps = chat_source:gsub('desc = "paseo: fork into a new workspace"', "")
+  eq("ui: f is mapped in both main chat buffers", fork_maps, 2)
   -- Pressed where the cursor actually is.
   vim.api.nvim_feedkeys("5", "x", false)
   eq("ui: pressing 5 in the composer jumps to the fifth tab", float.tab(), float.TABS[5])
@@ -256,7 +261,7 @@ local function test_surfaces()
   -- and the conversation window only exists on the Chat tab -- so every other
   -- tab had no header at all and the dashboard could not tell you which model
   -- it was on. It is a volt section in the chrome now.
-  -- The Sessions tab used to map CURSOR ROWS to sessions, and the only thing
+  -- The agent-session list used to map CURSOR ROWS to sessions, and the only thing
   -- between a panel's own line numbering and the buffer's was a constant it
   -- had to agree with. It holds focus by ID now, so the thing worth checking
   -- against a REAL open dashboard is different: that the row reaches the
@@ -271,7 +276,7 @@ local function test_surfaces()
         { id = "row-other", title = "row-other", status = "idle" },
       }
     end
-    float.select "Sessions"
+    float.select "Agents & terminals"
 
     local chrome
     for _, win in ipairs(vim.api.nvim_list_wins()) do
@@ -299,7 +304,7 @@ local function test_surfaces()
     end
     local joined = table.concat(drawn, "\n")
     truthy(
-      "ui: a Sessions row reaches the chrome buffer",
+      "ui: an agent-session row reaches the chrome buffer",
       joined:find("row-probe", 1, true) ~= nil,
       joined
     )
@@ -381,7 +386,7 @@ local function test_surfaces()
     -- The six panels SHARE the chrome buffer, so a panel that binds keys has
     -- to give them back. `<CR>` is the one that matters: volt binds it at open
     -- and that is how every other panel's rows are reached from the keyboard,
-    -- so a Session panel that simply DELETED its own `<CR>` on the way out
+    -- so an Agent panel that simply DELETED its own `<CR>` on the way out
     -- would leave the key dead on all five of the others.
     local function buf_map(lhs)
       local found = vim.fn.maparg(lhs, "n", false, true)

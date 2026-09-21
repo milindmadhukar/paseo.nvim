@@ -143,7 +143,7 @@ local function test_provider_setup()
       end)
     )
 
-    -- The review screen is the Session tab's view over a DRAFT, so it is
+    -- The review screen is the Agent tab's view over a DRAFT, so it is
     -- driven the way that view is driven -- through the model and the bound
     -- handlers -- rather than by aiming feedkeys at a row of plain text. The
     -- old screen was `nvim_buf_set_lines` and these assertions read it back.
@@ -159,7 +159,7 @@ local function test_provider_setup()
     )
     local review_buf = vim.api.nvim_get_current_buf()
     truthy(
-      "provider: with a Provider card the Session tab does not have",
+      "provider: with a Provider card the Agent tab does not have",
       volt_text(review_buf):find("Provider", 1, true) ~= nil
     )
     truthy(

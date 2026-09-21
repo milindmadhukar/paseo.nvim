@@ -1,8 +1,8 @@
 --- Workspaces and repos: the other half of the plugin, on the dashboard.
 ---
 --- The full-screen surface is meant to be the whole of Paseo without the app,
---- and until this panel existed it stopped at the session -- everything about
---- the unit of work the session runs IN was only reachable through a telescope
+--- and until this panel existed it stopped at the agent session -- everything about
+--- the unit of work the agent session runs IN was only reachable through a telescope
 --- picker, which is a different window, over the top, that you have to dismiss.
 ---
 --- Creating a workspace and the full picker still hand off to the commands

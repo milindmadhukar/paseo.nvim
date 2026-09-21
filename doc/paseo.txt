@@ -11,7 +11,7 @@ CONTENTS                                                      *paseo-contents*
   4. Configuration .............................. |paseo-configuration|
   5. Commands ................................... |paseo-commands|
   6. Lua API .................................... |paseo-api|
-  7. Workspaces and sessions .................... |paseo-workspaces|
+  7. Paseo glossary and workspaces .............. |paseo-workspaces|
   8. Git ........................................ |paseo-git|
   9. The agent bridge ........................... |paseo-bridge|
  10. The chat window ........................... |paseo-chat|
@@ -45,7 +45,7 @@ Hard:
   - Neovim 0.11+
   - `git`
   - a Nerd Font -- every surface draws glyphs from one; see |paseo-glyphs|
-  - telescope.nvim, for the workspace and session pickers
+  - telescope.nvim, for the workspace and agent-session pickers
   - gitsigns.nvim, for finding the hunk under the cursor (|:Paseo-ask|)
   - nvzone/volt, for the chat chrome, the panels and the permission dialog
 
@@ -117,7 +117,11 @@ Defaults: >lua
       },
 
       review = {
-        context = 0,
+        agents = true,
+      },
+
+      quit = {
+        warn_active_agents = true,
       },
     }
 <
@@ -304,9 +308,9 @@ ui.animate                                 boolean|table, default on
     it at the wrong row.
 
     A third effect -- staggering a panel's rows in on a tab switch -- was
-    written and then removed. The Sessions panel maps cursor rows to sessions,
-    and that map named every row while only some were painted, so for the
-    length of the reveal the screen disagreed with what a keypress would do.
+    written and then removed. A list's rows are all addressable the moment it
+    is drawn, so a reveal that painted only some of them left the screen
+    disagreeing with what a keypress would do for the length of it.
 
                         *paseo-config.ui.float.width*
                         *paseo-config.ui.float.height*
@@ -423,7 +427,7 @@ ui.terminal                                                         table
         terminal = { keys = { next = false, prev = false } }
 <
         next      the next session here, prev the previous
-        sessions  to the Sessions tab -- the way OUT of a terminal.
+        sessions  to the Agents & terminals tab -- the way OUT of a terminal.
                   This was `list`, which meant the rail
         terminal  from the chrome back into the PTY
 
@@ -594,6 +598,15 @@ review.agents                                       boolean, default `true`
     created are excluded: asking the agent you are talking to what it did is a
     loop. Set `false` and the prompt is the reference and nothing else.
 
+                                      *paseo-config.quit.warn_active_agents*
+quit.warn_active_agents                             boolean, default `true`
+
+    Warn before a normal whole-editor exit while a non-archived Paseo agent
+    session is running, starting, queued, or waiting for attention. The work
+    continues on the Paseo daemon; quitting closes only this Neovim client and
+    its sidecar. Closing a split, Neovim tab page, or float does not warn.
+    Forced `!` exits are the explicit bypass. See |paseo-quit|.
+
                                                        *paseo-config.skills.dirs*
 skills.dirs                             string[], default `{ "~/.claude/skills" }`
 
@@ -654,9 +667,22 @@ skills.method                                       `"link"`|`"copy"`, default `
     daemon catalog. A chat on another model stays intact. The next chat opens
     a matching existing agent or reviews settings before creating a new one.
 
+:Paseo switchmodel                                    *:Paseo-switchmodel*
+
+    Choose a model for the live agent session. When it actually changes,
+    choose one of: fork into a new workspace, use it for this agent's future
+    turns, or cancel. A fork leaves the source agent untouched and recalculates
+    model-specific thinking and feature values safely.
+
+:Paseo agent-settings                              *:Paseo-agent-settings*
+:Paseo session                                            *:Paseo-session*
+
+    Show what the current agent session is set to. `session` is retained as a
+    compatibility alias; `agent-settings` is the canonical command.
+
 :Paseo plan                                                  *:Paseo-plan*
 
-    Toggle Plan on the current session. Codex reports it as the plan_mode
+    Toggle Plan on the current agent session. Codex reports it as the plan_mode
     feature; Claude reports it as the plan mode. Codex's permission setting
     stays separate. :Paseo fast [feature_id] keeps its feature picker.
 
@@ -687,14 +713,17 @@ skills.method                                       `"link"`|`"copy"`, default `
     Create a workspace here. THE ONE YOU WANT: it works out for itself what
     kind of project this is, and you never have to. See |paseo-workspace-kinds|.
 
+:Paseo agents                                              *:Paseo-agents*
 :Paseo sessions                                          *:Paseo-sessions*
 
-    Sessions in the workspace containing this directory.
+    Agent sessions in the workspace containing this directory. `sessions` is
+    retained as a compatibility alias; `agents` is the canonical command.
 
 :Paseo term                                                  *:Paseo-term*
 :Paseo terminals                                        *:Paseo-terminals*
 
-    The terminals in this workspace: the dashboard, on its Sessions tab,
+    The terminals in this workspace: the dashboard, on its Agents &
+    terminals tab,
     which lists them beside the agents. Opening one shows it on the Chat tab.
     See |paseo-terminals|.
 
@@ -820,6 +849,14 @@ require("paseo.repos").invalidate()
     Drop the resolved-path cache. Called automatically on `DirChanged`; call it
     by hand after creating or removing a worktree under the current tree.
 
+                                                            *paseo.quit.guard*
+require("paseo.quit").guard(proceed, {opts})
+
+    Run `proceed` unless the user cancels because an agent session is active.
+    Use this from a central quit router. `{opts}.force` bypasses the check.
+    Standard interactive quit routes are wrapped automatically without
+    replacing mappings or command-line abbreviations that already exist.
+
                                                                *paseo-ask-box*
 |:Paseo-ask| and |:Paseo-qfask| open a small float, take your question, send
 it, and let the chat come up behind the answer. They used to open the entire
@@ -888,19 +925,50 @@ rather than the common dir. That is also deliberate: it is per-worktree, which
 is what identifies the member.
 
 ==============================================================================
-7. WORKSPACES AND SESSIONS                                  *paseo-workspaces*
+7. PASEO GLOSSARY AND WORKSPACES                            *paseo-workspaces*
+                                                               *paseo-glossary*
 
-Paseo's model, and this plugin uses it directly:
+These names follow Paseo's model:
 
-    Project     a directory or repo Paseo knows about -- `kora`, `openfin`
-    Workspace   one unit of work inside it, with a working directory
-    Session     an agent inside a workspace. Several run at once, and they
-                SHARE the workspace's directory
+    Project        The long-lived codebase Paseo knows. Contains workspaces.
 
-Isolation is a property of the WORKSPACE, not of the session. Two sessions in
-one workspace edit the same files, deliberately -- that is what makes "an agent
-writing code and another reviewing its diff" work. Two workspaces are isolated
-from each other only when each has its own worktree.
+    Workspace      One unit of work in a project, with a working directory.
+                   Contains agent sessions and terminals.
+
+    Agent          The AI worker identified by an agent ID.
+
+    Agent session  One agent's state and timeline inside a workspace. Several
+                   can share the same workspace and files. Bare `session` is
+                   retained only in compatibility aliases and stable internal
+                   module or protocol names.
+
+    Tab            A Paseo UI surface presenting an agent session. It is NOT a
+                   Neovim tab page. The dashboard sections are UI tabs too;
+                   neither kind is an isolation boundary.
+
+    Terminal       A daemon-owned PTY in a workspace. It appears beside agent
+                   sessions but is not an agent.
+
+    Worktree       A Git checkout used to isolate a workspace. It is a
+                   mechanism, not a synonym for workspace.
+
+    Daemon         The background Paseo process that owns projects,
+                   workspaces, agent sessions, timelines, and terminals.
+
+    Provider       The agent backend, such as Claude, Codex, or OpenCode.
+
+    Model          A provider-specific model used by an agent.
+
+    Subagent       An agent created or coordinated by another agent.
+
+    Fork           A new agent session initialized from a source agent's
+                   conversation snapshot. paseo.nvim currently puts it in a
+                   new workspace.
+
+Isolation is a property of the WORKSPACE, not of the agent session. Two agent
+sessions in one workspace edit the same files, deliberately -- that is what
+makes "an agent writing code and another reviewing its diff" work. Two
+workspaces are isolated only when each has its own worktree.
 
                                                       *paseo-workspaces-source*
 Paseo is the source of truth. A workspace created in the Paseo app, or by
@@ -1023,7 +1091,7 @@ In the workspace picker (|:Paseo-workspaces|) ~
     <CR>      open it -- a new tab page `tcd`'d into the workspace, or
               whatever |paseo-config.workspaces.open| says. An open chat
               follows: |paseo-chat-follows|
-    <C-s>     its sessions
+    <C-s>     its agent sessions
     <C-n>     create a workspace
     <C-d>     archive it -- refuses, and says what it would lose, if a member
               holds work that exists nowhere else. Its worktrees and their
@@ -1032,11 +1100,12 @@ In the workspace picker (|:Paseo-workspaces|) ~
               to every member, then fire |paseo-review-autocmd| -- what
               "review" means is your config's to say
 
-In the sessions picker (|:Paseo-sessions|) ~
+In the agent picker (|:Paseo-agents|; |:Paseo-sessions| is an alias) ~
 
-    <CR>      open a chat on that session, with its history
-    <C-n>     start a new session in this workspace
-    <C-d>     archive that session
+    <CR>      open a chat on that agent session, with its history
+    <C-n>     start a new agent session in this workspace
+    <C-y>     copy the complete agent ID
+    <C-d>     archive that agent session
 
 ==============================================================================
 8. GIT                                                             *paseo-git*
@@ -1408,7 +1477,7 @@ The same four cards open on their own, centred, without the dashboard: >
     :Paseo mode          the permission modes
     :Paseo thinking      the reasoning levels
     :Paseo switchmodel   the models
-    :Paseo session       all of them
+    :Paseo agent-settings  all of them (`session` is a compatibility alias)
 <
 Same keys, plus `q`/`<Esc>` to close. These used to be `vim.ui.select` lists
 of strings with a `●` glued to the front of one of them; they are the Settings
@@ -1416,7 +1485,7 @@ tab's renderer in a window of its own, so there is no second implementation to
 drift.
 
                                                        *paseo-new-session*
-Starting an agent where there is none opens the SAME renderer over a session
+Starting an agent where there is none opens the SAME renderer over an agent session
 that does not exist yet -- two more cards, because provider and model are
 settings here and are not settings on a running agent: >
 
@@ -1433,7 +1502,7 @@ settings here and are not settings on a running agent: >
     │   Off   Think                 │  │    Fast mode                   │
     ╰───────────────────────────────╯  ╰────────────────────────────────╯
 
-     c   create session                                claude/opus-5
+     c   create agent                                  claude/opus-5
 
      h j k l  move   ⏎  apply   p s m t f  group   r  reload   c  create
 <
@@ -1456,6 +1525,39 @@ applied, which is what two quick mode changes used to produce.
 keystroke convenience and putting a window in front of it would defeat the
 point. It opens the Features card only when this provider has no `fast_mode`
 to toggle.
+
+                                                               *paseo-fork*
+Forking an agent session ~
+
+Press `f` in normal mode in either chat buffer. The daemon snapshots the
+COMPLETE conversation available at that moment; no cursor or message boundary
+is sent. After a workspace name and multiline first prompt are entered, the
+plugin creates the appropriate assembled/worktree/local workspace and creates
+the new agent with the first prompt and `chat_history` attachment in one
+request. Provider, model, permission mode, thinking level, and supported
+features come from the source.
+
+Nothing is created if either prompt is cancelled. A daemon without the
+`agentForkContext` capability is rejected before creation. If agent creation
+fails after workspace creation, the empty workspace is retained and named in
+the error rather than being deleted automatically.
+
+Changing a live model asks whether to `Fork into a new workspace`, `Use for
+this agent's future turns`, or `Cancel`. A model fork leaves the source
+untouched and keeps only settings supported by the target model, using target
+defaults for the rest.
+
+Same-workspace “Fork in a new tab” is intentionally deferred: Paseo tab and
+Neovim tab page are different concepts and that presentation is not yet
+decided.
+
+                                                    *paseo-cross-agent-prompt*
+Cross-agent communication ~
+
+On `Agents & terminals`, `y` copies the selected agent's complete ID to the
+unnamed register and the system clipboard when available. In the agent picker,
+use `<C-y>`. Paste that receiving ID into the sending agent's chat and ask it
+to use Paseo's cross-agent prompt tool. Terminal rows do not offer this action.
 
                                                           *paseo-chat-zindex*
 The dashboard sits BELOW the z-index a floating window gets by default, at
@@ -1490,6 +1592,7 @@ In the conversation ~
     1-6       jump to a tab (full screen; see ui.float.tab_keys)
     <M-1>..6  the same, without taking the count keys
     gp        reopen a pending permission prompt
+    f         fork the complete conversation into a new workspace
     <C-f>     switch surface
     <C-c>     stop the turn. See |paseo-chat-stop|
     q         close the chat
@@ -1548,7 +1651,7 @@ exactly when it has grown enough to need them.
 
 These are bound only while that tab is showing, and whatever they displaced
 is put back on the way out -- the six panels share one buffer, so a `<CR>`
-left bound here would try to apply a session setting from the Changes tab.
+left bound here would try to apply an agent setting from the Changes tab.
 
                                                           *paseo-chat-stop*
 Stopping a turn ~
@@ -1641,6 +1744,23 @@ Its groups are `PaseoComposerBorder`, `PaseoComposerLabel`,
 The conversation is an ordinary buffer too, on purpose: `y`, `/` and soft-wrap
 work on an agent's reply. Volt draws the chrome around it -- the header, the
 panels, the permission dialog -- because virtual text cannot be yanked.
+
+                                                               *paseo-quit*
+Quitting Neovim ~
+
+Agent sessions belong to Paseo's background daemon. `VimLeavePre` stops only
+the Neovim sidecar; it does NOT stop the daemon or its agents. A daemon started
+by the plugin is started in the background for the same reason.
+
+With |paseo-config.quit.warn_active_agents| enabled, normal whole-editor
+routes (`:q`, `:qa`, `:wq`, `:x`, long forms, `ZZ`, and `ZQ`) warn when a
+non-archived agent session is running, starting, queued, or waiting for
+attention. Idle, failed, and closed sessions do not warn. The prompt offers
+`Quit Neovim` and `Cancel` and explains that Paseo work continues. Closing a
+split, Neovim tab page, or float does not warn; a forced `!` exit bypasses it.
+
+Existing mappings and command-line abbreviations are not replaced. A central
+quit router should call |paseo.quit.guard| around its own confirmation.
 
                                                           *paseo-colours*
 Every colour is DERIVED from your colourscheme by default, and nothing here
@@ -1747,7 +1867,7 @@ toggled by hand is yours from then on and is never folded back under you.
                           *paseo-terminals* *paseo-chat-terminals*
 Paseo runs TERMINALS as well as agents -- the `claude` or `codex` sessions you
 started in the app are PTYs on the daemon -- and A TERMINAL IS A SESSION. It
-lists on the Sessions tab beside the agents, and opening one shows it on the
+lists on the Agents & terminals tab beside the agent sessions, and opening one shows it on the
 CHAT TAB, where the conversation would be. |:Paseo-term| goes to that list.
 
 It used to be a surface of its own: a rail of names, a title bar, the terminal
@@ -1777,7 +1897,7 @@ strip that grew by a chip on hover would draw past the end of the buffer.
 
 In a terminal ~
 
-    <C-s>     the Sessions tab -- the way out
+    <C-s>     the Agents & terminals tab -- the way out
     <C-j>     the next session here, <C-k> the previous
     <M-1>..6  jump to a tab
     q         close the dashboard, from normal mode
@@ -1795,7 +1915,7 @@ either -- it is SIGINT, and belongs to the program.
 `<Esc>` is never bound. It belongs to the PTY, so vim running inside one can
 still leave insert mode, and `<C-\><C-n>` is Neovim's own way out.
 
-On the Sessions tab, `c` starts a terminal, `R` renames one and `d` kills it
+On the Agents & terminals tab, `c` starts a terminal, `R` renames one and `d` kills it
 (asked first -- something is usually running in there). See |paseo-chat-lists|.
 
                                                      *paseo-terminals-presets*

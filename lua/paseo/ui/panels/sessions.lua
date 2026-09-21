@@ -2,7 +2,7 @@
 ---
 --- ONE LIST, because that is what Paseo has. A workspace holds agent sessions
 --- and PTYs side by side, they show up in the app together, and splitting them
---- across two tabs here meant the Sessions tab was quietly a lie about what was
+--- across two tabs here meant the Agents & terminals tab was quietly a lie about what was
 --- running -- it could say "no agents here yet" on a workspace with three
 --- `claude` terminals in it. The kind glyph is what tells them apart.
 ---
@@ -28,7 +28,7 @@ local widgets = require "paseo.ui.widgets"
 
 local M = {}
 
-M.title = "Sessions"
+M.title = "Agents & terminals"
 
 ---Status glyphs, from the registry -- the timeline says the same four things
 ---about a tool call, and the two had spelled them differently.
@@ -58,7 +58,7 @@ local KIND = {
 ---the Settings tab and on every list, and one key meaning "ask the daemon
 ---again" on five tabs and "rename this terminal" on the sixth is exactly the
 ---kind of near-miss that makes a surface feel like several.
-local KEYS = { terminal = "c", agent = "a", rename = "R", kill = "d" }
+local KEYS = { terminal = "c", agent = "a", copy = "y", rename = "R", kill = "d" }
 
 ---Start an agent in this workspace, through |paseo-new-session|.
 ---@param chat table
@@ -155,6 +155,9 @@ local function sections(chat)
         }
       end or nil,
       keys = {
+        [KEYS.copy] = function()
+          agents.copy_id { id = agent.id, title = agent.title }
+        end,
         [KEYS.kill] = function()
           archive(agent.id)
         end,
@@ -231,6 +234,7 @@ local function source(chat)
     hints = {
       { KEYS.terminal, "terminal" },
       { KEYS.agent, "agent" },
+      { KEYS.copy, "agent ID" },
       { KEYS.rename, "rename" },
       { KEYS.kill, "kill" },
     },

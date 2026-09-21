@@ -49,7 +49,7 @@ local function test_settings()
     render.concat(sidebar.header(chat)):find("Auto mode", 1, true) ~= nil,
     render.concat(sidebar.header(chat))
   )
-  -- The Session panel draws its `●` from the snapshot, which nothing patched:
+  -- The Agent panel draws its `●` from the snapshot, which nothing patched:
   -- the header could report a mode the panel below it still marked elsewhere.
   eq("settings: the panel's snapshot is patched too", chat.config_snapshot.modeId, "auto")
   eq("settings: a real change redraws the panel", rebuilds, 1)
@@ -88,6 +88,68 @@ local function test_settings()
   eq("settings: an unknown id falls back to itself", chat.mode, "invented")
 
   float.rebuild = real_rebuild
+
+  -- Every live-agent model selector comes through `session.apply`. Selecting
+  -- the current model is a no-op; an actual change asks whether to branch or
+  -- affect future turns on the source agent.
+  local session = require "paseo.ui.session"
+  local bridge = require "paseo.bridge"
+  local old_select, old_request = vim.ui.select, bridge.request
+  local old_fork = package.loaded["paseo.fork"]
+  local old_chat = package.loaded["paseo.ui.chat"]
+  local prompts, forks, mutations = 0, 0, 0
+  local choice
+  package.loaded["paseo.fork"] = {
+    start = function(fork_chat, opts)
+      eq("settings: a model fork targets this agent", fork_chat.agent_id, chat.agent_id)
+      eq("settings: a model fork carries the selected model", opts.model_id, "new")
+      forks = forks + 1
+    end,
+  }
+  package.loaded["paseo.ui.chat"] = { load_settings = function() end }
+  vim.ui.select = function(_, _, done)
+    prompts = prompts + 1
+    done(choice)
+  end
+  bridge.request = function(op, _, done)
+    if op == "agent.setModel" then
+      mutations = mutations + 1
+      return done(nil, {})
+    end
+    if op == "agent.config" then
+      return done(nil, chat.config_snapshot)
+    end
+    error("unexpected operation " .. op)
+  end
+  local model_group = {
+    id = "model",
+    kind = "radio",
+    current = "old",
+    op = "agent.setModel",
+    arg = "modelId",
+  }
+  session.apply(chat, model_group, { id = "old" })
+  eq("settings: reselecting the current model asks nothing", prompts, 0)
+
+  choice = { id = "cancel" }
+  session.apply(chat, model_group, { id = "new" })
+  eq("settings: cancelling a model change mutates nothing", { forks, mutations }, { 0, 0 })
+  choice = { id = "fork" }
+  session.apply(chat, model_group, { id = "new" })
+  eq("settings: the fork outcome leaves the source untouched", { forks, mutations }, { 1, 0 })
+  choice = { id = "future" }
+  local completed = false
+  session.apply(chat, model_group, { id = "new" }, function()
+    completed = true
+  end)
+  vim.wait(100, function()
+    return completed
+  end)
+  eq("settings: future turns uses the in-place model change", mutations, 1)
+
+  vim.ui.select, bridge.request = old_select, old_request
+  package.loaded["paseo.fork"] = old_fork
+  package.loaded["paseo.ui.chat"] = old_chat
 end
 
 return {

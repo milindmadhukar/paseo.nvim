@@ -1,6 +1,6 @@
 --- The live terminal directory.
 ---
---- Paseo owns terminals as well as agents -- the `claude` and `codex` sessions
+--- Paseo owns terminals as well as agents -- the `claude` and `codex` terminal processes
 --- you started from the app are PTYs on the daemon, not processes on your
 --- machine -- and until now none of them were reachable from here. This is the
 --- list half; |paseo.ui.terminal| is the PTY half.

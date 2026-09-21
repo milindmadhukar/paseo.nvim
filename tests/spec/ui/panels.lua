@@ -96,11 +96,11 @@ local function test_session_source()
   -- the WHOLE registry rather than the four markers it used to.
   --
   -- This has now happened twice. `check_on`/`check_off` were empty strings --
-  -- the codepoints had been lost out of the file -- so the Session panel's
+  -- the codepoints had been lost out of the file -- so the Agent panel's
   -- feature toggles drew no marker at all and "off" was indistinguishable from
   -- "not drawn". That got fixed, and a test was added covering exactly those
   -- four names; meanwhile six slots in `render.icons`, the `permission` marker
-  -- in the Sessions panel, two group icons and five inline glyphs elsewhere
+  -- in Agents & terminals, two group icons and five inline glyphs elsewhere
   -- were empty the entire time, and the suite stayed green.
   --
   -- An empty icon is not a visible failure: the line still draws. So the check
@@ -181,7 +181,7 @@ local function test_panels()
   eq("session: on its last entry", wrapped.id, "sonnet")
 
   -- `maparg` reads the CURRENT buffer, not the one being bound -- and at the
-  -- moment the Session panel attaches, the current buffer is usually the
+  -- moment the Agent panel attaches, the current buffer is usually the
   -- COMPOSER, whose `<CR>` sends the prompt. Saving the displaced mapping from
   -- the wrong buffer restored "send the prompt" onto the chrome buffer.
   local host = vim.api.nvim_create_buf(false, true)

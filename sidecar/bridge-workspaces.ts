@@ -40,16 +40,30 @@ export async function workspaceFor(
 
 export function workspaceOps(ctx: BridgeConnection): Ops {
   const connected = () => ctx.connected();
+
+  async function createdWorkspace(workspace: any) {
+    let snapshot = workspace.current?.() ?? null;
+    if (!workspace.directory && !snapshot?.workspaceDirectory) {
+      snapshot = await workspace.refresh?.();
+    }
+    return {
+      id: workspace.id,
+      directory:
+        workspace.directory ??
+        snapshot?.workspaceDirectory ??
+        snapshot?.project?.checkout?.cwd ??
+        null,
+      projectId: workspace.projectId ?? snapshot?.projectId ?? null,
+      name: workspace.name ?? snapshot?.name ?? snapshot?.title ?? null,
+    };
+  }
+
   return {
     async "workspace.open"(req) {
       const workspace = await connected().workspaces.open(
         String(need(req.cwd, "cwd")),
       );
-      return {
-        id: workspace.id,
-        directory: (workspace as any).directory ?? null,
-        projectId: (workspace as any).projectId ?? null,
-      };
+      return await createdWorkspace(workspace);
     },
 
     async "workspaces.list"(req) {
@@ -97,11 +111,7 @@ export function workspaceOps(ctx: BridgeConnection): Ops {
         source,
         ...(req.title ? { title: String(req.title) } : {}),
       });
-      return {
-        id: workspace.id,
-        directory: workspace.directory ?? null,
-        projectId: workspace.projectId ?? null,
-      };
+      return await createdWorkspace(workspace);
     },
 
     /**

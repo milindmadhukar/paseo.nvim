@@ -1,4 +1,4 @@
---- What a running session is set to, and how to change it.
+--- What a running agent session is set to, and how to change it.
 ---
 --- These are the controls under the composer in the Paseo app. They belong here
 --- for the same reason the composer does: needing the app to change permission
@@ -11,7 +11,7 @@
 --- on the next provider.
 ---
 --- THIS FILE IS THE MODEL, NOT A VIEW. It used to be a second, parallel
---- implementation of the Session panel -- four `vim.ui.select` prompts with
+--- implementation of the Agent panel -- four `vim.ui.select` prompts with
 --- their own copy of the apply-and-report logic, drifting against the panel's
 --- copy of the same thing. Now `M.groups` normalises the daemon's four
 --- differently-shaped lists into one shape, `M.apply` is the only place a
@@ -53,7 +53,7 @@ end
 ---rest of the session.
 M.KEYS = { mode = "m", thinking = "t", features = "f", model = "s" }
 
----The settings of a session, in ONE shape.
+---The settings of an agent session, in ONE shape.
 ---
 ---The daemon reports four lists that agree about nothing: modes carry a
 ---description, thinking options carry `isDefault`, models carry both, and
@@ -208,7 +208,7 @@ end
 ---@param group table
 ---@param entry table
 ---@param done? fun()
-function M.apply(chat, group, entry, done)
+local function apply_direct(chat, group, entry, done)
   done = done or function() end
   if not (chat and chat.agent_id and group and entry) then
     return done()
@@ -237,6 +237,40 @@ function M.apply(chat, group, entry, done)
   end)
 end
 
+function M.apply(chat, group, entry, done)
+  done = done or function() end
+  if not (chat and chat.agent_id and group and entry) then
+    return done()
+  end
+  if group.id ~= "model" then
+    return apply_direct(chat, group, entry, done)
+  end
+  if entry.id == group.current then
+    return done()
+  end
+
+  local choices = {
+    { id = "fork", label = "Fork into a new workspace" },
+    { id = "future", label = "Use for this agent's future turns" },
+    { id = "cancel", label = "Cancel" },
+  }
+  vim.ui.select(choices, {
+    prompt = "Change model to " .. (entry.label or entry.id) .. "?",
+    format_item = function(choice)
+      return choice.label
+    end,
+  }, function(choice)
+    if not choice or choice.id == "cancel" then
+      return done()
+    end
+    if choice.id == "fork" then
+      require("paseo.fork").start(chat, { model_id = entry.id })
+      return done()
+    end
+    apply_direct(chat, group, entry, done)
+  end)
+end
+
 -- ------------------------------------------------------------------ source
 
 ---@class paseo.SettingsSource
@@ -251,7 +285,7 @@ end
 ---by name, which tied it to a RUNNING agent -- and that is why the screen
 ---shown before an agent exists was a second, hand-rolled renderer of the same
 ---four settings. The View is already generic over "a list of groups"; this is
----the three-method seam that lets |paseo.ui.draft| hand it a session that does
+---the three-method seam that lets |paseo.ui.draft| hand it an agent session that does
 ---not exist yet.
 ---@param chat table
 ---@return paseo.SettingsSource
@@ -307,12 +341,12 @@ function M.thinking()
   popup "thinking"
 end
 
----Switch model on the running session, without starting a new one.
+---Change model on the running agent session, or fork it.
 function M.model()
   popup "model"
 end
 
----Everything about the session, in one window.
+---Everything about the agent session, in one window.
 function M.status()
   popup()
 end
@@ -331,7 +365,7 @@ function M.toggle(feature_id)
 
   M.load(chat, function(config)
     if not config then
-      return vim.notify("paseo: could not read the session config", vim.log.levels.ERROR)
+      return vim.notify("paseo: could not read the agent config", vim.log.levels.ERROR)
     end
 
     local groups = M.groups(chat)
@@ -349,7 +383,7 @@ function M.toggle(feature_id)
       -- Not every provider has every feature, and `fast_mode` is Opus-specific.
       -- Show what this one DOES have rather than reporting nothing.
       if not features or #features.entries == 0 then
-        return vim.notify("paseo: this session has no feature toggles", vim.log.levels.WARN)
+        return vim.notify("paseo: this agent has no feature toggles", vim.log.levels.WARN)
       end
       return require("paseo.ui.settings").open(chat, "features")
     end
@@ -381,7 +415,7 @@ function M.plan()
 
   M.load(chat, function(config)
     if not config then
-      return vim.notify("paseo: could not read the session config", vim.log.levels.ERROR)
+      return vim.notify("paseo: could not read the agent config", vim.log.levels.ERROR)
     end
 
     for _, feature in ipairs(config.features or {}) do
@@ -400,7 +434,7 @@ function M.plan()
     end
 
     if not has "plan" then
-      return vim.notify("paseo: this session has no Plan control", vim.log.levels.WARN)
+      return vim.notify("paseo: this agent has no Plan control", vim.log.levels.WARN)
     end
 
     -- Leaving Plan goes back to whatever you were in, remembered on the way

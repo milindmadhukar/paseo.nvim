@@ -1,4 +1,4 @@
---- A session that does not exist yet, in the shape the settings View draws.
+--- An agent session that does not exist yet, in the shape the settings View draws.
 ---
 --- Sibling to |paseo.ui.session|, and the same doctrine: `groups` normalises
 --- the daemon's differently-shaped lists into ONE shape, and `apply` is the
@@ -6,11 +6,11 @@
 ---
 --- It exists because the screen shown before an agent is created was a second
 --- renderer of the same settings -- `("%-15s %s"):format(label, value)` into a
---- plain buffer, with a `vim.ui.select` for every choice -- while the Session
+--- plain buffer, with a `vim.ui.select` for every choice -- while the Agent
 --- tab drew those settings as cards. One of the two had to go, and the one to
 --- keep is obviously the one you can see.
 ---
---- Two groups the running-session model does not have: PROVIDER and MODEL are
+--- Two groups the running-agent model does not have: PROVIDER and MODEL are
 --- settings here and are not settings there. Switching model on a live agent is
 --- `agent.setModel`; switching it here replaces the thinking options and the
 --- feature list, because both are per model and nothing has been created yet.
@@ -366,7 +366,7 @@ function M.apply(draft, group, entry, done)
   return done()
 end
 
----Re-read the catalogue, so `r` means the same thing here as on the Session
+---Re-read the catalogue, so `r` means the same thing here as on the Agent
 ---tab. The selection survives by id where it still exists.
 ---@param draft paseo.Draft
 ---@param done? fun()

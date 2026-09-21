@@ -1,9 +1,9 @@
 --- The full-screen surface: the conversation, plus everything about the
---- session, on tabs.
+--- agent session, on dashboard tabs.
 ---
 --- The DEFAULT surface. The sidebar is for asking a question beside your code;
 --- this is for the rest of the time -- when you want to see what the agent is
---- doing, what it has cost, what is changed on disk, which sessions are running
+--- doing, what it has cost, what is changed on disk, which agent sessions are running
 --- and where, and to change the mode without a `vim.ui.select` prompt covering
 --- the thing you are reading.
 ---
@@ -35,7 +35,18 @@ local ns = api.nvim_create_namespace "paseo.float"
 ---@type table|nil
 local state
 
-M.TABS = { "Chat", "Sessions", "Settings", "Changes", "Usage", "Workspaces" }
+M.TABS = { "Chat", "Agents & terminals", "Settings", "Changes", "Usage", "Workspaces" }
+
+--- Tab name -> the module under `paseo.ui.panels` that draws it. Only the tabs
+--- whose name is not simply the module name capitalised need an entry; the
+--- list tab is spelled for what it holds, which is both kinds of session.
+local PANEL_MODULE = { ["Agents & terminals"] = "sessions" }
+
+---@param name string
+---@return string
+local function panel_module(name)
+  return PANEL_MODULE[name] or name:lower()
+end
 
 -- ------------------------------------------------------------------ geometry
 
@@ -107,7 +118,7 @@ local function goto_tab(name)
   end
 end
 
----The session header: the same cells the sidebar puts in its winbar.
+---The agent-session header: the same cells the sidebar puts in its winbar.
 ---
 ---It lives in the CHROME rather than on the conversation window's winbar, and
 ---that is the fix for "the dashboard does not say which model it is on": a
@@ -349,9 +360,9 @@ local function body_lines()
   local lines = {}
 
   if state.tab ~= "Chat" then
-    local ok, panel = pcall(require, "paseo.ui.panels." .. state.tab:lower())
+    local ok, panel = pcall(require, "paseo.ui.panels." .. panel_module(state.tab))
     -- The height is passed as well as the width. A panel that can tighten
-    -- itself -- Session drops the breathing room inside its cards -- needs to
+    -- itself -- Agent drops the breathing room inside its cards -- needs to
     -- know how many rows it is being given, and the rest simply ignore it.
     local body = ok and panel.lines(state.chat, g.width - 4, height)
       or {
@@ -715,7 +726,7 @@ local function show_agent_panes()
   })
 
   -- The surface reads as ONE sheet: the conversation shares the chrome's
-  -- background, and the composer is a raised card -- the same tier the Session
+  -- background, and the composer is a raised card -- the same tier the Agent
   -- panel's cards sit on, so "where you type" is visibly a control and not
   -- more transcript.
   --
@@ -801,7 +812,7 @@ local function bind_terminal(buf)
     end, "paseo: tab " .. name)
   end
   map({ "n", "t" }, keys.sessions, function()
-    M.select "Sessions"
+    M.select "Agents & terminals"
   end, "paseo: the session list")
   map({ "n", "t" }, keys.next, function()
     M.cycle_session(1)
@@ -915,7 +926,7 @@ end
 ---@param name string
 ---@return table|nil
 local function panel_for(name)
-  local ok, panel = pcall(require, "paseo.ui.panels." .. name:lower())
+  local ok, panel = pcall(require, "paseo.ui.panels." .. panel_module(name))
   return ok and panel or nil
 end
 
@@ -923,7 +934,7 @@ end
 ---
 ---The six panels SHARE one buffer, so a panel that binds `<CR>` has to unbind
 ---it on the way out or the Changes tab inherits it and tries to apply a
----session setting. `attach`/`detach` are both optional: the panel contract has
+---agent setting. `attach`/`detach` are both optional: the panel contract has
 ---always been pcall-and-optional.
 ---@param name string
 ---@param method "attach"|"detach"
@@ -1232,7 +1243,7 @@ function M.open(chat)
     sidebar.open(chat)
   end)
   map(require("paseo.config").get().ui.terminal.keys.sessions, function()
-    M.select "Sessions"
+    M.select "Agents & terminals"
   end)
 
   -- THE DASHBOARD DID NOT FOLLOW A RESIZE. It registered no autocmds at all,

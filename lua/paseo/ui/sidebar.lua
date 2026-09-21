@@ -2,7 +2,7 @@
 ---
 --- One of the plugin's two surfaces. This is the everyday one -- narrow, beside
 --- your code, always answerable. The other is `ui/float.lua`, which trades the
---- code view for room to show everything about the session at once.
+--- code view for room to show everything about the agent session at once.
 ---
 --- Both are views onto the SAME `paseo.Chat`: the same conversation buffer, the
 --- same composer buffer, the same block table. Switching surface therefore

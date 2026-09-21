@@ -38,6 +38,9 @@ local function apply(payload)
   end
 end
 
+-- Exposed for deterministic tests; production updates arrive from `watch`.
+M._apply = apply
+
 ---Start following the directory. Safe to call repeatedly.
 ---@param callback? fun(err: string|nil)
 function M.watch(callback)
@@ -69,6 +72,57 @@ end
 ---@return table|nil
 function M.get(id)
   return agents[id]
+end
+
+---Every non-archived agent session in the subscribed directory.
+---@return table[]
+function M.all()
+  local out = {}
+  for _, agent in pairs(agents) do
+    out[#out + 1] = agent
+  end
+  table.sort(out, function(a, b)
+    return (a.title or a.id) < (b.title or b.id)
+  end)
+  return out
+end
+
+---@return boolean
+function M.ready()
+  return subscribed
+end
+
+---Agent sessions whose work is live, or whose work is waiting on the user.
+---@return table[]
+function M.active()
+  local working = {
+    running = true,
+    starting = true,
+    initializing = true,
+    queued = true,
+    working = true,
+    busy = true,
+    in_progress = true,
+  }
+  return vim.tbl_filter(function(agent)
+    return agent.requiresAttention or working[agent.status] == true
+  end, M.all())
+end
+
+---Copy an agent id for Paseo's cross-agent prompting workflow.
+---@param agent table
+---@return boolean
+function M.copy_id(agent)
+  if not (agent and agent.id) then
+    return false
+  end
+  vim.fn.setreg('"', agent.id)
+  pcall(vim.fn.setreg, "+", agent.id)
+  vim.notify(
+    ("paseo: copied agent ID for %s\n%s"):format(agent.title or "agent", agent.id),
+    vim.log.levels.INFO
+  )
+  return true
 end
 
 ---Agents whose cwd is at or below `root`.

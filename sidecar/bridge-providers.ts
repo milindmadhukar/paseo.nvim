@@ -204,6 +204,9 @@ export function providerOps(ctx: BridgeConnection): Ops {
         // push now genuinely carry the same fields, which is the whole point
         // of the sentence above.
         ...describeSettings(snap),
+        workspaceId: snap?.workspaceId ?? null,
+        cwd: snap?.cwd ?? null,
+        title: snap?.title ?? null,
         thinkingOptions,
         models,
       };

@@ -155,7 +155,7 @@ function M.open(opts)
 
       local picker
       picker = pickers.new(opts, {
-        prompt_title = "Workspaces  ·  <CR> open  <C-s> sessions  <C-n> new  <C-d> archive",
+        prompt_title = "Workspaces  ·  <CR> open  <C-s> agents  <C-n> new  <C-d> archive",
         finder = finders.new_table {
           results = list,
           entry_maker = function(ws)
@@ -183,7 +183,7 @@ function M.open(opts)
             end
           end)
 
-          -- The sessions inside it -- the tabs, in the app's terms.
+          -- The agent sessions inside it -- tabs in Paseo's presentation.
           map({ "i", "n" }, "<C-s>", function()
             local entry = state.get_selected_entry()
             actions.close(bufnr)

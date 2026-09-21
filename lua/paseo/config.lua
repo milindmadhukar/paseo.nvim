@@ -13,6 +13,7 @@ local M = {}
 ---@field workspaces paseo.Config.Workspaces
 ---@field skills paseo.Config.Skills
 ---@field review paseo.Config.Review
+---@field quit paseo.Config.Quit
 
 ---@class paseo.Config.Paseo
 ---@field url string?     Daemon WebSocket endpoint. Leave unset to DISCOVER
@@ -241,6 +242,12 @@ local M = {}
 ---                       agent can interrogate them about who made a change.
 ---                       Off means the prompt is the reference and nothing else.
 
+---@class paseo.Config.Quit
+---@field warn_active_agents boolean  Ask before leaving Neovim while a Paseo
+---                       agent session is running or waiting for attention.
+---                       The agents keep running; this protects the view, not
+---                       the daemon process. Default true.
+
 ---@type paseo.Config
 local defaults = {
   paseo = {
@@ -361,6 +368,10 @@ local defaults = {
     agents = true,
   },
 
+  quit = {
+    warn_active_agents = true,
+  },
+
   skills = {
     -- `~/.claude/skills` ONLY. `~/.agents/skills` is one person's stow
     -- convention rather than a standard, and a default that writes into two
@@ -381,6 +392,7 @@ function M.setup(opts)
   config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts or {})
 
   vim.validate("review.agents", config.review.agents, "boolean")
+  vim.validate("quit.warn_active_agents", config.quit.warn_active_agents, "boolean")
   vim.validate("ui.surface", config.ui.surface, function(v)
     return v == "float" or v == "sidebar"
   end, '"float" or "sidebar"')
