@@ -1358,10 +1358,18 @@ On the default |paseo-config.ui.style| a card has no frame: the status colour
 is carried by a one-column accent bar down its left edge, the same shape a
 message of your own gets. `"rounded"` puts the boxes back.
 `<Tab>` expands one to show what it actually did -- a command's output and
-exit code, an edit's diff, a read's line range, a search's matches. A failed
-call shows its error without being expanded.
+exit code, an edit's diff, a read's line range, a search's matches, a
+sub-agent's own log of the work it delegated, and for a tool nothing here has
+a schema for -- an MCP tool, mostly -- its arguments by name and what it
+answered. A failed call shows its error without being expanded.
 
 A card is updated IN PLACE when the call finishes; it does not appear twice.
+It is also MERGED rather than replaced. The live subscription is not the
+projected timeline the app renders: a sub-agent's terminal event arrives in its
+raw shape, knowing less than the thirty before it, so taking each event whole
+made a finished card fall back from `Explore  <what it was asked>` to the bare
+tool name the instant it succeeded. What a later event knows wins; what it has
+forgotten does not.
 
 By default a command is ALREADY EXPANDED while it runs, and folds to its one
 line when it succeeds -- watching the output arrive is most of the reason to

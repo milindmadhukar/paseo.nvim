@@ -1320,6 +1320,50 @@ local function test_ui()
     truthy("ui: a " .. case[1] .. " tool call renders", #built.lines > 0)
   end
 
+  -- The state EVERY tool call passes through: the daemon emits the call as soon
+  -- as the model names it and fills `detail` in once the arguments have finished
+  -- streaming. A running card draws open, so this frame is on screen -- and it
+  -- used to draw `vim.inspect(detail.input)`, which for an empty table is the
+  -- literal text `vim.empty_dict()`. That is what the Paseo app showed as a bare
+  -- header and Neovim showed as a Lua sentinel, side by side in one screenshot.
+  ---@param lines table[][]
+  ---@return string
+  local function flat(lines)
+    return table.concat(vim.tbl_map(render.concat, lines), "\n")
+  end
+
+  local streaming =
+    flat(timeline.detail_body({ type = "unknown", input = vim.empty_dict(), output = nil }, 60))
+  eq("ui: a tool call whose arguments have not arrived has no body", streaming, "")
+
+  local mcp = flat(timeline.detail_body({
+    type = "unknown",
+    input = { limit = 30, cwd = "/tmp" },
+    -- The daemon wraps an MCP result in one `output` key; the outer key is a
+    -- word of noise in front of every one of them.
+    output = { output = { agents = { "a", "b" } } },
+  }, 60))
+  truthy("ui: an unknown tool names its arguments", mcp:find("limit: 30", 1, true) ~= nil, mcp)
+  truthy("ui: and shows what it answered", mcp:find("agents", 1, true) ~= nil, mcp)
+  truthy("ui: and never leaks a Lua sentinel", mcp:find("empty_dict", 1, true) == nil, mcp)
+
+  -- `buildToolCallDisplayModel` takes a sub-agent's summary straight from its
+  -- description, so rendering the description in the body put the same sentence
+  -- on the header line and on the line under it.
+  local delegated = flat(timeline.detail_body({
+    type = "sub_agent",
+    subAgentType = "Explore",
+    description = "Explore workspace.toml in paseo.nvim",
+    log = "",
+    actions = { { index = 1, toolName = "Grep", summary = "workspace.toml" } },
+  }, 60, "Explore workspace.toml in paseo.nvim"))
+  eq(
+    "ui: a sub-agent does not repeat its summary in its body",
+    select(2, delegated:gsub("Explore workspace%.toml", "")),
+    0
+  )
+  truthy("ui: but does list what it did", delegated:find("Grep", 1, true) ~= nil, delegated)
+
   -- Reasoning is the "thinking steps" half of the complaint.
   local thought = timeline.card({ kind = "thinking", text = "line one\nline two" }, { width = 60 })
   truthy("ui: reasoning renders", #thought.lines > 0)
@@ -1425,6 +1469,65 @@ local function test_ui()
   end
   eq("ui: and does not create a second block", blocks, 4)
 
+  -- THE LIVE STREAM IS NOT THE PROJECTED ONE, and a sub-agent is where the two
+  -- part company. Captured off a real daemon, one `callId` goes:
+  --
+  --     Agent  unknown    input={}          x4   while the input streams
+  --     Task   sub_agent  subAgentType=…    x32  for the whole of its run
+  --     Agent  unknown    input={prompt…}   x1   its terminal event
+  --
+  -- The last one knows LESS than the 32 before it. Taking each event whole made
+  -- the card read `Explore  Find RSS feed fetching` for a minute and then fall
+  -- back, at the instant the sub-agent SUCCEEDED, to `Agent` over a dump of the
+  -- prompt -- while `timeline.history`, which asks for the projected view, drew
+  -- the same call correctly. That is the pair of screenshots this came from.
+  local delegate = {
+    kind = "tool",
+    callId = "call-sub",
+    name = "Task",
+    status = "running",
+    display = { displayName = "Explore", summary = "Find RSS feed fetching" },
+    detail = {
+      type = "sub_agent",
+      subAgentType = "Explore",
+      description = "Find RSS feed fetching",
+      log = "[Bash] ls",
+      actions = {},
+    },
+  }
+  local sub_chat = { conversation = vim.api.nvim_create_buf(false, true) }
+  transcript.reset(sub_chat)
+  transcript.upsert(sub_chat, delegate)
+  transcript.upsert(sub_chat, {
+    kind = "tool",
+    callId = "call-sub",
+    name = "Agent",
+    status = "completed",
+    display = { displayName = "Agent" },
+    detail = { type = "unknown", input = { description = "Find RSS feed fetching" } },
+  })
+  local settled = sub_chat.blocks[sub_chat.by_call["call-sub"]].item
+  eq("ui: a finished sub-agent keeps the name it ran under", settled.display.displayName, "Explore")
+  eq("ui: and its detail", settled.detail.type, "sub_agent")
+  eq("ui: while still settling to its terminal status", settled.status, "completed")
+
+  -- An error only exists on the terminal event, so that much must still cross.
+  transcript.upsert(sub_chat, {
+    kind = "tool",
+    callId = "call-sub",
+    name = "Agent",
+    status = "failed",
+    display = { displayName = "Agent", errorText = "sub-agent failed" },
+    detail = { type = "unknown", input = {} },
+  })
+  local broke = sub_chat.blocks[sub_chat.by_call["call-sub"]].item
+  eq(
+    "ui: a failure carries its error across the merge",
+    broke.display.errorText,
+    "sub-agent failed"
+  )
+  eq("ui: and still says who failed", broke.display.displayName, "Explore")
+
   -- And with output to fold away, it does shrink -- which is the visible half
   -- of "the card folds on success". Asserted against `timeline.card`, which is
   -- the pure function that decides a card's height, rather than by pushing
@@ -1498,6 +1601,65 @@ local function test_ui()
     "ui: anchors survive a block changing height",
     #vim.api.nvim_buf_get_extmarks(chat.conversation, require("paseo.ui.hl").ns_anchor, 0, -1, {}),
     4
+  )
+
+  -- A CARD THAT SHRINKS MUST NOT TAKE THE ONE BELOW IT WITH IT.
+  --
+  -- `nvim_buf_set_lines(row, row + height)` spans `(row,0)`-`(row+height,0)`,
+  -- and every anchor used to be left-gravity -- so the NEXT block's anchor,
+  -- sitting exactly on that far boundary, collapsed onto `row` the moment a
+  -- card got shorter. The next redraw then wrote over the card above it. A tool
+  -- card shrinks when it folds on success, so two calls launched together left
+  -- one card and a wreck: watched live, a finished sub-agent was overwritten by
+  -- its sibling.
+  local pair = { conversation = vim.api.nvim_create_buf(false, true) }
+  transcript.reset(pair)
+  -- A message first, as a real transcript has. It matters: a scratch buffer
+  -- starts with one empty line that the first block inserts ABOVE rather than
+  -- replacing, and that stray row puts a gap between the first card's end and
+  -- the second card's anchor -- so the boundary the bug needs never lines up.
+  transcript.upsert(pair, { kind = "user", text = "go" })
+  transcript.upsert(pair, {
+    kind = "tool",
+    callId = "a",
+    name = "Bash",
+    status = "running",
+    display = { displayName = "Shell", summary = "first" },
+    detail = { type = "shell", command = "first", output = "1\n2\n3\n4\n5" },
+  })
+  transcript.upsert(pair, {
+    kind = "tool",
+    callId = "b",
+    name = "Bash",
+    status = "running",
+    display = { displayName = "Shell", summary = "second" },
+    detail = { type = "shell", command = "second" },
+  })
+  -- `a` folds: five body rows go away under `b`'s anchor.
+  transcript.upsert(pair, {
+    kind = "tool",
+    callId = "a",
+    name = "Bash",
+    status = "completed",
+    display = { displayName = "Shell", summary = "first" },
+    detail = { type = "shell", command = "first", output = "1\n2\n3\n4\n5", exitCode = 0 },
+  })
+  local both = table.concat(vim.api.nvim_buf_get_lines(pair.conversation, 0, -1, false), "\n")
+  truthy("ui: a card that folds keeps its own summary", both:find("first", 1, true) ~= nil, both)
+  truthy("ui: and does not overwrite the card below it", both:find("second", 1, true) ~= nil, both)
+  local function anchor_of(call)
+    local block = pair.blocks[pair.by_call[call]]
+    return vim.api.nvim_buf_get_extmark_by_id(
+      pair.conversation,
+      require("paseo.ui.hl").ns_anchor,
+      block.mark,
+      {}
+    )[1]
+  end
+  truthy(
+    "ui: and the card below still anchors beneath it, not onto it",
+    anchor_of "b" > anchor_of "a",
+    ("a@%s b@%s"):format(tostring(anchor_of "a"), tostring(anchor_of "b"))
   )
 
   -- THE BUG THAT MADE EVERY TOOL CARD INVISIBLE, at the only place it was
