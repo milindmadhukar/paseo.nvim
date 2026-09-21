@@ -1162,13 +1162,13 @@ tab for every other thing Paseo knows: >
     1 Chat        the conversation and composer
     2 Sessions    the agents AND terminals here, live -- open one
     3 Settings    mode, thinking level, model and feature toggles
-    4 Changes     what is changed on disk -- click a file to open it
+    4 Changes     what is changed on disk -- open one
     5 Usage       context window, tokens and cost
     6 Workspaces  every workspace, and the repos in this unit of work
 <
 `1`-`6` jump, `<M-1>`-`<M-6>` and `<Tab>`/`<S-Tab>` do the same, and
-everything on screen that does something responds to a CLICK -- the tab bar, a
-mode, a model, a session, a changed file. The keys are bound on the composer
+everything on screen that does something responds to a CLICK as well -- the
+tab bar, a mode, a model, a session, a changed file. The keys are bound on the composer
 and the conversation as well as on the chrome, because the Chat tab puts your
 cursor in the composer, and a key bound only to a window you are never in is a
 key that does not work.
@@ -1310,13 +1310,49 @@ On the Settings tab ~
     m t f s   jump to a group of settings
     r         re-fetch from the daemon
 
-On the Sessions tab ~
+                                                         *paseo-chat-lists*
+On the SESSIONS, WORKSPACES and CHANGES tabs ~
 
-    <CR>      open -- an agent switches the chat, a terminal opens |:Paseo-term|
-    c         a new terminal here
-    a         a new agent here, through |paseo-new-session|
-    r         rename the terminal under the cursor
-    d         kill a terminal, or archive an agent -- asked first, either way
+Three lists, one set of keys, because they are one kind of screen: >
+
+    j k       move -- <Down> and <Up> too
+    h l       the previous or next SECTION
+    g G       the first or last row
+    <CR>      open what is focused
+    r         re-fetch
+<
+Plus, per tab: >
+
+    Sessions     c  new terminal     a  new agent
+                 R  rename a terminal
+                 d  kill a terminal, or archive an agent -- asked first
+    Workspaces   n  new here         o  the full picker
+                 d  archive -- asked first, and by name
+<
+`r` is re-fetch on ALL of them, and on the Settings tab, which is why rename
+is `R`: one key meaning "ask the daemon again" on five tabs and "rename this
+terminal" on the sixth is the kind of near-miss that makes one surface feel
+like several. A key the panel claims for itself wins over the built-in, binds
+once, and the hint bar says which -- a bar advertising one key for two things
+is wrong about the first of them.
+
+THE FOCUSED ROW IS PAINTED, in the same colour hover uses: pointing at a row
+and moving to it are the same state. Arriving at a tab puts focus on a row --
+the one you are in, else the first -- so the first `<CR>` does something.
+
+None of that was true before. Selection lived on the CURSOR, which volt resets
+to line 1 after every click; nothing was drawn to say where it was; and the
+cursor was never put on a row in the first place. So Sessions had working
+keymaps and read as a tab you could only click, and Workspaces had no keymaps
+at all.
+
+Focus is held BY ID, so a list that moves under you -- and these are push-fed,
+so they do -- does not take it with it. A reorder leaves focus on the same
+session; killing the row you are on leaves you on whatever took its place.
+
+A list longer than the tab scrolls, with a scrollbar in the last column, and
+the hint bar stays put: a list that scrolls its own instructions away does it
+exactly when it has grown enough to need them.
 
 These are bound only while that tab is showing, and whatever they displaced
 is put back on the way out -- the six panels share one buffer, so a `<CR>`

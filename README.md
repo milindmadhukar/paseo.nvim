@@ -240,12 +240,26 @@ composer geometry are both measured against it.
 | `Chat` | the conversation and the composer, real buffers floated on top |
 | `Sessions` | the agents **and terminals** here, live; open one |
 | `Settings` | mode, thinking level, model, feature toggles — keyboard or click |
-| `Changes` | what is changed on disk, per repo; click a file to open it |
+| `Changes` | what is changed on disk, per repo; open one |
 | `Usage` | context window, tokens, cost |
 | `Workspaces` | every workspace Paseo knows, plus the repos in this unit of work |
 
+`Sessions`, `Workspaces` and `Changes` are one kind of screen and take one set
+of keys — `j`/`k` to move, `h`/`l` by section, `g`/`G` to the ends, `<CR>` to
+open, `r` to re-fetch — plus their own verbs: `c`/`a`/`R`/`d` on Sessions,
+`n`/`o`/`d` on Workspaces. **The focused row is painted**, in the colour hover
+uses, and arriving at a tab puts focus on a row so the first `<CR>` does
+something.
+
+None of that was true before. Selection lived on the **cursor**, which volt
+resets to line 1 after every click, nothing was drawn to say where it was, and
+the cursor was never put on a row — so Sessions had working keymaps and read as
+a tab you could only click, and Workspaces had no keymaps at all. Focus is held
+by **id** now, so a list that moves under you — and these are push-fed, so they
+do — does not take it with it.
+
 `1`–`6` jump, `<M-1>`–`<M-6>` and `<Tab>`/`<S-Tab>` do the same, and
-everything that does something responds to a click.
+everything that does something responds to a click as well.
 
 A bare digit is also a **count**, and the two panes these are bound on are
 ordinary buffers — so while the dashboard is open, `3p` and `5j` in the

@@ -582,8 +582,157 @@ local function test_toggle_height()
   truthy("toggles: the whole row is clickable, not just the label", clickable >= 4, clickable)
 end
 
+--- The list view: focus, and what happens to it when the data moves.
+---
+--- Every case here is something the panels this replaced got wrong. They held
+--- selection on the CURSOR, which volt resets to {1,1} after every click, never
+--- seeded it onto a row, and painted nothing to say where it was.
+local function test_list()
+  local list = require "paseo.ui.list"
+  local render = require "paseo.ui.render"
+  local widgets = require "paseo.ui.widgets"
+
+  ---@param ids string[]
+  local function source(ids, active)
+    local rows = {}
+    for i, id in ipairs(ids) do
+      rows[i] =
+        { id = id, cells = { { "  " .. id } }, active = id == active, activate = function() end }
+    end
+    return { { id = "s", title = "Things", rows = rows } }
+  end
+
+  local data = source { "a", "b", "c" }
+  local view = list.new {
+    sections = function()
+      return data
+    end,
+    load = function(_, done)
+      done()
+    end,
+  }
+
+  -- FOCUS IS SEEDED ON THE FIRST DRAW. The panels this replaces left the
+  -- cursor wherever it happened to be, so the first <CR> after switching to
+  -- the tab did nothing at all.
+  eq("list: focus starts on the first row", (view:resolve()).id, "a")
+
+  view:move(1)
+  eq("list: j moves it", (view:resolve()).id, "b")
+  view:edge(1)
+  eq("list: G goes to the last row", (view:resolve()).id, "c")
+  view:move(1)
+  eq("list: and j wraps from there", (view:resolve()).id, "a")
+  view:edge(-1)
+
+  -- REORDERING MUST NOT MOVE FOCUS. These lists are push-fed -- an agent
+  -- changing status re-sorts them -- and focus that followed a position would
+  -- wander under you while you were reading.
+  view:move(1)
+  eq("list: focused on b", (view:resolve()).id, "b")
+  data = source { "c", "b", "a" }
+  eq("list: a reorder does not move focus", (view:resolve()).id, "b")
+
+  -- A ROW THAT DIES leaves focus on whatever took its place, not back at the
+  -- top -- which is what you want after `d` on the row you were standing on.
+  data = source { "c", "a" }
+  eq("list: a row that disappears hands focus to its successor", (view:resolve()).id, "a")
+
+  -- An empty list is not a crash.
+  data = {}
+  eq("list: nothing to focus is not an error", (view:resolve()), nil)
+  data = source { "a", "b", "c" }
+
+  -- THE FOCUSED ROW IS PAINTED, and in the same colour as hover: pointing at
+  -- a row and moving to it are the same state.
+  local lines = view:lines(40)
+  local lit = 0
+  for _, line in ipairs(lines) do
+    for _, cell in ipairs(line) do
+      if cell[2] == "PaseoRowHover" then
+        lit = lit + 1
+        break
+      end
+    end
+  end
+  eq("list: exactly one row carries the focus band", lit, 1)
+
+  -- `active` is a different axis and a weaker claim, and it used to WIN over
+  -- hover -- so the row you were most likely to point at was the one row that
+  -- could not light up.
+  eq(
+    "list: focus beats active",
+    widgets.row_hl("x", { focused = true, active = true }),
+    "PaseoRowHover"
+  )
+  eq(
+    "list: and active still paints on its own",
+    widgets.row_hl("x", { active = true }),
+    "PaseoRowActive"
+  )
+
+  -- A list taller than the body scrolls, keeps the focused row on screen, and
+  -- draws every line to exactly one width so the scrollbar is a COLUMN.
+  local many = {}
+  for i = 1, 30 do
+    many[i] = { id = "r" .. i, cells = { { "  row " .. i } }, activate = function() end }
+  end
+  data = { { id = "s", title = "Many", rows = many } }
+  view.focus = { section = "s", row = "r30" }
+  local tall = view:lines(40, 10)
+  eq("list: a long list is cut to the height it was given", #tall, 10)
+  local widths, seen = {}, false
+  for i = 1, #tall - 1 do
+    widths[vim.api.nvim_strwidth(render.concat(tall[i]))] = true
+    if render.concat(tall[i]):find("row 30", 1, true) then
+      seen = true
+    end
+  end
+  truthy("list: and scrolled far enough to show the focused row", seen)
+  eq("list: every scrolled line is one width, so the bar is a column", vim.tbl_count(widths), 1)
+
+  -- NO KEY IS BOUND TWICE. `keys.take` binds in order and does not notice a
+  -- repeat, so a source spelling one of its verbs `r` bound that AND the
+  -- built-in reload, left whichever came last on the key, and advertised both
+  -- of them side by side in the hint bar -- which is a hint bar that is wrong
+  -- about the first one.
+  data = source { "a" }
+  local clash = list.new {
+    sections = function()
+      return data
+    end,
+    load = function(_, done)
+      done()
+    end,
+    keys = { rename = "r" },
+    hints = { { "r", "rename" } },
+  }
+  local seen, dupes = {}, {}
+  for _, mapping in ipairs(clash:mappings()) do
+    if seen[mapping[1]] then
+      dupes[#dupes + 1] = mapping[1]
+    end
+    seen[mapping[1]] = true
+  end
+  eq("list: a source key that collides with a built-in binds once", dupes, {})
+  truthy("list: and the source is the one that keeps it", seen.r)
+
+  local bar = render.concat(clash:hints())
+  eq("list: the hint bar names the key once", select(2, bar:gsub("reload", "")), 0)
+  truthy("list: and names what the source does with it", bar:find("rename", 1, true) ~= nil, bar)
+
+  -- The hint bar is the last row and never scrolls off: a list that loses its
+  -- own instructions does so exactly when it has grown enough to need them.
+  truthy(
+    "list: the hints survive scrolling",
+    render.concat(tall[#tall]):find("move", 1, true) ~= nil,
+    render.concat(tall[#tall])
+  )
+end
+
 return {
   { "ui.session", test_session_source },
   { "ui.panels", test_panels },
   { "ui.toggles", test_toggle_height },
+  { "ui.list", test_list },
 }

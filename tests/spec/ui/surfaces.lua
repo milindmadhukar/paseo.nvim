@@ -215,25 +215,23 @@ local function test_surfaces()
   -- and the conversation window only exists on the Chat tab -- so every other
   -- tab had no header at all and the dashboard could not tell you which model
   -- it was on. It is a volt section in the chrome now.
-  -- The Sessions tab maps CURSOR ROWS to sessions, and the only thing between
-  -- a panel's own line numbering and the buffer's is `body_row_offset`. It is
-  -- a constant, so it is checked against a real open dashboard rather than
-  -- against itself -- the panel this replaced hardcoded the same sum and was
-  -- wrong about it.
+  -- The Sessions tab used to map CURSOR ROWS to sessions, and the only thing
+  -- between a panel's own line numbering and the buffer's was a constant it
+  -- had to agree with. It holds focus by ID now, so the thing worth checking
+  -- against a REAL open dashboard is different: that the row reaches the
+  -- chrome buffer at all, and that exactly one of them is lit.
   do
     local agents = require "paseo.agents"
     local old_for_root, old_watch = agents.for_root, agents.watch
     agents.watch = function() end
     agents.for_root = function()
-      return { { id = "row-probe", title = "row-probe", status = "idle" } }
+      return {
+        { id = "row-probe", title = "row-probe", status = "idle" },
+        { id = "row-other", title = "row-other", status = "idle" },
+      }
     end
     float.select "Sessions"
-    local probe
-    for line, row in pairs(require("paseo.ui.panels.sessions")._rows) do
-      if row.id == "row-probe" then
-        probe = line
-      end
-    end
+
     local chrome
     for _, win in ipairs(vim.api.nvim_list_wins()) do
       local buf = vim.api.nvim_win_get_buf(win)
@@ -241,28 +239,45 @@ local function test_surfaces()
         chrome = buf
       end
     end
-    local on_that_row = ""
-    if chrome and probe then
-      local marks = vim.api.nvim_buf_get_extmarks(
-        chrome,
-        -1,
-        { probe - 1, 0 },
-        { probe - 1, -1 },
-        { details = true }
-      )
-      local parts = {}
-      for _, mark in ipairs(marks) do
+
+    local drawn, lit = {}, 0
+    if chrome then
+      for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(chrome, -1, 0, -1, { details = true })) do
+        local row, banded = {}, false
         for _, cell in ipairs(mark[4].virt_text or {}) do
-          parts[#parts + 1] = cell[1]
+          row[#row + 1] = cell[1]
+          if cell[2] == "PaseoRowHover" then
+            banded = true
+          end
+        end
+        drawn[#drawn + 1] = table.concat(row)
+        if banded then
+          lit = lit + 1
         end
       end
-      on_that_row = table.concat(parts)
     end
+    local joined = table.concat(drawn, "\n")
     truthy(
-      "ui: a Sessions row is on the buffer line its map claims",
-      on_that_row:find("row-probe", 1, true) ~= nil,
-      ("row %s holds %q"):format(tostring(probe), on_that_row)
+      "ui: a Sessions row reaches the chrome buffer",
+      joined:find("row-probe", 1, true) ~= nil,
+      joined
     )
+
+    -- THE BUG THIS TAB HAD. The keys were bound and the rows were reachable,
+    -- and nothing on screen said which one you were on -- so it read as a tab
+    -- you could only click. Arriving at it now lands focus on a row and paints
+    -- it, without anyone having to move first.
+    truthy("ui: and arriving on the tab lights exactly one of them", lit == 1, lit)
+    local function bound(lhs)
+      local found
+      vim.api.nvim_buf_call(chrome, function()
+        found = vim.fn.maparg(lhs, "n", false, true)
+      end)
+      return type(found) == "table" and found.buffer == 1
+    end
+    truthy("ui: the list takes the movement keys", chrome and bound "j")
+    truthy("ui: and its per-row verbs", chrome and bound "d")
+
     agents.for_root, agents.watch = old_for_root, old_watch
   end
 
