@@ -273,6 +273,19 @@ commands.dash = {
   end,
 }
 
+commands.buf = {
+  desc = "Open the chat full screen, in a window of its own, on its own tab",
+  run = function()
+    -- Not a toggle, for the same reason `dash` is not one.
+    require("paseo.ui.chat").surface "buffer"
+  end,
+}
+
+-- The other name for the same thing: some people reach for what it IS -- a
+-- buffer, with a filetype, in the window layout -- and some for where it goes.
+-- Same precedent as `sessions`/`agents` and `ws`/`workspaces`.
+commands.tab = commands.buf
+
 commands.stop = {
   desc = "Interrupt the turn the current chat's agent is running",
   run = function()

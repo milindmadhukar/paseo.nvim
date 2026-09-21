@@ -105,6 +105,140 @@ local function watch_directories()
   require("paseo.terminals").on_change(directory_changed)
 end
 
+-- ----------------------------------------------------------------- the mount
+
+---What a NORMAL window has to be turned into before volt may draw in it.
+---
+---`wrap` is the one that is not taste. Volt writes `h` lines of `w` spaces and
+---addresses rows by INDEX -- one wrapped line puts every row below it one off
+---its extmark, and the surface comes apart from the bottom up. The gutter
+---options are the second half of the same problem: `virt_text_win_col` counts
+---from the TEXT AREA and a win-relative pane counts from the window ORIGIN,
+---so every column of gutter is a column of disagreement between the chrome
+---and the panes floated over it. 'statuscolumn' is in the list because a
+---user's global one is how a gutter comes back after you have turned the
+---other three off.
+---
+---DELIBERATELY NOT `ui/sidebar.lua`'s `WINDOW`, which this otherwise nearly
+---duplicates: its first entry is `wrap = true`, which is right for a pane of
+---real wrapped text and is precisely the value that breaks volt here. One
+---shared table would be an invitation to "fix" the disagreement in the wrong
+---direction.
+local HOST = {
+  wrap = false,
+  linebreak = false,
+  number = false,
+  relativenumber = false,
+  signcolumn = "no",
+  foldcolumn = "0",
+  statuscolumn = "",
+  cursorline = false,
+  cursorcolumn = false,
+  colorcolumn = "",
+  list = false,
+  spell = false,
+  scrolloff = 0,
+  sidescrolloff = 0,
+  -- The header is a volt section. A winbar would draw it twice, one row apart
+  -- -- and would cost the chrome the row it measured itself against.
+  winbar = "",
+  winblend = 0,
+  -- Not a window other buffers open in. `:e file` from here would leave volt
+  -- drawing extmarks over somebody's source.
+  winfixbuf = true,
+}
+
+---The filetype the buffer surface carries.
+---
+---The nvim-tree parallel, and the thing to hang an `ftplugin/` off. Spelled
+---the way the plugin's other owned buffers are -- `paseo-create`,
+---`paseo-settings`, `paseo-manifest`, `paseo-answer`.
+M.FILETYPE = "paseo-dash"
+
+---How many dashboards have wanted the name. See `host_buf`.
+local named = 0
+
+---@param win integer
+local function style_host(win)
+  for option, value in pairs(HOST) do
+    pcall(function()
+      vim.wo[win][option] = value
+    end)
+  end
+
+  -- `NormalNC` is the entry the float never needed and this mount cannot do
+  -- without: the cursor lives in the composer PANE, so the host is a
+  -- not-current window nearly all of the time, and a colourscheme that dims
+  -- `NormalNC` would tint the whole dashboard whenever you were typing.
+  --
+  -- The statusline groups are here rather than in `HOST` for the same reason
+  -- 'laststatus' is not touched at all: the statusline is outside the height
+  -- we measured, so it costs the layout nothing -- but a bright rule under
+  -- the surface is still a bright rule under the surface.
+  pcall(function()
+    vim.wo[win].winhl = table.concat({
+      "Normal:PaseoNormal",
+      "NormalNC:PaseoNormal",
+      "EndOfBuffer:PaseoNormal",
+      "SignColumn:PaseoNormal",
+      "CursorLine:PaseoNormal",
+      "StatusLine:PaseoNormal",
+      "StatusLineNC:PaseoNormal",
+    }, ",")
+  end)
+end
+
+---The chrome buffer, for a mount that has to survive being displaced.
+---
+---`bufhidden = "wipe"` rather than the float's `hide`: this buffer sits in a
+---window the user can `:e` out of, and a volt buffer nobody can see is still
+---a volt buffer on `volt.events.bufs`, still dispatching clicks. Gone with
+---its window is the only state that stays honest -- which is what the
+---unconditional volt cleanup in `M.close` is there to survive.
+---@return integer
+local function host_buf()
+  local buf = api.nvim_create_buf(false, true)
+  vim.bo[buf].bufhidden = "wipe"
+  -- A `://` name is not expanded against the cwd the way a bare word would
+  -- be, and the default tabline shows its tail -- `dashboard`. `E95` if a
+  -- stale one outlived us, which is what the counter is for.
+  if not pcall(api.nvim_buf_set_name, buf, "paseo://dashboard") then
+    named = named + 1
+    pcall(api.nvim_buf_set_name, buf, ("paseo://dashboard-%d"):format(named))
+  end
+  return buf
+end
+
+---A tab page of its own, holding this buffer and nothing else.
+---
+---`:tab sbuffer` rather than `:tabnew` + `nvim_win_set_buf`, which leaves the
+---new tab's own empty buffer behind -- listed, loaded and never collected --
+---once per open for the length of the session.
+---
+---After the current tab rather than at the end: the dashboard for what you
+---are looking at belongs next to it.
+---@param buf integer
+---@return integer win, integer tabpage
+local function mount_tab(buf)
+  local ok = pcall(vim.cmd, ("tab sbuffer %d"):format(buf))
+  if not (ok and api.nvim_get_current_buf() == buf) then
+    -- 'switchbuf' is the only thing that can redirect `sbuffer`, and the
+    -- fallback costs four lines.
+    vim.cmd "tabnew"
+    local scratch = api.nvim_get_current_buf()
+    api.nvim_win_set_buf(0, buf)
+    if
+      scratch ~= buf
+      and api.nvim_buf_is_valid(scratch)
+      and api.nvim_buf_get_name(scratch) == ""
+      and not vim.bo[scratch].modified
+    then
+      pcall(api.nvim_buf_delete, scratch, { force = true })
+    end
+  end
+  return api.nvim_get_current_win(), api.nvim_get_current_tabpage()
+end
+
 -- ------------------------------------------------------------------ geometry
 
 ---Where the surface sits, how big it is, and how it stacks.
@@ -117,7 +251,7 @@ end
 ---are on top of it. The one window that must never be covered -- the
 ---permission dialog -- asks for its own z-index well above both.
 ---@return table
-local function geometry()
+local function float_geometry()
   local config = require "paseo.config"
   local ui = config.get().ui.float
   local columns, lines = vim.o.columns, vim.o.lines
@@ -145,6 +279,12 @@ local function geometry()
 
   local z = ui.zindex or 30
   return {
+    -- Which MOUNT this geometry describes. The dashboard is the same surface
+    -- either way -- same chrome, same six tabs, same panes -- and the only
+    -- thing that differs is what it is anchored to, so the difference lives
+    -- in the geometry rather than in a second copy of the module.
+    mount = "float",
+    relative = "editor",
     width = w,
     height = h,
     -- Whether the chrome window has a frame, which decides where its first
@@ -162,6 +302,116 @@ local function geometry()
     z_chrome = z,
     z_panes = z + 5,
   }
+end
+
+---A dashboard setting, from `ui.buffer` if the buffer mount overrides it and
+---from `ui.float` otherwise.
+---
+---`composer`, `zindex` and `tab_keys` describe the DASHBOARD -- how tall the
+---prompt box grows, how the panes stack, whether a bare digit switches tab --
+---and not the mount. Restating all three under `ui.buffer` would be three
+---more places for the two surfaces to drift apart on a question neither of
+---them asks differently. So `ui.buffer` carries what is genuinely its own,
+---and inherits the rest.
+---@param name string
+---@return any
+local function dash_option(name)
+  local ui = require("paseo.config").get().ui
+  local value = (ui.buffer or {})[name]
+  if value == nil then
+    value = ui.float[name]
+  end
+  return value
+end
+
+---The box when the dashboard IS a window rather than one floated over the
+---editor: the host window's own text area, exactly.
+---
+---`row` and `col` are NOT zero, and that is the whole reason |paseo.ui.layout|
+---needs no branch for this mount. A win-relative float at `0,0` sits at the
+---host's ORIGIN -- above the winbar, left of the gutter -- while volt draws
+---with `virt_text_win_col`, which counts from the TEXT AREA. Feeding the
+---winbar row into `row` and 'textoff' into `col` cancels exactly that
+---difference, and `layout.screen_row` then answers win-relative coordinates
+---with the same arithmetic it has always used for screen ones.
+---
+---'textoff' is read rather than assumed zero even though `HOST` turns every
+---gutter off: a user's global 'statuscolumn', or a `FileType` autocmd that
+---puts numbers back, would otherwise shift the chrome text one way and the
+---panes the other.
+---@param win integer
+---@return table
+local function host_geometry(win)
+  local info = vim.fn.getwininfo(win)[1] or {}
+  local textoff = info.textoff or 0
+  -- `nvim_win_get_height` INCLUDES the winbar row; `getwininfo().height` is
+  -- the text rows, which is what the chrome buffer actually has to fill.
+  local h = math.max(1, info.height or api.nvim_win_get_height(win))
+  local w = math.max(1, api.nvim_win_get_width(win) - textoff)
+
+  local composer = dash_option "composer"
+  composer = type(composer) == "number" and math.floor(composer) or 7
+  composer = math.max(1, math.min(composer, h - 10))
+
+  local z = math.floor(dash_option "zindex" or 30)
+  return {
+    mount = "buffer",
+    relative = "win",
+    host = win,
+    width = w,
+    height = h,
+    -- There is no frame, so `screen_row` adds nothing for one.
+    border = false,
+    row = (vim.wo[win].winbar or "") ~= "" and 1 or 0,
+    col = textoff,
+    composer = composer,
+    -- Nothing behind a tab page to dim.
+    backdrop = false,
+    z_backdrop = 1,
+    -- Vestigial on this mount -- the chrome is a normal window, and a normal
+    -- window is below every float whatever number you write here. Kept so the
+    -- two geometries have one shape.
+    z_chrome = z,
+    z_panes = z + 5,
+  }
+end
+
+---@param mount string|nil
+---@param host integer|nil
+---@return table
+local function geometry_for(mount, host)
+  if mount == "buffer" and host and api.nvim_win_is_valid(host) then
+    return host_geometry(host)
+  end
+  return float_geometry()
+end
+
+---The `relative` half of a window config, from the geometry rather than from
+---a literal.
+---
+---THE one thing that makes the panes mount-aware. The float's are relative to
+---the editor; the buffer mount's are relative to its host window -- which is
+---also what puts them on the host's TAB PAGE rather than on whichever tab
+---happened to be current when a re-fit ran.
+---
+---Both keys, always. `nvim_win_set_config` given `relative = "win"` with no
+---`win` re-anchors to the CURRENT window, which during a re-fit is routinely
+---not ours.
+---@param g table
+---@return table
+local function anchor(g)
+  if g.relative == "win" and g.host and api.nvim_win_is_valid(g.host) then
+    return { relative = "win", win = g.host }
+  end
+  return { relative = "editor" }
+end
+
+---A window config built on whatever the geometry is anchored to.
+---@param g table
+---@param opts table
+---@return table
+local function placed(g, opts)
+  return vim.tbl_extend("error", anchor(g), opts)
 end
 
 -- -------------------------------------------------------------------- chrome
@@ -469,11 +719,23 @@ local function footer_lines()
   local pairs_ = {
     { "1-" .. #M.TABS, "tabs" },
     { "<Tab>", "cycle" },
-    { "<C-f>", "sidebar" },
+  }
+  -- Not on the buffer mount, where `<C-f>` is deliberately not bound. A hint
+  -- bar is the only place the surface says what its keys are, so one that
+  -- names a key doing nothing is worse than a shorter bar -- and
+  -- `widgets.hints` degrades, so the columns go back to the others.
+  --
+  -- Appended rather than written as a `nil` in the literal: a hole in a table
+  -- constructor makes `#` and `ipairs` undefined, and the three pairs BELOW
+  -- it are the ones that would quietly vanish.
+  if not state or state.mount ~= "buffer" then
+    pairs_[#pairs_ + 1] = { "<C-f>", "sidebar" }
+  end
+  vim.list_extend(pairs_, {
     { "<C-c>", "stop" },
     { "<C-t>", "speak" },
     { "q", "close" },
-  }
+  })
 
   if not state then
     return { widgets.hints(pairs_) }
@@ -617,7 +879,7 @@ local function bind_tabs(buf, cycle)
   -- -- a seven-line prompt box is not where you type counts -- but it is a
   -- trade, so `ui.float.tab_keys = false` buys the counts back and leaves
   -- `<M-3>` and `<Tab>`, which collide with nothing.
-  local digits = require("paseo.config").get().ui.float.tab_keys ~= false
+  local digits = dash_option "tab_keys" ~= false
   for i, name in ipairs(M.TABS) do
     local keys = digits and { tostring(i), ("<M-%d>"):format(i) } or { ("<M-%d>"):format(i) }
     for _, key in ipairs(keys) do
@@ -714,21 +976,19 @@ function M.resize_composer(chat)
     return
   end
 
-  pcall(api.nvim_win_set_config, win, {
-    relative = "editor",
+  pcall(api.nvim_win_set_config, win, placed(g, {
     row = panes.composer_row,
     col = panes.col,
     width = panes.width,
     height = panes.composer + 1,
-  })
+  }))
   if conversation and api.nvim_win_is_valid(conversation) then
-    pcall(api.nvim_win_set_config, conversation, {
-      relative = "editor",
+    pcall(api.nvim_win_set_config, conversation, placed(g, {
       row = panes.top,
       col = panes.col,
       width = panes.width,
       height = panes.conversation,
-    })
+    }))
     -- The conversation follows the agent, and it just got taller. Without this
     -- the extra rows open up BELOW the last line and the transcript stops
     -- looking like it reached the bottom.
@@ -760,8 +1020,7 @@ local function show_agent_panes()
   local border, border_hl = require("paseo.ui.style").composer_border()
   local panes = layout.panes(g, composer_rows(chat, g), { framed = border ~= "none" })
 
-  chat.win_conversation = api.nvim_open_win(chat.conversation, false, {
-    relative = "editor",
+  chat.win_conversation = api.nvim_open_win(chat.conversation, false, placed(g, {
     row = panes.top,
     col = panes.col,
     width = panes.width,
@@ -769,9 +1028,8 @@ local function show_agent_panes()
     style = "minimal",
     border = "none",
     zindex = g.z_panes,
-  })
-  chat.win_composer = api.nvim_open_win(chat.composer, true, {
-    relative = "editor",
+  }))
+  chat.win_composer = api.nvim_open_win(chat.composer, true, placed(g, {
     row = panes.composer_row,
     col = panes.col,
     width = panes.width,
@@ -786,7 +1044,7 @@ local function show_agent_panes()
     -- other card from it -- one tier of elevation, and a title row.
     border = border,
     zindex = g.z_panes,
-  })
+  }))
 
   -- The surface reads as ONE sheet: the conversation shares the chrome's
   -- background, and the composer is a raised card -- the same tier the Agent
@@ -906,8 +1164,7 @@ local function show_terminal_pane()
 
   local g = state.geometry
   local pane = layout.panes(g).body
-  state.term_win = api.nvim_open_win(api.nvim_create_buf(false, true), true, {
-    relative = "editor",
+  state.term_win = api.nvim_open_win(api.nvim_create_buf(false, true), true, placed(g, {
     row = pane.row,
     col = pane.col,
     width = pane.width,
@@ -915,7 +1172,7 @@ local function show_terminal_pane()
     style = "minimal",
     border = "none",
     zindex = g.z_panes,
-  })
+  }))
   pcall(function()
     vim.wo[state.term_win].winhl = "Normal:PaseoNormal,NormalFloat:PaseoNormal"
   end)
@@ -1161,9 +1418,12 @@ function M.close()
     end
   end
   for _, buf in ipairs { held.buf, held.backdrop } do
-    if buf and api.nvim_buf_is_valid(buf) then
-      -- Volt never clears its own state table; without this the chrome
-      -- buffer's clickable and hoverable tables leak for the session.
+    if buf then
+      -- BEFORE THE VALIDITY CHECK, NOT INSIDE IT. Volt never clears its own
+      -- state table, and the case where nobody else will either is exactly
+      -- the case where the buffer is already gone: `:q` on a window we host,
+      -- or `bufhidden = "wipe"` doing what it says. Guarded, both tables
+      -- leaked for the session every time the buffer went first.
       require("volt.state")[buf] = nil
       -- And its global on_key handler keeps dispatching against a dead buffer
       -- unless the buf is taken off its list.
@@ -1174,20 +1434,49 @@ function M.close()
           break
         end
       end
-      pcall(api.nvim_buf_delete, buf, { force = true })
+      if api.nvim_buf_is_valid(buf) then
+        pcall(api.nvim_buf_delete, buf, { force = true })
+      end
     end
   end
   held.chat.surface = nil
 end
 
 ---@param chat table
-function M.open(chat)
+---@param opts? { mount?: "float"|"buffer" }
+function M.open(chat, opts)
+  local mount = opts and opts.mount or "float"
+
+  -- A TAB PAGE YOU CANNOT SEE IS ONE `gt` AWAY, NOT GONE.
+  --
+  -- `is_open` is tab-aware, and for a float that is exactly right: an
+  -- invisible float is no use to you, so "open it" means open another one
+  -- where you are. This mount is a tab page -- the surface you asked for
+  -- already exists and has your draft in it, and "open it" means GO THERE.
+  -- Without this, `:Paseo buf` from your code opened a second dashboard tab
+  -- every time.
+  if
+    mount == "buffer"
+    and state
+    and state.mount == "buffer"
+    and state.tabpage
+    and api.nvim_tabpage_is_valid(state.tabpage)
+    and state.tabpage ~= api.nvim_get_current_tabpage()
+    and M.showing(chat)
+  then
+    api.nvim_set_current_tabpage(state.tabpage)
+  end
+
   -- Already up on this chat: go to the Chat tab and focus the composer rather
   -- than tearing the surface down and rebuilding it. "Open the chat" while
   -- sitting on the Usage panel means show me the conversation -- and it has to,
   -- because the caller goes on to put the cursor in `chat.win_composer`, which
   -- on any other tab does not exist.
-  if M.is_open(chat) then
+  --
+  -- ON THE SAME MOUNT. A dashboard floating over your code is not the one
+  -- `:Paseo buf` asked for, however open it is -- without the second test the
+  -- two commands took this branch on each other and neither could swap.
+  if M.is_open(chat) and state.mount == mount then
     -- AND ON THE CONVERSATION, not on whatever the Chat tab was last left on.
     -- `state.session` survives a trip through the panels, so: `<C-s>` out of a
     -- terminal to the session list, an agent picked out of that list, and the
@@ -1221,46 +1510,57 @@ function M.open(chat)
   -- closed: `directory_changed` returns on a nil `state`.
   watch_directories()
 
-  local g = geometry()
+  local buf, win, g, backdrop, backdrop_win, tabpage
 
-  local backdrop, backdrop_win
-  if g.backdrop then
-    backdrop = api.nvim_create_buf(false, true)
-    backdrop_win = api.nvim_open_win(backdrop, false, {
+  if mount == "buffer" then
+    -- The window FIRST, the geometry second: this mount's box is the host
+    -- window's own text area, so there is nothing to measure until it exists.
+    buf = host_buf()
+    win, tabpage = mount_tab(buf)
+    style_host(win)
+    g = host_geometry(win)
+  else
+    g = float_geometry()
+
+    if g.backdrop then
+      backdrop = api.nvim_create_buf(false, true)
+      backdrop_win = api.nvim_open_win(backdrop, false, {
+        relative = "editor",
+        row = 0,
+        col = 0,
+        width = vim.o.columns,
+        height = vim.o.lines,
+        focusable = false,
+        style = "minimal",
+        border = "none",
+        zindex = g.z_backdrop,
+      })
+      vim.wo[backdrop_win].winblend = 25
+    end
+
+    local edge, edge_hl = style.window_border()
+
+    buf = api.nvim_create_buf(false, true)
+    win = api.nvim_open_win(buf, true, {
       relative = "editor",
-      row = 0,
-      col = 0,
-      width = vim.o.columns,
-      height = vim.o.lines,
-      focusable = false,
+      row = g.row,
+      col = g.col,
+      width = g.width,
+      height = g.height,
       style = "minimal",
-      border = "none",
-      zindex = g.z_backdrop,
+      border = edge,
+      zindex = g.z_chrome,
     })
-    vim.wo[backdrop_win].winblend = 25
+
+    -- On the default -- `ui.style`'s "invisible" -- `PaseoNormalBorder` is
+    -- fg == bg, so `nvim_open_win`'s border glyphs render as solid colour and
+    -- the box becomes a one-cell padding ring in the surface's own background.
+    -- That is the single change that stops the dashboard looking like a framed
+    -- rectangle and starts it looking like a card. The other border settings
+    -- paint the same glyphs in `PaseoBorder` and you get a visible edge.
+    vim.wo[win].winhl =
+      ("Normal:PaseoNormal,NormalFloat:PaseoNormal,FloatBorder:%s"):format(edge_hl)
   end
-
-  local edge, edge_hl = style.window_border()
-
-  local buf = api.nvim_create_buf(false, true)
-  local win = api.nvim_open_win(buf, true, {
-    relative = "editor",
-    row = g.row,
-    col = g.col,
-    width = g.width,
-    height = g.height,
-    style = "minimal",
-    border = edge,
-    zindex = g.z_chrome,
-  })
-
-  -- On the default -- `ui.style`'s "invisible" -- `PaseoNormalBorder` is
-  -- fg == bg, so `nvim_open_win`'s border glyphs render as solid colour and
-  -- the box becomes a one-cell padding ring in the surface's own background.
-  -- That is the single change that stops the dashboard looking like a framed
-  -- rectangle and starts it looking like a card. The other border settings
-  -- paint the same glyphs in `PaseoBorder` and you get a visible edge.
-  vim.wo[win].winhl = ("Normal:PaseoNormal,NormalFloat:PaseoNormal,FloatBorder:%s"):format(edge_hl)
 
   state = {
     buf = buf,
@@ -1269,6 +1569,13 @@ function M.open(chat)
     backdrop_win = backdrop_win,
     chat = chat,
     geometry = g,
+    -- Which mount is up, and -- when it is the buffer one -- the window and
+    -- the tab page it lives in. `host` is `win` today, and stays a separate
+    -- field because it is what `anchor` and `geometry_for` read: "the window
+    -- the panes hang off" is a different question from "the chrome window".
+    mount = g.mount,
+    host = g.host,
+    tabpage = tabpage,
     tab = "Chat",
     -- What the Chat tab is showing. A sibling of `chat` rather than something
     -- folded into it: `state.chat` is identity-compared by `is_open`,
@@ -1276,7 +1583,7 @@ function M.open(chat)
     -- that a session might be a PTY.
     session = { kind = "agent", id = chat.agent_id },
   }
-  chat.surface = "float"
+  chat.surface = mount
 
   M.rebuild()
 
@@ -1314,12 +1621,32 @@ function M.open(chat)
   map("p", function() end)
   map("P", function() end)
   map("q", M.close)
-  map("<Esc>", M.close)
-  map("<C-f>", function()
-    M.close()
-    chat.surface = "sidebar"
-    sidebar.open(chat)
-  end)
+  if mount == "float" then
+    -- `<Esc>` DISMISSES A FLOAT AND DOES NOT DESTROY A TAB PAGE.
+    --
+    -- On a float it is the universal "close the thing in front of me", and it
+    -- is right. The buffer mount is not in front of anything -- it is a place
+    -- you are standing -- and in a normal window `<Esc>` means "cancel what I
+    -- was in the middle of": clear the search highlight, drop a pending
+    -- count, leave a mode. Rebinding that to tear the tab down means one
+    -- stray press after a mistyped `i` takes the surface with it. nvim-tree,
+    -- oil, fugitive and neo-tree all bind `q` and none of them binds `<Esc>`.
+    --
+    -- Left UNBOUND rather than mapped to a no-op, which would swallow the
+    -- legitimate uses along with the accident.
+    map("<Esc>", M.close)
+
+    -- `<C-f>` is the sidebar swap, and the buffer mount is not in that pair:
+    -- the sidebar is with your code, the buffer surface is a place of its
+    -- own, the float is floating. |paseo.ui.chat|.fullscreen declines it from
+    -- the other side, for the conversation and composer -- which keep their
+    -- own `<C-f>` because they are shared with the sidebar.
+    map("<C-f>", function()
+      M.close()
+      chat.surface = "sidebar"
+      sidebar.open(chat)
+    end)
+  end
   map(require("paseo.config").get().ui.terminal.keys.sessions, function()
     M.select "Agents & terminals"
   end)
@@ -1337,6 +1664,66 @@ function M.open(chat)
     end,
     desc = "paseo: re-fit the dashboard",
   })
+
+  -- RE-FIT WHAT YOU HAVE JUST COME BACK TO. `M.relayout` declines to work on
+  -- a surface that is not on the current tab page -- see the comment there --
+  -- and this is the other half of that: the deferred re-fit happens when you
+  -- arrive, before you can see that it was needed.
+  api.nvim_create_autocmd("TabEnter", {
+    group = state.augroup,
+    callback = function()
+      if state and state.dirty then
+        vim.schedule(M.relayout)
+      end
+    end,
+    desc = "paseo: re-fit the dashboard you have come back to",
+  })
+
+  if mount == "buffer" then
+    -- THE DOOR THE FLOAT NEVER HAD. A float is only ever closed by us; a
+    -- window in the layout is closed by `:q`, `<C-w>c`, `:only`, `:tabclose`
+    -- and a session restore, none of which go anywhere near `M.close`.
+    --
+    -- The case that makes it load-bearing rather than tidy: on a dash tab the
+    -- user has SPLIT, closing the host leaves the two panes valid and
+    -- floating over the remaining window, anchored to a window id that no
+    -- longer exists, with no way to reach them. `hide_panes` reaps them.
+    --
+    -- Scheduled because `WinClosed` fires DURING the close and `M.close` goes
+    -- on to close three more windows and delete a buffer. Re-entrancy is not
+    -- a worry: `M.close` nils `state` and deletes this augroup before it
+    -- touches a window, so a second caller finds nothing to do.
+    --
+    -- No `TabClosed` handler to go with it. The order is `WinClosed`(pane) ->
+    -- `WinClosed`(host) -> `BufWipeout` -> `TabClosed`, so the host is always
+    -- first and a second handler is only a second chance to double-fire.
+    api.nvim_create_autocmd("WinClosed", {
+      group = state.augroup,
+      pattern = tostring(win),
+      callback = function()
+        vim.schedule(M.close)
+      end,
+      desc = "paseo: the dashboard's window went away",
+    })
+
+    -- And the buffer going without the window -- `:bd`, `:bw`, a plugin that
+    -- swaps buffers under you. `winfixbuf` makes it rare rather than
+    -- impossible. Also scheduled: deleting a buffer from inside its own
+    -- `BufWipeout` is not allowed.
+    api.nvim_create_autocmd({ "BufWipeout", "BufUnload" }, {
+      group = state.augroup,
+      buffer = buf,
+      callback = function()
+        vim.schedule(M.close)
+      end,
+      desc = "paseo: the dashboard's buffer went away",
+    })
+
+    -- LAST, once the surface is finished. This is the name a user hangs an
+    -- `ftplugin/paseo-dash.lua` off, and it should not fire at a half-built
+    -- window with no keys on it.
+    vim.bo[buf].filetype = M.FILETYPE
+  end
 
   show_panes()
 end
@@ -1427,7 +1814,24 @@ function M.relayout()
   if not state or not api.nvim_win_is_valid(state.win) then
     return
   end
-  local g = geometry()
+
+  -- NOT WHILE YOU ARE STANDING SOMEWHERE ELSE. Re-fitting recreates the
+  -- panes, and `show_agent_panes` opens the composer with `enter = true` --
+  -- which, for a window on another tab page, SWITCHES to it. So a terminal
+  -- resize while you worked in your code would haul you onto the dashboard
+  -- and leave you there, firing every `TabEnter` hook on the way.
+  --
+  -- It waits at the door instead: the `TabEnter` autocmd in `M.open` runs it
+  -- when you arrive. This is a fix for the float as much as for the buffer
+  -- mount -- with `relative = "editor"` panes it could also strand them on
+  -- whichever tab was current when the resize landed.
+  if api.nvim_win_get_tabpage(state.win) ~= api.nvim_get_current_tabpage() then
+    state.dirty = true
+    return
+  end
+  state.dirty = false
+
+  local g = geometry_for(state.mount, state.host)
 
   -- NOTHING MOVED, NOTHING TO RE-FIT. `WinResized` fires for any window on
   -- the tab page, not just for the editor changing size -- and one of those
@@ -1440,6 +1844,7 @@ function M.relayout()
   local old = state.geometry
   if
     old
+    and old.host == g.host
     and old.row == g.row
     and old.col == g.col
     and old.width == g.width
@@ -1449,21 +1854,26 @@ function M.relayout()
   end
   state.geometry = g
 
-  pcall(api.nvim_win_set_config, state.win, {
-    relative = "editor",
-    row = g.row,
-    col = g.col,
-    width = g.width,
-    height = g.height,
-  })
-  if state.backdrop_win and api.nvim_win_is_valid(state.backdrop_win) then
-    pcall(api.nvim_win_set_config, state.backdrop_win, {
+  -- ONLY THE FLOAT OWNS ITS OWN BOX. The buffer mount's box IS the host
+  -- window, and the host window is however big Neovim has just made it --
+  -- moving it here would be arguing with the thing that told us.
+  if state.mount ~= "buffer" then
+    pcall(api.nvim_win_set_config, state.win, {
       relative = "editor",
-      row = 0,
-      col = 0,
-      width = vim.o.columns,
-      height = vim.o.lines,
+      row = g.row,
+      col = g.col,
+      width = g.width,
+      height = g.height,
     })
+    if state.backdrop_win and api.nvim_win_is_valid(state.backdrop_win) then
+      pcall(api.nvim_win_set_config, state.backdrop_win, {
+        relative = "editor",
+        row = 0,
+        col = 0,
+        width = vim.o.columns,
+        height = vim.o.lines,
+      })
+    end
   end
 
   -- The panes are laid out from the geometry, so they are cheapest to close
@@ -1560,6 +1970,17 @@ end
 ---@return string|nil
 function M.tab()
   return state and state.tab or nil
+end
+
+---Which mount the dashboard is on, if it is up.
+---
+---Read by |paseo.ui.chat|.fullscreen, which has to decline `<C-f>` on the
+---buffer mount from the conversation and composer -- two buffers the sidebar
+---shares, so the key cannot simply be left unbound there the way it is on the
+---chrome.
+---@return "float"|"buffer"|nil
+function M.mount()
+  return state and state.mount or nil
 end
 
 return M

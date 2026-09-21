@@ -37,10 +37,14 @@ local M = {}
 --- nothing here shells out to it. The daemon is reached over its WebSocket.)
 
 ---@class paseo.Config.UI
----@field surface "float"|"sidebar"  Which surface `:Paseo chat` opens on.
----                       "float" is the default: the full-screen dashboard is
----                       the one with everything on it, and the sidebar is the
----                       narrower thing you switch TO with <C-f>.
+---@field surface "float"|"sidebar"|"buffer"  Which surface `:Paseo chat` opens
+---                       on. "float" is the default: the full-screen dashboard
+---                       is the one with everything on it, and the sidebar is
+---                       the narrower thing you switch TO with <C-f>.
+---                       "buffer" is the same dashboard as "float" -- same
+---                       chrome, same six tabs -- in a real window with a
+---                       buffer of its own, on a tab page of its own, using the
+---                       whole screen rather than 94% of it.
 ---@field style string|paseo.Style  Frame language. A preset name --
 ---                       "plate", "rule", "rounded", "square" -- or a table of
 ---                       the same fields, which only has to name what it
@@ -135,6 +139,16 @@ local M = {}
 ---                       go to the tab bar instead while the dashboard is open.
 ---                       Set false to keep the counts; `<M-1>`-`<M-6>` and
 ---                       `<Tab>` still switch tabs.
+
+---@class paseo.Config.UI.Buffer
+---
+---The dashboard as a WINDOW rather than as a float. Deliberately one key: how
+---tall the composer grows (`composer`), how the panes stack (`zindex`) and
+---whether a bare digit switches tab (`tab_keys`) describe the DASHBOARD and
+---not the mount, so they are read from |paseo-config.ui.float| unless you set
+---them here. The size is not a setting at all -- the host window's size IS the
+---geometry, which is the whole point of the surface.
+---@field open "tab"  Where it goes. A tab page of its own today.
 
 ---@class paseo.Config.UI.Sidebar
 ---@field width number|fun(columns: integer): integer  PERCENT of the editor's
@@ -307,6 +321,15 @@ local defaults = {
       tab_keys = true,
     },
 
+    -- The same dashboard, in a window of its own rather than floating over
+    -- your code. `composer`, `zindex` and `tab_keys` are read from `float`
+    -- above unless you set them here: they describe the dashboard, not where
+    -- it is mounted, and two copies of one answer is how the two surfaces
+    -- start disagreeing.
+    buffer = {
+      open = "tab",
+    },
+
     sidebar = {
       width = 40,
       min_width = 60,
@@ -394,8 +417,11 @@ function M.setup(opts)
   vim.validate("review.agents", config.review.agents, "boolean")
   vim.validate("quit.warn_active_agents", config.quit.warn_active_agents, "boolean")
   vim.validate("ui.surface", config.ui.surface, function(v)
-    return v == "float" or v == "sidebar"
-  end, '"float" or "sidebar"')
+    return v == "float" or v == "sidebar" or v == "buffer"
+  end, '"float", "sidebar" or "buffer"')
+  vim.validate("ui.buffer.open", config.ui.buffer.open, function(v)
+    return v == "tab"
+  end, '"tab"')
   vim.validate("ui.sidebar.position", config.ui.sidebar.position, function(v)
     return v == "right" or v == "left"
   end, '"right" or "left"')
@@ -491,6 +517,9 @@ function M.setup(opts)
   -- finding the key that caused it.
   for where, keys in pairs {
     float = { "width", "height", "row", "col", "composer" },
+    -- Every one of these may be nil here, which is what lets the buffer mount
+    -- inherit it from `ui.float` rather than restate it.
+    buffer = { "composer", "zindex" },
     sidebar = { "width", "min_width", "composer" },
     terminal = { "width", "height", "row", "col", "list" },
   } do

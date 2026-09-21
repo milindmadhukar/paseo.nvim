@@ -83,7 +83,8 @@ require("paseo").setup {
   },
 
   ui = {
-    surface = "float",            -- where `:Paseo chat` opens. Or "sidebar".
+    surface = "float",            -- where `:Paseo chat` opens.
+                                  -- Or "sidebar", or "buffer".
 
     style = "plate",              -- frame language. See "Style".
 
@@ -104,6 +105,11 @@ require("paseo").setup {
       zindex = 30,                -- BELOW the 50 a float gets by default
       backdrop = true,
       tab_keys = true,            -- bare 1-6 switch tabs; see below
+    },
+
+    buffer = {                    -- the same dashboard, in a window of its own
+      open = "tab",               -- a tab page of its own
+      -- composer, zindex and tab_keys are inherited from `float`
     },
 
     sidebar = {
@@ -170,6 +176,7 @@ require("paseo").setup {
 | `:Paseo agent-settings` | What this agent session is set to |
 | `:Paseo session` | Compatibility alias for `agent-settings` |
 | `:Paseo dash` | The chat full screen, with the agent panels |
+| `:Paseo buf` | The same dashboard, in a window of its own on its own tab (`:Paseo tab`) |
 | `:Paseo sidebar` | The chat in the pane beside your code |
 | `:Paseo model [provider/model]` | Set the preference for new agents; no agent is created |
 | `:Paseo workspaces` | Workspace picker — open, inspect agent sessions, create, archive |
@@ -361,6 +368,31 @@ do — does not take it with it.
 
 `1`–`6` jump, `<M-1>`–`<M-6>` and `<Tab>`/`<S-Tab>` do the same, and
 everything that does something responds to a click as well.
+
+### The same dashboard, in a tab
+
+`:Paseo buf` — or `ui.surface = "buffer"` — puts everything above in a **real
+window** instead of a float: same chrome, same six tabs, same panes, same
+keys. It opens on a tab page of its own and fills it, so it gets the whole
+screen rather than the 94% a centred float leaves itself.
+
+The chrome is an ordinary buffer with a filetype of its own, `paseo-dash`, so
+`ftplugin/paseo-dash.lua` works on it the way it would for a file tree. The
+conversation and composer stay floats — they have to, they are real buffers
+and virtual text cannot be yanked — but they are anchored to the host window
+rather than to the editor. That is not an implementation detail you can
+ignore: it is what makes them follow the window when a split moves it, what
+puts them on its tab page rather than on whichever tab you were standing on,
+and what lets `ui/layout.lua`'s row arithmetic serve both mounts without a
+single branch in it.
+
+Two keys differ, both deliberately. `q` closes it and takes the tab with it;
+`<Esc>` does **not**, because a float is a thing in front of you and this is a
+place you are standing — one stray `<Esc>` after a mistyped `i` should not
+destroy the surface. And `<C-f>` is not bound at all: that key names one swap,
+between the sidebar beside your code and the float over it, and this is
+neither of those. The sidebar is with your code, the float is floating, this
+is separate.
 
 #### The composer
 
@@ -1494,7 +1526,11 @@ lua/paseo/          the plugin
     hl.lua          applies them, plus the user's `ui.theme` overrides
     style.lua       frame presets, and the box characters nothing else names
     icons.lua       every glyph, by codepoint
-    layout.lua      the chrome's row budget, stated once
+    layout.lua      the chrome's row budget, stated once -- and mount-agnostic,
+                    which is what lets the dashboard be a float or a window
+    float.lua       the dashboard, on either mount: floating over your code,
+                    or a real buffer in a window on a tab page of its own
+    sidebar.lua     the narrow pane beside your code, in two real splits
     animate.lua     motion, none of which may change a height
     render.lua      the cell/line alphabet and the three sinks
     widgets.lua     the vocabulary: cards, chips, keycaps, tiles, bars, tables

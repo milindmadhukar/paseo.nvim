@@ -709,7 +709,270 @@ local function test_terminal_session()
   truthy("terminal: the session cases ran", ok, err)
 end
 
+--- The buffer mount: the same dashboard in a real window, on its own tab.
+---
+--- ASSERT ON `nvim_win_get_config`, NEVER ON SCREEN POSITION. Headless Neovim
+--- does not re-anchor a win-relative float until something forces a full
+--- redraw, so `win_screenpos` answers the float's stale coordinates and reads
+--- as a bug that is not there. The config is exact the moment the window is
+--- opened.
+local function test_buffer_surface()
+  local api = vim.api
+  local float = require "paseo.ui.float"
+  local layout = require "paseo.ui.layout"
+
+  ---@return table
+  local function new_chat()
+    local chat = {
+      root = vim.uv.cwd(),
+      agent_id = "buffer-agent",
+      provider = "test",
+      streaming = false,
+      pending = {},
+      conversation = api.nvim_create_buf(false, true),
+      composer = api.nvim_create_buf(false, true),
+    }
+    transcript.reset(chat)
+    transcript.upsert(chat, { kind = "user", text = "hello" })
+    return chat
+  end
+
+  -- The teardowns are scheduled -- `WinClosed` fires DURING the close, so
+  -- `M.close` cannot run inline -- which means every assertion about them has
+  -- to let the event loop turn first.
+  local function settle()
+    for _ = 1, 20 do
+      vim.wait(10)
+    end
+  end
+
+  ---@param buf integer
+  ---@param key string
+  ---@return boolean
+  local function bound(buf, key)
+    for _, m in ipairs(api.nvim_buf_get_keymap(buf, "n")) do
+      if m.lhs == key then
+        return true
+      end
+    end
+    return false
+  end
+
+  local tabs_before = #api.nvim_list_tabpages()
+  local wins_before = #api.nvim_list_wins()
+
+  local chat = new_chat()
+  -- AFTER the chat, whose conversation and composer are not the surface's to
+  -- collect: they belong to |paseo.ui.chat| and outlive every surface, which
+  -- is what preserves your draft across a swap.
+  local bufs_before = #api.nvim_list_bufs()
+  float.open(chat, { mount = "buffer" })
+
+  local chrome = float.chrome_buf()
+  local host = api.nvim_win_get_config(chat.win_conversation).win
+
+  eq("buffer: it opens on a tab page of its own", #api.nvim_list_tabpages(), tabs_before + 1)
+  eq("buffer: holding nothing else", #api.nvim_tabpage_list_wins(0), 3)
+  eq("buffer: and it knows which mount it is", float.mount(), "buffer")
+
+  -- The nvim-tree half of the ask: a real window with a real buffer, carrying
+  -- a name an `ftplugin/` can be hung off.
+  eq("buffer: the chrome is a REAL window, not a float", api.nvim_win_get_config(host).relative, "")
+  eq("buffer: with a filetype of its own", vim.bo[chrome].filetype, float.FILETYPE)
+  eq("buffer: named for what it is", api.nvim_buf_get_name(chrome):match "dashboard", "dashboard")
+
+  -- The two window options volt cannot be drawn in without. `wrap` would put
+  -- every row below the first wrapped line one off its extmark; a gutter
+  -- would offset the chrome text from the panes floated over it.
+  eq("buffer: no wrap, so its rows are its lines", vim.wo[host].wrap, false)
+  eq(
+    "buffer: and no gutter, so its columns are the window's",
+    vim.fn.getwininfo(host)[1].textoff,
+    0
+  )
+  eq(
+    "buffer: which is what lets the chrome fill the window exactly",
+    api.nvim_buf_line_count(chrome),
+    vim.fn.getwininfo(host)[1].height
+  )
+
+  -- The panes are anchored to the HOST, not to the editor -- which is what
+  -- makes them follow it, and what puts them on its tab page rather than on
+  -- whichever tab was current when a re-fit ran.
+  local conversation = api.nvim_win_get_config(chat.win_conversation)
+  local composer = api.nvim_win_get_config(chat.win_composer)
+  eq("buffer: the conversation hangs off the host window", conversation.relative, "win")
+  eq("buffer: so does the composer", composer.relative, "win")
+  truthy("buffer: both off the SAME window", conversation.win == host and composer.win == host)
+
+  -- THE REGRESSION GUARD FOR THE WHOLE DESIGN. `ui/layout.lua` needed no
+  -- change for this mount because `g.row` carries the winbar row and `g.col`
+  -- carries 'textoff' -- a win-relative float sits at the window's ORIGIN
+  -- while volt draws from its TEXT AREA, and those two fields are exactly the
+  -- difference. Anyone who "simplifies" either to a zero breaks the buffer
+  -- mount alone, and only on a window with a gutter.
+  local info = vim.fn.getwininfo(host)[1]
+  local g = {
+    row = 0,
+    col = info.textoff,
+    border = false,
+    width = api.nvim_win_get_width(host) - info.textoff,
+    height = info.height,
+    composer = 7,
+  }
+  local panes = layout.panes(g, api.nvim_win_get_height(chat.win_composer))
+  truthy(
+    "buffer: and land exactly where layout.panes puts them",
+    conversation.row == panes.top and conversation.col == panes.col
+      and conversation.width == panes.width
+  )
+
+  eq("buffer: the cursor lands in the composer", api.nvim_get_current_buf(), chat.composer)
+  truthy("buffer: q closes it, as nvim-tree does", bound(chrome, "q"))
+  truthy(
+    "buffer: but <Esc> does not -- it is a place you stand, not a thing in front of you",
+    not bound(chrome, "<Esc>")
+  )
+  truthy("buffer: and <C-f> is not the swap here", not bound(chrome, "<C-F>"))
+
+  -- A hint bar is the only place the surface says what its keys are, so one
+  -- naming a key that does nothing is worse than a shorter bar.
+  local footer = {}
+  for _, mark in
+    ipairs(api.nvim_buf_get_extmarks(chrome, -1, 0, -1, { details = true }))
+  do
+    for _, cell in ipairs(mark[4].virt_text or {}) do
+      footer[#footer + 1] = cell[1]
+    end
+  end
+  truthy(
+    "buffer: and the footer does not advertise a swap it does not have",
+    not table.concat(footer):find("<C%-f>")
+  )
+
+  float.select "Usage"
+  float.select "Chat"
+  truthy("buffer: a round trip through the panels leaves it open", float.is_open(chat))
+
+  float.close()
+  settle()
+  eq("buffer: closing takes the tab page with it", #api.nvim_list_tabpages(), tabs_before)
+  eq("buffer: leaving no windows behind", #api.nvim_list_wins(), wins_before)
+  eq("buffer: nor buffers", #api.nvim_list_bufs(), bufs_before)
+
+  -- THE DOOR THE FLOAT NEVER HAD. A window in the layout is closed by the
+  -- user, and none of the ways they do it go anywhere near `M.close`.
+  chat = new_chat()
+  float.open(chat, { mount = "buffer" })
+  api.nvim_set_current_win(api.nvim_win_get_config(chat.win_conversation).win)
+  vim.cmd "q"
+  settle()
+  truthy("buffer: :q on the host takes the surface with it", float.chrome_buf() == nil)
+  truthy(
+    "buffer: panes and all",
+    chat.win_composer == nil and chat.win_conversation == nil
+  )
+  eq("buffer: and the volt click handler stops dispatching at it", #require("volt.events").bufs, 0)
+  eq("buffer: with the tab page gone too", #api.nvim_list_tabpages(), tabs_before)
+
+  -- The case that makes the `WinClosed` handler load-bearing rather than
+  -- tidy: with a second window on the dash tab, closing the host leaves the
+  -- panes VALID, floating over what is left, anchored to a dead window id.
+  chat = new_chat()
+  float.open(chat, { mount = "buffer" })
+  host = api.nvim_win_get_config(chat.win_conversation).win
+  local stranded = { chat.win_conversation, chat.win_composer }
+  api.nvim_set_current_win(host)
+  vim.cmd "vsplit"
+  vim.cmd "enew"
+  api.nvim_win_close(host, true)
+  settle()
+  truthy(
+    "buffer: closing the host on a split tab does not strand the panes",
+    not api.nvim_win_is_valid(stranded[1]) and not api.nvim_win_is_valid(stranded[2])
+  )
+  truthy("buffer: and the surface knows it is gone", float.chrome_buf() == nil)
+  vim.cmd "tabclose!"
+  settle()
+
+  -- A split on the dash tab is a resize, and a resize is the one thing a
+  -- win-relative float does NOT follow on its own.
+  chat = new_chat()
+  float.open(chat, { mount = "buffer" })
+  host = api.nvim_win_get_config(chat.win_conversation).win
+  local wide = api.nvim_win_get_config(chat.win_conversation).width
+  api.nvim_set_current_win(host)
+  vim.cmd "vsplit"
+  vim.cmd "enew"
+  float.relayout()
+  local narrow = api.nvim_win_get_config(chat.win_conversation)
+  truthy("buffer: a split on its tab re-fits the panes", narrow.width < wide)
+  eq("buffer: which stay anchored to the same host", narrow.win, host)
+
+  -- A re-fit recreates the panes, and `show_agent_panes` ENTERS the composer
+  -- -- which for a window on another tab page means switching to it. So a
+  -- terminal resize while you worked in your code used to haul you over.
+  vim.cmd "tabnew"
+  local elsewhere = api.nvim_get_current_tabpage()
+  float.relayout()
+  eq(
+    "buffer: a re-fit from another tab leaves you where you are",
+    api.nvim_get_current_tabpage(),
+    elsewhere
+  )
+  vim.cmd "tabclose"
+  float.close()
+  settle()
+
+  -- `is_open` is tab-aware, and for a float that is right -- an invisible one
+  -- is no use to you. A tab page is one `gt` away, and "open it" means go.
+  chat = new_chat()
+  float.open(chat, { mount = "buffer" })
+  local dash_tab = api.nvim_get_current_tabpage()
+  vim.cmd "tabnew"
+  local tabs_now = #api.nvim_list_tabpages()
+  float.open(chat, { mount = "buffer" })
+  eq("buffer: reopening does not make a second dashboard", #api.nvim_list_tabpages(), tabs_now)
+  eq("buffer: it goes to the one there is", api.nvim_get_current_tabpage(), dash_tab)
+
+  -- And the two mounts swap rather than no-op on each other, which is what
+  -- the `state.mount == mount` test in `M.open`'s fast path buys.
+  float.open(chat, { mount = "float" })
+  eq("buffer: :Paseo dash swaps a buffer surface for a float", float.mount(), "float")
+  eq(
+    "buffer: really a float",
+    api.nvim_win_get_config(vim.fn.bufwinid(float.chrome_buf())).relative,
+    "editor"
+  )
+  float.open(chat, { mount = "buffer" })
+  eq("buffer: and :Paseo buf swaps back", float.mount(), "buffer")
+  float.close()
+  settle()
+  while #api.nvim_list_tabpages() > tabs_before do
+    vim.cmd "tabclose!"
+  end
+
+  -- The 10 Hz spinner drives `sidebar.refresh`, which used to ask the
+  -- tab-aware `is_open` -- so with the dashboard on its own tab the answer
+  -- was "no" and the fallback wrote a winbar onto the dashboard's OWN
+  -- conversation pane. That pane's winbar is emptied deliberately, so the
+  -- header was drawn twice and the pane lost a row, ten times a second.
+  chat = new_chat()
+  float.open(chat, { mount = "buffer" })
+  local pane = chat.win_conversation
+  vim.cmd "tabnew"
+  require("paseo.ui.sidebar").refresh(chat)
+  eq("buffer: the spinner repaints the chrome, not the pane's winbar", vim.wo[pane].winbar, "")
+  vim.cmd "tabclose"
+  float.close()
+  settle()
+  while #api.nvim_list_tabpages() > tabs_before do
+    vim.cmd "tabclose!"
+  end
+end
+
 return {
   { "ui.surfaces", test_surfaces },
   { "ui.terminal-session", test_terminal_session },
+  { "ui.buffer-surface", test_buffer_surface },
 }
