@@ -9,6 +9,13 @@ here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/.." && pwd)"
 filter="${1:-}"
 
+# Every commit the suite makes -- in fixtures.sh, and in the workspace suites
+# from inside Neovim -- is nobody's work, and a CI runner has no git identity
+# at all. Without one those commits fail, and a suite asking "is there unpushed
+# work here?" is answered "there are uncommitted changes" instead.
+export GIT_AUTHOR_NAME="paseo tests" GIT_AUTHOR_EMAIL="tests@paseo.invalid"
+export GIT_COMMITTER_NAME="paseo tests" GIT_COMMITTER_EMAIL="tests@paseo.invalid"
+
 fixtures="${PASEO_FIXTURES:-${TMPDIR:-/tmp}/paseo-nvim-tests}"
 deps="${PASEO_TEST_DEPS:-${XDG_CACHE_HOME:-$HOME/.cache}/paseo-nvim/test-deps}"
 
