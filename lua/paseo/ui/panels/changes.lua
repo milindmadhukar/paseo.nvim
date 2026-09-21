@@ -4,28 +4,20 @@
 --- the agent half: after a turn that edited files, this is the answer to "what
 --- did it actually do". Everything else -- the changed-files picker, the hunk
 --- quickfix list, staging -- is yours to build on |paseo-git|.
+---
+--- One section per repo, drawn by |paseo.ui.list|, which is where the focus
+--- ring, `j`/`k`, `<CR>` and the hint bar come from. This panel used to own a
+--- `buffer line -> file` map and read the cursor; the rows were clickable and
+--- keyboard-reachable only by accident.
 
 local git = require "paseo.git"
 local icons = require "paseo.ui.icons"
+local list = require "paseo.ui.list"
 local repos = require "paseo.repos"
-local widgets = require "paseo.ui.widgets"
 
 local M = {}
 
 M.title = "Changes"
-
----Buffer line -> the file on it, rebuilt on every draw.
----
----Same shape as the Sessions panel's, and for the same reason: a map is
----checkable against a real draw, where arithmetic on the cursor row is a
----second copy of the chrome's layout that has to be kept in step by hand.
----@type table<integer, string>
-M._rows = {}
-
----@return integer  The buffer line the panel's first line is drawn on.
-local function offset()
-  return require("paseo.ui.float").body_row_offset()
-end
 
 ---@param change table
 ---@return table
@@ -40,122 +32,122 @@ local function status_cell(change)
   }
 end
 
+---`git status` per repo, as sections.
+---
+---Read straight rather than cached: this is the panel whose whole job is to be
+---current, and it is only consulted while the tab is on screen.
 ---@param chat table
----@param width integer
----@return table[][]
-function M.lines(chat, width)
-  local lines = {}
-  local total = 0
-  M._rows = {}
-
+---@return paseo.ListSection[]
+local function sections(chat)
+  local out = {}
   for _, repo in ipairs(repos.list { path = chat.root }) do
     local changes = git.status(repo)
     if #changes > 0 then
-      -- A colour swatch per repo, hashed off the name so the same repo is the
-      -- same colour in every session. With several repos in one unit of work
-      -- the headings were four identical blue lines and the only thing telling
-      -- them apart was reading them.
-      lines[#lines + 1] = {
-        { "  " },
-        widgets.swatch(repo.name),
-        { " " .. repo.name, "PaseoHeader" },
-        { ("   %d changed"):format(#changes), "PaseoDim" },
-      }
+      local rows = {}
       for _, change in ipairs(changes) do
-        total = total + 1
         -- `change.path` is relative to the repo's worktree, and with several
         -- repos in one unit of work the cwd is not any of them.
         local file = vim.fs.joinpath(repo.worktree, change.path)
-        -- The dashboard closes on the way. A file opened underneath a
-        -- full-screen float is a file you cannot see, and this panel exists to
-        -- answer "what did it just edit" -- an answer you then want to READ.
-        local click = function()
-          require("paseo.ui.float").close()
-          vim.cmd.edit(vim.fn.fnameescape(file))
-        end
         local status = status_cell(change)
-        local id = "changes." .. file
-        local action = widgets.hover(id, "body", click)
-        local row = {
-          { "    " },
-          { status[1], status[2] },
-          { repos.relative(repo, change.path) or change.path, "PaseoPath" },
+        rows[#rows + 1] = {
+          id = file,
+          cells = {
+            { "    " },
+            { status[1], status[2] },
+            { repos.relative(repo, change.path) or change.path, "PaseoPath" },
+          },
+          activate = function()
+            -- The dashboard closes on the way. A file opened underneath a
+            -- full-screen float is a file you cannot see, and this panel
+            -- exists to answer "what did it just edit" -- an answer you then
+            -- want to READ.
+            require("paseo.ui.float").close()
+            vim.cmd.edit(vim.fn.fnameescape(file))
+          end,
         }
-
-        local row_hl = widgets.row_hl(id)
-        if row_hl then
-          lines[#lines + 1] = widgets.fill_row(row, width, row_hl, action)
-        else
-          for _, cell in ipairs(row) do
-            cell[3] = action
-          end
-          lines[#lines + 1] = row
-        end
-        M._rows[#lines + offset()] = file
       end
-      lines[#lines + 1] = {}
+
+      out[#out + 1] = {
+        id = "repo." .. repo.worktree,
+        title = repo.name,
+        -- Hashed off the name, so the same repo is the same colour in every
+        -- session.
+        swatch = repo.name,
+        summary = { { ("   %d changed"):format(#changes), "PaseoDim" } },
+        rows = rows,
+      }
     end
   end
-
-  if total == 0 then
-    lines[#lines + 1] = {
-      { "  " .. icons.status.completed .. "  ", "PaseoToolOk" },
-      { "nothing changed", "PaseoDim" },
-    }
-    return lines
-  end
-
-  lines[#lines + 1] = {}
-  local hints = { { "  " } }
-  vim.list_extend(hints, widgets.hints { { "<CR>", "open this file" } })
-  vim.list_extend(hints, {
-    { "   ·   ", "PaseoDim" },
-    { ":Paseo ask hunk", "PaseoKey" },
-    { " on a hunk to ask about it", "PaseoDim" },
-  })
-  lines[#lines + 1] = hints
-  return lines
+  return out
 end
 
----What this panel has bound on the shared chrome buffer.
----@type table[]|nil
-local bound
-
----@param _chat table
----@param buf integer
-function M.attach(_chat, buf)
-  -- The rows were clickable and only clickable: the footer said "click a file
-  -- to open it", in a plugin whose entire premise is that you do not have to.
-  --
-  -- Through |paseo.ui.keys|, which gives back what it displaced. The panels
-  -- share one chrome buffer and volt binds `<CR>` on it at open, so a panel
-  -- that merely DELETED its own `<CR>` would leave the key dead on every other
-  -- one for the rest of the session.
-  bound = require("paseo.ui.keys").take(buf, {
-    {
-      "<CR>",
-      function()
-        local file = M._rows[vim.api.nvim_win_get_cursor(vim.api.nvim_get_current_win())[1]]
-        if not file then
-          return
-        end
-        -- The dashboard closes on the way, the same as the click does. A file
-        -- opened underneath a full-screen float is a file you cannot see, and
-        -- this panel exists to answer "what did it just edit" -- an answer you
-        -- then want to READ.
-        require("paseo.ui.float").close()
-        vim.cmd.edit(vim.fn.fnameescape(file))
-      end,
-      "paseo: open the changed file under the cursor",
+---@param chat table
+---@return paseo.ListSource
+local function source(chat)
+  return {
+    chat = chat,
+    -- `git status` is synchronous and there is nothing to fetch, so this never
+    -- answers nil -- the list view's loading branch is for the panels that
+    -- talk to the daemon.
+    sections = function()
+      return sections(chat)
+    end,
+    load = function(_, done)
+      done()
+    end,
+    hints = {
+      { ":Paseo ask hunk", "ask about a hunk" },
     },
-  })
+  }
+end
+
+---One view per chat, rebuilt when the chat changes.
+---@type paseo.ListView|nil
+local view
+
+---@param chat table
+---@return paseo.ListView
+local function view_for(chat)
+  if not view or view.source.chat ~= chat then
+    view = list.new(source(chat), {
+      redraw = function()
+        require("paseo.ui.float").rebuild()
+      end,
+    })
+  end
+  return view
+end
+
+---@param chat table
+---@param width integer
+---@param height? integer
+---@return table[][]
+function M.lines(chat, width, height)
+  local v = view_for(chat)
+  local drawn = v:sections()
+  if #drawn == 0 then
+    return {
+      {
+        { "  " .. icons.status.completed .. "  ", "PaseoToolOk" },
+        { "nothing changed", "PaseoDim" },
+      },
+    }
+  end
+  return v:lines(width, height)
+end
+
+---@param chat table
+---@param buf integer
+function M.attach(chat, buf)
+  view_for(chat):bind(buf)
 end
 
 ---@param _chat table
 ---@param buf integer
 function M.detach(_chat, buf)
-  require("paseo.ui.keys").release(buf, bound)
-  bound = nil
+  if view then
+    view:unbind(buf)
+  end
 end
 
 return M

@@ -167,6 +167,34 @@ local function test_questions()
     "Applies: B · Comment: looks right"
   )
 
+  -- A note QUALIFIES an answer rather than being one, so it travels in
+  -- `annotations` and leaves `answers` a clean label -- a reader that knows
+  -- nothing about notes still gets an option it recognises.
+  local noted = questions.state(one)
+  questions.choose(noted, 1)
+  questions.annotate(noted, "but only for new workspaces")
+  local sent = questions.input(claude, noted.questions, questions.answers(noted), noted.notes)
+  eq("questions: a note leaves the answer itself alone", sent.answers["Reconcile"], "Rebase")
+  eq(
+    "questions: and rides beside it, keyed the same way",
+    sent.annotations and sent.annotations["Reconcile"].notes,
+    "but only for new workspaces"
+  )
+  eq(
+    "questions: and the badge carries it, so the transcript has it too",
+    questions.label(noted.questions, questions.answers(noted), noted.notes),
+    "Rebase (but only for new workspaces)"
+  )
+
+  -- An annotation on nothing is dropped rather than sent attached to an answer
+  -- that was never given.
+  questions.annotate(noted, nil)
+  eq(
+    "questions: clearing a note drops the key entirely",
+    questions.input(claude, noted.questions, questions.answers(noted), noted.notes).annotations,
+    nil
+  )
+
   -- The transcript card showed `title`, which is the FIRST question and its
   -- labels, so a request carrying two was recorded as one.
   local card = timeline.card({ kind = "permission", request = pair }, { width = 60 })

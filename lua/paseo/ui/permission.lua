@@ -291,8 +291,8 @@ local function handlers(chat, request, view)
         -- A question is allowed AND answered in the same message: the answers
         -- ride in `updatedInput`, and an allow without them reaches the agent as
         -- "The user did not answer the questions" -- approved, and silent.
-        updatedInput = questions.input(request, state.questions, answers),
-        label = questions.label(state.questions, answers),
+        updatedInput = questions.input(request, state.questions, answers, state.notes),
+        label = questions.label(state.questions, answers, state.notes),
       })
     end,
 

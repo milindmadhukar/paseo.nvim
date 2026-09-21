@@ -153,6 +153,49 @@ local function test_chat_follow()
       end)
     )
 
+    -- THE REPORTED BUG, in the shape it was actually hit: switch FIRST, open
+    -- the chat SECOND, with a file from the workspace you left still the
+    -- current buffer.
+    --
+    -- `follow` deliberately does nothing when no chat is on screen, so the
+    -- whole answer comes from how `chat.open {}` resolves "here" -- and it
+    -- used to resolve it from `ref.file()`, the git toplevel of the BUFFER.
+    -- With `workspaces.open = "tcd"` the switch reuses the tab, so that buffer
+    -- is still the old worktree's file and the chat opened on the workspace
+    -- you had just left.
+    chat.close()
+    chat.forget()
+    config.setup { workspaces = { open = "tcd" } }
+
+    -- A real file, in a real repo, in the workspace we are about to leave.
+    vim.fn.system { "git", "-C", here, "init", "-q" }
+    local stale = here .. "/stale.txt"
+    vim.fn.writefile({ "left open behind us" }, stale)
+    vim.cmd.edit(vim.fn.fnameescape(stale))
+    eq("follow: the old workspace's file is the current buffer", vim.fn.expand "%:p", stale)
+
+    workspaces.open { directory = there, name = "there" }
+    eq("follow: and the switch moved the editor", vim.fn.getcwd(), there)
+    truthy(
+      "follow: the old workspace's file is STILL the current buffer",
+      vim.fn.expand "%:p" == stale
+    )
+
+    chat.toggle()
+    truthy(
+      "follow: opening the chat after a switch lands on the new workspace",
+      vim.wait(1000, function()
+        return chat.current() ~= nil and chat.current().root == there
+      end)
+    )
+    eq(
+      "follow: and on that workspace's agent, not the one we left",
+      chat.current().agent_id,
+      "agent-" .. vim.fs.basename(there)
+    )
+    chat.close()
+    vim.cmd "silent! bwipeout!"
+
     -- A handler that opens its own window is on its own: we did not move, so
     -- neither does the chat.
     chat.open { root = here }

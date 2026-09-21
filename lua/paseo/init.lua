@@ -227,15 +227,30 @@ commands.sessions = {
 }
 
 commands.term = {
-  desc = "The Paseo terminals in this workspace (toggle)",
+  desc = "The terminals in this workspace, on the Sessions tab",
   run = function()
-    require("paseo.ui.termfloat").toggle()
+    -- A terminal is a SESSION, so there is nowhere else to go: the dashboard's
+    -- Sessions tab lists the agents and the PTYs together, and opening either
+    -- shows it on the Chat tab. This used to open a rail-and-pane window of
+    -- its own, over the top of whatever you were looking at.
+    --
+    -- Through `open` with a callback rather than `surface` then `select`.
+    -- With no chat yet, `surface` defers to an `open` of its own and reaches
+    -- the float only once the daemon has answered -- so a `select` written
+    -- after it races that answer and, against a real daemon rather than a
+    -- synchronous stub, asks for a tab on a surface that is not up yet.
+    -- `select` is a no-op then, and you arrive at Chat.
+    require("paseo.ui.chat").open({ surface = "float" }, function(chat)
+      if chat then
+        require("paseo.ui.float").select "Sessions"
+      end
+    end)
   end,
 }
 
--- The old name. It used to mean "the tab listing them", and that tab is gone:
--- the list is on the Sessions tab now and the terminals are their own surface.
--- Kept because the help tag is published.
+-- The old name. It used to mean "the tab listing them"; the list is on the
+-- Sessions tab and this lands there too. Kept because the help tag is
+-- published.
 commands.terminals = commands.term
 
 commands.chat = {

@@ -69,6 +69,11 @@ M.marker = {
   more_down = g(0x2193), -- DOWNWARDS ARROW
   ellipsis = g(0x2026), -- HORIZONTAL ELLIPSIS
   newline = g(0x23ce), -- RETURN SYMBOL -- a collapsed "\n" in a one-line cell
+  -- The composer's label, in its top border. A prompt chevron rather than a
+  -- nerd-font glyph: this one has to say "type here" to someone who has never
+  -- seen the plugin, and a shell prompt is the most widely understood mark
+  -- there is for that.
+  prompt = g(0x276f), -- HEAVY RIGHT-POINTING ANGLE QUOTATION MARK ORNAMENT
 }
 
 -- --------------------------------------------------------------------- tools
@@ -92,13 +97,16 @@ M.tool = {
 
 -- -------------------------------------------------------------------- panels
 --
--- The seven dashboard tabs, plus the surfaces that open on their own. Keyed by
--- the tab name exactly as `float.M.TABS` spells it.
+-- The six dashboard tabs, plus the surfaces that open on their own. Keyed by
+-- the tab name exactly as `float.M.TABS` spells it, and in that order -- a
+-- name here that the tab bar does not spell identically draws a blank icon
+-- and nothing errors, so the two lists are checked against each other in
+-- `tests/spec/ui/panels.lua`.
 
 M.panel = {
   Chat = g(0xf0004), -- md-account
-  Session = g(0xf1542), -- md-tune_variant
   Sessions = g(0xf167a), -- md-robot_outline
+  Settings = g(0xf1542), -- md-tune_variant
   Changes = g(0xf062c), -- md-source_branch
   Usage = g(0xf0128), -- md-chart_bar
   Workspaces = g(0xf0645), -- md-file_tree

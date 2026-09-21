@@ -7,7 +7,7 @@ local render = require "paseo.ui.render"
 local config = require "paseo.config"
 local float = require "paseo.ui.float"
 local session = require "paseo.ui.session"
-local session_panel = require "paseo.ui.panels.session"
+local session_panel = require "paseo.ui.panels.settings"
 local widgets = require "paseo.ui.widgets"
 local transcript = require "paseo.ui.transcript"
 
@@ -114,6 +114,19 @@ local function test_session_source()
   end
   table.sort(blank)
   eq("ui: no glyph in the registry is empty", blank, {})
+
+  -- EVERY TAB HAS AN ICON, and the two lists are keyed by the same string.
+  -- `tab_lines` does `icons.panel[name] or ""`, so a tab the registry does not
+  -- spell identically draws a blank pill and nothing anywhere errors -- which
+  -- is exactly how a rename goes unnoticed until you look at the bar.
+  local missing = {}
+  for _, name in ipairs(require("paseo.ui.float").TABS) do
+    if vim.api.nvim_strwidth(registry.panel[name] or "") < 1 then
+      missing[#missing + 1] = name
+    end
+  end
+  table.sort(missing)
+  eq("ui: every dashboard tab has an icon under its own name", missing, {})
 
   -- The two selection markers additionally have to be exactly ONE cell. They
   -- are drawn in fixed-width rows, and a two-cell marker shifts everything to
@@ -391,7 +404,6 @@ local function test_panels()
         width = 30,
         min_width = 20,
         composer = 9,
-        min_composer = 3,
         position = "left",
       },
     },
@@ -403,19 +415,19 @@ local function test_panels()
     math.max(20, math.floor(vim.o.columns * 30 / 100))
   )
 
-  -- THE BOX IS THE SIZE OF WHAT IS IN IT. `composer` is a ceiling, not a
-  -- height: an empty composer sits at `min_composer`, which is where a fixed
-  -- eight rows used to spend a third of a narrow sidebar on whitespace.
+  -- THE BOX IS THE SIZE OF WHAT IS IN IT, here as well as on the dashboard.
+  -- `composer` is a ceiling, not a height: a fixed eight rows spent a third of
+  -- a narrow sidebar on whitespace for the whole of a session.
   --
   -- `nvim_win_get_height` counts the winbar row, and this composer carries the
   -- hint bar -- so every assertion here is `rows + 1`. Without adding it back
-  -- in `fit_composer`, `min_composer = 3` would mean three rows of typing in
-  -- the dashboard and two in the sidebar.
+  -- in `fit_composer`, `ui.sidebar.composer` would mean one thing here and
+  -- another on the dashboard, whose composer has no winbar.
   local bar = vim.wo[surface_chat.win_composer].winbar ~= "" and 1 or 0
   eq(
-    "ui: an empty composer sits at its floor",
+    "ui: an empty composer is a single row",
     vim.api.nvim_win_get_height(surface_chat.win_composer),
-    3 + bar
+    1 + bar
   )
   vim.api.nvim_buf_set_lines(surface_chat.composer, 0, -1, false, { "one", "two", "three", "four" })
   sidebar.fit_composer(surface_chat)
@@ -436,7 +448,7 @@ local function test_panels()
   eq(
     "ui: and shrinks back when it is sent",
     vim.api.nvim_win_get_height(surface_chat.win_composer),
-    3 + bar
+    1 + bar
   )
   truthy(
     "ui: `position = left` puts it on the left",
@@ -482,6 +494,60 @@ local function test_panels()
     header:find("needs you", 1, true) ~= nil
   )
 
+  -- The context gauge. It used to be a bare `42%` in the dim colour, which
+  -- said neither what it counted nor which way it ran -- and it counted the
+  -- fraction USED, so the figure you watched climb was the one you wanted to
+  -- watch fall. It now says what is LEFT, in the same words as the number.
+  surface_chat.permissions = {}
+  eq("ui: no usage reported, no gauge", sidebar.context(surface_chat), {})
+
+  surface_chat.usage = { contextWindowUsedTokens = 30, contextWindowMaxTokens = 100 }
+  local gauge = render.concat(sidebar.context(surface_chat))
+  truthy("ui: the gauge says what is left, not what is spent", gauge:find("70% left", 1, true))
+  truthy(
+    "ui: and the header carries it",
+    render.concat(sidebar.header(surface_chat)):find("70% left", 1, true) ~= nil
+  )
+
+  -- Pressure is the USED fraction, and it agrees with the Usage panel's
+  -- thresholds -- amber and red have to mean the same thing on both screens.
+  --
+  -- Measured on a cell with WIDTH, which is the whole point. The gauge used to
+  -- drain rather than fill, so the pressure colour sat on the shrinking run and
+  -- at `5% left` there was nothing left of it to see: the bar went quietly
+  -- all-track at exactly the moment it was supposed to be shouting.
+  ---@return string|nil hl, integer width  The pressure-coloured run, and how
+  ---wide it is. A roomy context paints almost none of the bar, which is the
+  ---point of it being calm; a tight one has to paint nearly all of it.
+  local function tone(used)
+    surface_chat.usage = { contextWindowUsedTokens = used, contextWindowMaxTokens = 100 }
+    for _, cell in ipairs(sidebar.context(surface_chat)) do
+      if cell[2] and cell[2] ~= "PaseoDim" and cell[2] ~= "PaseoTrack" then
+        return cell[2], vim.api.nvim_strwidth(cell[1] or "")
+      end
+    end
+  end
+  eq("ui: a roomy context is calm", (tone(10)), widgets.pressure_hl(10))
+  eq("ui: a tight one is not", (tone(95)), widgets.pressure_hl(95))
+  truthy("ui: and those two are different colours", tone(10) ~= tone(95))
+
+  -- The gauge used to DRAIN rather than fill, so the pressure colour sat on
+  -- the shrinking run: at `5% left` there was none of it left to see and the
+  -- bar went quietly all-track at exactly the moment it should have shouted.
+  local _, loud = tone(95)
+  truthy("ui: a nearly-full context paints most of the bar, not none of it", loud >= 5, loud)
+  local _, quiet = tone(5)
+  truthy("ui: and a nearly-empty one paints almost none", quiet <= 1, quiet)
+
+  -- Over 100% is a thing a context window genuinely reports once the overhead
+  -- is counted, and "-4% left" is a worse answer than "0% left".
+  surface_chat.usage = { contextWindowUsedTokens = 104, contextWindowMaxTokens = 100 }
+  truthy(
+    "ui: an overfull window floors at nothing left",
+    render.concat(sidebar.context(surface_chat)):find("0% left", 1, true) ~= nil
+  )
+  surface_chat.usage = nil
+
   -- The spinner. A static `●` looked identical at two seconds and at two
   -- minutes, so a wedged turn and a working one were the same picture; the
   -- elapsed count is the half that tells them apart.
@@ -489,10 +555,24 @@ local function test_panels()
   surface_chat.permissions = {}
   chat.set_streaming(surface_chat, true)
   local frame, seconds = chat.progress(surface_chat)
-  local busy = render.concat(sidebar.header(surface_chat))
   truthy("ui: a running turn reports a frame", frame ~= nil, frame)
-  truthy("ui: which the header draws", frame and busy:find(frame, 1, true) ~= nil, busy)
   eq("ui: alongside the seconds it has been running", seconds, 0)
+
+  -- The status belongs to the BOTTOM of the surface, not to the header. The
+  -- header carries the session's settings -- provider, mode, thinking -- and
+  -- the one field on it that changes ten times a second pushed the other five
+  -- sideways every time the count gained a digit.
+  local status = render.concat(sidebar.status(surface_chat))
+  truthy("ui: the status carries the frame", frame and status:find(frame, 1, true) ~= nil, status)
+  local settings = render.concat(sidebar.header(surface_chat))
+  truthy("ui: and the header does not", frame and settings:find(frame, 1, true) == nil, settings)
+
+  -- `1729s` is arithmetic homework rather than a duration.
+  eq("ui: under a minute stays in seconds", render.duration(9), "9s")
+  eq("ui: past one, the seconds are carried", render.duration(64), "1m 4s")
+  eq("ui: which is the whole point", render.duration(1729), "28m 49s")
+  eq("ui: and at the hour they are dropped as noise", render.duration(5077), "1h 24m")
+  eq("ui: a turn that has not started is not negative", render.duration(nil), "0s")
 
   -- The invariant that keeps the timer honest: `streaming` is only ever set
   -- through the setter, so a timer can never outlive the turn it belongs to
@@ -515,7 +595,7 @@ end
 ---inside `vim.on_key`. `chips_body` has always reserved that height; this is
 ---the same guard for the toggles that now carry descriptions.
 local function test_toggle_height()
-  local panel = require "paseo.ui.panels.session"
+  local panel = require "paseo.ui.panels.settings"
 
   local source = {
     keys = {},
@@ -576,6 +656,154 @@ local function test_toggle_height()
     end
   end
   truthy("toggles: the whole row is clickable, not just the label", clickable >= 4, clickable)
+end
+
+--- The list view: focus, and what happens to it when the data moves.
+---
+--- Every case here is something the panels this replaced got wrong. They held
+--- selection on the CURSOR, which volt resets to {1,1} after every click, never
+--- seeded it onto a row, and painted nothing to say where it was.
+local function test_list()
+  local list = require "paseo.ui.list"
+  local render = require "paseo.ui.render"
+  local widgets = require "paseo.ui.widgets"
+
+  ---@param ids string[]
+  local function source(ids, active)
+    local rows = {}
+    for i, id in ipairs(ids) do
+      rows[i] =
+        { id = id, cells = { { "  " .. id } }, active = id == active, activate = function() end }
+    end
+    return { { id = "s", title = "Things", rows = rows } }
+  end
+
+  local data = source { "a", "b", "c" }
+  local view = list.new {
+    sections = function()
+      return data
+    end,
+    load = function(_, done)
+      done()
+    end,
+  }
+
+  -- FOCUS IS SEEDED ON THE FIRST DRAW. The panels this replaces left the
+  -- cursor wherever it happened to be, so the first <CR> after switching to
+  -- the tab did nothing at all.
+  eq("list: focus starts on the first row", (view:resolve()).id, "a")
+
+  view:move(1)
+  eq("list: j moves it", (view:resolve()).id, "b")
+  view:edge(1)
+  eq("list: G goes to the last row", (view:resolve()).id, "c")
+  view:move(1)
+  eq("list: and j wraps from there", (view:resolve()).id, "a")
+  view:edge(-1)
+
+  -- REORDERING MUST NOT MOVE FOCUS. These lists are push-fed -- an agent
+  -- changing status re-sorts them -- and focus that followed a position would
+  -- wander under you while you were reading.
+  view:move(1)
+  eq("list: focused on b", (view:resolve()).id, "b")
+  data = source { "c", "b", "a" }
+  eq("list: a reorder does not move focus", (view:resolve()).id, "b")
+
+  -- A ROW THAT DIES leaves focus on whatever took its place, not back at the
+  -- top -- which is what you want after `d` on the row you were standing on.
+  data = source { "c", "a" }
+  eq("list: a row that disappears hands focus to its successor", (view:resolve()).id, "a")
+
+  -- An empty list is not a crash.
+  data = {}
+  eq("list: nothing to focus is not an error", (view:resolve()), nil)
+  data = source { "a", "b", "c" }
+
+  -- THE FOCUSED ROW IS PAINTED, and in the same colour as hover: pointing at
+  -- a row and moving to it are the same state.
+  local lines = view:lines(40)
+  local lit = 0
+  for _, line in ipairs(lines) do
+    for _, cell in ipairs(line) do
+      if cell[2] == "PaseoRowHover" then
+        lit = lit + 1
+        break
+      end
+    end
+  end
+  eq("list: exactly one row carries the focus band", lit, 1)
+
+  -- `active` is a different axis and a weaker claim, and it used to WIN over
+  -- hover -- so the row you were most likely to point at was the one row that
+  -- could not light up.
+  eq(
+    "list: focus beats active",
+    widgets.row_hl("x", { focused = true, active = true }),
+    "PaseoRowHover"
+  )
+  eq(
+    "list: and active still paints on its own",
+    widgets.row_hl("x", { active = true }),
+    "PaseoRowActive"
+  )
+
+  -- A list taller than the body scrolls, keeps the focused row on screen, and
+  -- draws every line to exactly one width so the scrollbar is a COLUMN.
+  local many = {}
+  for i = 1, 30 do
+    many[i] = { id = "r" .. i, cells = { { "  row " .. i } }, activate = function() end }
+  end
+  data = { { id = "s", title = "Many", rows = many } }
+  view.focus = { section = "s", row = "r30" }
+  local tall = view:lines(40, 10)
+  eq("list: a long list is cut to the height it was given", #tall, 10)
+  local widths, seen = {}, false
+  for i = 1, #tall - 1 do
+    widths[vim.api.nvim_strwidth(render.concat(tall[i]))] = true
+    if render.concat(tall[i]):find("row 30", 1, true) then
+      seen = true
+    end
+  end
+  truthy("list: and scrolled far enough to show the focused row", seen)
+  eq("list: every scrolled line is one width, so the bar is a column", vim.tbl_count(widths), 1)
+
+  -- NO KEY IS BOUND TWICE. `keys.take` binds in order and does not notice a
+  -- repeat, so a source spelling one of its verbs `r` bound that AND the
+  -- built-in reload, left whichever came last on the key, and advertised both
+  -- of them side by side in the hint bar -- which is a hint bar that is wrong
+  -- about the first one.
+  data = source { "a" }
+  local clash = list.new {
+    sections = function()
+      return data
+    end,
+    load = function(_, done)
+      done()
+    end,
+    keys = { rename = "r" },
+    hints = { { "r", "rename" } },
+  }
+  local seen, dupes = {}, {}
+  for _, mapping in ipairs(clash:mappings()) do
+    if seen[mapping[1]] then
+      dupes[#dupes + 1] = mapping[1]
+    end
+    seen[mapping[1]] = true
+  end
+  eq("list: a source key that collides with a built-in binds once", dupes, {})
+  truthy("list: and the source is the one that keeps it", seen.r)
+
+  local bar = render.concat(clash:hints())
+  eq("list: the hint bar names the key once", select(2, bar:gsub("reload", "")), 0)
+  truthy("list: and names what the source does with it", bar:find("rename", 1, true) ~= nil, bar)
+
+  -- The hint bar is the last row and never scrolls off: a list that loses its
+  -- own instructions does so exactly when it has grown enough to need them.
+  truthy(
+    "list: the hints survive scrolling",
+    render.concat(tall[#tall]):find("move", 1, true) ~= nil,
+    render.concat(tall[#tall])
+  )
 end
 
 --- The Usage panel draws what it has and nothing else.
@@ -702,8 +930,13 @@ local function test_usage_panel()
   usage.invalidate()
 end
 
---- Workspaces are grouped under the project they live in, not the one the
---- daemon invented for them.
+--- Workspaces nest under the project they live in.
+---
+--- The daemon cannot get this right and it is not its fault: a `ws` workspace
+--- is a plain directory, so opening `~/Code/openfin/.workspaces/billing`
+--- registers it as a top-level project called `billing`, a SIBLING of
+--- `openfin` rather than something inside it. Asserted on the sections the
+--- panel hands the list view, because that is where the nesting lives.
 local function test_workspaces_panel()
   local panel = require "paseo.ui.panels.workspaces"
   local workspaces = require "paseo.workspaces"
@@ -715,7 +948,7 @@ local function test_workspaces_panel()
     return "idle"
   end
   workspaces.list = function(cb)
-    local list = {
+    local known = {
       {
         id = "w1",
         name = "openfin",
@@ -738,17 +971,18 @@ local function test_workspaces_panel()
         projectId = "prj_nvim",
       },
     }
-    for _, ws in ipairs(list) do
+    for _, ws in ipairs(known) do
       ws.group = workspaces.group(ws)
     end
-    cb(list, nil)
+    cb(known, nil)
   end
 
   panel.invalidate()
   local chat = { root = "/x/Code/openfin" }
-  panel.lines(chat, 100)
+  panel.lines(chat, 100, 40)
+  vim.wait(200)
   local drawn = {}
-  for _, line in ipairs(panel.lines(chat, 100)) do
+  for _, line in ipairs(panel.lines(chat, 100, 40)) do
     local cells = {}
     for _, cell in ipairs(line) do
       cells[#cells + 1] = cell[1] or ""
@@ -757,15 +991,13 @@ local function test_workspaces_panel()
   end
   local text = table.concat(drawn, "\n")
 
-  -- `billing` is a directory inside `openfin`, so it must be drawn inside it
-  -- -- not as a sibling project of the same name.
   local at_openfin, at_billing, at_nvim
   for i, line in ipairs(drawn) do
     at_openfin = at_openfin or (line:find("openfin", 1, true) and i or nil)
     at_billing = at_billing or (line:find("billing", 1, true) and i or nil)
     at_nvim = at_nvim or (line:find("paseo.nvim", 1, true) and i or nil)
   end
-  truthy("ui: the workspaces panel draws a group heading", at_openfin ~= nil)
+  truthy("ui: the workspaces panel draws a group heading", at_openfin ~= nil, text)
   truthy(
     "ui: with the .workspaces child under it rather than beside it",
     at_billing ~= nil and at_openfin ~= nil and at_billing > at_openfin,
@@ -776,38 +1008,9 @@ local function test_workspaces_panel()
     at_nvim ~= nil and at_billing ~= nil and at_nvim > at_billing,
     text
   )
-  -- Only ONE `billing` line now: it used to be both a group and a row.
-  local billings = select(2, text:gsub("billing", ""))
-  eq("ui: and billing is a workspace, not also a project", billings, 1)
-
-  -- The keys are advertised once, at the bottom, rather than written out on
-  -- every heading: a destructive action spelled out three times in a list you
-  -- are reading for something else is three invitations to lose a record.
-  truthy(
-    "ui: the panel says how to archive and forget",
-    text:find("forget project", 1, true) ~= nil,
-    text
-  )
-  eq("ui: and does not offer it on every heading", select(2, text:gsub("forget project", "")), 1)
-
-  -- WHICH LINE EACH ROW IS ON, and it has to be exact: `d` and `x` act on
-  -- whatever `M._rows` says the cursor is over, so an entry recorded one line
-  -- early puts `d` on a group heading over the first workspace under it --
-  -- archiving the wrong thing without ever looking wrong.
-  local offset = require("paseo.ui.float").body_row_offset()
-  local checked = 0
-  for line, row in pairs(panel._rows) do
-    local drawn_at = drawn[line - offset]
-    local name = row.name or (row.ws and row.ws.name)
-    truthy(
-      ("ui: the row map points `%s` at the line it is drawn on"):format(tostring(name)),
-      drawn_at ~= nil and drawn_at:find(name, 1, true) ~= nil,
-      ("line %d holds %q"):format(line, tostring(drawn_at))
-    )
-    checked = checked + 1
-  end
-  -- Three workspaces in two groups: every one of the five is addressable.
-  eq("ui: every group and workspace is in the row map", checked, 5)
+  -- One `billing` line: it used to be both a group and a row under itself.
+  eq("ui: and billing is a workspace, not also a project", select(2, text:gsub("billing", "")), 1)
+  truthy("ui: the panel says how to forget a project", text:find("forget", 1, true) ~= nil, text)
 
   workspaces.list, agents.watch, agents.summary = old_list, old_watch, old_summary
   panel.invalidate()
@@ -817,6 +1020,7 @@ return {
   { "ui.session", test_session_source },
   { "ui.panels", test_panels },
   { "ui.toggles", test_toggle_height },
+  { "ui.list", test_list },
   { "ui.usage", test_usage_panel },
   { "ui.workspaces", test_workspaces_panel },
 }

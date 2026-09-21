@@ -245,7 +245,7 @@ end
 ---@field load fun(self, done: fun())
 ---@field keys table<string, string>
 
----This module, as the interface |paseo.ui.panels.session| draws.
+---This module, as the interface |paseo.ui.panels.settings| draws.
 ---
 ---The View used to call `session.groups`, `session.apply` and `session.load`
 ---by name, which tied it to a RUNNING agent -- and that is why the screen

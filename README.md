@@ -55,9 +55,9 @@ which reads like a broken install.
 | Agents | the Paseo daemon running, and `bun` or node ≥ 22 |
 | Pasting images | `wl-paste` (Wayland), `xclip` (X11) or `pngpaste` (macOS) |
 
-Without a daemon the review half works unchanged and the agent half degrades
-to the `local` backend rather than breaking. `:checkhealth paseo` reports
-exactly which of these you have.
+Without a daemon the review half works unchanged — hunks, blame, staging and
+`:Paseo explain` are all local git. The agent half is the part that needs one.
+`:checkhealth paseo` reports exactly which of these you have.
 
 ### The sidecar's one dependency
 
@@ -76,8 +76,6 @@ does:
 
 ```lua
 require("paseo").setup {
-  backend = "paseo",              -- or "local" (floaterm + nvim_chan_send)
-
   paseo = {
     -- url and home are absent by default: absent means "discover the daemon".
     -- Set url to pin it, e.g. "ws://127.0.0.1:6767/ws".
@@ -88,6 +86,9 @@ require("paseo").setup {
     surface = "float",            -- where `:Paseo chat` opens. Or "sidebar".
 
     style = "plate",              -- frame language. See "Style".
+
+    colors = "auto",              -- derive from the colourscheme. Or "fixed".
+    palette = {},                 -- the eight base colours, by name
     theme = {},                   -- highlight overrides, laid over the derived ones
     animate = {                   -- or `false` for instant
       bars = true,                -- ease a bar towards its new value
@@ -99,30 +100,22 @@ require("paseo").setup {
       width = 94,                 -- percent of the editor, 1-100
       height = 86,
       -- row and col are absent: absent means centred
-      composer = 12,              -- the MOST rows the composer grows to
-      min_composer = 3,           -- ...and what it sits at, empty
+      composer = 7,               -- rows the composer may grow TO
       zindex = 30,                -- BELOW the 50 a float gets by default
       backdrop = true,
-      tab_keys = true,            -- bare 1-7 switch tabs; see below
+      tab_keys = true,            -- bare 1-6 switch tabs; see below
     },
 
     sidebar = {
       width = 40,                 -- percent of the editor's columns
       min_width = 60,             -- ...but never narrower than this, in cells
-      composer = 12,              -- the MOST rows the composer grows to
-      min_composer = 3,           -- ...and what it sits at, empty
+      composer = 8,               -- the MOST rows the composer grows to
       position = "right",         -- or "left"
     },
 
-    terminal = {                  -- the terminal surface; see below
-      width = 84,                 -- percent of the editor, 1-100
-      height = 78,
-      -- row and col are absent: absent means centred
-      list = 22,                  -- the terminal list, in CELLS
-      zindex = 45,                -- over the dashboard, under a picker
-      backdrop = true,
+    terminal = {                  -- terminals are sessions; see below
       keys = { next = "<C-j>", prev = "<C-k>",
-               list = "<C-h>", terminal = "<C-l>" },
+               sessions = "<C-s>", terminal = "<C-l>" },
       presets = {},               -- extra entries for `c`
     },
 
@@ -202,23 +195,42 @@ from the selected model.
 
 ### The header
 
-While a turn is running the header spins and counts the seconds:
+The header says what the session *is*:
 
 ```
-⠹ 14s  codex/gpt-5.6-sol · Auto-review · 󰧑 high · Fast · Plan · 21%   ~/Code/paseo.nvim
+  codex/gpt-5.6-sol · Auto-review · 󰧑 high · Fast · Plan · ││││││ 58% left   ~/Code/paseo.nvim
 ```
 
-The count is the point — a static dot looked identical at two seconds and at
-two minutes, so a wedged turn and a working one were the same picture. A
-pending permission replaces it with ` needs you`, because then the agent is
-not working, it is waiting for you.
+While a turn runs, a spinner and an elapsed count say what it is *doing* — and
+those live at the **bottom**, on the right of the hint bar:
 
-On the sidebar it is the conversation window's winbar. On the full-screen
-surface it is **not**: a winbar belongs to a window, the conversation window
-only exists on the Chat tab, and every other tab therefore had no header and
-could not tell you which model it was on. There it is a volt section in the
-chrome, drawn above the tab bar, true on all seven tabs — and clicking it takes
-you to the panel that can change what it says.
+```
+ 1-6  tabs    󰌒  cycle    Ctrl + f  sidebar    q  close              ⠹ 28m 49s
+```
+
+The count is the point: a static dot looked identical at two seconds and at two
+minutes, so a wedged turn and a working one were the same picture. It is
+humanised for the same reason — `1729s` is arithmetic homework, `28m 49s` is a
+duration. Past an hour the seconds are dropped (`1h 24m`); at that scale they
+are noise, and dropping them stops the field growing a third segment that
+shifts everything beside it.
+
+Bottom rather than in the header because this is the one field that changes ten
+times a second, and among five static ones it pushed the provider sideways
+every time the count gained a digit. A pending permission still shouts from the
+header itself — ` needs you` — because then the agent is not working, it is
+waiting for you.
+
+On the sidebar the header is the conversation window's winbar. On the
+full-screen surface it is **not**: a winbar belongs to a window, the
+conversation window only exists on the Chat tab, and every other tab therefore
+had no header and could not tell you which model it was on. There it is a volt
+section in the chrome, drawn above the tab bar, true on all six tabs — and
+clicking it takes you to the panel that can change what it says.
+
+That also decides where the status goes. The full-screen surface has a footer
+and puts it there; the sidebar is a split whose only chrome is that winbar, so
+there it goes on the end of the header instead.
 
 ### The full-screen surface
 
@@ -227,8 +239,8 @@ swaps to the sidebar and back. `<C-c>` stops the turn — from the composer or
 the conversation, normal mode or insert.
 
 ```
-  ⠹ 14s  claude/sonnet-5 · acceptEdits · 󰧑 think · ⚡ · 21%   ~/Code/paseo.nvim
-   1 󰀄 Chat   2 󱕂 Session   3 󱙺 Sessions   4 󰘬 Changes   5 󰄨 Usage   6 󰙅 Workspaces   7 󰆍 Terminals
+   claude/sonnet-5 · acceptEdits · 󰧑 think · ⚡ · ││││││ 42% left   ~/Code/paseo.nvim
+   1 󰀄 Chat   2 󱙺 Sessions   3 󱕂 Settings   4 󰘬 Changes   5 󰄨 Usage   6 󰙅 Workspaces
 ```
 
 The tab bar **degrades rather than truncates**, because the tab that would
@@ -241,7 +253,7 @@ you need — to keep `close`. Four levels, widest that fits:
 |---|---|
 | `1 󰀄 Chat` | number, icon and name |
 | `1 Chat` | the icon goes first: the name is what you read, the icon is what you recognise |
-| `1 󰀄` | seven of these fit in 41 columns |
+| `1 󰀄` | six of these fit in 36 columns |
 | `1` | and at the last level the active tab alone keeps its name |
 
 The row count never changes at any level, because the body height and the
@@ -250,14 +262,53 @@ composer geometry are both measured against it.
 | | |
 |---|---|
 | `Chat` | the conversation and the composer, real buffers floated on top |
-| `Session` | mode, thinking level, model, feature toggles — keyboard or click |
 | `Sessions` | the agents **and terminals** here, live; open one |
-| `Changes` | what is changed on disk, per repo; click a file to open it |
+| `Settings` | mode, thinking level, model, feature toggles — keyboard or click |
+| `Changes` | what is changed on disk, per repo; open one |
 | `Usage` | context window, tokens, cost — and this provider's 5-hour and weekly limits |
 | `Workspaces` | every workspace Paseo knows, grouped by project; archive one, or forget a project |
 
-`1`–`7` jump, `<M-1>`–`<M-7>` and `<Tab>`/`<S-Tab>` do the same, and
-everything that does something responds to a click.
+`Sessions`, `Workspaces` and `Changes` are one kind of screen and take one set
+of keys — `j`/`k` to move, `h`/`l` by section, `g`/`G` to the ends, `<CR>` to
+open, `r` to re-fetch — plus their own verbs: `c`/`a`/`R`/`d` on Sessions,
+`n`/`o`/`d` on Workspaces. **The focused row is painted**, in the colour hover
+uses, and arriving at a tab puts focus on a row so the first `<CR>` does
+something.
+
+None of that was true before. Selection lived on the **cursor**, which volt
+resets to line 1 after every click, nothing was drawn to say where it was, and
+the cursor was never put on a row — so Sessions had working keymaps and read as
+a tab you could only click, and Workspaces had no keymaps at all. Focus is held
+by **id** now, so a list that moves under you — and these are push-fed, so they
+do — does not take it with it.
+
+`1`–`6` jump, `<M-1>`–`<M-6>` and `<Tab>`/`<S-Tab>` do the same, and
+everything that does something responds to a click as well.
+
+#### The composer
+
+The box you type in **grows with the prompt** — one row when it is empty, up to
+`ui.float.composer` rows as you fill it, and back again when you send:
+
+```
+╭ ❯ ───────────────────────────────────────────────────────────────────────────╮
+│ why is the ref suite opening a file it then deletes?                          │
+╰────────────────────────────────────────────────────────── ⏎ / Ctrl + s  send ╯
+```
+
+Standing at its configured height over an empty buffer made it the largest and
+emptiest shape on the screen: seven rows of flat card colour, no edge, nothing
+saying you could type in it. Wrapped lines count towards the height — `wrap` is
+on, so a 300-column paragraph is four rows on screen, and asking the buffer for
+its line count would say one and leave the cursor off the bottom of the box.
+
+The border is **drawn** rather than painted `fg == bg`, and it carries both
+things an input has to say: a prompt chevron for *what it is*, and the send
+keys for *how to use it*. Both keys, because they are not interchangeable —
+`<CR>` sends from normal mode and opens a line from insert mode, so `<C-s>` is
+the one that always works. They live in the frame rather than on a row of their
+own, which would cost the conversation a row to say something that is true the
+whole time.
 
 A bare digit is also a **count**, and the two panes these are bound on are
 ordinary buffers — so while the dashboard is open, `3p` and `5j` in the
@@ -300,18 +351,17 @@ Whatever you ask for is clamped to 60×20 — below that the tab bar and the
 composer stop fitting — and to the editor, so no setting can put the border
 off screen.
 
-**The composer is the size of what is in it.** It sits at `min_composer` rows
-with nothing in it and grows as you type, up to `composer`, then shrinks back
-when you send. Both surfaces do this, measured in *screen* rows rather than
-buffer lines, because the composer soft-wraps and one pasted sentence is three
-rows in a narrow pane. Note the behaviour change: `composer` is now a ceiling,
-so a configured `composer = 20` means "up to 20", not "always 20".
+**The composer is the size of what is in it**, on the sidebar as well as the
+dashboard. One row over an empty buffer, growing as you type up to `composer`,
+shrinking back when you send — measured in *screen* rows rather than buffer
+lines, because it soft-wraps and one pasted sentence is three rows in a narrow
+pane. A fixed eight rows in the sidebar was a third of that pane spent on
+whitespace for the whole of a session.
 
 **The sidebar takes the same units**, under `ui.sidebar`: `width` as a
 percentage, `min_width` as a floor in cells (40% of a 100-column terminal is a
 pane too narrow to read a tool card in, and a percentage has no way to know
-that), `composer`/`min_composer` in rows, and `position` for which side it
-opens on. Its
+that), `composer` in rows, and `position` for which side it opens on. Its
 width is also capped at what `'winwidth'` leaves for the window you came back
 from — Neovim claws the difference back the instant focus returns there, so a
 bigger number is not a wider sidebar, it is a number that quietly does not
@@ -329,7 +379,7 @@ header repaints ten times a second while a turn runs, and a single section
 would drag the `Changes` panel — one `git status` per repo — through every
 frame.
 
-### The Session tab
+### The Settings tab
 
 Everything this session is set to, at once, with the current value **filled in**
 rather than marked with a dot:
@@ -429,51 +479,63 @@ applied, which is what two quick mode changes used to produce.
 ### Terminals
 
 Paseo runs terminals as well as agents — the `claude` and `codex` sessions you
-started in the app are PTYs on the daemon — and `:Paseo term` is where you
-drive them:
+started in the app are PTYs on the daemon — and **a terminal is a session.** It
+lists on the `Sessions` tab beside the agents, and opening one shows it **on
+the Chat tab**, where the conversation would be:
 
 ```
- ╭────────────────────╮ ╭───────────────────────────────────────────────╮
- │  Terminals         │ │  Claude   ✳ Claude Code        ~/Code/kora    │
- │ ────────────────── │ ╰───────────────────────────────────────────────╯
- │ ▌· Claude       1  │ ╭───────────────────────────────────────────────╮
- │  · reviewer     2  │ │ ▐▛███▜▌ Claude Code v2.1.263                  │
- │  · Terminal 3   3  │ │ ▝▜█████▛▘ Opus 5 (1M context)                 │
- │                    │ │                                               │
- │ ────────────────── │ │ > _                                           │
- │  c  new    d  kill │ │                                               │
- │  r  name   q  close│ │                                               │
- ╰────────────────────╯ ╰───────────────────────────────────────────────╯
+ ╭──────────────────────────────────────────────────────────────────────╮
+ │  claude/opus-5 · acceptEdits · ││││││ 58% left        ~/Code/kora     │
+ │  1 󰀄 Chat   2 󱙺 Sessions   3 󱕂 Settings   4 󰘬 Changes   5 󰄨 Usage    │
+ │ ──────────────────────────────────────────────────────────────────── │
+ │  󱙺 main   󱙺 reviewer   󰆍 lazygit   󰆍 shell      Ctrl + s  sessions   │
+ │                                                                      │
+ │  ▐▛███▜▌ Claude Code v2.1.263                                        │
+ │  ▝▜█████▛▘ Opus 5 (1M context)                                       │
+ │                                                                      │
+ │  > _                                                                 │
+ ╰──────────────────────────────────────────────────────────────────────╯
 ```
 
-**Several at once** — that is the point, and it is what the dashboard tab this
-replaced could not do. It held exactly one terminal, in a module-local, and
-closed it the moment you switched tabs. The shape is
-[floaterm](https://github.com/nvzone/floaterm)'s, and so is the geometry: three
-windows, every one `relative = "editor"` with pre-floored coordinates, because
-hanging the bar off the rail makes its position the sum of two independently
-rounded numbers and the rig lines up at some terminal sizes and not others.
+It used to be a surface of its own — a rail of names, a title bar, the terminal
+and a backdrop, four windows over the top of whatever you were looking at, with
+its own geometry, its own z-index and its own keymaps. That shape was
+[floaterm](https://github.com/nvzone/floaterm)'s, and it was the wrong one to
+borrow: a terminal you open a second application to reach is not a session,
+it is a place you get stuck, and the way back out was `q`.
 
-In the list: `<CR>` opens, `1`-`9` open the *n*th, `c` starts one, `r` names
-it, `d` kills it (asked first — something is usually running in there), `<C-l>`
-goes to the terminal, `q` closes. In a terminal: `<C-j>`/`<C-k>` cycle,
-`<C-h>` goes back to the list, `<M-1>`-`<M-9>` open the *n*th, `q` closes.
+Now there is **one surface**, and what changes is what fills the panel area — a
+conversation and its composer for an agent, the PTY outright for a terminal.
 
-Those four navigation keys are bound in **terminal mode** too, which is the
-only way cycling is worth having — otherwise it starts with `<C-\><C-n>`. That
-does take them from whatever is running inside, which is right for `claude` and
-wrong for `tmux`, so `ui.terminal.keys` renames or disables any of them. The
-**digits are deliberately not bound in a terminal**: a bare `5` there costs you
-`50k` to scroll back, and `<M-5>` reaches the same terminal. `<Esc>` is never
-bound at all — it belongs to the PTY, so vim running inside one can still leave
-insert mode.
+**The session strip** under the tab bar is what makes that legible: one chip per
+session in this workspace, agents then terminals, the one you are in lit. It is
+on **every** tab, like the header, because "which session am I in" does not stop
+being worth answering when you look at Usage — and a terminal has no transcript
+and no composer, so without it the dashboard could be showing a PTY with nothing
+on screen naming it. A chip is a click; `<C-s>` is the keyboard.
 
-`c` offers a shell, then one entry per provider the daemon has — read live, so
-enabling one in Paseo makes it appear here without a config change — then
-anything in `ui.terminal.presets`, then a free-text command. Nothing checks
-that a command exists, on purpose: the terminal runs on the **daemon's** host,
-which is not necessarily this machine, so the honest failure is the PTY
-printing `command not found`.
+In a terminal: `<C-s>` to the session list, `<C-j>`/`<C-k>` to the next and
+previous session here, `<M-1>`–`<M-6>` for the tabs, `q` (normal mode) to close.
+**All of them are bound in terminal mode too**, which is the only way any of
+them is worth having — otherwise each starts with `<C-\><C-n>`. That does take
+them from whatever is running inside, which is right for `claude` and wrong for
+`tmux`, so `ui.terminal.keys` renames or disables any of them.
+
+The **digits are deliberately not bound**: a bare `5` in a terminal costs you
+`50k` to scroll back, and `<M-5>` reaches the same tab. `<C-c>` is not bound
+either — it is SIGINT and belongs to the program. `<Esc>` is never bound at all:
+it belongs to the PTY, so vim running inside one can still leave insert mode.
+
+On the `Sessions` tab, `c` starts a terminal, `R` renames one and `d` kills it
+(asked first — something is usually running in there). `c` opens a **screen, not
+a prompt**: a shell, then one entry per provider the daemon has — read live, so
+enabling one in Paseo makes it appear without a config change — then anything in
+`ui.terminal.presets`, then a free-text command. It was a `vim.ui.select` of
+bare labels opened over a surface that was itself an overlay; it is the same
+card renderer every other choice in this plugin uses. Nothing checks that a
+command exists, on purpose: the terminal runs on the **daemon's** host, which is
+not necessarily this machine, so the honest failure is the PTY printing
+`command not found`.
 
 **A name you give is kept here**, by the plugin, and the daemon is told as
 well. That is not belt and braces. `renameTerminal` sets a terminal's `title`,
@@ -481,23 +543,19 @@ and `title` is also what the PTY reports for itself — so the shell overwrites
 your name with `milind@host:~/dir` within a second, and every terminal in one
 directory ends up labelled identically. The list shows, in order: the name you
 gave, the stable one the daemon assigned (`Terminal 3`), then the live title.
-The bar shows the live title *beside* the name, where there is room for it and
-where it is actually useful.
 
 A terminal is a **real** terminal — `nvim_open_term`, the same libvterm behind
 `:terminal`, fed the PTY's own bytes, so colour, the cursor and a TUI redrawing
 itself all work. One `terminal_output` listener routes to a registry keyed by
 id, which is the whole of how several are fed at once; `bridge.on` has no
 `off`, so a listener per attach would stack up one dead closure per terminal
-you opened.
+you opened. That registry owns no window, which is why deleting the surface
+above it was a deletion and not a rewrite.
 
 A terminal **dying** is a directory update that no longer lists it, never a
 process exiting under us — Paseo owns the process, not Neovim, so none of
-floaterm's reaping machinery applies. The row goes and the surface stays open
-showing an empty pane. floaterm closes itself when its last terminal dies;
-pressing `d` on the last row and having the window vanish is jarring, and not
-doing it removes the ordering problem between a window closing and a terminal
-ending outright.
+floaterm's reaping machinery applies. The Chat tab falls back to the agent and
+the dashboard stays open.
 
 ### Style
 
@@ -521,6 +579,12 @@ ui = { style = { preset = "rounded", border = "none" } }
 | `invisible` | a real border painted `fg == bg`, so it becomes a one-cell ring of padding in the surface's own colour. The default — and **not** the same as `none`, which drops the padding with it and puts content hard against the window edge. |
 | `rounded` · `single` · `none` | literal |
 
+A drawn edge is painted with `PaseoSurfaceBorder`, which has the surface's own
+background. It used to be `PaseoBorder`, which has none — so the glyphs
+rendered on the *editor's* background and the framed styles lost the one cell
+of padding the unframed ones get, which is what made the frame read as a
+hairline pasted onto the editor rather than as the edge of a raised sheet.
+
 Every style produces the **same number of rows** for the same content, which is
 not tidiness: volt records a section's start row when the layout is measured
 and never recomputes it, so a card whose height depended on the frame would
@@ -530,9 +594,54 @@ The default is `plate` because the old look was three frame weights competing
 inside one window — a box around every card, inside the float's own border,
 with a rule under the tab bar as well.
 
+**That rule under the tab bar is gone in every style.** It survived for the
+framed ones, where it was the same complaint in miniature: the float's own
+edge, a full-bleed rule directly under the pills, and a box around every card
+below it. The pills are a row of filled shapes and delimit the bar by
+themselves. The *row* stays — dropping it would shift every section below, and
+volt does not recompute those.
+
 ### Colour
 
-Everything is derived, never hardcoded, and there is no dependency on NvChad.
+Everything is derived from your colourscheme by default, and there is no
+dependency on NvChad. **Three keys, and they are different questions:**
+
+```lua
+ui = {
+  colors = "auto",   -- where the eight base colours come from
+  palette = {},      -- those eight colours, by name
+  theme = {},        -- finished highlight groups
+}
+```
+
+| | |
+|---|---|
+| `ui.colors` | `"auto"` derives the base colours from the colourscheme — what makes the dashboard look like it belongs to whatever you have loaded. `"fixed"` uses the plugin's own instead, and then a `:colorscheme` does not move them. |
+| `ui.palette` | the eight base colours by name — `red` `green` `blue` `yellow` `grey` `border` `text` `bg` — laid over **whichever** source. So it is a correction to a theme that got one colour wrong as readily as it is a whole palette on top of `"fixed"`. |
+| `ui.theme` | the last word: finished groups, laid over the derived table. |
+
+`palette` and `theme` are not the same tool. A colour set in `palette` is a
+**token**, and everything below still runs on it — the elevation ladder, the
+four accent ramps, the contrast corrections — so naming two colours still gets
+a coherent set, and the colour reaches every group derived from it. A colour
+set in `theme` is the one group you named.
+
+```lua
+-- Ignore the colourscheme entirely.
+ui = { colors = "fixed" }
+
+-- Keep deriving, but this theme's Function colour is not what I want
+-- the dashboard's blue to be.
+ui = { palette = { blue = "#7aa2f7" } }
+
+-- My own palette, derived into a full set.
+ui = { colors = "fixed", palette = { bg = "#1a1b26", blue = "#7aa2f7" } }
+```
+
+Leave `palette.bg` unset on a **transparent** theme: absent is what tells the
+derivation there is nothing to build tiers on.
+
+The rest of this section is what `"auto"` does.
 
 **Backgrounds** are an elevation ladder stepped off `Normal`: the editor, the
 surface two points away, a card five, a chip eight, the selected row eleven.
@@ -595,6 +704,8 @@ ui = { theme = { PaseoChipOn = { bg = "#204a26" } } }
 That is a config key rather than "set the group again after `setup()`", which
 is what the docs used to say and which quietly stopped working the moment you
 changed colourscheme — the derivation re-runs on `ColorScheme` and overwrote it.
+The same is true of `ui.colors` and `ui.palette`: all three survive a theme
+change because all three are read on every re-derivation.
 
 ### Glyphs
 
@@ -653,24 +764,39 @@ above it — `●` answered, `◉` where you are, `○` not yet:
 
 ```
 ╭─ 󰘦  The agent is asking 3 things ───────────────────────────╮
-│ ● ◉ ○                                               2 of 3  │
+│ ● ◉ ○                            2 of 3  ││││││││           │
 │                                                             │
 │ Which checks should run?                                    │
 │                                                             │
-│  1   tests                                                  │
-│  2   lint                                                   │
-│  3   typecheck                                              │
+│  1  ■ tests                                                 │
+│       The unit suite, about 40s                             │
+│  2  □ lint                                                  │
+│  3  □ typecheck                                             │
+│    󰎞 skip the slow ones on this branch                      │
 │    choose as many as apply                                  │
 ╰─────────────────────────────────────────────────────────────╯
 
-  1-9  pick    ⏎  send the answers    ⇥  question    ␛  later
+  1-9  pick    ⏎  send the answers    c  note    ⇥  question    ␛  later
 ```
 
 `1`-`9` picks, `j`/`k` reaches an option past the ninth, `<Space>` takes the one
 you are on, `x` clears the answer, `s` skips an optional question, and `<Tab>`
 moves between them. The marker is a checkbox where a second pick **adds** and a
 radio where it **replaces**, so the shape tells you which before you press
-anything.
+anything. The bar beside `2 of 3` is how much of the set is answered.
+
+**An option's description is shown in full**, wrapped under the option it
+belongs to rather than truncated onto one row — the half that used to fall off
+the end was usually the half that told it apart from the option below it. It is
+drawn for the option you are **on** and for every option you have **picked**, so
+an answer does not lose its meaning the moment you choose it.
+
+`c` writes a **note** about the answer — the caveat the options did not cover,
+like *"the second one, but only for new workspaces"*. It never replaces the
+pick: the label still travels in `answers`, and the remark rides beside it in
+`annotations`, so a reader that knows nothing about notes still gets a clean
+option. Clearing the answer with `x` clears its note too, and the note appears
+in the transcript badge beside what was answered.
 
 `<CR>` sends the moment nothing is missing, and until then it **takes you to the
 first thing that is** — which is what the old "that question still needs an
@@ -737,7 +863,18 @@ It has to be a real buffer: the card is drawn as virtual text, virtual text
 cannot be scrolled, and the version before this therefore budgeted the plan
 against `vim.o.lines - 16` and truncated it — so on any plan longer than the
 terminal you were approving the part that happened to fit, plus the words `… 84
-more lines`. `j`/`k`/`<C-d>` scroll it without ever leaving the buttons.
+more lines`. `j`/`k`/`<C-d>`/`<C-u>`/`gg`/`G` scroll it without ever leaving the
+buttons, **and so does the mouse wheel**: the body used to be an unfocusable
+float, which is one the mouse lands straight *through*, so the wheel scrolled
+the conversation behind the plan while the plan itself sat still. It is
+focusable now, and it carries the same keys the card does so landing in it with
+the mouse is not a dead end.
+
+A plan takes the **whole width** the conversation has, rather than the 96-column
+cap a question's options are held to: a plan is a document with code in it, and
+that cap wrapped every fenced block. The percentage and bar in the title say how
+far down it you are — without one, a document that scrolls cannot be told from
+one that does not, which is most of what "scrolling does not work" looks like.
 
 A plan request also carries no tool `detail` at all — the markdown travels in the
 tool input — so the dialog, which renders `detail` for everything else, was
@@ -1049,6 +1186,16 @@ too but never takes focus; that belongs to whatever your review autocmd opens.
 A `workspaces.open` function that spawns its own window doesn't move this
 Neovim, so the chat in it stays put.
 
+**And if you open the chat afterwards instead**, `:Paseo chat` resolves the
+directory you are *standing in* — the workspace containing the cwd, else the
+repo containing it, else the cwd. It used to read the git toplevel of the
+**buffer**, falling back to the cwd only for an unnamed one, which is what
+made "switch workspace, open the chat" land you back in the workspace you
+left: with `workspaces.open = "tcd"` the switch reuses the tab, so the file
+you had open in the old worktree is still the current buffer. Anything that
+means a particular *file* — `:Paseo ask`, `:Paseo explain` — still resolves
+from that file; only "open the chat", which means *here*, reads the cwd.
+
 To keep the built-in switch and only decide what the new tab *shows*, listen for
 `User PaseoWorkspaceOpen` instead; it fires after the `tcd`, with the root in
 `data.root`:
@@ -1160,7 +1307,6 @@ lua/paseo/          the plugin
     panels/         one per dashboard tab
   workspace/        assembling N worktrees into one unit of work
   pickers/          workspaces, sessions
-  backends/         the no-daemon fallback
   plugin.lua        where this plugin's own files are, asked once
   skills.lua        installing the bundled skills where an agent can see them
 sidecar/            paseo-bridge.ts entry point, bridge-*.ts modules, SDK deps
@@ -1261,13 +1407,6 @@ Worth knowing because the symptom is confusing: `/opt/Paseo/Paseo` is the
 shadowing `/usr/bin/paseo` on `$PATH`. Then a window opens and `--json` returns
 Electron startup logs — which looks like a CLI defect and is not.
 `:checkhealth paseo` reports which one you have.
-
-### Backend seam
-
-`paseo.backends.{paseo,local}`. Worktree assembly is ours either way, so the
-`local` backend — floaterm plus `nvim_chan_send` — costs little and makes the
-plugin usable without Paseo installed. Paseo is the default and gets every
-feature.
 
 ## Notes from the source
 

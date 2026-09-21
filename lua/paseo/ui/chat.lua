@@ -350,11 +350,13 @@ local function send(chat)
   -- a prompt typed in the Paseo app would appear only once. The timeline is
   -- the single source of truth for what was said, whoever said it.
   vim.api.nvim_buf_set_lines(chat.composer, 0, -1, false, { "" })
-  -- An API write, so nothing fired. Without this the box stays as tall as the
-  -- prompt you just sent, for the rest of the session.
-  M.fit_composer(chat)
   chat.pending = {}
   chat.images = {}
+  -- The composer grew with the prompt, so it has to shrink back with it.
+  -- Explicitly rather than through the autocmd: a `nvim_buf_set_lines` is not
+  -- a user edit, and leaving it to `TextChanged` is how a four-line prompt
+  -- leaves a four-line empty box behind after it is sent.
+  M.fit_composer(chat)
   M.set_streaming(chat, true)
 
   bridge.request("agent.send", {
@@ -476,7 +478,7 @@ end
 local function fit_composer(chat)
   local float = require "paseo.ui.float"
   if float.is_open(chat) then
-    return float.fit_composer(chat)
+    return float.resize_composer(chat)
   end
   sidebar.fit_composer(chat)
 end
@@ -821,6 +823,37 @@ end
 
 -- --------------------------------------------------------------------- API
 
+---Where a chat opens when nobody said which directory.
+---
+---THE DIRECTORY YOU ARE STANDING IN, resolved to the unit of work that
+---contains it: the workspace when the cwd is inside one, else the enclosing
+---repository, else the cwd itself.
+---
+---This used to be `ref.file().root` -- the git toplevel of the BUFFER -- with
+---the cwd reached only when that buffer had no name. That is the whole of why
+---switching workspace and then opening the chat showed you the workspace you
+---had just left: `workspaces.open = "tcd"` reuses the current tab, so the file
+---you had open in the old worktree is still the current buffer, and its
+---toplevel is still the old worktree. The cwd is the one thing the switch
+---actually changed, so the cwd is what this reads.
+---
+---`getcwd()` rather than `vim.uv.cwd()`: the switch is a `:tcd`, and the
+---tab-local directory is where the window you are looking at is standing.
+---
+---Resolved the same way |paseo.workspaces|.open passes a root, so
+---`:Paseo chat` and an automatic |paseo.ui.chat|.follow land on the same
+---agent rather than on two agents one directory apart.
+---
+---Callers that mean a particular FILE -- |paseo.explain|, `:Paseo ask` --
+---pass `root` explicitly and never reach this.
+---@return string
+local function here()
+  local repos = require "paseo.repos"
+  local cwd = vim.fn.getcwd()
+  local repo = repos.resolve(cwd)
+  return repos.workspace_root(cwd) or (repo and repo.worktree) or cwd
+end
+
 ---Open (or focus) a chat.
 ---
 ---`create = false` means "show me the agent in this directory, and say so if
@@ -838,11 +871,7 @@ function M.open(opts, callback)
   opts = opts or {}
   callback = callback or function() end
 
-  local root = opts.root
-  if not root then
-    local ref = require("paseo.ref").file() or require("paseo.ref").cursor()
-    root = ref and ref.root or assert(vim.uv.cwd())
-  end
+  local root = opts.root or here()
 
   local key = opts.agent_id or root
   local chat = chats[key]
@@ -1064,12 +1093,41 @@ function M.close()
   sidebar.close(chat)
 end
 
+---Is this chat on screen on the tab page you are looking at?
+---
+---`sidebar.is_open` asks only whether the conversation WINDOW is valid, and a
+---window on another tab page is perfectly valid -- so a chat left behind by a
+---`tabnew` workspace switch counted as open, and the first press of the chat
+---key closed something invisible instead of opening something here.
+---@param chat table
+---@return boolean
+local function visible(chat)
+  -- Already tab-aware.
+  if require("paseo.ui.float").is_open(chat) then
+    return true
+  end
+  local win = chat.win_conversation
+  if not (win and vim.api.nvim_win_is_valid(win)) then
+    return false
+  end
+  return vim.api.nvim_win_get_tabpage(win) == vim.api.nvim_get_current_tabpage()
+end
+
 function M.toggle()
   local chat = current
-  if chat and (sidebar.is_open(chat) or require("paseo.ui.float").is_open(chat)) then
+  if chat and visible(chat) then
     return M.close()
   end
   M.open {}
+end
+
+---Stop treating any chat as the current one.
+---
+---Not a close: the windows, if there are any, are somebody else's business.
+---This only drops the module-local pointer, so the next `M.open {}` resolves
+---where it is from scratch instead of adopting whatever was last looked at.
+function M.forget()
+  current = nil
 end
 
 ---Re-point an OPEN chat at another directory.
@@ -1105,8 +1163,18 @@ function M.follow(root, opts)
     return false
   end
 
+  -- `showing` rather than `is_open`, which is tab-aware: following is the act
+  -- of moving a surface off the tab you just left, so the one moment it
+  -- matters is the moment a tab-aware test says "nothing open".
   local float = require "paseo.ui.float"
-  if not (float.is_open(chat) or sidebar.is_open(chat)) then
+  if not (float.showing(chat) or sidebar.is_open(chat)) then
+    -- Declining to OPEN a window is not the same as keeping a pointer to the
+    -- workspace you just left. `current` is what `toggle`, `close` and
+    -- `surface` all read, and `open`'s `adopt` will hand back this very chat
+    -- object -- root, transcript and header directory -- the moment
+    -- `agent.find` returns an id it already knows. So the window stays shut,
+    -- and the memory of where we were goes.
+    M.forget()
     return false
   end
 

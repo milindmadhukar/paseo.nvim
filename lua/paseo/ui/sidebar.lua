@@ -46,36 +46,104 @@ end
 
 -- -------------------------------------------------------------------- header
 
+---How much of the context window is LEFT, as a gauge.
+---
+---This was a bare `42%` in `PaseoDim`, wedged between the feature toggles and
+---the path. Two things were wrong with it and they compound: nothing said what
+---the number counted, and it counted the wrong direction -- it was the
+---fraction USED, so the figure you watched climbing was the one you wanted to
+---watch falling, and a reader who assumed the obvious read it exactly
+---backwards at the one moment it matters.
+---
+---So: a gauge that FILLS, over a number that counts down. Those agree -- a
+---bar nearly full and `5% left` are one reading, "the tank is nearly full and
+---there is not much room" -- and filling is the direction that puts the weight
+---in the right place. A bar that drained instead was empty and colourless at
+---exactly the moment it mattered: the pressure colour lives on the filled run,
+---so at 5% left there was no filled run to carry it and the red never showed.
+---
+---The colour is pressure, from the thresholds |paseo.ui.widgets|.pressure_hl
+---already holds for the Usage panel, so amber and red mean the same thing on
+---both screens.
+---
+---Drawn INLINE rather than right-aligned. `header` has no width to align
+---against -- it is rendered both into a `winbar` string and into a volt line
+---that the dashboard truncates itself -- and the readout belongs beside the
+---model and the mode anyway, which is the cluster you are already reading.
+---@param chat table
+---@return table[]  Cells; empty until the daemon has reported any usage.
+function M.context(chat)
+  local usage = chat.usage
+  local used, max = nil, nil
+  if usage then
+    used, max = usage.contextWindowUsedTokens, usage.contextWindowMaxTokens
+  end
+  if not (used and max and max > 0) then
+    return {}
+  end
+
+  local widgets = require "paseo.ui.widgets"
+  -- Clamped: a context window can report over 100% once the overhead is
+  -- counted, and "-4% left" is a worse answer than "0% left".
+  local spent = math.max(0, math.min(100, (used / max) * 100))
+  local left = 100 - spent
+
+  local cells = { { " · ", "PaseoDim" } }
+  -- Six cells is the smallest bar that still reads as a bar rather than as
+  -- three punctuation marks, and the header has room for it on both surfaces.
+  local gauge = widgets.bar { w = 6, val = spent, hl = widgets.pressure_hl(spent), thin = true }
+  vim.list_extend(cells, gauge)
+  cells[#cells + 1] = { (" %d%% left"):format(math.floor(left)), "PaseoDim" }
+  return cells
+end
+
 ---The status line above the conversation, as cells.
 ---
 ---Exposed because the float draws the same information through volt, and two
 ---headers that drift apart is how a UI starts lying about which mode it is in.
 ---@param chat table
 ---@return table[]
-function M.header(chat)
-  local line = {}
-
-  -- RECORDING FIRST, because while it is true it is the only thing on this bar
-  -- that is about you rather than about the agent -- and it is the state most
-  -- worth being certain of. Drawn on the header rather than on the composer's
-  -- own hint bar so it works on both surfaces: the dashboard's composer has no
-  -- winbar at all.
-  if chat.dictating then
-    line[#line + 1] = { " " .. icons.ui.mic .. " ", "PaseoToolFail" }
-    line[#line + 1] = { "listening ", "PaseoDim" }
-  end
-
-  -- A spinner and an elapsed count rather than a static dot: `●` looked the
-  -- same at two seconds and at two minutes, so a wedged turn was
-  -- indistinguishable from a working one without opening the app to check.
+---Is it working, and for how long -- as cells, or nothing when it is idle.
+---
+---A spinner and an elapsed count rather than a static dot: `●` looked the same
+---at two seconds and at two minutes, so a wedged turn was indistinguishable
+---from a working one without opening the app to check.
+---
+---This lives at the BOTTOM of whichever surface is drawing, beside the hint
+---bar, rather than in the header. A progress readout is the thing your eye
+---goes back to while you wait, and the header is where the session's SETTINGS
+---are -- putting the one changing field among five static ones made the whole
+---row twitch, and pushed the provider sideways every time the count gained a
+---digit.
+---@param chat table
+---@return table[]
+function M.status(chat)
   local frame, seconds = require("paseo.ui.chat").progress(chat)
   if frame then
-    line[#line + 1] = { " " .. frame .. " ", "PaseoToolRunning" }
-    line[#line + 1] = { seconds .. "s ", "PaseoDim" }
-  elseif chat.streaming then
-    line[#line + 1] = { " ● ", "PaseoToolRunning" }
-  else
-    line[#line + 1] = { "  ", "PaseoDim" }
+    return {
+      { frame .. " ", "PaseoToolRunning" },
+      -- Humanised, because `1729s` is arithmetic homework rather than a
+      -- duration -- see |paseo.ui.render|'s `duration`.
+      { render.duration(seconds), "PaseoDim" },
+    }
+  end
+  if chat.streaming then
+    return { { "● ", "PaseoToolRunning" } }
+  end
+  return {}
+end
+
+function M.header(chat)
+  local line = { { "  ", "PaseoDim" } }
+
+  -- RECORDING FIRST, because while it is true it is the only thing on this row
+  -- that is about you rather than about the agent, and it is the state most
+  -- worth being certain of. On the header rather than on the composer's own
+  -- hint bar so it works on both surfaces: the dashboard's composer has no
+  -- winbar at all.
+  if chat.dictating then
+    line[#line + 1] = { icons.ui.mic .. " ", "PaseoToolFail" }
+    line[#line + 1] = { "listening · ", "PaseoDim" }
   end
 
   line[#line + 1] = { chat.provider or "…", "PaseoHeader" }
@@ -96,17 +164,7 @@ function M.header(chat)
     end
   end
 
-  -- Context-window fill, once the daemon has reported any. This is the number
-  -- you actually want in front of you during a long session.
-  local usage = chat.usage
-  if usage and usage.contextWindowUsedTokens and usage.contextWindowMaxTokens then
-    local pct = math.floor((usage.contextWindowUsedTokens / usage.contextWindowMaxTokens) * 100)
-    line[#line + 1] = { " · ", "PaseoDim" }
-    line[#line + 1] = {
-      ("%d%%"):format(pct),
-      pct >= 90 and "PaseoToolFail" or pct >= 70 and "PaseoToolRunning" or "PaseoDim",
-    }
-  end
+  vim.list_extend(line, M.context(chat))
 
   -- Something is waiting on you. Worth shouting about: the agent is blocked
   -- until it is answered.
@@ -136,7 +194,17 @@ function M.refresh(chat)
     return float.refresh_header(chat)
   end
 
-  local bar = render.to_winbar(M.header(chat))
+  -- The sidebar has no footer to put the status in -- it is a split, and its
+  -- only chrome is this winbar -- so it goes on the end of the header instead.
+  -- The float, which does have a footer, draws it there.
+  local line = M.header(chat)
+  local status = M.status(chat)
+  if #status > 0 then
+    line[#line + 1] = { "  ", "PaseoDim" }
+    vim.list_extend(line, status)
+  end
+
+  local bar = render.to_winbar(line)
   for _, win in ipairs { chat.win_conversation } do
     if win and api.nvim_win_is_valid(win) then
       pcall(function()
@@ -182,7 +250,7 @@ function M.open(chat)
   -- The composer sits under the conversation, small: it is where you type one
   -- question, not where you write a document. It opens at its FLOOR and grows
   -- with what you type -- see `M.fit_composer`.
-  vim.cmd(("belowright %dsplit"):format(math.max(1, math.floor(ui.min_composer or 3))))
+  vim.cmd "belowright 1split"
   chat.win_composer = api.nvim_get_current_win()
   api.nvim_win_set_buf(chat.win_composer, chat.composer)
   style(chat.win_composer)
@@ -234,10 +302,15 @@ end
 ---Early-returns when the height is already right, like `ui/prompt.lua`'s
 ---`fit`: this runs on every keystroke in insert mode.
 ---
+---The dashboard has had this since `float.resize_composer`; the sidebar had
+---not, and the sidebar is the surface that sits beside your code all day. A
+---fixed eight rows there is a third of a narrow pane spent on whitespace for
+---the whole of a session.
+---
 ---`nvim_win_get_height` INCLUDES the winbar row -- measured -- and this
 ---composer carries a hint bar, so the bar is added back on top of the rows
----asked for. Without that, `min_composer = 3` would mean three rows of typing
----in the dashboard and two here, and one config key would mean two things.
+---asked for. Without that, `ui.sidebar.composer` would mean one thing here
+---and another on the dashboard, whose composer has no winbar.
 ---
 ---The `at_bottom`/`to_bottom` pair is not a nicety. Growing the composer takes
 ---its rows from the BOTTOM of the conversation, so without it typing a fourth
@@ -257,10 +330,11 @@ function M.fit_composer(chat)
   local rows = require("paseo.ui.layout").composer_rows {
     buf = chat.composer,
     win = win,
-    min = math.max(1, math.floor(ui.min_composer or 3)),
+    -- One row over an empty buffer, as the dashboard's does.
+    min = 1,
     -- Never so tall that the conversation has nothing left. `total` counts the
     -- conversation's own winbar, so the five here is four lines of transcript.
-    max = math.max(1, math.min(math.floor(ui.composer or 12), total - 5 - bar)),
+    max = math.max(1, math.min(math.floor(ui.composer or 8), total - 5 - bar)),
   }
 
   if api.nvim_win_get_height(win) == rows + bar then
