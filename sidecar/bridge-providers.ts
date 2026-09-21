@@ -69,9 +69,27 @@ export function providerOps(ctx: BridgeConnection): Ops {
   const raw = () => ctx.raw();
   return {
     async providers(req) {
-      const snapshot = await connected().providers.snapshot(
-        req.cwd ? { cwd: String(req.cwd) } : {},
-      );
+      const where = req.cwd ? { cwd: String(req.cwd) } : {};
+      // WAIT, do not snapshot. Provider discovery is lazy and PER DIRECTORY, so
+      // the first call in a directory the daemon has not seen -- which is every
+      // call in a workspace you just made -- comes back with every provider at
+      // `status: "loading"` and no models. Everything downstream treats that as
+      // "nothing is ready": the new-session screen refuses to open with "no
+      // provider on this daemon has a model ready", and retrying a second later
+      // works, which is the shape of a bug rather than of a daemon that is
+      // genuinely unconfigured. `agent.create` already waits; this did not, so
+      // the two disagreed about the same daemon.
+      let snapshot: any;
+      try {
+        snapshot = await connected().providers.waitForReady({
+          ...where,
+          timeoutMs: 15_000,
+        });
+      } catch {
+        // Discovery that never settles must not cost you the list. Whatever is
+        // known now is still better than an error.
+        snapshot = await connected().providers.snapshot(where);
+      }
       return {
         entries: (snapshot.entries ?? []).map((entry: any) => ({
           provider: entry.provider,

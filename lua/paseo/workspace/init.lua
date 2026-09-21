@@ -562,6 +562,13 @@ function M.unsaved(ws)
       if repo.base and repo.base ~= "" then
         args[#args + 1] = repo.base
       end
+      -- The `--` is load-bearing. `repo.base` is a bare name, and kora-backend
+      -- has a directory called `main` next to a branch called `main` -- git
+      -- refuses that as ambiguous, `git` here returns nil, and a nil answer to
+      -- "is there unpushed work?" reads as NO. So the one repository where the
+      -- check could not run was the one where removal went ahead and took the
+      -- commits with it.
+      args[#args + 1] = "--"
       local commits = git(repo.path, args)
       if commits and commits ~= "" then
         local count = #vim.split(commits, "\n")
@@ -614,6 +621,23 @@ function M.remove(ws, opts)
   for _, repo in ipairs(ws.repos or {}) do
     if repo.origin then
       git(repo.origin, { "worktree", "prune" })
+    end
+  end
+
+  -- And the BRANCH the worktree was on, which `git worktree remove` leaves
+  -- behind. It is not administrative debris that only git can see: `ws/billing`
+  -- and `ws/test-workspace` sit in `git branch` forever, one per member repo,
+  -- so a project accumulates five dead branches per workspace anyone ever made.
+  -- ~/Code/grasslabs/kora had a full set from a workspace removed three days
+  -- earlier.
+  --
+  -- `-d`, not `-D`, even here: it refuses a branch that is not merged, and
+  -- refusing is right. The `unsaved` check above is the one that decides
+  -- whether work may be discarded; this is only tidying up after it, and an
+  -- unmerged branch left standing is recoverable where a deleted one is not.
+  for _, repo in ipairs(ws.repos or {}) do
+    if repo.state == "active" and repo.origin and repo.branch and repo.branch ~= "" then
+      git(repo.origin, { "branch", opts.force and "-D" or "-d", repo.branch })
     end
   end
 

@@ -941,6 +941,20 @@ which repos one workspace gets — but none of it is a prerequisite.
 The point is that "is this the `ws init` kind of project?" is a question about
 plumbing, and you should be able to type one command without answering it.
 
+### Taking one down
+
+`<C-d>` in the picker, or `:Paseo ws rm <name>`. It refuses first and says what
+it would lose — a member with uncommitted changes, or with commits that exist
+on no remote and not on the base the branch was cut from — and `force`
+discards that.
+
+Once it goes ahead, the members leave through `git worktree remove`, never
+`rm -rf`: deleting the directory is how stale `.git/worktrees` entries get left
+behind. The `ws/<name>` **branch goes too**, with a plain `git branch -d`, which
+refuses an unmerged branch rather than taking it with the worktree. Without
+that, `git worktree remove` left the branch standing in every member — one dead
+`ws/…` per repo per workspace anyone had ever made.
+
 ### Opening one
 
 `<CR>` in the picker switches **inside this Neovim**: a new tab page, `tcd`'d

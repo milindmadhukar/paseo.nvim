@@ -167,7 +167,27 @@ local function default_expanded(item)
   return item.status == "running" or item.status == "failed"
 end
 
----Draw a block's lines at `row`, replacing `height` existing lines.
+---Draw a block's lines at `row`, replacing `height` existing lines, and put
+---this block's anchor back on the first of them.
+---
+---RE-ANCHORED AFTER THE WRITE, rather than trusting a mark to survive it,
+---because neither gravity survives alone -- measured, not reasoned about.
+---`nvim_buf_set_lines(row, row + height)` spans `(row,0)`-`(row+height,0)`, so:
+---
+---  * a LEFT-gravity mark at the FAR boundary -- which is exactly where the
+---    next block's anchor sits -- collapses onto `row`;
+---  * a RIGHT-gravity mark at the NEAR boundary -- this block's own -- is
+---    pushed to the end of whatever was just written.
+---
+---Every anchor was left-gravity, so the first of those was live: the moment a
+---card SHRANK, every block under it moved onto the shrinking card's first line
+---and the next redraw wrote over it. A tool card shrinks when it folds on
+---success, so any successful call with something below it -- which is every
+---call in a parallel batch -- silently ate the card above it. Two sub-agents
+---launched together left one card and a wrecked one.
+---
+---So the blocks below get right gravity, which moves them correctly, and this
+---one is simply put back where we already know it belongs.
 ---@param chat table
 ---@param block table
 ---@param row integer
@@ -183,6 +203,14 @@ local function draw(chat, block, row, old_height)
   -- namespace precisely so this does not delete it.
   api.nvim_buf_clear_namespace(chat.conversation, hl.ns, row, row + old_height)
   block.height = render.to_buffer(chat.conversation, hl.ns, row, row + old_height, card.lines)
+
+  local modifiable = vim.bo[chat.conversation].modifiable
+  vim.bo[chat.conversation].modifiable = true
+  block.mark = api.nvim_buf_set_extmark(chat.conversation, hl.ns_anchor, row, 0, {
+    id = block.mark,
+    right_gravity = true,
+  })
+  vim.bo[chat.conversation].modifiable = modifiable
 end
 
 ---Append a new block to the end of the transcript.
@@ -217,13 +245,8 @@ function M.append(chat, item)
   }
   chat.next_id = chat.next_id + 1
 
-  -- `right_gravity = false` keeps the anchor ON this block's first line when
-  -- text is inserted at exactly that position, rather than being pushed down
-  -- ahead of it.
-  vim.bo[buf].modifiable = true
-  block.mark = api.nvim_buf_set_extmark(buf, hl.ns_anchor, row, 0, { right_gravity = false })
-  vim.bo[buf].modifiable = false
-
+  -- The anchor is `draw`'s to place, and it places it AFTER the lines exist --
+  -- see there for why neither gravity does the job on its own.
   draw(chat, block, row, 0)
 
   chat.blocks[block.id] = block
@@ -295,6 +318,55 @@ function M.rerender(chat, block, item, opts)
   end
 end
 
+---A later event for one call must not know LESS than the one before it.
+---
+---THE LIVE STREAM IS NOT THE PROJECTED ONE. `timeline.history` asks the daemon
+---for `projection = "projected"`, which is also what the Paseo app renders; the
+---subscription delivers raw events, and for a sub-agent those go:
+---
+---    Agent  detail=unknown   input={}        while the call's input streams
+---    Task   detail=sub_agent subAgentType=…  for the whole of its run
+---    Agent  detail=unknown   input={prompt…} its TERMINAL event
+---
+---The last one is a regression -- the daemon hands the finished call back in
+---its raw shape, and the projection is what folds it into the `sub_agent` the
+---history returns. Taking each event whole meant a card that read
+---`Explore  Find RSS feed fetching` for a minute fell back, at the instant the
+---sub-agent SUCCEEDED, to `Agent` over a dump of the prompt. Reopening the same
+---chat drew it correctly, which is exactly the pair of screenshots this came
+---from: the app on the left, right; Neovim on the right, wrong.
+---
+---So the new event's `status` and `error` always win -- those are the news --
+---and a `detail` that has gone back to `unknown` does not.
+---@param old table|nil
+---@param new table
+---@return table
+local function merge(old, new)
+  if not (old and old.kind == "tool" and new.kind == "tool") then
+    return new
+  end
+
+  local known = old.detail and old.detail.type ~= "unknown"
+  local regressed = known and (new.detail == nil or new.detail.type == "unknown")
+  if not regressed then
+    return new
+  end
+
+  local merged = vim.tbl_extend("force", {}, new)
+  merged.detail = old.detail
+  -- `display` is DERIVED from `detail` in the sidecar, so a detail that went
+  -- back to unknown arrived with a display that says less -- "Agent" for what
+  -- was "Explore". The two travel together or not at all.
+  merged.display = vim.deepcopy(old.display or {})
+  -- Except the error text, which only exists on the terminal event and is the
+  -- one thing it knows that its predecessors did not.
+  local incoming = new.display or {}
+  if incoming.errorText then
+    merged.display.errorText = incoming.errorText
+  end
+  return merged
+end
+
 ---The single entry point for an incoming item.
 ---
 ---A tool call arrives TWICE -- running, then completed -- under one `callId`.
@@ -312,7 +384,7 @@ function M.upsert(chat, item)
       -- chunk starts a new paragraph below the card instead of being spliced
       -- onto the sentence that preceded it.
       chat.open_text = nil
-      M.rerender(chat, block, item)
+      M.rerender(chat, block, merge(block.item, item))
       return block
     end
   end
