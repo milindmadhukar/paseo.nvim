@@ -9,6 +9,7 @@ import {
 import { providerOps, describeSettings } from "./bridge-providers.ts";
 import { describeItem } from "./bridge-timeline.ts";
 import { terminalOps } from "./bridge-terminals.ts";
+import { workspaceOps } from "./bridge-workspaces.ts";
 import { emit } from "./bridge-io.ts";
 
 /** stdout IS the protocol, so asserting on it is asserting on the wire. */
@@ -322,6 +323,58 @@ test("plan limits come through whole, including a provider that failed", async (
     await providerOps(empty)["providers.usage"]({ op: "providers.usage" }),
     { fetchedAt: null, providers: [] },
   );
+});
+
+test("a workspace carries its project id, and a project can be forgotten", async () => {
+  // `projectId` was read off the wire and dropped one field before it was
+  // useful. Removing a project -- which the app offers beside archiving -- is
+  // keyed on it and on nothing else, and for a `ws` workspace it is how you
+  // get rid of the top-level project the daemon invented for
+  // `<project>/.workspaces/<name>`.
+  const removed: string[] = [];
+  const ctx = new BridgeConnection();
+  ctx.connected = (() => ({
+    workspaces: {
+      async list() {
+        return {
+          entries: [
+            {
+              id: "w1",
+              name: "billing",
+              workspaceDirectory: "/x/Code/openfin/.workspaces/billing",
+              projectId: "prj_billing",
+              projectDisplayName: "billing",
+              projectRootPath: "/x/Code/openfin/.workspaces/billing",
+              projectKind: "non_git",
+              workspaceKind: "directory",
+              status: "done",
+            },
+          ],
+        };
+      },
+    },
+  })) as any;
+  ctx.raw = (() => ({
+    async removeProject(id: string) {
+      removed.push(id);
+      return { removed: true };
+    },
+  })) as any;
+
+  const ops = workspaceOps(ctx);
+  const page: any = await ops["workspaces.list"]({ op: "workspaces.list" });
+  assert.equal(page.entries[0].projectId, "prj_billing");
+  assert.deepEqual(
+    await ops["project.remove"]({
+      op: "project.remove",
+      projectId: "prj_billing",
+    }),
+    { removed: true },
+  );
+  assert.deepEqual(removed, ["prj_billing"]);
+
+  // A missing id is an error, not a request that removes something else.
+  await assert.rejects(() => ops["project.remove"]({ op: "project.remove" }));
 });
 
 test("a timeline item keeps its kind on the payload, not just in the event name", async () => {

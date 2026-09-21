@@ -904,6 +904,44 @@ still sitting there on disk. That is the whole point: the generated file used
 to say `PRUNE THIS` in a comment, and nothing that re-read the project ever
 honoured the answer.
 
+                                                      *paseo-workspaces-grouping*
+Grouping ~
+
+The sidebar and the picker nest a workspace under the project it LIVES IN,
+which is not always the project Paseo has it filed under.
+
+An assembled workspace is a plain directory -- it has to be, because a git
+worktree is per repo and a unit of work spanning four repos has nowhere else
+to live. So it is not a git repo, and when the daemon is asked to open
+`~/Code/openfin/.workspaces/billing` it registers that directory as its own
+TOP-LEVEL project called `billing`, a sibling of `openfin` rather than
+something inside it.
+
+The shape is recognisable from the path alone -- some ancestor's parent is
+|paseo-config.workspaces.dir| -- so the editor groups on that. Nothing is
+renamed and nothing is migrated: the daemon's own record is left exactly as it
+is, and a workspace made in the app lands in the same group as one made here.
+
+                                                       *paseo-workspaces-panel*
+On the Workspaces tab (`6`) ~
+
+Each group is a heading, with its workspaces under it. Two destructive acts,
+deliberately in different places because they are not two strengths of one
+thing:
+
+    archive         on a workspace row, under the pointer. Retires that unit
+                    of work, and takes its worktrees and their `ws/<name>`
+                    branches with it. Refuses, and says what it would lose, if
+                    a member holds work that exists nowhere else
+    forget project  on the group heading, beside the name it would remove.
+                    Drops PASEO'S RECORD of a directory tree -- never the
+                    files. This is how you get rid of the top-level project
+                    the daemon invented for a `.workspaces/<name>` directory.
+                    A group can span several such records; it removes all of
+                    them, and says how many before it does
+
+Both confirm first.
+
                                                           *paseo-workspaces-keys*
 In the workspace picker (|:Paseo-workspaces|) ~
 

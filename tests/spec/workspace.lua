@@ -237,7 +237,10 @@ local function test_ws_init()
       named:find "%.ws/workspace%.toml" ~= nil,
       named
     )
-    truthy("ws init raw: .ws/ exists BEFORE you write", vim.uv.fs_stat(vim.fs.dirname(named)) ~= nil)
+    truthy(
+      "ws init raw: .ws/ exists BEFORE you write",
+      vim.uv.fs_stat(vim.fs.dirname(named)) ~= nil
+    )
 
     local ok = pcall(vim.cmd, "silent write")
     truthy("ws init raw: :w succeeds", ok)
@@ -263,7 +266,62 @@ local function test_ws_init()
   vim.fn.delete(project, "rf")
 end
 
+--- Which project a workspace is nested under, in the editor's view of it.
+---
+--- The daemon cannot get this right and it is not its fault. A `ws` workspace
+--- at `<project>/.workspaces/<name>` is a plain directory holding several
+--- worktrees -- it has to be, because a git worktree is per repo -- so asking
+--- the daemon to open it registers that directory as its own TOP-LEVEL project
+--- named after the workspace. `~/Code/openfin/.workspaces/billing` came back as
+--- a project called `billing`, drawn as a sibling of `openfin` rather than as
+--- something inside it, which is exactly how the sidebar rendered it.
+local function test_workspace_group()
+  local workspaces = require "paseo.workspaces"
+
+  eq(
+    "ws group: a .workspaces child is grouped under its project",
+    workspaces.group { directory = "/home/x/Code/openfin/.workspaces/billing" },
+    "openfin"
+  )
+  eq(
+    "ws group: however deep the path goes",
+    workspaces.group { directory = "/home/x/Code/grasslabs/kora/.workspaces/nvim-e2e" },
+    "kora"
+  )
+  eq(
+    "ws group: an ordinary checkout keeps the daemon's project",
+    workspaces.group { directory = "/home/x/Code/paseo.nvim", project = "paseo.nvim" },
+    "paseo.nvim"
+  )
+  eq(
+    "ws group: and a worktree under one does too",
+    workspaces.group {
+      directory = "/home/x/.paseo/worktrees/abc/ui-fixes",
+      project = "paseo.nvim",
+    },
+    "paseo.nvim"
+  )
+  -- Nothing to go on is an empty string, never nil: it is a sort key and a
+  -- table index in the panel.
+  eq("ws group: nothing known is empty, not nil", workspaces.group {}, "")
+
+  -- The directory name is configurable, and the shape test has to follow it.
+  require("paseo.config").setup { workspaces = { dir = ".units" } }
+  eq(
+    "ws group: the marker directory follows the config",
+    workspaces.group { directory = "/home/x/Code/openfin/.units/billing" },
+    "openfin"
+  )
+  eq(
+    "ws group: and `.workspaces` stops being one",
+    workspaces.group { directory = "/home/x/Code/openfin/.workspaces/billing", project = "billing" },
+    "billing"
+  )
+  require("paseo.config").setup {}
+end
+
 return {
   { "workspace", test_workspace },
+  { "workspace group", test_workspace_group },
   { "ws init", test_ws_init },
 }

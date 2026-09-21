@@ -662,9 +662,96 @@ local function test_usage_panel()
   usage.invalidate()
 end
 
+--- Workspaces are grouped under the project they live in, not the one the
+--- daemon invented for them.
+local function test_workspaces_panel()
+  local panel = require "paseo.ui.panels.workspaces"
+  local workspaces = require "paseo.workspaces"
+  local agents = require "paseo.agents"
+
+  local old_list, old_watch, old_summary = workspaces.list, agents.watch, agents.summary
+  agents.watch = function() end
+  agents.summary = function()
+    return "idle"
+  end
+  workspaces.list = function(cb)
+    local list = {
+      {
+        id = "w1",
+        name = "openfin",
+        directory = "/x/Code/openfin",
+        project = "openfin",
+        projectId = "prj_root",
+      },
+      {
+        id = "w2",
+        name = "billing",
+        directory = "/x/Code/openfin/.workspaces/billing",
+        project = "billing",
+        projectId = "prj_billing",
+      },
+      {
+        id = "w3",
+        name = "testing",
+        directory = "/x/Code/paseo.nvim",
+        project = "paseo.nvim",
+        projectId = "prj_nvim",
+      },
+    }
+    for _, ws in ipairs(list) do
+      ws.group = workspaces.group(ws)
+    end
+    cb(list, nil)
+  end
+
+  panel.invalidate()
+  local chat = { root = "/x/Code/openfin" }
+  panel.lines(chat, 100)
+  local drawn = {}
+  for _, line in ipairs(panel.lines(chat, 100)) do
+    local cells = {}
+    for _, cell in ipairs(line) do
+      cells[#cells + 1] = cell[1] or ""
+    end
+    drawn[#drawn + 1] = table.concat(cells)
+  end
+  local text = table.concat(drawn, "\n")
+
+  -- `billing` is a directory inside `openfin`, so it must be drawn inside it
+  -- -- not as a sibling project of the same name.
+  local at_openfin, at_billing, at_nvim
+  for i, line in ipairs(drawn) do
+    at_openfin = at_openfin or (line:find("openfin", 1, true) and i or nil)
+    at_billing = at_billing or (line:find("billing", 1, true) and i or nil)
+    at_nvim = at_nvim or (line:find("paseo.nvim", 1, true) and i or nil)
+  end
+  truthy("ui: the workspaces panel draws a group heading", at_openfin ~= nil)
+  truthy(
+    "ui: with the .workspaces child under it rather than beside it",
+    at_billing ~= nil and at_openfin ~= nil and at_billing > at_openfin,
+    text
+  )
+  truthy(
+    "ui: and the next group after both of them",
+    at_nvim ~= nil and at_billing ~= nil and at_nvim > at_billing,
+    text
+  )
+  -- Only ONE `billing` line now: it used to be both a group and a row.
+  local billings = select(2, text:gsub("billing", ""))
+  eq("ui: and billing is a workspace, not also a project", billings, 1)
+
+  -- Forgetting the project is offered on the heading, where the name it would
+  -- remove actually is.
+  truthy("ui: a group offers to be forgotten", text:find("forget project", 1, true) ~= nil, text)
+
+  workspaces.list, agents.watch, agents.summary = old_list, old_watch, old_summary
+  panel.invalidate()
+end
+
 return {
   { "ui.session", test_session_source },
   { "ui.panels", test_panels },
   { "ui.toggles", test_toggle_height },
   { "ui.usage", test_usage_panel },
+  { "ui.workspaces", test_workspaces_panel },
 }
