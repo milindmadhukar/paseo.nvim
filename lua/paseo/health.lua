@@ -1,9 +1,7 @@
 --- `:checkhealth paseo`
 ---
---- Split into hard requirements (the review layer), and the Paseo backend
---- (which degrades to the `local` backend rather than breaking anything).
-
-local config = require "paseo.config"
+--- Split into hard requirements (the review layer), which work with nothing
+--- running, and the daemon the agent half needs.
 
 local M = {}
 
@@ -117,13 +115,8 @@ local function check_core()
 end
 
 local function check_paseo()
-  local cfg = config.get()
   local daemon = require "paseo.daemon"
-  start "paseo.nvim: Paseo backend"
-
-  if cfg.backend ~= "paseo" then
-    info(('backend is "%s"; the Paseo checks below are informational'):format(cfg.backend))
-  end
+  start "paseo.nvim: the Paseo daemon"
 
   -- WHICH `paseo` is on PATH matters, and it is worth reporting.
   --

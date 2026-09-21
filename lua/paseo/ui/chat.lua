@@ -311,6 +311,11 @@ local function send(chat)
   vim.api.nvim_buf_set_lines(chat.composer, 0, -1, false, { "" })
   chat.pending = {}
   chat.images = {}
+  -- The composer grew with the prompt, so it has to shrink back with it.
+  -- Explicitly rather than through the autocmd: a `nvim_buf_set_lines` is not
+  -- a user edit, and leaving it to `TextChanged` is how a four-line prompt
+  -- leaves a four-line empty box behind after it is sent.
+  require("paseo.ui.float").resize_composer(chat)
   M.set_streaming(chat, true)
 
   bridge.request("agent.send", {

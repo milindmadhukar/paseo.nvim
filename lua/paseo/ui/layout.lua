@@ -92,11 +92,16 @@ end
 ---the conversation deliberately: switching between an agent session and a
 ---terminal one must not shift the left edge under you.
 ---@param g table  The float's geometry.
+---@param composer_h? integer  Rows the composer wants RIGHT NOW. Absent means
+---                   the configured maximum. The composer grows with what you
+---                   have typed rather than standing at its full height over
+---                   an empty buffer, so this is a function of the content and
+---                   not of the config alone -- see `float.composer_rows`.
 ---@return { top: integer, col: integer, width: integer, conversation: integer, composer_row: integer, composer: integer, body: { row: integer, col: integer, width: integer, height: integer } }
-function M.panes(g)
+function M.panes(g, composer_h)
   local rows = M.rows(g.height)
   local top = M.screen_row(g, rows.body_first)
-  local composer_h = g.composer
+  composer_h = math.max(1, math.min(composer_h or g.composer, g.composer))
 
   -- The composer is BORDERED, and `nvim_open_win` is handed the border's row,
   -- not the content's -- so the window costs `composer_h + 2` rows and its

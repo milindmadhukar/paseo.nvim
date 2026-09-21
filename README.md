@@ -55,9 +55,9 @@ which reads like a broken install.
 | Agents | the Paseo daemon running, and `bun` or node ≥ 22 |
 | Pasting images | `wl-paste` (Wayland), `xclip` (X11) or `pngpaste` (macOS) |
 
-Without a daemon the review half works unchanged and the agent half degrades
-to the `local` backend rather than breaking. `:checkhealth paseo` reports
-exactly which of these you have.
+Without a daemon the review half works unchanged — hunks, blame, staging and
+`:Paseo explain` are all local git. The agent half is the part that needs one.
+`:checkhealth paseo` reports exactly which of these you have.
 
 ### The sidecar's one dependency
 
@@ -76,8 +76,6 @@ does:
 
 ```lua
 require("paseo").setup {
-  backend = "paseo",              -- or "local" (floaterm + nvim_chan_send)
-
   paseo = {
     -- url and home are absent by default: absent means "discover the daemon".
     -- Set url to pin it, e.g. "ws://127.0.0.1:6767/ws".
@@ -88,6 +86,9 @@ require("paseo").setup {
     surface = "float",            -- where `:Paseo chat` opens. Or "sidebar".
 
     style = "plate",              -- frame language. See "Style".
+
+    colors = "auto",              -- derive from the colourscheme. Or "fixed".
+    palette = {},                 -- the eight base colours, by name
     theme = {},                   -- highlight overrides, laid over the derived ones
     animate = {                   -- or `false` for instant
       bars = true,                -- ease a bar towards its new value
@@ -99,7 +100,7 @@ require("paseo").setup {
       width = 94,                 -- percent of the editor, 1-100
       height = 86,
       -- row and col are absent: absent means centred
-      composer = 7,               -- rows the composer gets
+      composer = 7,               -- rows the composer may grow TO
       zindex = 30,                -- BELOW the 50 a float gets by default
       backdrop = true,
       tab_keys = true,            -- bare 1-6 switch tabs; see below
@@ -187,23 +188,42 @@ from the selected model.
 
 ### The header
 
-While a turn is running the header spins and counts the seconds:
+The header says what the session *is*:
 
 ```
-⠹ 14s  codex/gpt-5.6-sol · Auto-review · 󰧑 high · Fast · Plan · 21%   ~/Code/paseo.nvim
+  codex/gpt-5.6-sol · Auto-review · 󰧑 high · Fast · Plan · ││││││ 58% left   ~/Code/paseo.nvim
 ```
 
-The count is the point — a static dot looked identical at two seconds and at
-two minutes, so a wedged turn and a working one were the same picture. A
-pending permission replaces it with ` needs you`, because then the agent is
-not working, it is waiting for you.
+While a turn runs, a spinner and an elapsed count say what it is *doing* — and
+those live at the **bottom**, on the right of the hint bar:
 
-On the sidebar it is the conversation window's winbar. On the full-screen
-surface it is **not**: a winbar belongs to a window, the conversation window
-only exists on the Chat tab, and every other tab therefore had no header and
-could not tell you which model it was on. There it is a volt section in the
-chrome, drawn above the tab bar, true on all six tabs — and clicking it takes
-you to the panel that can change what it says.
+```
+ 1-6  tabs    󰌒  cycle    Ctrl + f  sidebar    q  close              ⠹ 28m 49s
+```
+
+The count is the point: a static dot looked identical at two seconds and at two
+minutes, so a wedged turn and a working one were the same picture. It is
+humanised for the same reason — `1729s` is arithmetic homework, `28m 49s` is a
+duration. Past an hour the seconds are dropped (`1h 24m`); at that scale they
+are noise, and dropping them stops the field growing a third segment that
+shifts everything beside it.
+
+Bottom rather than in the header because this is the one field that changes ten
+times a second, and among five static ones it pushed the provider sideways
+every time the count gained a digit. A pending permission still shouts from the
+header itself — ` needs you` — because then the agent is not working, it is
+waiting for you.
+
+On the sidebar the header is the conversation window's winbar. On the
+full-screen surface it is **not**: a winbar belongs to a window, the
+conversation window only exists on the Chat tab, and every other tab therefore
+had no header and could not tell you which model it was on. There it is a volt
+section in the chrome, drawn above the tab bar, true on all six tabs — and
+clicking it takes you to the panel that can change what it says.
+
+That also decides where the status goes. The full-screen surface has a footer
+and puts it there; the sidebar is a split whose only chrome is that winbar, so
+there it goes on the end of the header instead.
 
 ### The full-screen surface
 
@@ -211,7 +231,7 @@ The default. `:Paseo chat` opens it, `:Paseo chat` again closes it, `<C-f>`
 swaps to the sidebar and back.
 
 ```
-  ⠹ 14s  claude/sonnet-5 · acceptEdits · 󰧑 think · ⚡ · ││││││ 42% left   ~/Code/paseo.nvim
+   claude/sonnet-5 · acceptEdits · 󰧑 think · ⚡ · ││││││ 42% left   ~/Code/paseo.nvim
    1 󰀄 Chat   2 󱙺 Sessions   3 󱕂 Settings   4 󰘬 Changes   5 󰄨 Usage   6 󰙅 Workspaces
 ```
 
@@ -254,6 +274,31 @@ do — does not take it with it.
 
 `1`–`6` jump, `<M-1>`–`<M-6>` and `<Tab>`/`<S-Tab>` do the same, and
 everything that does something responds to a click as well.
+
+#### The composer
+
+The box you type in **grows with the prompt** — one row when it is empty, up to
+`ui.float.composer` rows as you fill it, and back again when you send:
+
+```
+╭ ❯ ───────────────────────────────────────────────────────────────────────────╮
+│ why is the ref suite opening a file it then deletes?                          │
+╰────────────────────────────────────────────────────────── ⏎ / Ctrl + s  send ╯
+```
+
+Standing at its configured height over an empty buffer made it the largest and
+emptiest shape on the screen: seven rows of flat card colour, no edge, nothing
+saying you could type in it. Wrapped lines count towards the height — `wrap` is
+on, so a 300-column paragraph is four rows on screen, and asking the buffer for
+its line count would say one and leave the cursor off the bottom of the box.
+
+The border is **drawn** rather than painted `fg == bg`, and it carries both
+things an input has to say: a prompt chevron for *what it is*, and the send
+keys for *how to use it*. Both keys, because they are not interchangeable —
+`<CR>` sends from normal mode and opens a line from insert mode, so `<C-s>` is
+the one that always works. They live in the frame rather than on a row of their
+own, which would cost the conversation a row to say something that is true the
+whole time.
 
 A bare digit is also a **count**, and the two panes these are bound on are
 ordinary buffers — so while the dashboard is open, `3p` and `5j` in the
@@ -517,6 +562,12 @@ ui = { style = { preset = "rounded", border = "none" } }
 | `invisible` | a real border painted `fg == bg`, so it becomes a one-cell ring of padding in the surface's own colour. The default — and **not** the same as `none`, which drops the padding with it and puts content hard against the window edge. |
 | `rounded` · `single` · `none` | literal |
 
+A drawn edge is painted with `PaseoSurfaceBorder`, which has the surface's own
+background. It used to be `PaseoBorder`, which has none — so the glyphs
+rendered on the *editor's* background and the framed styles lost the one cell
+of padding the unframed ones get, which is what made the frame read as a
+hairline pasted onto the editor rather than as the edge of a raised sheet.
+
 Every style produces the **same number of rows** for the same content, which is
 not tidiness: volt records a section's start row when the layout is measured
 and never recomputes it, so a card whose height depended on the frame would
@@ -526,9 +577,54 @@ The default is `plate` because the old look was three frame weights competing
 inside one window — a box around every card, inside the float's own border,
 with a rule under the tab bar as well.
 
+**That rule under the tab bar is gone in every style.** It survived for the
+framed ones, where it was the same complaint in miniature: the float's own
+edge, a full-bleed rule directly under the pills, and a box around every card
+below it. The pills are a row of filled shapes and delimit the bar by
+themselves. The *row* stays — dropping it would shift every section below, and
+volt does not recompute those.
+
 ### Colour
 
-Everything is derived, never hardcoded, and there is no dependency on NvChad.
+Everything is derived from your colourscheme by default, and there is no
+dependency on NvChad. **Three keys, and they are different questions:**
+
+```lua
+ui = {
+  colors = "auto",   -- where the eight base colours come from
+  palette = {},      -- those eight colours, by name
+  theme = {},        -- finished highlight groups
+}
+```
+
+| | |
+|---|---|
+| `ui.colors` | `"auto"` derives the base colours from the colourscheme — what makes the dashboard look like it belongs to whatever you have loaded. `"fixed"` uses the plugin's own instead, and then a `:colorscheme` does not move them. |
+| `ui.palette` | the eight base colours by name — `red` `green` `blue` `yellow` `grey` `border` `text` `bg` — laid over **whichever** source. So it is a correction to a theme that got one colour wrong as readily as it is a whole palette on top of `"fixed"`. |
+| `ui.theme` | the last word: finished groups, laid over the derived table. |
+
+`palette` and `theme` are not the same tool. A colour set in `palette` is a
+**token**, and everything below still runs on it — the elevation ladder, the
+four accent ramps, the contrast corrections — so naming two colours still gets
+a coherent set, and the colour reaches every group derived from it. A colour
+set in `theme` is the one group you named.
+
+```lua
+-- Ignore the colourscheme entirely.
+ui = { colors = "fixed" }
+
+-- Keep deriving, but this theme's Function colour is not what I want
+-- the dashboard's blue to be.
+ui = { palette = { blue = "#7aa2f7" } }
+
+-- My own palette, derived into a full set.
+ui = { colors = "fixed", palette = { bg = "#1a1b26", blue = "#7aa2f7" } }
+```
+
+Leave `palette.bg` unset on a **transparent** theme: absent is what tells the
+derivation there is nothing to build tiers on.
+
+The rest of this section is what `"auto"` does.
 
 **Backgrounds** are an elevation ladder stepped off `Normal`: the editor, the
 surface two points away, a card five, a chip eight, the selected row eleven.
@@ -591,6 +687,8 @@ ui = { theme = { PaseoChipOn = { bg = "#204a26" } } }
 That is a config key rather than "set the group again after `setup()`", which
 is what the docs used to say and which quietly stopped working the moment you
 changed colourscheme — the derivation re-runs on `ColorScheme` and overwrote it.
+The same is true of `ui.colors` and `ui.palette`: all three survive a theme
+change because all three are read on every re-derivation.
 
 ### Glyphs
 
@@ -1167,7 +1265,6 @@ lua/paseo/          the plugin
     panels/         one per dashboard tab
   workspace/        assembling N worktrees into one unit of work
   pickers/          workspaces, sessions
-  backends/         the no-daemon fallback
   plugin.lua        where this plugin's own files are, asked once
   skills.lua        installing the bundled skills where an agent can see them
 sidecar/            paseo-bridge.ts entry point, bridge-*.ts modules, SDK deps
@@ -1268,13 +1365,6 @@ Worth knowing because the symptom is confusing: `/opt/Paseo/Paseo` is the
 shadowing `/usr/bin/paseo` on `$PATH`. Then a window opens and `--json` returns
 Electron startup logs — which looks like a CLI defect and is not.
 `:checkhealth paseo` reports which one you have.
-
-### Backend seam
-
-`paseo.backends.{paseo,local}`. Worktree assembly is ours either way, so the
-`local` backend — floaterm plus `nvim_chan_send` — costs little and makes the
-plugin usable without Paseo installed. Paseo is the default and gets every
-feature.
 
 ## Notes from the source
 

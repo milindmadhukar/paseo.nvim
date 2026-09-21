@@ -69,6 +69,11 @@ M.marker = {
   more_down = g(0x2193), -- DOWNWARDS ARROW
   ellipsis = g(0x2026), -- HORIZONTAL ELLIPSIS
   newline = g(0x23ce), -- RETURN SYMBOL -- a collapsed "\n" in a one-line cell
+  -- The composer's label, in its top border. A prompt chevron rather than a
+  -- nerd-font glyph: this one has to say "type here" to someone who has never
+  -- seen the plugin, and a shell prompt is the most widely understood mark
+  -- there is for that.
+  prompt = g(0x276f), -- HEAVY RIGHT-POINTING ANGLE QUOTATION MARK ORNAMENT
 }
 
 -- --------------------------------------------------------------------- tools

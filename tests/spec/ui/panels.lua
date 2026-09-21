@@ -493,10 +493,24 @@ local function test_panels()
   surface_chat.permissions = {}
   chat.set_streaming(surface_chat, true)
   local frame, seconds = chat.progress(surface_chat)
-  local busy = render.concat(sidebar.header(surface_chat))
   truthy("ui: a running turn reports a frame", frame ~= nil, frame)
-  truthy("ui: which the header draws", frame and busy:find(frame, 1, true) ~= nil, busy)
   eq("ui: alongside the seconds it has been running", seconds, 0)
+
+  -- The status belongs to the BOTTOM of the surface, not to the header. The
+  -- header carries the session's settings -- provider, mode, thinking -- and
+  -- the one field on it that changes ten times a second pushed the other five
+  -- sideways every time the count gained a digit.
+  local status = render.concat(sidebar.status(surface_chat))
+  truthy("ui: the status carries the frame", frame and status:find(frame, 1, true) ~= nil, status)
+  local settings = render.concat(sidebar.header(surface_chat))
+  truthy("ui: and the header does not", frame and settings:find(frame, 1, true) == nil, settings)
+
+  -- `1729s` is arithmetic homework rather than a duration.
+  eq("ui: under a minute stays in seconds", render.duration(9), "9s")
+  eq("ui: past one, the seconds are carried", render.duration(64), "1m 4s")
+  eq("ui: which is the whole point", render.duration(1729), "28m 49s")
+  eq("ui: and at the hour they are dropped as noise", render.duration(5077), "1h 24m")
+  eq("ui: a turn that has not started is not negative", render.duration(nil), "0s")
 
   -- The invariant that keeps the timer honest: `streaming` is only ever set
   -- through the setter, so a timer can never outlive the turn it belongs to

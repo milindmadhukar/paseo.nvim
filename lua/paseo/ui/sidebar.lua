@@ -103,21 +103,38 @@ end
 ---headers that drift apart is how a UI starts lying about which mode it is in.
 ---@param chat table
 ---@return table[]
-function M.header(chat)
-  local line = {}
-
-  -- A spinner and an elapsed count rather than a static dot: `●` looked the
-  -- same at two seconds and at two minutes, so a wedged turn was
-  -- indistinguishable from a working one without opening the app to check.
+---Is it working, and for how long -- as cells, or nothing when it is idle.
+---
+---A spinner and an elapsed count rather than a static dot: `●` looked the same
+---at two seconds and at two minutes, so a wedged turn was indistinguishable
+---from a working one without opening the app to check.
+---
+---This lives at the BOTTOM of whichever surface is drawing, beside the hint
+---bar, rather than in the header. A progress readout is the thing your eye
+---goes back to while you wait, and the header is where the session's SETTINGS
+---are -- putting the one changing field among five static ones made the whole
+---row twitch, and pushed the provider sideways every time the count gained a
+---digit.
+---@param chat table
+---@return table[]
+function M.status(chat)
   local frame, seconds = require("paseo.ui.chat").progress(chat)
   if frame then
-    line[#line + 1] = { " " .. frame .. " ", "PaseoToolRunning" }
-    line[#line + 1] = { seconds .. "s ", "PaseoDim" }
-  elseif chat.streaming then
-    line[#line + 1] = { " ● ", "PaseoToolRunning" }
-  else
-    line[#line + 1] = { "  ", "PaseoDim" }
+    return {
+      { frame .. " ", "PaseoToolRunning" },
+      -- Humanised, because `1729s` is arithmetic homework rather than a
+      -- duration -- see |paseo.ui.render|'s `duration`.
+      { render.duration(seconds), "PaseoDim" },
+    }
   end
+  if chat.streaming then
+    return { { "● ", "PaseoToolRunning" } }
+  end
+  return {}
+end
+
+function M.header(chat)
+  local line = { { "  ", "PaseoDim" } }
 
   line[#line + 1] = { chat.provider or "…", "PaseoHeader" }
 
@@ -167,7 +184,17 @@ function M.refresh(chat)
     return float.refresh_header(chat)
   end
 
-  local bar = render.to_winbar(M.header(chat))
+  -- The sidebar has no footer to put the status in -- it is a split, and its
+  -- only chrome is this winbar -- so it goes on the end of the header instead.
+  -- The float, which does have a footer, draws it there.
+  local line = M.header(chat)
+  local status = M.status(chat)
+  if #status > 0 then
+    line[#line + 1] = { "  ", "PaseoDim" }
+    vim.list_extend(line, status)
+  end
+
+  local bar = render.to_winbar(line)
   for _, win in ipairs { chat.win_conversation } do
     if win and api.nvim_win_is_valid(win) then
       pcall(function()
