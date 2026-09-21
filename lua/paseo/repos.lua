@@ -114,8 +114,16 @@ end
 function M.workspace_root(path)
   local marker = config.get().workspaces.dir
   local dir = path and normalise(path) or normalise(assert(vim.uv.cwd()))
-  while dir and dir ~= "/" do
+  while dir and dir ~= "" and dir ~= "/" do
     local parent = vim.fs.dirname(dir)
+    -- THE WALK HAS TO END EVEN WHEN THE PATH IS NOT ABSOLUTE. `dirname` is a
+    -- fixed point for `.` and for `""` -- and `vim.fn.getcwd()` answers `""`
+    -- when the directory Neovim was started in has since been removed -- so
+    -- the loop that only stops at `/` spun forever with the whole editor
+    -- inside it: no redraw, no keys, one core at 100%.
+    if parent == dir then
+      return nil
+    end
     if vim.fs.basename(parent) == marker then
       return dir
     end

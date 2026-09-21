@@ -256,6 +256,31 @@ function M.open(opts)
     })
   end
 
+  -- A POPUP THAT IS ASKING YOU SOMETHING TAKES THE CURSOR, AND KEEPS IT
+  -- ACROSS THE TICK IT OPENED ON. `nvim_open_win` above enters the window,
+  -- but every one of these is opened from an asynchronous callback -- the
+  -- daemon answering `providers` -- and whatever the editor was in the middle
+  -- of lands after it: a surface re-fitting itself, telescope restoring the
+  -- window it was opened from, a composer that takes focus when its panes are
+  -- rebuilt. The screen was then up with the cursor somewhere else, and the
+  -- only way to answer it was to click it first. Claimed once, on the next
+  -- tick, and never afterwards: a window you moved out of on purpose stays
+  -- moved out of.
+  vim.schedule(function()
+    if handle.closed or not (handle.win and api.nvim_win_is_valid(handle.win)) then
+      return
+    end
+    if api.nvim_get_current_win() ~= handle.win then
+      -- Insert mode belongs to the window we are leaving -- a composer, or a
+      -- PTY -- and the popup is not modifiable: carrying it in means every
+      -- key answers `E21` instead of the question on screen.
+      if api.nvim_get_mode().mode ~= "n" then
+        pcall(vim.cmd.stopinsert)
+      end
+      pcall(api.nvim_set_current_win, handle.win)
+    end
+  end)
+
   return handle
 end
 

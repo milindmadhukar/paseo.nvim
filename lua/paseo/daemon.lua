@@ -19,6 +19,20 @@ local M = {}
 ---@field status string  `GET` this to probe; see `probe()`.
 ---@field source string  Which rule produced it, for diagnostics.
 
+---Did this Neovim start the daemon, or did it find one already running?
+---
+---The quit guard's whole question. Agent sessions live on the daemon rather
+---than in here, so closing a Neovim that merely CONNECTED to a daemon someone
+---else was already running closes a view of the work and nothing else -- and
+---asking you to confirm that is a keystroke asking you to confirm a keystroke.
+---A daemon this editor started is the case where the question is worth asking.
+local ours = false
+
+---@return boolean
+function M.started_here()
+  return ours
+end
+
 ---@return string  `$PASEO_HOME`, or ~/.paseo.
 function M.home()
   local cfg = config.get()
@@ -243,6 +257,10 @@ function M.start(opts, callback)
       local function poll()
         local endpoint = M.resolve()
         if endpoint then
+          -- What answered is what WE started: nothing else was reachable when
+          -- this began -- `start` is only ever called after a full probe came
+          -- back empty.
+          ours = true
           return callback(endpoint, nil)
         end
         if vim.uv.now() >= deadline then

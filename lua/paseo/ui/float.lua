@@ -1130,7 +1130,22 @@ function M.open(chat)
   -- because the caller goes on to put the cursor in `chat.win_composer`, which
   -- on any other tab does not exist.
   if M.is_open(chat) then
+    -- AND ON THE CONVERSATION, not on whatever the Chat tab was last left on.
+    -- `state.session` survives a trip through the panels, so: `<C-s>` out of a
+    -- terminal to the session list, an agent picked out of that list, and the
+    -- Chat tab came back showing the same PTY -- a key that visibly did
+    -- nothing. The session pointer is what "open the chat" moves.
+    if not (state.session and state.session.kind == "agent") then
+      state.session = { kind = "agent", id = chat.agent_id }
+      hide_panes()
+    end
     M.select "Chat"
+    -- `select` only opens the panes when it is CHANGING tab, so the case
+    -- above -- already on Chat, terminal panes just closed -- needs them
+    -- opened here.
+    if not (chat.win_composer and api.nvim_win_is_valid(chat.win_composer)) then
+      show_panes()
+    end
     if chat.win_composer and api.nvim_win_is_valid(chat.win_composer) then
       api.nvim_set_current_win(chat.win_composer)
     end
@@ -1350,6 +1365,25 @@ function M.relayout()
     return
   end
   local g = geometry()
+
+  -- NOTHING MOVED, NOTHING TO RE-FIT. `WinResized` fires for any window on
+  -- the tab page, not just for the editor changing size -- and one of those
+  -- windows is a modal of ours: the new-agent screen opens and then sizes
+  -- itself to its content the moment the model's features land. Re-fitting
+  -- for that tore the panes down and reopened them, and `show_agent_panes`
+  -- enters the composer as it does on a cold open, so the cursor was pulled
+  -- out of the modal you were looking at and the only way back in was a
+  -- click.
+  local old = state.geometry
+  if
+    old
+    and old.row == g.row
+    and old.col == g.col
+    and old.width == g.width
+    and old.height == g.height
+  then
+    return
+  end
   state.geometry = g
 
   pcall(api.nvim_win_set_config, state.win, {
@@ -1372,11 +1406,32 @@ function M.relayout()
   -- The panes are laid out from the geometry, so they are cheapest to close
   -- and reopen -- and on any tab but Chat there are none.
   if state.tab == "Chat" then
+    -- WHATEVER HAD THE CURSOR KEEPS IT. The panes are recreated here, so
+    -- their window ids change: the composer and the terminal are followed to
+    -- their new windows, and anything else that was focused -- the chrome, or
+    -- a modal floating over all of it -- is simply put back.
+    local chat = state.chat
     local was = api.nvim_get_current_win()
+    local composer = chat and was == chat.win_composer
+    local conversation = chat and was == chat.win_conversation
+    local terminal = was == state.term_win
+
     hide_panes()
     show_panes()
-    if was == state.win and api.nvim_win_is_valid(state.win) then
-      pcall(api.nvim_set_current_win, state.win)
+
+    local back = (composer and chat.win_composer)
+      or (conversation and chat.win_conversation)
+      or (terminal and state.term_win)
+      or (api.nvim_win_is_valid(was) and was)
+      or nil
+    if back and api.nvim_win_is_valid(back) then
+      -- `show_terminal_pane` lands in insert mode, which belongs to the PTY
+      -- and to nothing else: leaving it set would send the next keystroke
+      -- into a window that is not a terminal.
+      if back ~= state.term_win and api.nvim_get_mode().mode ~= "n" then
+        pcall(vim.cmd.stopinsert)
+      end
+      pcall(api.nvim_set_current_win, back)
     end
   end
 

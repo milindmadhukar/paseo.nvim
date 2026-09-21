@@ -466,6 +466,18 @@ There is one renderer now, and one place a change is written.
 
 ### Starting an agent session
 
+**Only where there is none.** `:Paseo chat` first asks the daemon what is
+already running in this directory and opens that — the session you started in
+the Paseo app counts, tabs and all. It used to look only for sessions this
+plugin had created *and* on the model `:Paseo model` was set to, so opening
+the chat in a workspace with two live tabs in it offered to start a third. A
+session of this plugin's own is still preferred over the app's, and the model
+you are set to over one you are not; beyond that, whichever was touched last.
+
+The new-agent screen is what you get when the answer is genuinely nothing, and
+it **takes the cursor when it opens** — it is a question, and a question you
+have to click before you can answer is a worse question.
+
 Starting an agent where there is none opens **that same renderer** over a
 agent session that does not exist yet. Two more cards, because provider and model are
 settings here and are not settings on a running agent:
@@ -545,6 +557,10 @@ on screen naming it. A chip is a click; `<C-s>` is the keyboard.
 
 In a terminal: `<C-s>` to the session list, `<C-j>`/`<C-k>` to the next and
 previous session here, `<M-1>`–`<M-6>` for the tabs, `q` (normal mode) to close.
+**And a chat picked out of that list opens the chat** — which session the Chat
+tab is on survives a trip through the panels, so `<C-s>` out of a terminal and
+an agent chosen from the list used to land back on the same PTY, a keystroke
+that visibly did nothing.
 **All of them are bound in terminal mode too**, which is the only way any of
 them is worth having — otherwise each starts with `<C-\><C-n>`. That does take
 them from whatever is running inside, which is right for `claude` and wrong for
@@ -1109,12 +1125,17 @@ each other only when each has its own worktree.
 
 Paseo agent sessions belong to the
 [background daemon](https://paseo.sh/docs/cli#daemon-lifecycle), not to Neovim. Closing
-Neovim stops only this plugin's sidecar; active agents continue running. By
-default, normal whole-editor exits (`:q`, `:qa`, `:wq`, `:x`, their long
-forms, `ZZ`, and `ZQ`) warn when a non-archived agent is running, starting,
-queued, or waiting for attention. Closing a split, tab page, or float does not
-warn, and a forced `!` exit is the explicit bypass. Set
-`quit.warn_active_agents = false` to opt out. Custom quit routers can call:
+Neovim stops only this plugin's sidecar; active agents continue running.
+
+**Which is why the warning only asks about a daemon this Neovim started.** If
+the daemon was already up when you opened the editor — the desktop app's, or
+one left from an earlier session — quitting risks nothing and nothing is
+asked. When the plugin started the daemon itself, normal whole-editor exits
+(`:q`, `:qa`, `:wq`, `:x`, their long forms, `ZZ`, and `ZQ`) warn if a
+non-archived agent is running, starting, queued, or waiting for attention.
+Closing a split, tab page, or float does not warn, and a forced `!` exit is the
+explicit bypass. Set `quit.warn_active_agents = false` to opt out. Custom quit
+routers can call:
 
 ```lua
 require("paseo.quit").guard(function()

@@ -255,6 +255,60 @@ local function test_surfaces()
     float.close()
   end
 
+  -- A RE-FIT DOES NOT MOVE THE CURSOR. `WinResized` fires for any window on
+  -- the tab page, and one of those windows is a modal of ours: the new-agent
+  -- screen opens and then sizes itself to its content the moment the model's
+  -- features arrive. The re-fit closed and reopened the panes, and
+  -- `show_agent_panes` enters the composer -- so the screen that had just
+  -- asked you a question lost the cursor, and the only way to answer it was
+  -- to click it first.
+  do
+    float.open(surface_chat)
+    local modal = vim.api.nvim_open_win(vim.api.nvim_create_buf(false, true), true, {
+      relative = "editor",
+      row = 1,
+      col = 1,
+      width = 20,
+      height = 5,
+      style = "minimal",
+      zindex = 80,
+    })
+
+    float.relayout()
+    eq("ui: nothing moved, so nothing is re-fitted", vim.api.nvim_get_current_win(), modal)
+    truthy("ui: and the panes are the same windows", vim.api.nvim_win_is_valid(modal))
+
+    -- The box really did change shape this time, so the panes ARE closed and
+    -- reopened -- and the cursor still belongs to whoever had it. Cells rather
+    -- than percentages, because both of these have to clear the floor
+    -- `geometry` clamps to and a percentage of a 24-row test editor does not.
+    local full = function(columns)
+      return columns
+    end
+    local narrower = function(columns)
+      return columns - 6
+    end
+    config.setup { ui = { float = { width = full } } }
+    float.relayout()
+    eq("ui: a real re-fit leaves the cursor where it was", vim.api.nvim_get_current_win(), modal)
+    vim.api.nvim_win_close(modal, true)
+
+    -- And when the composer was the one with the cursor, it is FOLLOWED to
+    -- the window the re-fit gave it, rather than left behind on a closed one.
+    vim.api.nvim_set_current_win(surface_chat.win_composer)
+    local before = surface_chat.win_composer
+    config.setup { ui = { float = { width = narrower } } }
+    float.relayout()
+    truthy("ui: a re-fit gives the composer a new window", surface_chat.win_composer ~= before)
+    eq(
+      "ui: which is where the cursor goes",
+      vim.api.nvim_get_current_win(),
+      surface_chat.win_composer
+    )
+    config.setup {}
+    float.close()
+  end
+
   float.open(surface_chat)
 
   -- FEATURE PARITY. The header used to be the conversation window's winbar,
@@ -533,6 +587,35 @@ local function test_terminal_session()
     float.show_session { kind = "agent", id = "a1" }
     eq("terminal: going back lands on the agent", float.session().kind, "agent")
     truthy("terminal: and the composer returns", chat.win_composer ~= nil)
+
+    -- OPENING THE CHAT MEANS THE CONVERSATION, whatever the Chat tab was last
+    -- left on. `state.session` outlives a trip through the panels, so `<C-s>`
+    -- out of a terminal and the chat picked out of the session list came back
+    -- to the Chat tab still pointed at the PTY: the screen did not change, and
+    -- the key read as broken.
+    float.show_session { kind = "terminal", id = "t1" }
+    float.select "Agents & terminals"
+    float.open(chat)
+    eq("terminal: the session list is the way back to the chat", float.tab(), "Chat")
+    eq("terminal: which is the agent, not the terminal", float.session().kind, "agent")
+    truthy(
+      "terminal: with its composer on screen",
+      chat.win_composer ~= nil and vim.api.nvim_win_is_valid(chat.win_composer)
+    )
+
+    -- The same from the Chat tab itself, where there is no tab change to hang
+    -- the rebuild off: the panes have to be swapped here or the PTY stays.
+    float.show_session { kind = "terminal", id = "t1" }
+    float.open(chat)
+    eq(
+      "terminal: and from the Chat tab, with no tab change to ride on",
+      float.session().kind,
+      "agent"
+    )
+    truthy(
+      "terminal: the composer is back there too",
+      chat.win_composer ~= nil and vim.api.nvim_win_is_valid(chat.win_composer)
+    )
 
     -- THE ROW THAT SAYS WHERE YOU ARE, on every tab -- a terminal session has
     -- no header of its own and no transcript, so without it the dashboard

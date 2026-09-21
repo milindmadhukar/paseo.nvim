@@ -2,6 +2,11 @@
 ---
 --- Paseo agents belong to the daemon and keep running after Neovim closes.
 --- The prompt protects the user's live view; it never stops the daemon.
+---
+--- WHICH IS WHY IT ONLY ASKS ABOUT A DAEMON THIS NEOVIM STARTED. Attaching to
+--- a daemon that was already up -- the desktop app's, or one left behind by an
+--- earlier session -- means quitting costs nothing: the work is not ours to
+--- lose. See |paseo.daemon|.started_here.
 
 local M = {}
 
@@ -77,6 +82,15 @@ function M.guard(proceed, opts)
   end
   local bridge = require "paseo.bridge"
   if not bridge.running() then
+    return proceed()
+  end
+  -- ONLY WHEN THIS EDITOR IS THE ONE THE DAEMON CAME UP WITH. An agent session
+  -- belongs to the daemon and goes on working without us, so quitting a
+  -- Neovim that attached to a daemon which was already running -- the app's,
+  -- or one from a previous session -- risks nothing at all, and a dialog in
+  -- front of every `:q` for it is noise. The daemon this Neovim started is the
+  -- one case where the work and the editor came up together.
+  if not require("paseo.daemon").started_here() then
     return proceed()
   end
   local agents = require "paseo.agents"

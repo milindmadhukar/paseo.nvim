@@ -66,6 +66,27 @@ local function test_repos()
   in_dir(root .. "/plain", function()
     eq("repos: outside any repo yields an empty list, not nil", repos.list(), {})
   end)
+
+  -- THE WALK HAS TO END. `workspace_root` climbs with `vim.fs.dirname` and
+  -- used to stop only at `/`, which assumes it was handed an absolute path.
+  -- Delete the directory Neovim is standing in and it is not: `getcwd()`
+  -- answers `""` and `:p` answers `"./"`, and `dirname` is a FIXED POINT for
+  -- `"."`. The editor went into that loop and never came back -- no redraw, no
+  -- keys, one core at 100% -- and it got there through `:Paseo chat`, which
+  -- asks this about the cwd before it does anything else.
+  do
+    local gone = root .. "/gone"
+    vim.fn.mkdir(gone, "p")
+    local back = assert(vim.uv.cwd())
+    vim.uv.chdir(gone)
+    vim.fn.delete(gone, "rf")
+    local ok, walked = pcall(repos.workspace_root, ".")
+    vim.uv.chdir(back)
+    truthy("repos: the workspace walk ends when the cwd is gone", ok, walked)
+    eq("repos: answering nothing rather than spinning", walked, nil)
+  end
+
+  eq("repos: and a relative path is not a workspace either", repos.workspace_root "a/b", nil)
 end
 
 local function test_status()

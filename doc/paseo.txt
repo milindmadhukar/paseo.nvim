@@ -605,7 +605,11 @@ quit.warn_active_agents                             boolean, default `true`
     session is running, starting, queued, or waiting for attention. The work
     continues on the Paseo daemon; quitting closes only this Neovim client and
     its sidecar. Closing a split, Neovim tab page, or float does not warn.
-    Forced `!` exits are the explicit bypass. See |paseo-quit|.
+    Forced `!` exits are the explicit bypass.
+
+    Only asked about a daemon THIS Neovim started. Attaching to one that was
+    already running -- the desktop app's, or one from an earlier session --
+    costs nothing to leave, and is left alone. See |paseo-quit|.
 
                                                        *paseo-config.skills.dirs*
 skills.dirs                             string[], default `{ "~/.claude/skills" }`
@@ -1485,6 +1489,20 @@ tab's renderer in a window of its own, so there is no second implementation to
 drift.
 
                                                        *paseo-new-session*
+WHERE THERE IS NONE, and nowhere else. `:Paseo chat` asks the daemon what is
+already running in this directory first, and opens that -- INCLUDING a session
+you started in the Paseo app, which carries none of this plugin's labels. It
+used to look only for sessions this plugin had created, on the model
+|:Paseo-model| was set to, so opening the chat in a workspace with two live
+tabs in it offered to start a third. Preference order: ours on that model,
+ours on any model, anyone's on that model, anyone's -- and within each,
+whichever was touched most recently.
+
+The screen below is what you get when the answer really is nothing. It TAKES
+THE CURSOR when it opens, and keeps it: it is asking you a question, and the
+surface underneath re-fitting itself used to pull the cursor back into the
+composer and leave you clicking the modal to answer it.
+
 Starting an agent where there is none opens the SAME renderer over an agent session
 that does not exist yet -- two more cards, because provider and model are
 settings here and are not settings on a running agent: >
@@ -1752,6 +1770,12 @@ Agent sessions belong to Paseo's background daemon. `VimLeavePre` stops only
 the Neovim sidecar; it does NOT stop the daemon or its agents. A daemon started
 by the plugin is started in the background for the same reason.
 
+WHICH DAEMON IT IS DECIDES WHETHER YOU ARE ASKED. A daemon that was already
+running when this Neovim connected -- the desktop app's, or one left behind by
+an earlier session -- goes on running without us, so quitting risks nothing and
+nothing is asked, however busy its agents are. The question is only worth
+asking about the daemon this Neovim started itself.
+
 With |paseo-config.quit.warn_active_agents| enabled, normal whole-editor
 routes (`:q`, `:qa`, `:wq`, `:x`, long forms, `ZZ`, and `ZQ`) warn when a
 non-archived agent session is running, starting, queued, or waiting for
@@ -1902,6 +1926,12 @@ In a terminal ~
     <M-1>..6  jump to a tab
     q         close the dashboard, from normal mode
 <
+AND A CHAT PICKED OUT OF THAT LIST OPENS THE CHAT. Which session the Chat tab
+is on outlives a trip through the panels, so `<C-s>` out of a terminal and an
+agent chosen from the list used to come back to the Chat tab still showing the
+same PTY: the screen did not change, and the key read as broken. Opening a
+chat moves the session pointer as well as the tab.
+
 ALL OF THESE ARE BOUND IN TERMINAL MODE as well as normal, which is the only
 way any of them is worth having: a key you must press `<C-\><C-n>` to reach
 first is a key you do not reach. That does take them from whatever is running

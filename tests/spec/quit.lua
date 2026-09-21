@@ -8,7 +8,9 @@ local function test_quit()
   local agents = require "paseo.agents"
   local bridge = require "paseo.bridge"
   local config = require "paseo.config"
+  local daemon = require "paseo.daemon"
   local old_running, old_ready, old_active = bridge.running, agents.ready, agents.active
+  local old_started = daemon.started_here
   local old_select = vim.ui.select
 
   local ok, failure = pcall(function()
@@ -32,6 +34,9 @@ local function test_quit()
       return true
     end
     agents.ready = function()
+      return true
+    end
+    daemon.started_here = function()
       return true
     end
     local active = {}
@@ -80,6 +85,23 @@ local function test_quit()
     eq("quit: the warning can be disabled", proceeded, 4)
     config.setup {}
 
+    -- A DAEMON WE ONLY ATTACHED TO IS NOT OURS TO WARN ABOUT. It was running
+    -- before this Neovim and goes on running after it, so there is nothing
+    -- here to lose and nothing to ask about -- however busy its agents are.
+    daemon.started_here = function()
+      return false
+    end
+    choice = "Cancel"
+    local before = prompts
+    quit.guard(function()
+      proceeded = proceeded + 1
+    end)
+    eq("quit: attaching to someone else's daemon exits silently", proceeded, 5)
+    eq("quit: with nothing asked", prompts, before)
+    daemon.started_here = function()
+      return true
+    end
+
     truthy("quit: qall is always an editor exit", quit.would_exit "qall")
     truthy("quit: a forced all-exit remains detectable as an exit", quit.would_exit "qall!")
 
@@ -101,6 +123,7 @@ local function test_quit()
   end)
 
   bridge.running, agents.ready, agents.active = old_running, old_ready, old_active
+  daemon.started_here = old_started
   vim.ui.select = old_select
   config.setup {}
   truthy("quit: cases completed", ok, failure)

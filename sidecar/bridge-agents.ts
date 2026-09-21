@@ -23,6 +23,43 @@ function agentProvider(agent: any): string | null {
     : null;
 }
 
+/**
+ * The agent `:Paseo chat` should open in a directory, out of everything the
+ * daemon has there.
+ *
+ * NOT the same question as `matchesReviewAgent`, which is "is this one OURS"
+ * and is what `agent.ensure` has to keep asking -- creating what the new-agent
+ * screen was just filled in for must not hand back somebody else's session.
+ * This one is "is there anything here at all", and it is the whole difference
+ * between a plugin that joins the session you are already running and one that
+ * offers to start a second: a tab opened in the Paseo app carries no
+ * `paseo.nvim` label, so the strict test said "no agent in this workspace" in
+ * a workspace with two of them on screen.
+ *
+ * Preference order, most wanted first:
+ *   1. ours, on the provider this editor is set to
+ *   2. ours, on any provider
+ *   3. anyone's, on the provider this editor is set to
+ *   4. anyone's
+ * and within each, whichever was touched most recently -- which is the one you
+ * were just looking at.
+ */
+export function preferredAgent(
+  agents: any[],
+  cwd: string,
+  provider?: string | null,
+): any | undefined {
+  const touched = (agent: any) =>
+    Date.parse(agent.updatedAt ?? agent.createdAt ?? "") || 0;
+  const rank = (agent: any) =>
+    (agent.labels?.["paseo.nvim"] === "review" ? 2 : 0) +
+    (provider && agentProvider(agent) === provider ? 1 : 0);
+
+  return agents
+    .filter((agent) => agent.cwd === cwd)
+    .sort((a, b) => rank(b) - rank(a) || touched(b) - touched(a))[0];
+}
+
 export function creationConfig(req: Request, provider: string) {
   return {
     provider,
@@ -165,7 +202,12 @@ export function agentOps(ctx: BridgeConnection): Ops {
     },
 
     async "agent.find"(req) {
-      const agent = await reviewAgent(
+      const page = await connected().agents.list({
+        filter: { includeArchived: false },
+        page: { limit: 100 },
+      });
+      const agent = preferredAgent(
+        page.entries.map(({ agent }: any) => agent),
         String(need(req.cwd, "cwd")),
         req.provider ? String(req.provider) : null,
       );

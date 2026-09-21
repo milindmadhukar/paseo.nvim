@@ -4,6 +4,7 @@ import { BridgeConnection } from "./bridge-connection.ts";
 import {
   agentOps,
   matchesReviewAgent,
+  preferredAgent,
   creationConfig,
 } from "./bridge-agents.ts";
 import { providerOps, describeSettings } from "./bridge-providers.ts";
@@ -91,9 +92,12 @@ test("review reuse requires the requested provider and model", async () => {
     thinkingOptionId: "high",
     featureValues: { plan_mode: true, fast_mode: false },
   };
+  // `find` asks the OTHER question -- "is there a session here at all" -- so
+  // the provider is a preference for it and not a filter: this one is on the
+  // wrong provider and is still the session you are looking at.
   assert.deepEqual(await ops["agent.find"](requested), {
-    id: null,
-    provider: null,
+    id: "claude-agent",
+    provider: "claude/opus",
   });
   assert.deepEqual(await ops["agent.ensure"](requested), {
     id: "codex-agent",
@@ -127,6 +131,47 @@ test("review reuse requires the requested provider and model", async () => {
       provider: "claude/opus",
     },
   );
+});
+
+test("the chat opens a session that is already there, label or no label", () => {
+  // A tab opened in the Paseo app. No `paseo.nvim` label, because the app has
+  // never heard of us -- and the reason `:Paseo chat` used to offer to create
+  // a second agent in a workspace that visibly had one open.
+  const app = {
+    id: "app",
+    cwd: "/work",
+    labels: {},
+    updatedAt: "2026-01-02T00:00:00Z",
+    runtimeInfo: { provider: "claude", model: "opus" },
+  };
+  const older = {
+    id: "older-app",
+    cwd: "/work",
+    labels: {},
+    updatedAt: "2026-01-01T00:00:00Z",
+    runtimeInfo: { provider: "claude", model: "opus" },
+  };
+  const ours = {
+    id: "ours",
+    cwd: "/work",
+    labels: { "paseo.nvim": "review" },
+    updatedAt: "2025-12-01T00:00:00Z",
+    runtimeInfo: { provider: "codex", model: "gpt-5.6-sol" },
+  };
+  const elsewhere = { id: "elsewhere", cwd: "/other", labels: {} };
+
+  // Nothing of ours: the app's, most recently touched first.
+  assert.equal(preferredAgent([elsewhere, older, app], "/work")?.id, "app");
+  // Ours outranks the app's even on a different provider -- it is the session
+  // this editor has been talking to.
+  assert.equal(preferredAgent([app, ours, older], "/work")?.id, "ours");
+  // Among the app's, the requested provider wins over recency.
+  assert.equal(
+    preferredAgent([app, older], "/work", "claude/opus")?.id,
+    "app",
+  );
+  // A directory with nothing in it is still the create screen's job.
+  assert.equal(preferredAgent([elsewhere], "/work"), undefined);
 });
 
 test("ensure rechecks after workspace lookup before creating", async () => {
