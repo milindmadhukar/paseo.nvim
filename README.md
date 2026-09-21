@@ -217,7 +217,7 @@ The default. `:Paseo chat` opens it, `:Paseo chat` again closes it, `<C-f>`
 swaps to the sidebar and back.
 
 ```
-  ⠹ 14s  claude/sonnet-5 · acceptEdits · 󰧑 think · ⚡ · 21%   ~/Code/paseo.nvim
+  ⠹ 14s  claude/sonnet-5 · acceptEdits · 󰧑 think · ⚡ · ││││││ 42% left   ~/Code/paseo.nvim
    1 󰀄 Chat   2 󱙺 Sessions   3 󱕂 Settings   4 󰘬 Changes   5 󰄨 Usage   6 󰙅 Workspaces
 ```
 

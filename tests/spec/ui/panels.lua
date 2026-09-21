@@ -432,6 +432,60 @@ local function test_panels()
     header:find("needs you", 1, true) ~= nil
   )
 
+  -- The context gauge. It used to be a bare `42%` in the dim colour, which
+  -- said neither what it counted nor which way it ran -- and it counted the
+  -- fraction USED, so the figure you watched climb was the one you wanted to
+  -- watch fall. It now says what is LEFT, in the same words as the number.
+  surface_chat.permissions = {}
+  eq("ui: no usage reported, no gauge", sidebar.context(surface_chat), {})
+
+  surface_chat.usage = { contextWindowUsedTokens = 30, contextWindowMaxTokens = 100 }
+  local gauge = render.concat(sidebar.context(surface_chat))
+  truthy("ui: the gauge says what is left, not what is spent", gauge:find("70% left", 1, true))
+  truthy(
+    "ui: and the header carries it",
+    render.concat(sidebar.header(surface_chat)):find("70% left", 1, true) ~= nil
+  )
+
+  -- Pressure is the USED fraction, and it agrees with the Usage panel's
+  -- thresholds -- amber and red have to mean the same thing on both screens.
+  --
+  -- Measured on a cell with WIDTH, which is the whole point. The gauge used to
+  -- drain rather than fill, so the pressure colour sat on the shrinking run and
+  -- at `5% left` there was nothing left of it to see: the bar went quietly
+  -- all-track at exactly the moment it was supposed to be shouting.
+  ---@return string|nil hl, integer width  The pressure-coloured run, and how
+  ---wide it is. A roomy context paints almost none of the bar, which is the
+  ---point of it being calm; a tight one has to paint nearly all of it.
+  local function tone(used)
+    surface_chat.usage = { contextWindowUsedTokens = used, contextWindowMaxTokens = 100 }
+    for _, cell in ipairs(sidebar.context(surface_chat)) do
+      if cell[2] and cell[2] ~= "PaseoDim" and cell[2] ~= "PaseoTrack" then
+        return cell[2], vim.api.nvim_strwidth(cell[1] or "")
+      end
+    end
+  end
+  eq("ui: a roomy context is calm", (tone(10)), widgets.pressure_hl(10))
+  eq("ui: a tight one is not", (tone(95)), widgets.pressure_hl(95))
+  truthy("ui: and those two are different colours", tone(10) ~= tone(95))
+
+  -- The gauge used to DRAIN rather than fill, so the pressure colour sat on
+  -- the shrinking run: at `5% left` there was none of it left to see and the
+  -- bar went quietly all-track at exactly the moment it should have shouted.
+  local _, loud = tone(95)
+  truthy("ui: a nearly-full context paints most of the bar, not none of it", loud >= 5, loud)
+  local _, quiet = tone(5)
+  truthy("ui: and a nearly-empty one paints almost none", quiet <= 1, quiet)
+
+  -- Over 100% is a thing a context window genuinely reports once the overhead
+  -- is counted, and "-4% left" is a worse answer than "0% left".
+  surface_chat.usage = { contextWindowUsedTokens = 104, contextWindowMaxTokens = 100 }
+  truthy(
+    "ui: an overfull window floors at nothing left",
+    render.concat(sidebar.context(surface_chat)):find("0% left", 1, true) ~= nil
+  )
+  surface_chat.usage = nil
+
   -- The spinner. A static `●` looked identical at two seconds and at two
   -- minutes, so a wedged turn and a working one were the same picture; the
   -- elapsed count is the half that tells them apart.

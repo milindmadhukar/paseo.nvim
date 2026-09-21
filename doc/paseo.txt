@@ -1131,6 +1131,29 @@ two minutes, so a wedged turn and a working one were the same picture and the
 only way to tell was to open the app. A pending permission replaces the
 spinner with `` needs you``.
 
+                                                         *paseo-chat-context*
+The CONTEXT GAUGE sits in the same line, once the daemon has reported any
+usage: a six-cell bar and the figure it stands for. >
+
+    ⠹ 14s  claude/sonnet-5 · acceptEdits · ││││││ 58% left  ~/Code/kora
+<
+The bar is one glyph repeated and the FILL IS COLOUR, not shape -- the same
+two-tone track |paseo.ui.widgets|.bar draws everywhere else, because a track
+made of spaces is a hole rather than a track. On paper here it is six
+identical bars; on screen the first two or three are lit.
+
+It says what is LEFT and the bar FILLS as you spend it, and both halves of
+that are deliberate. It used to be a bare `42%`, which said neither what the
+number counted nor which way it ran -- and it counted the fraction USED, so
+the figure you watched climbing was the one you wanted to watch falling.
+
+The bar fills rather than drains for the same reason: the colour lives on the
+filled run, so a draining bar had nothing left to paint at `5% left`, and went
+quietly colourless at exactly the moment it was supposed to be shouting. Full
+and red now means the same thing the words do -- the window is nearly full and
+there is not much room. The thresholds are the ones the Usage tab uses, so
+amber and red mean one thing on both screens.
+
                                                            *paseo-chat-float*
 The FULL SCREEN surface -- the DEFAULT -- is `:Paseo chat`, `:Paseo dash`, or
 `<C-f>` from the sidebar. The same conversation, under the same header, plus a
