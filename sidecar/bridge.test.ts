@@ -266,6 +266,64 @@ test("catalog retains choices and feature lookup follows the model", async () =>
   assert.equal(featureRequests[1].provider, "codex/gpt-5.5");
 });
 
+test("plan limits come through whole, including a provider that failed", async () => {
+  // `listProviderUsage` lives on the raw DaemonClient rather than the typed
+  // API, so this also pins that the op reaches for `ctx.raw()` -- a typed-API
+  // lookup would be undefined and throw.
+  const ctx = new BridgeConnection();
+  ctx.raw = (() => ({
+    async listProviderUsage() {
+      return {
+        fetchedAt: "2026-09-21T10:00:00Z",
+        providers: [
+          {
+            providerId: "claude",
+            displayName: "Claude",
+            status: "available",
+            planLabel: "Max 20x",
+            windows: [
+              { id: "five_hour", label: "Session", usedPct: 23 },
+              { id: "weekly", label: "Weekly", usedPct: 91 },
+            ],
+          },
+          {
+            providerId: "codex",
+            displayName: "Codex",
+            status: "unavailable",
+            planLabel: null,
+            windows: [],
+            error: "not signed in",
+          },
+        ],
+      };
+    },
+  })) as any;
+  const usage: any = await providerOps(ctx)["providers.usage"]({
+    op: "providers.usage",
+  });
+  assert.equal(usage.providers[0].planLabel, "Max 20x");
+  assert.deepEqual(
+    usage.providers[0].windows.map((w: any) => w.id),
+    ["five_hour", "weekly"],
+  );
+  // An unavailable provider is passed through rather than filtered out: the
+  // panel draws "not signed in", which is the answer to a question the user
+  // asked, unlike a card that is silently missing.
+  assert.equal(usage.providers[1].error, "not signed in");
+
+  // A daemon too old for the request must not take the panel down with it.
+  const empty = new BridgeConnection();
+  empty.raw = (() => ({
+    async listProviderUsage() {
+      return undefined;
+    },
+  })) as any;
+  assert.deepEqual(
+    await providerOps(empty)["providers.usage"]({ op: "providers.usage" }),
+    { fetchedAt: null, providers: [] },
+  );
+});
+
 test("a timeline item keeps its kind on the payload, not just in the event name", async () => {
   // THE BUG THAT MADE EVERY TOOL CARD INVISIBLE. `kind` is the event name the
   // Lua listens on AND the field its renderer dispatches on; emitting it as

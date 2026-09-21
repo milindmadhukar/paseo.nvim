@@ -1125,7 +1125,7 @@ tab for every other thing Paseo knows: >
     2 Session     mode, thinking level, model and feature toggles
     3 Sessions    the agents AND terminals here, live -- open one
     4 Changes     what is changed on disk -- click a file to open it
-    5 Usage       context window, tokens and cost
+    5 Usage       context window, tokens, cost and what is left of the plan
     6 Workspaces  every workspace, and the repos in this unit of work
 <
 `1`-`6` jump, `<M-1>`-`<M-6>` and `<Tab>`/`<S-Tab>` do the same, and
@@ -1137,6 +1137,38 @@ key that does not work.
 
 Both surfaces share the same buffers, so switching preserves your draft and
 your scroll position.
+
+                                                           *paseo-chat-usage*
+The USAGE tab (`5`) answers two different questions, from two different
+places.
+
+The top is about THIS SESSION: how full the context window is, and what the
+last turn cost. That rides the agent snapshot and needs no polling. A tile is
+drawn only when it has a figure -- an empty card is not information, it is a
+box taking up a third of the row to tell you nothing.
+
+The tokens and the dollar figure arrive ONLY on turn completion, and the
+daemon does not keep them: the provider's streaming usage update carries the
+context window and nothing else, and it REPLACES the snapshot's copy rather
+than merging into it. So the plugin keeps the last complete turn itself, and
+the tile says `Last turn` when that is what you are looking at.
+
+The bottom is about the ACCOUNT -- `Plan limits`. One card per provider the
+daemon can fetch a quota for, headed with the plan name, with a bar per
+window: >
+
+    Claude  Max 20x
+      Session   23%   resets in 2h 14m
+      Weekly    91%   resets in 3d 4h
+<
+`claude` reports a five-hour window, a weekly one, and a weekly window per
+scoped model; `codex` reports a session window, a weekly one, a code-review
+window and a credit balance. A provider with no quota fetcher in the daemon --
+`fable` and `gemini` have none -- says so rather than leaving a gap, and one
+you are not signed in to shows what the daemon said about it.
+
+The numbers are the daemon's cache of the provider's own usage endpoint, not a
+poll: the panel asks once when you open it.
 
                                                          *paseo-chat-session*
 The SESSION tab (`2`) is the one you drive from the keyboard. Every setting

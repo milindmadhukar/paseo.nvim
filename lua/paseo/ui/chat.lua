@@ -1128,10 +1128,24 @@ function M.attach_events()
     M.apply_settings(chat, payload)
   end)
 
+  -- KEPT, not just stored, because the daemon throws these away.
+  --
+  -- This event rides `turn_completed`/`turn_failed`/`turn_canceled`, and it is
+  -- the ONLY place the token counts and the dollar figure ever arrive: the
+  -- provider's streaming `usage_updated` carries the context window and
+  -- nothing else, and the daemon REPLACES `lastUsage` with it wholesale rather
+  -- than merging. So the cost of a turn survives on the snapshot for about as
+  -- long as it takes the next turn to start streaming, and the Usage panel
+  -- spent the rest of the session drawing two empty cards. Holding the last
+  -- complete turn here costs one table and is what the panel falls back to.
   bridge.on("usage", function(payload)
     local chat = by_agent(payload.agentId)
     if chat then
       chat.usage = payload.usage
+      local turn = payload.usage or {}
+      if turn.inputTokens or turn.outputTokens or turn.totalCostUsd then
+        chat.last_turn_usage = turn
+      end
       set_winbar(chat)
     end
   end)

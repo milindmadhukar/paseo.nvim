@@ -515,8 +515,117 @@ local function test_toggle_height()
   truthy("toggles: the whole row is clickable, not just the label", clickable >= 4, clickable)
 end
 
+--- The Usage panel draws what it has and nothing else.
+---
+--- Two empty cards sat on that panel for most of every session, and it took
+--- reading the daemon to find out why: `usage_updated` REPLACES `lastUsage`
+--- with a payload carrying only the context window, so the tokens and cost
+--- from `turn_completed` are wiped seconds after they arrive. The panel had no
+--- opinion about that -- it drew three tiles unconditionally and put an em
+--- dash in two of them.
+local function test_usage_panel()
+  local usage = require "paseo.ui.panels.usage"
+  local bridge = require "paseo.bridge"
+
+  -- The plan limits are a daemon round trip. Stub it, both because the sidecar
+  -- is not running here and because the interesting assertions are about what
+  -- the panel does with the answer.
+  local old_ensure, old_request = bridge.ensure, bridge.request
+  local fetched
+  bridge.ensure = function(fn)
+    fn(nil)
+  end
+  bridge.request = function(op, _args, cb)
+    fetched = op
+    cb(nil, {
+      fetchedAt = "2026-09-21T10:00:00Z",
+      providers = {
+        {
+          providerId = "claude",
+          displayName = "Claude",
+          status = "available",
+          planLabel = "Max 20x",
+          windows = {
+            { id = "five_hour", label = "Session", usedPct = 23 },
+            { id = "weekly", label = "Weekly", usedPct = 91 },
+          },
+        },
+      },
+    })
+  end
+
+  ---@param chat table
+  ---@return string
+  local function drawn(chat)
+    local out = {}
+    for _, line in ipairs(usage.lines(chat, 100)) do
+      for _, cell in ipairs(line) do
+        out[#out + 1] = cell[1] or ""
+      end
+      out[#out + 1] = "\n"
+    end
+    return table.concat(out)
+  end
+
+  usage.invalidate()
+  local chat = {
+    provider = "claude/claude-opus-5",
+    usage = { contextWindowUsedTokens = 236028, contextWindowMaxTokens = 1000000 },
+  }
+  -- The first draw is the one that ASKS; it returns "loading" because in
+  -- production the answer is a round trip. The stub answers synchronously, so
+  -- the second draw has it.
+  drawn(chat)
+  eq("ui: the Usage panel asks the daemon for plan limits", fetched, "providers.usage")
+  local context_only = drawn(chat)
+  truthy("ui: context is drawn when it is known", context_only:find("Context", 1, true) ~= nil)
+  truthy(
+    "ui: an empty turn tile is not drawn at all",
+    context_only:find("This turn", 1, true) == nil
+      and context_only:find("Last turn", 1, true) == nil
+  )
+  truthy("ui: nor an empty cost tile", context_only:find("Cost", 1, true) == nil)
+  truthy("ui: nor a table of three em dashes", context_only:find("cached", 1, true) == nil)
+
+  -- The plan is the thing the panel could not answer before.
+  truthy("ui: the plan name is on the limits card", context_only:find("Max 20x", 1, true) ~= nil)
+  truthy("ui: with the five-hour window", context_only:find("Session", 1, true) ~= nil)
+  truthy("ui: and the weekly one", context_only:find("Weekly", 1, true) ~= nil)
+
+  -- What `chat.lua` kept off the `usage` event, because the snapshot will not
+  -- keep it. Labelled as the LAST turn, since that is what it is by then.
+  local after_turn = drawn {
+    provider = "claude/claude-opus-5",
+    usage = { contextWindowUsedTokens = 1, contextWindowMaxTokens = 10 },
+    last_turn_usage = {
+      inputTokens = 120,
+      cachedInputTokens = 9400,
+      outputTokens = 300,
+      totalCostUsd = 0.1234,
+    },
+  }
+  truthy(
+    "ui: the last completed turn survives the snapshot",
+    after_turn:find("Last turn", 1, true) ~= nil
+  )
+  truthy("ui: with its cost", after_turn:find("$0.1234", 1, true) ~= nil)
+  truthy("ui: and its breakdown", after_turn:find("cached", 1, true) ~= nil)
+
+  -- A provider the daemon has no quota fetcher for -- fable and gemini have
+  -- none -- must say so rather than leave a gap.
+  local no_fetcher = drawn { provider = "fable/fable-5-1" }
+  truthy(
+    "ui: a provider with no quota fetcher says so",
+    no_fetcher:find("no plan limits reported for ", 1, true) ~= nil
+  )
+
+  bridge.ensure, bridge.request = old_ensure, old_request
+  usage.invalidate()
+end
+
 return {
   { "ui.session", test_session_source },
   { "ui.panels", test_panels },
   { "ui.toggles", test_toggle_height },
+  { "ui.usage", test_usage_panel },
 }

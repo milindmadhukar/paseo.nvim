@@ -241,7 +241,7 @@ composer geometry are both measured against it.
 | `Session` | mode, thinking level, model, feature toggles — keyboard or click |
 | `Sessions` | the agents **and terminals** here, live; open one |
 | `Changes` | what is changed on disk, per repo; click a file to open it |
-| `Usage` | context window, tokens, cost |
+| `Usage` | context window, tokens, cost — and the plan's 5-hour and weekly limits |
 | `Workspaces` | every workspace Paseo knows, plus the repos in this unit of work |
 
 `1`–`7` jump, `<M-1>`–`<M-7>` and `<Tab>`/`<S-Tab>` do the same, and
