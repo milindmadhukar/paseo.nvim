@@ -189,19 +189,7 @@ function M.open(chat)
   -- No `^V image` hint. Pasting an image is now what `p` does, so it is not a
   -- key you have to be told about -- and a hint you do not need is a hint that
   -- costs you the width it occupies.
-  vim.wo[chat.win_composer].winbar = render.to_winbar {
-    { "  ", "PaseoDim" },
-    { icons.spell "<CR>", "PaseoKey" },
-    { " send · ", "PaseoDim" },
-    { "<C-f>", "PaseoKey" },
-    { " full screen · ", "PaseoDim" },
-    { "<C-c>", "PaseoKey" },
-    { " stop · ", "PaseoDim" },
-    { "<C-t>", "PaseoKey" },
-    { " speak · ", "PaseoDim" },
-    { "q", "PaseoKey" },
-    { " close", "PaseoDim" },
-  }
+  M.refresh_hints(chat)
 
   -- An unrelated `:split` -- or a user's `winheight` -- must not reflow the box
   -- out from under the fit. Explicit `nvim_win_set_height` still works on a
@@ -217,6 +205,28 @@ function M.open(chat)
   -- prompt into the composer before you ever touch it -- should show it.
   M.fit_composer(chat)
   api.nvim_set_current_win(from)
+end
+
+---The composer's hint bar, sized to the pane.
+---
+---DEGRADES RATHER THAN TRUNCATES. A winbar wider than its window is cut, and
+---the cut takes the LEFT -- so a sixty-column sidebar with five hints on the
+---bar showed `<nd · <C-f> full screen · …`, having eaten the one thing you
+---most need to know. `widgets.hints` drops whole hints off the end instead,
+---which puts `send` first and leaves `close` to be the one that goes.
+---@param chat table
+function M.refresh_hints(chat)
+  local win = chat.win_composer
+  if not (win and api.nvim_win_is_valid(win)) then
+    return
+  end
+  vim.wo[win].winbar = render.to_winbar(require("paseo.ui.widgets").hints({
+    { "<CR>", "send" },
+    { "<C-f>", "screen" },
+    { "<C-c>", "stop" },
+    { "<C-t>", "speak" },
+    { "q", "close" },
+  }, nil, api.nvim_win_get_width(win) - 2))
 end
 
 ---Grow the composer to what is in it, and shrink it back.

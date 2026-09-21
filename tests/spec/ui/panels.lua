@@ -356,6 +356,30 @@ local function test_panels()
   local hint = vim.wo[surface_chat.win_composer].winbar
   truthy("ui: the composer's hint does not advertise ^V", hint:find("^V", 1, true) == nil, hint)
   truthy("ui: it still says how to send", hint:find("send", 1, true) ~= nil, hint)
+
+  -- THE HINT BAR DEGRADES RATHER THAN TRUNCATING, the way the tab bar does.
+  -- A winbar wider than its window is cut, and the cut takes the LEFT -- so a
+  -- narrow sidebar with five hints showed `<nd · <C-f> full screen · …`,
+  -- having eaten the one thing you most need to know.
+  local wide = widgets.hints({
+    { "<CR>", "send" },
+    { "<C-f>", "screen" },
+    { "<C-c>", "stop" },
+    { "q", "close" },
+  }, nil, 200)
+  local narrow = widgets.hints({
+    { "<CR>", "send" },
+    { "<C-f>", "screen" },
+    { "<C-c>", "stop" },
+    { "q", "close" },
+  }, nil, 20)
+  truthy("ui: a wide bar keeps every hint", render.width(wide) > render.width(narrow))
+  truthy("ui: a narrow one keeps the first", render.to_winbar(narrow):find("send", 1, true) ~= nil)
+  truthy(
+    "ui: and drops whole hints rather than cutting one in half",
+    render.width(narrow) <= 20,
+    render.width(narrow)
+  )
   sidebar.close(surface_chat)
   eq("ui: and the sidebar closes both its windows", #vim.api.nvim_list_wins(), wins_at_hint)
 

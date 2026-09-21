@@ -309,14 +309,14 @@ local function footer_lines()
   -- into five files and they had already drifted -- this one advertised
   -- "1-5 jump" while there were six tabs.
   return {
-    require("paseo.ui.widgets").hints {
+    require("paseo.ui.widgets").hints({
       { "1-" .. #M.TABS, "tabs" },
       { "<Tab>", "cycle" },
       { "<C-f>", "sidebar" },
       { "<C-c>", "stop" },
       { "<C-t>", "speak" },
       { "q", "close" },
-    },
+    }, nil, state and (state.geometry.width - 4) or nil),
   }
 end
 

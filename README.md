@@ -233,7 +233,9 @@ the conversation, normal mode or insert.
 
 The tab bar **degrades rather than truncates**, because the tab that would
 fall off the end is always the last one — which is the one you had not
-discovered yet. Four levels, widest that fits:
+discovered yet. The hint bars do the same: a winbar wider than its window is
+cut from the *left*, so a narrow sidebar was eating `send` — the first thing
+you need — to keep `close`. Four levels, widest that fits:
 
 | | |
 |---|---|
