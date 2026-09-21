@@ -56,6 +56,52 @@ function M.invalidate()
   cache = nil
 end
 
+---Buffer line -> what is on it, rebuilt on every draw.
+---
+---A map rather than arithmetic on the cursor row, for the reason the Sessions
+---panel gives: computing `row - <however many heading rows there happen to
+---be>` means adding a line to the heading silently retargets a destructive
+---key. Here the headings are data-dependent, so there is no constant to get
+---wrong in the first place.
+---@type table<integer, { kind: "workspace"|"group", ws: table|nil, name: string|nil,
+---                       projects: string[]|nil }>
+M._rows = {}
+
+---@return integer  The buffer line the panel's first line is drawn on.
+local function offset()
+  return require("paseo.ui.float").body_row_offset()
+end
+
+---What the cursor is on.
+---@return table|nil
+local function under_cursor()
+  local win = vim.api.nvim_get_current_win()
+  return M._rows[vim.api.nvim_win_get_cursor(win)[1]]
+end
+
+---The group a cursor row belongs to, whether it is on the heading or on one
+---of the workspaces under it.
+---@param row table|nil
+---@return table|nil
+local function group_of(row)
+  if not row then
+    return nil
+  end
+  if row.kind == "group" then
+    return row
+  end
+  local key = row.ws and (row.ws.group or row.ws.project)
+  if not key then
+    return nil
+  end
+  for _, entry in pairs(M._rows) do
+    if entry.kind == "group" and entry.name == key then
+      return entry
+    end
+  end
+  return nil
+end
+
 ---@param ws table
 ---@return string
 local function shape(ws)
@@ -86,6 +132,7 @@ function M.lines(chat, width)
 
   local here = vim.fn.resolve(vim.fn.fnamemodify(chat.root, ":p")):gsub("/+$", "")
   local list = cache.list or {}
+  M._rows = {}
 
   -- GROUPED, the way the app groups them, and NOT the way the daemon reports
   -- them. A `ws` workspace at `<project>/.workspaces/<name>` is a plain
@@ -149,18 +196,29 @@ function M.lines(chat, width)
       widgets.swatch(key),
       { " " .. key, "PaseoHeader" },
     }
-    if #group.projects > 0 then
-      heading[#heading + 1] = { "  " .. icons.ui.remove, "PaseoDim", remove }
+    -- ONLY UNDER THE POINTER. A destructive action spelled out on every group
+    -- heading, permanently, is three invitations to lose a project record in
+    -- a list you are reading for something else. The key -- `x` -- is how you
+    -- get here without a mouse, and it is advertised once, at the bottom.
+    if #group.projects > 0 and widgets.hovered(remove_id) then
+      heading[#heading + 1] = { "  " .. icons.ui.remove, "PaseoToolFail", remove }
       heading[#heading + 1] = { " forget project", "PaseoDim", remove }
     end
-    lines[#lines + 1] = widgets.hovered(remove_id)
-        and widgets.fill_row(heading, width, "PaseoRowHover")
-      or heading
-    -- The hover target is the heading row itself, so the affordance only
-    -- lights up when the pointer is on the line it belongs to.
-    for _, cell in ipairs(lines[#lines]) do
-      cell[3] = cell[3] or widgets.hover(remove_id, "body")
+    if #group.projects > 0 then
+      lines[#lines + 1] = widgets.hovered(remove_id)
+          and widgets.fill_row(heading, width, "PaseoRowHover")
+        or heading
+      for _, cell in ipairs(lines[#lines]) do
+        cell[3] = cell[3] or widgets.hover(remove_id, "body")
+      end
+    else
+      lines[#lines + 1] = heading
     end
+    -- AFTER the append, so `#lines` is this line's own panel index. Panel
+    -- line `i` is drawn on buffer line `i + offset()`; an entry recorded one
+    -- line early puts `d` on a group heading over the first workspace under
+    -- it, which archives the wrong thing without ever looking wrong.
+    M._rows[#lines + offset()] = { kind = "group", name = key, projects = group.projects }
 
     for _, ws in ipairs(group.rows) do
       local dir = vim.fn.resolve(ws.directory or ""):gsub("/+$", "")
@@ -208,6 +266,7 @@ function M.lines(chat, width)
         end
         lines[#lines + 1] = row
       end
+      M._rows[#lines + offset()] = { kind = "workspace", ws = ws }
     end
 
     lines[#lines + 1] = {}
@@ -224,6 +283,18 @@ function M.lines(chat, width)
     { "new workspace here", "PaseoDim", new },
     { "      " .. icons.ui.more .. " ", "PaseoKey", picker },
     { "open, sessions, archive", "PaseoDim", picker },
+  }
+  -- The keys, said once. The row affordances are for the pointer; this is for
+  -- everyone else, and it is why `forget project` is not written out three
+  -- times above.
+  lines[#lines + 1] = {
+    { "      " },
+    { "<CR>", "PaseoKey" },
+    { " open · ", "PaseoDim" },
+    { "d", "PaseoKey" },
+    { " archive · ", "PaseoDim" },
+    { "x", "PaseoKey" },
+    { " forget project", "PaseoDim" },
   }
 
   -- The repos of the unit of work this session is in -- `:Paseo repos`, which
@@ -248,6 +319,70 @@ function M.lines(chat, width)
   end
 
   return lines
+end
+
+---What this panel has bound on the shared chrome buffer.
+---@type table[]|nil
+local bound
+
+---@param _chat table
+---@param buf integer
+function M.attach(_chat, buf)
+  local function refresh()
+    M.invalidate()
+    require("paseo.ui.float").rebuild()
+  end
+
+  -- Through |paseo.ui.keys|, which gives back what it displaced: the panels
+  -- share one chrome buffer and volt binds `<CR>` on it at open, so deleting
+  -- our own would leave the key dead on every other tab.
+  bound = require("paseo.ui.keys").take(buf, {
+    {
+      "<CR>",
+      function()
+        local row = under_cursor()
+        local ws = row and row.ws
+        if not (ws and ws.directory and ws.directory ~= "") then
+          return
+        end
+        require("paseo.ui.chat").open { root = ws.directory, title = ws.name }
+      end,
+      "paseo: open this workspace",
+    },
+    {
+      "d",
+      function()
+        local row = under_cursor()
+        if not (row and row.ws) then
+          return
+        end
+        require("paseo.workspaces").confirm_archive(row.ws, refresh)
+      end,
+      "paseo: archive this workspace",
+    },
+    -- A different key from `d` on purpose. Archiving retires one unit of work
+    -- and forgetting drops the daemon's record of a whole tree; one key that
+    -- did both depending on which line you were on is the shape of a mistake.
+    {
+      "x",
+      function()
+        local group = group_of(under_cursor())
+        if not (group and group.projects and #group.projects > 0) then
+          return
+        end
+        require("paseo.workspaces").remove_project(group.projects, group.name, refresh)
+      end,
+      "paseo: forget this project",
+    },
+  })
+end
+
+---@param _chat table
+---@param buf integer
+function M.detach(_chat, buf)
+  local saved = bound
+  bound = nil
+  require("paseo.ui.keys").release(buf, saved)
 end
 
 return M

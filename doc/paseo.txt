@@ -954,18 +954,26 @@ Each group is a heading, with its workspaces under it. Two destructive acts,
 deliberately in different places because they are not two strengths of one
 thing:
 
-    archive         on a workspace row, under the pointer. Retires that unit
-                    of work, and takes its worktrees and their `ws/<name>`
-                    branches with it. Refuses, and says what it would lose, if
-                    a member holds work that exists nowhere else
-    forget project  on the group heading, beside the name it would remove.
-                    Drops PASEO'S RECORD of a directory tree -- never the
-                    files. This is how you get rid of the top-level project
-                    the daemon invented for a `.workspaces/<name>` directory.
-                    A group can span several such records; it removes all of
-                    them, and says how many before it does
+    <CR>            open a chat on the workspace under the cursor
+    d               archive it. Retires that unit of work, and takes its
+                    worktrees and their `ws/<name>` branches with it. Refuses,
+                    and says what it would lose, if a member holds work that
+                    exists nowhere else
+    x               forget the project the cursor is in -- from the heading or
+                    from any workspace under it. Drops PASEO'S RECORD of a
+                    directory tree, never the files. This is how you get rid
+                    of the top-level project the daemon invented for a
+                    `.workspaces/<name>` directory. A group can span several
+                    such records; it removes all of them, and says how many
+                    before it does
 
-Both confirm first.
+Two keys rather than one that decides from the line you are on: archiving
+retires a unit of work and forgetting drops a record of a whole tree, and one
+key for both is the shape of a mistake. Both confirm first.
+
+With the pointer, the same two are offered on the row and on the heading --
+under the pointer only, because a column of destructive glyphs down the side
+of a list is a column of mistakes.
 
                                                           *paseo-workspaces-keys*
 In the workspace picker (|:Paseo-workspaces|) ~
@@ -1394,6 +1402,12 @@ On the Session tab ~
     <CR>      apply the focused setting
     m t f s   jump to a group of settings
     r         re-fetch from the daemon
+
+On the Workspaces tab ~
+
+    <CR>      open a chat on the workspace under the cursor
+    d         archive it -- |paseo-workspaces-panel|
+    x         forget the project it is in -- |paseo-workspaces-panel|
 
 On the Sessions tab ~
 

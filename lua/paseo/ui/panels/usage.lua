@@ -143,6 +143,13 @@ local function amount(balance)
 end
 
 ---One provider's plan, as a card.
+---
+---DENSE ON PURPOSE: two rows per window, a label line and a bar, with the
+---reset time on the label line rather than under it. The body of this panel is
+---TRUNCATED, not scrolled (`float.body_lines`), so every row this spends is a
+---row the provider below it does not get -- and a `widgets.tile` per window
+---costs three, plus a blank, plus a reset row. Four windows of that is the
+---whole panel.
 ---@param usage table
 ---@param width integer
 ---@return table[][]
@@ -160,49 +167,37 @@ local function limits_card(usage, width)
 
   for _, window in ipairs(usage.windows or {}) do
     local pct = window.usedPct or (window.remainingPct and (100 - window.remainingPct)) or nil
+    local hl = pct and widgets.pressure_hl(pct) or "PaseoDim"
+
+    local right = {}
     local resets = until_text(window.resetsAt)
-    vim.list_extend(
-      lines,
-      widgets.tile {
-        icon = icons.ui.clock,
-        label = window.label or window.id or "window",
-        value = pct and ("%d%%"):format(math.floor(pct))
-          or (resets and ("resets " .. resets) or "—"),
-        w = inner,
-        val = pct,
-        hl = pct and widgets.pressure_hl(pct) or "PaseoDim",
-      }
-    )
-    if pct and resets then
-      lines[#lines + 1] = widgets.row(
-        { { "", "PaseoCardText" } },
-        { { "resets in " .. resets, "PaseoDim" } },
-        inner
-      )
+    if resets then
+      right[#right + 1] = { resets .. "   ", "PaseoDim" }
     end
-    lines[#lines + 1] = {}
+    right[#right + 1] = { pct and ("%d%%"):format(math.floor(pct)) or "—", "PaseoCardTitle" }
+
+    lines[#lines + 1] = widgets.row({
+      { icons.ui.clock .. "  ", hl },
+      { window.label or window.id or "window", "PaseoCardText" },
+    }, right, inner)
+    lines[#lines + 1] = widgets.bar { w = inner, val = pct or 0, hl = hl, thin = true }
   end
 
   for _, balance in ipairs(usage.balances or {}) do
-    lines[#lines + 1] = widgets.row(
-      { { balance.label or balance.id or "balance", "PaseoCardText" } },
-      { { amount(balance), "PaseoCardTitle" } },
-      inner
-    )
+    lines[#lines + 1] = widgets.row({
+      { icons.ui.cost .. "  ", "PaseoYellow0" },
+      { balance.label or balance.id or "", "PaseoCardText" },
+    }, { { amount(balance), "PaseoCardTitle" } }, inner)
   end
 
   for _, detail in ipairs(usage.details or {}) do
     lines[#lines + 1] = widgets.row(
-      { { detail.label or detail.id or "", "PaseoCardText" } },
+      { { detail.label or detail.id or "", "PaseoDim" } },
       { { detail.value or "", "PaseoDim" } },
       inner
     )
   end
 
-  -- A trailing blank from the last window is a gap inside the box.
-  while #lines > 0 and vim.tbl_isempty(lines[#lines]) do
-    table.remove(lines)
-  end
   if #lines == 0 then
     lines[1] = { { "no windows reported", "PaseoDim" } }
   end
@@ -212,12 +207,7 @@ local function limits_card(usage, width)
     title[#title + 1] = { "  " .. usage.planLabel, "PaseoBadge" }
   end
 
-  return widgets.card {
-    title = title,
-    icon = icons.ui.limits,
-    w = width,
-    lines = lines,
-  }
+  return widgets.card { title = title, icon = icons.ui.limits, w = width, lines = lines }
 end
 
 ---The Limits section: every provider the daemon can fetch a quota for.
@@ -304,10 +294,23 @@ local function limits_lines(chat, width)
   return lines
 end
 
+---How many rows the Limits section is about to want.
+---
+---Measured by building it, which is cheap -- it is a few dozen table rows and
+---no window calls -- and is the only honest answer: the alternative is a
+---second formula for the section's height that can disagree with the first.
 ---@param chat table
 ---@param width integer
+---@return integer
+local function limits_height(chat, width)
+  return #limits_lines(chat, width)
+end
+
+---@param chat table
+---@param width integer
+---@param height? integer  Rows the panel is being given. See `M.lines`.
 ---@return table[][]
-function M.lines(chat, width)
+function M.lines(chat, width, height)
   local usage = chat.usage or (chat.config_snapshot and chat.config_snapshot.usage)
   local last = chat.last_turn_usage
 
@@ -407,9 +410,18 @@ function M.lines(chat, width)
     vim.list_extend(lines, widgets.grid_col(column))
   end
 
+  -- THE BODY IS TRUNCATED, NOT SCROLLED (`float.body_lines`), so the rows this
+  -- section is prepared to give up have to be decided here rather than found
+  -- out by having them silently cut. Both of these say again, at length, what
+  -- a tile above already said in one line -- so they are what goes when the
+  -- plan limits need the room, and the limits are the half you cannot read
+  -- anywhere else.
+  local room = height and (height - #lines - 4 - limits_height(chat, width)) or math.huge
+  local detail = room > 0
+
   -- The breakdown, when there is one. All-nil rows are three em dashes under
   -- three headings, which is the table equivalent of an empty card.
-  if turn_usage and turn > 0 then
+  if detail and turn_usage and turn > 0 then
     lines[#lines + 1] = {}
     local table_lines = widgets.table(
       {
@@ -435,7 +447,7 @@ function M.lines(chat, width)
     end
   end
 
-  if used and max then
+  if detail and used and max then
     lines[#lines + 1] = {}
     lines[#lines + 1] = {
       { "  " },

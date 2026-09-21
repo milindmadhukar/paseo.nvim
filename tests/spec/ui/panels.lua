@@ -740,9 +740,34 @@ local function test_workspaces_panel()
   local billings = select(2, text:gsub("billing", ""))
   eq("ui: and billing is a workspace, not also a project", billings, 1)
 
-  -- Forgetting the project is offered on the heading, where the name it would
-  -- remove actually is.
-  truthy("ui: a group offers to be forgotten", text:find("forget project", 1, true) ~= nil, text)
+  -- The keys are advertised once, at the bottom, rather than written out on
+  -- every heading: a destructive action spelled out three times in a list you
+  -- are reading for something else is three invitations to lose a record.
+  truthy(
+    "ui: the panel says how to archive and forget",
+    text:find("forget project", 1, true) ~= nil,
+    text
+  )
+  eq("ui: and does not offer it on every heading", select(2, text:gsub("forget project", "")), 1)
+
+  -- WHICH LINE EACH ROW IS ON, and it has to be exact: `d` and `x` act on
+  -- whatever `M._rows` says the cursor is over, so an entry recorded one line
+  -- early puts `d` on a group heading over the first workspace under it --
+  -- archiving the wrong thing without ever looking wrong.
+  local offset = require("paseo.ui.float").body_row_offset()
+  local checked = 0
+  for line, row in pairs(panel._rows) do
+    local drawn_at = drawn[line - offset]
+    local name = row.name or (row.ws and row.ws.name)
+    truthy(
+      ("ui: the row map points `%s` at the line it is drawn on"):format(tostring(name)),
+      drawn_at ~= nil and drawn_at:find(name, 1, true) ~= nil,
+      ("line %d holds %q"):format(line, tostring(drawn_at))
+    )
+    checked = checked + 1
+  end
+  -- Three workspaces in two groups: every one of the five is addressable.
+  eq("ui: every group and workspace is in the row map", checked, 5)
 
   workspaces.list, agents.watch, agents.summary = old_list, old_watch, old_summary
   panel.invalidate()
