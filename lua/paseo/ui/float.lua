@@ -70,8 +70,8 @@ local function geometry()
   local col = type(ui.col) == "number" and math.floor(ui.col) or math.floor((columns - w) / 2)
 
   -- The composer is measured from the bottom, so the conversation gets what is
-  -- left. Clamped to leave the conversation at least five rows: a composer
-  -- taller than the box would give it a negative height.
+  -- left. A CEILING it grows to rather than a height it stands at -- see
+  -- `M.resize_composer`. Clamped to leave the conversation at least five rows.
   local composer = type(ui.composer) == "number" and math.floor(ui.composer) or 7
   composer = math.max(1, math.min(composer, h - 10))
 
@@ -384,16 +384,24 @@ local function footer_lines()
   -- into five files and they had already drifted -- this one advertised
   -- "1-5 jump" while there were six tabs.
   local widgets = require "paseo.ui.widgets"
-  local hints = widgets.hints {
+  local pairs_ = {
     { "1-" .. #M.TABS, "tabs" },
     { "<Tab>", "cycle" },
     { "<C-f>", "sidebar" },
+    { "<C-c>", "stop" },
+    { "<C-t>", "speak" },
     { "q", "close" },
   }
 
   if not state then
-    return { hints }
+    return { widgets.hints(pairs_) }
   end
+
+  -- Sized to what is left after the elapsed count, and DEGRADING rather than
+  -- truncating: the hint that falls off the end is the least important one,
+  -- whereas a row cut to fit loses whichever end the renderer happens to cut.
+  local status = sidebar.status(state.chat)
+  local hints = widgets.hints(pairs_, nil, state.geometry.width - 2 - render.width(status) - 2)
 
   -- The spinner and the elapsed count, right-aligned against the hints. Here
   -- rather than in the header for two reasons: this is the row your eye goes
@@ -405,7 +413,7 @@ local function footer_lines()
   -- where you are looking: the composer only exists on the Chat tab, and a
   -- turn keeps running while you read the Changes panel.
   return {
-    widgets.row(hints, sidebar.status(state.chat), state.geometry.width - 2, "PaseoNormal"),
+    widgets.row(hints, status, state.geometry.width - 2, "PaseoNormal"),
   }
 end
 

@@ -124,4 +124,49 @@ function M.panes(g, composer_h)
   }
 end
 
+---Rows the composer should get for what is in it, between `min` and `max`.
+---
+---Measured in SCREEN rows, not buffer lines. The composer soft-wraps, and a
+---sixty-column sidebar turns one pasted sentence into three rows -- so a box
+---that counted lines would say "1" while holding three rows of text, which is
+---a box you type into blind. `prompt.lua` counts lines because its own box is
+---78 columns wide and wrapping is the exception there; here it is the rule.
+---
+---Three ways of asking, best first, because the two surfaces ask at different
+---moments: the float sizes the pane BEFORE opening it, and the sidebar fits a
+---window that already exists.
+---
+---`nvim_win_text_height` measures against the window's WIDTH, so changing the
+---height cannot change the answer. That is what makes the fit converge in one
+---pass instead of oscillating against its own resize event.
+---@param opts { buf: integer, win?: integer, width?: integer, min?: integer, max: integer }
+---@return integer
+function M.composer_rows(opts)
+  if not (opts.buf and vim.api.nvim_buf_is_valid(opts.buf)) then
+    return math.max(opts.min or 1, 1)
+  end
+
+  local rows
+  -- The window's own answer, when there is a window. This is the only one that
+  -- is exactly right: it knows about 'linebreak', tabs, and characters wider
+  -- than one cell, none of which dividing a display width by a column count
+  -- can account for.
+  if opts.win and vim.api.nvim_win_is_valid(opts.win) then
+    local ok, height = pcall(vim.api.nvim_win_text_height, opts.win, {})
+    rows = ok and height and height.all or nil
+  end
+
+  -- Before the window exists -- `show_chat_panes` sizes the pane it is about
+  -- to open -- the width it is ABOUT to have is the next best thing.
+  if not rows and opts.width and opts.width > 0 then
+    rows = 0
+    for _, line in ipairs(vim.api.nvim_buf_get_lines(opts.buf, 0, -1, false)) do
+      rows = rows + math.max(1, math.ceil(vim.api.nvim_strwidth(line) / opts.width))
+    end
+  end
+
+  rows = rows or vim.api.nvim_buf_line_count(opts.buf)
+  return math.max(opts.min or 1, math.min(opts.max, rows))
+end
+
 return M

@@ -564,6 +564,9 @@ function M.resolved(chat, request_id, resolution)
     local label = resolution
       and (resolution.label or (resolution.behavior == "allow" and "allowed" or "denied"))
     block.item.resolution = label or "answered"
+    -- Written onto the item the transcript already holds, so the rendered card
+    -- it cached against that table is now a lie. Say so before redrawing.
+    transcript.invalidate(block)
     transcript.rerender(chat, block)
   end
 

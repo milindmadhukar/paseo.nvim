@@ -338,15 +338,30 @@ end
 ---tabs.
 ---@param pairs_ table[]  `{ { "h l", "move" }, … }`
 ---@param hl? string  Background for the gaps, when drawn inside a card.
+---@param w? integer  Stop before overflowing this many columns.
 ---@return table[]
-function M.hints(pairs_, hl)
+function M.hints(pairs_, hl, w)
   local line = {}
   for i, pair in ipairs(pairs_) do
+    local part = {}
     if i > 1 then
-      line[#line + 1] = { "   ", hl }
+      part[#part + 1] = { "   ", hl }
     end
-    line[#line + 1] = M.keycap(pair[1])
-    line[#line + 1] = { " " .. pair[2], hl or "PaseoDim" }
+    part[#part + 1] = M.keycap(pair[1])
+    part[#part + 1] = { " " .. pair[2], hl or "PaseoDim" }
+
+    -- DEGRADES RATHER THAN TRUNCATES, the way the tab bar does, and for the
+    -- same reason: the hint that falls off the end is the least important
+    -- one, whereas a bar cut to fit loses whichever end the renderer happens
+    -- to cut -- in the sidebar's winbar that is the LEFT, so the first thing
+    -- to go was how to send.
+    if w then
+      local after = M.line_w(line) + M.line_w(part)
+      if after > w then
+        break
+      end
+    end
+    vim.list_extend(line, part)
   end
   return line
 end

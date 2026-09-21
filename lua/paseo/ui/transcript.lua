@@ -54,6 +54,10 @@ function M.reset(chat)
   chat.next_id = 1
   chat.open_text = nil
   chat.seq, chat.epoch = nil, nil
+  -- The blocks are gone, so nothing is drawn at that width any more. Without
+  -- this, a chat reset and refetched at the SAME width -- which is every
+  -- `replaced` -- guards itself out of ever drawing its new history.
+  chat.rendered_width = nil
 
   -- The permission bookkeeping goes with the blocks it points at.
   --
@@ -167,6 +171,79 @@ local function default_expanded(item)
   return item.status == "running" or item.status == "failed"
 end
 
+---A card long enough that keeping it costs more than rebuilding it. A
+---four-hundred-line expanded shell output is both the most memory and the
+---least likely to be wanted again at a width it has already been drawn at.
+local CACHE_MAX_LINES = 200
+
+---Two slots. The ping-pong worth having is sidebar width <-> float width,
+---which `<C-f>` walks between and which is exactly two.
+local CACHE_SLOTS = 2
+
+---Throw away a block's cached rendering.
+---
+---MUST be called by anything that mutates `block.item` IN PLACE rather than
+---replacing it -- `M.stream` appending a chunk to `item.text`, `permission`
+---writing a resolution onto the item it already handed us. Replacement is
+---covered by `rerender` itself; in-place mutation is invisible from here and
+---is the only way the cache can lie.
+---@param block table
+function M.invalidate(block)
+  block.rev = (block.rev or 0) + 1
+  block.drawn = nil
+end
+
+---The card for a block, from its cache when the cache is honest.
+---
+---`timeline.card` is pure in `(item, width, expanded)` with ONE exception:
+---`tool_card` asks `animate.flash_stop`, which is a clock. So the flash's
+---on/off joins the key -- and because every frame of a settle flash renders
+---identically (the stop index picks no colour; `flashing` is used as a
+---boolean), that turns a twelve-frame flash from twelve full rebuilds into
+---two.
+---@param block table
+---@param width integer
+---@return { key: string, lines: table[][], collapsible: boolean }
+local function card_for(block, width)
+  local flashing = require("paseo.ui.animate").flash_stop(timeline.flash_key(block.item)) ~= nil
+  local key = ("%d|%s|%d|%s"):format(
+    width,
+    tostring(block.expanded),
+    block.rev or 0,
+    tostring(flashing)
+  )
+
+  local cache = block.cards
+  if cache then
+    for i, entry in ipairs(cache) do
+      if entry.key == key then
+        -- Most recent to the front, so two slots really do hold the two
+        -- widths rather than one width and whatever was drawn last.
+        if i > 1 then
+          table.remove(cache, i)
+          table.insert(cache, 1, entry)
+        end
+        return entry
+      end
+    end
+  end
+
+  local card = timeline.card(block.item, { width = width, expanded = block.expanded })
+  local entry = { key = key, lines = card.lines, collapsible = card.collapsible }
+  -- Safe to hold on to: `render.to_buffer` flattens its input into fresh
+  -- tables and never writes back into the cells it was handed, unlike volt's
+  -- `draw`, which strips the click handler out of `cell[3]`.
+  if #card.lines <= CACHE_MAX_LINES then
+    cache = cache or {}
+    table.insert(cache, 1, entry)
+    while #cache > CACHE_SLOTS do
+      table.remove(cache)
+    end
+    block.cards = cache
+  end
+  return entry
+end
+
 ---Draw a block's lines at `row`, replacing `height` existing lines, and put
 ---this block's anchor back on the first of them.
 ---
@@ -193,16 +270,23 @@ end
 ---@param row integer
 ---@param old_height integer
 local function draw(chat, block, row, old_height)
-  local card = timeline.card(block.item, {
-    width = M.width(chat),
-    expanded = block.expanded,
-  })
+  local card = card_for(block, M.width(chat))
   block.collapsible = card.collapsible
+
+  -- Already on screen, byte for byte. This is what makes a settle flash free
+  -- rather than merely cheap: it skips the buffer write too, not just the
+  -- card build. Sound because `draw` replaces exactly `[row, row + height)`
+  -- and nothing else writes into another block's rows -- if that ever stops
+  -- being true, delete these three lines and the memo above still stands.
+  if block.drawn == card.key and block.height > 0 then
+    return
+  end
 
   -- Clear only THIS block's highlights. The anchor lives in a different
   -- namespace precisely so this does not delete it.
   api.nvim_buf_clear_namespace(chat.conversation, hl.ns, row, row + old_height)
   block.height = render.to_buffer(chat.conversation, hl.ns, row, row + old_height, card.lines)
+  block.drawn = card.key
 
   local modifiable = vim.bo[chat.conversation].modifiable
   vim.bo[chat.conversation].modifiable = true
@@ -280,6 +364,7 @@ function M.rerender(chat, block, item, opts)
 
   if item then
     block.item = item
+    M.invalidate(block)
     -- The running->completed replacement is where a card earns its fold. Only
     -- re-derive it if you have not had an opinion: a card you opened by hand
     -- must not snap shut the moment the command finishes, which is exactly
@@ -417,6 +502,8 @@ function M.stream(chat, text)
   end
 
   block.item.text = (block.item.text or "") .. text
+  -- IN PLACE, so `rerender` sees the same table it cached against.
+  M.invalidate(block)
   M.rerender(chat, block)
 end
 
@@ -469,10 +556,26 @@ function M.toggle_at_cursor(chat)
 end
 
 ---Re-render everything at the current width. For a window resize.
+---
+---CHEAP WHEN THE WIDTH HAS NOT CHANGED, and that is the point of it. A drag on
+---the sidebar separator fires `WinResized` per column, the composer growing
+---fires it for a HEIGHT change, and `<C-f>` fires it on every toggle -- and
+---each one used to re-render every block in the transcript. The lines in the
+---buffer are a pure function of the width, so when the width is the same the
+---work is provably redundant.
+---
+---This also covers the surface swap for free: the sidebar pane and the float's
+---pane are different widths, so a real swap redraws. If they ever do coincide,
+---the bytes would have been identical anyway.
 ---@param chat table
-function M.redraw(chat)
+---@param opts? { force?: boolean }  `force` for a change the width cannot see.
+function M.redraw(chat, opts)
   M.ensure(chat)
   if not (chat.conversation and api.nvim_buf_is_valid(chat.conversation)) then
+    return
+  end
+  local width = M.width(chat)
+  if chat.rendered_width == width and not (opts and opts.force) then
     return
   end
   -- Once around the whole loop, not per block: every block but the last is
@@ -482,9 +585,17 @@ function M.redraw(chat)
   for _, id in ipairs(chat.order) do
     local block = chat.blocks[id]
     if block then
+      -- `force` has to reach the memo too, or it is not a force: the cache key
+      -- knows about width, expansion and the item, and nothing about
+      -- `ui.style` or `ui.expand` changing under a live session -- which is
+      -- the only reason this flag exists.
+      if opts and opts.force then
+        M.invalidate(block)
+      end
       M.rerender(chat, block, nil, { follow = false })
     end
   end
+  chat.rendered_width = width
   if stick then
     to_bottom(chat)
   end

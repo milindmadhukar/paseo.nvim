@@ -24,6 +24,8 @@ local M = {}
 ---@field ownedWorktree boolean  Paseo cut this worktree itself.
 ---@field members { name: string, path: string }[]  From our registry; may be empty.
 ---@field assembled boolean    We assembled it out of N worktrees.
+---@field group string         The project it is nested under HERE. See `M.group`.
+---@field projectId string|nil Paseo's own project record.
 
 ---@param path string|nil
 ---@return string
@@ -50,6 +52,36 @@ local function git(dir, args)
   return out ~= "" and out or nil
 end
 
+---Which project a workspace belongs to, as far as the EDITOR is concerned.
+---
+---PASEO GETS THIS WRONG FOR A `ws` WORKSPACE, and not by accident -- it cannot
+---know. `<project>/.workspaces/<name>` is a plain directory holding several
+---worktrees, because a git worktree is per repo and a unit of work spanning
+---four repos has nowhere else to live. So it is not a git repo, and when the
+---daemon is asked to open it, it registers that directory as a top-level
+---project named after the WORKSPACE. `~/Code/openfin/.workspaces/billing`
+---comes back as a project called `billing`, sitting as a sibling of `openfin`
+---rather than inside it -- which is exactly how the sidebar drew it.
+---
+---The shape is recognisable from the path alone, which `repos.workspace_root`
+---already does for the repo list. So the editor groups on that and leaves the
+---daemon's own record alone: nothing is renamed, nothing is migrated, and a
+---workspace made in the app lands in the same group as one made here.
+---@param ws paseo.PaseoWorkspace
+---@return string
+function M.group(ws)
+  local root = require("paseo.repos").workspace_root(ws.directory)
+  if root then
+    -- `root` is `<project>/<workspaces_dir>/<name>`, so the project is two up.
+    local project = vim.fs.dirname(vim.fs.dirname(root))
+    local name = vim.fs.basename(project)
+    if name and name ~= "" and name ~= "/" then
+      return name
+    end
+  end
+  return ws.project or ws.name or ""
+end
+
 ---Every workspace, Paseo's merged with ours.
 ---@param callback fun(list: paseo.PaseoWorkspace[]|nil, err: string|nil)
 function M.list(callback)
@@ -74,16 +106,21 @@ function M.list(callback)
       for _, ws in ipairs(result.entries or {}) do
         if not ws.archivingAt then
           local ours = assembled[normalise(ws.directory)]
-          out[#out + 1] = vim.tbl_extend("force", ws, {
+          local merged = vim.tbl_extend("force", ws, {
             members = ours and registry.active(ours) or {},
             assembled = ours ~= nil,
           })
+          merged.group = M.group(merged)
+          out[#out + 1] = merged
         end
       end
 
+      -- By GROUP, not by the daemon's project: see `M.group`. Sorting on the
+      -- project is what put `billing` between `bar` and `openfin` instead of
+      -- under the `openfin` it lives inside.
       table.sort(out, function(a, b)
-        if (a.project or "") ~= (b.project or "") then
-          return (a.project or "") < (b.project or "")
+        if (a.group or "") ~= (b.group or "") then
+          return (a.group or "") < (b.group or "")
         end
         return (a.name or "") < (b.name or "")
       end)
@@ -390,6 +427,97 @@ function M.archive(ws, opts, callback)
 
   bridge.request("workspace.archive", { workspaceId = ws.id }, function(err)
     callback(err)
+  end)
+end
+
+---Archive a workspace, asking the one question worth asking.
+---
+---Lifted out of the telescope picker, where it was a local, so the Workspaces
+---panel offers the same act rather than a second implementation of it that
+---forgets the refusal path.
+---
+---The refusal is the point. `workspace.remove` declines when a member worktree
+---holds work that exists nowhere else, and it names exactly what would be lost
+---- so that is a question, not an error to swallow and not something to force
+---past on your behalf.
+---@param ws paseo.PaseoWorkspace
+---@param after? fun()
+function M.confirm_archive(ws, after)
+  local label = ws.name or ws.directory or ws.id
+
+  local function go(force)
+    M.archive(ws, { force = force }, function(err)
+      if not err then
+        vim.notify("paseo: archived " .. label, vim.log.levels.INFO)
+        return after and vim.schedule(after)
+      end
+
+      if not force and err:find "refusing" then
+        vim.schedule(function()
+          vim.ui.select({ "No, keep it", "Yes, discard that work" }, {
+            prompt = err:gsub("\n.*", "") .. " — discard?",
+          }, function(choice)
+            if choice and choice:find "Yes" then
+              go(true)
+            end
+          end)
+        end)
+        return
+      end
+      vim.notify("paseo: " .. err, vim.log.levels.ERROR)
+    end)
+  end
+
+  go(false)
+end
+
+---Forget a project -- Paseo's record of it, never the files.
+---
+---The counterpart to archiving, and the app offers both. Archiving retires one
+---unit of work; this drops the daemon's record of a whole directory tree, and
+---for a `ws` workspace it is how you get rid of the top-level project the
+---daemon invented for `<project>/.workspaces/<name>`.
+---
+---Takes a LIST of project ids, because a group in the sidebar is not one
+---daemon project: grouping on the path puts `openfin` and the invented
+---`billing` in the same group, and removing "the group" has to mean all of
+---them or it leaves half behind.
+---@param ids string[]
+---@param label string  What to call it in the confirmation.
+---@param after? fun()
+function M.remove_project(ids, label, after)
+  ids = ids or {}
+  if #ids == 0 then
+    return vim.notify("paseo: no project to remove", vim.log.levels.WARN)
+  end
+
+  local prompt = ("Remove %s from Paseo? (%d project%s; files are not touched)"):format(
+    label,
+    #ids,
+    #ids == 1 and "" or "s"
+  )
+  vim.ui.select({ "No", "Yes, remove it" }, { prompt = prompt }, function(choice)
+    if not (choice and choice:find "Yes") then
+      return
+    end
+    local left, failed = #ids, nil
+    for _, id in ipairs(ids) do
+      bridge.request("project.remove", { projectId = id }, function(err)
+        failed = failed or err
+        left = left - 1
+        if left > 0 then
+          return
+        end
+        if failed then
+          vim.notify("paseo: " .. failed, vim.log.levels.ERROR)
+        else
+          vim.notify("paseo: removed " .. label, vim.log.levels.INFO)
+        end
+        if after then
+          vim.schedule(after)
+        end
+      end)
+    end
   end)
 end
 

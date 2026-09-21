@@ -26,7 +26,12 @@ M.title = "Workspaces"
 
 ---The key ALPHABET. Bound from this constant, never from the rows we happen to
 ---have -- keys are taken on arrival, before the daemon has answered.
-local KEYS = { new = "n", picker = "o", archive = "d" }
+---
+---`x` is a different key from `d` on purpose. Archiving retires ONE unit of
+---work; forgetting drops Paseo's record of a whole directory tree. One key
+---that did both depending on which row you were standing on is the shape of a
+---mistake.
+local KEYS = { new = "n", picker = "o", archive = "d", forget = "x" }
 
 ---Module-level rather than per-chat: the list is the DAEMON's, identical for
 ---every chat, and a fetch per chat would be a round trip per chat for the same
@@ -95,6 +100,25 @@ local function archive(ws)
   end)
 end
 
+---Forget a project -- Paseo's record of it, never the files.
+---
+---This is how you get rid of the top-level project the daemon invents for a
+---`<project>/.workspaces/<name>` directory: that directory is not a git repo,
+---so opening it registers it as a project of its own, named after the
+---workspace. A GROUP here may therefore span several project records -- the
+---real one and every invented one under it -- so this removes all of them.
+---@param group table
+local function forget(group)
+  local ids = group.projects or {}
+  if #ids == 0 then
+    return vim.notify("paseo: no project to forget", vim.log.levels.WARN)
+  end
+  require("paseo.workspaces").remove_project(ids, group.name, function()
+    M.invalidate()
+    require("paseo.ui.float").rebuild()
+  end)
+end
+
 ---@param chat table
 ---@return paseo.ListSection[]|nil
 local function sections(chat)
@@ -121,29 +145,42 @@ local function sections(chat)
   local here = vim.fn.resolve(vim.fn.fnamemodify(vim.fn.getcwd(), ":p")):gsub("/+$", "")
   local known = cache.list or {}
 
-  -- Widths from the data, not guessed: project names run from `kora` to
-  -- `openfin` and a fixed column is either ragged or truncating.
-  local w_project, w_name = 0, 0
+  -- Widths from the data, not guessed: names run from `ui` to
+  -- `fetch-latest-and-prune`, and a fixed column is either ragged or
+  -- truncating.
+  local w_name = 0
   for _, ws in ipairs(known) do
-    w_project = math.max(w_project, vim.api.nvim_strwidth(ws.project or ""))
     w_name = math.max(w_name, vim.api.nvim_strwidth(ws.name or ""))
   end
-  w_project = math.min(w_project, 20)
-  w_name = math.min(w_name, 28)
+  w_name = math.min(w_name, 34)
 
-  local rows = {}
+  -- A SECTION PER PROJECT, and by the project the workspace LIVES IN rather
+  -- than the one the daemon has it filed under. An assembled workspace is a
+  -- plain directory -- it has to be, since a git worktree is per repo and a
+  -- unit of work spanning four repos has nowhere else to live -- so opening
+  -- `~/Code/openfin/.workspaces/billing` registers that directory as its own
+  -- top-level project called `billing`, drawn as a SIBLING of `openfin`
+  -- rather than as something inside it. `workspaces.group` recovers the real
+  -- parent from the path; the list arrives already sorted by it.
+  local groups, order = {}, {}
   for _, ws in ipairs(known) do
+    local key = ws.group or ws.project or ""
+    if not groups[key] then
+      groups[key] = { name = key, rows = {}, projects = {} }
+      order[#order + 1] = key
+    end
+    local group = groups[key]
+    if ws.projectId and not vim.tbl_contains(group.projects, ws.projectId) then
+      group.projects[#group.projects + 1] = ws.projectId
+    end
+
     local dir = vim.fn.resolve(ws.directory or ""):gsub("/+$", "")
     local mine = dir ~= "" and (here == dir or vim.startswith(here, dir .. "/"))
-    rows[#rows + 1] = {
+    group.rows[#group.rows + 1] = {
       id = "ws." .. (ws.directory or ws.name or ""),
       active = mine,
       cells = {
         { mine and "  " .. widgets.icons.mine .. " " or "    ", mine and "PaseoAgent" or nil },
-        -- A swatch per project, hashed off its name, so a list of twenty
-        -- workspaces groups by eye before it is read.
-        widgets.swatch(ws.project or ws.name or ""),
-        { " " .. ("%-" .. w_project .. "s  "):format(ws.project or ""), "PaseoDim" },
         { ("%-" .. w_name .. "s  "):format(ws.name or ""), mine and "PaseoAgent" or nil },
         { ("%-9s"):format(shape(ws)), "PaseoBadge" },
         { "  " .. agents.summary(ws.directory or ""), "PaseoDim" },
@@ -157,6 +194,11 @@ local function sections(chat)
       keys = {
         [KEYS.archive] = function()
           archive(ws)
+        end,
+        -- Bound on the ROW as well as on the heading, because "forget the
+        -- project this is in" is the question you have from a workspace.
+        [KEYS.forget] = function()
+          forget(group)
         end,
       },
     }
@@ -179,22 +221,36 @@ local function sections(chat)
     }
   end
 
-  return {
-    {
+  local out = {}
+  for _, key in ipairs(order) do
+    local group = groups[key]
+    out[#out + 1] = {
+      id = "group." .. key,
+      -- The project's own hashed colour block in place of an icon, so twenty
+      -- workspaces group by eye before they are read.
+      swatch = key,
+      title = key ~= "" and key or "Workspaces",
+      rows = group.rows,
+    }
+  end
+  if #out == 0 then
+    out[1] = {
       id = "workspaces",
       icon = icons.panel.Workspaces,
       title = "Workspaces",
       empty = "no workspaces yet",
-      rows = rows,
-    },
-    {
-      id = "repos",
-      icon = icons.ui.repo,
-      title = "This unit of work",
-      empty = "not inside a git repository",
-      rows = repo_rows,
-    },
+      rows = {},
+    }
+  end
+
+  out[#out + 1] = {
+    id = "repos",
+    icon = icons.ui.repo,
+    title = "This unit of work",
+    empty = "not inside a git repository",
+    rows = repo_rows,
   }
+  return out
 end
 
 ---@param chat table
@@ -208,6 +264,7 @@ local function source(chat)
       { KEYS.new, "new" },
       { KEYS.picker, "picker" },
       { KEYS.archive, "archive" },
+      { KEYS.forget, "forget project" },
     },
     verbs = {
       [KEYS.new] = function()

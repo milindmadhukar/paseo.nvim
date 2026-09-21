@@ -9,6 +9,7 @@ local M = {}
 ---@class paseo.Config
 ---@field paseo paseo.Config.Paseo
 ---@field ui paseo.Config.UI
+---@field voice paseo.Config.Voice
 ---@field workspaces paseo.Config.Workspaces
 ---@field skills paseo.Config.Skills
 ---@field review paseo.Config.Review
@@ -111,8 +112,11 @@ local M = {}
 ---@field col integer?    not sizes. Absent means CENTRED, with the same
 ---                       `(total - size) / 2` floaterm centres with -- so the
 ---                       two at one size land in one place.
----@field composer integer  Rows the composer gets. The rest of the box, less
----                       the header, tab bar and footer, is the conversation.
+---@field composer integer  The MOST rows the composer grows to. It stands at
+---                       one row over an empty buffer and grows with what you
+---                       type, so this is a ceiling rather than a size. The
+---                       rest of the box, less the header, tab bar and footer,
+---                       is the conversation.
 ---@field zindex integer  Base z-index of the surface. DELIBERATELY BELOW 50,
 ---                       which is what floating windows and plenary popups get
 ---                       by default: a dashboard that outranks them hides the
@@ -139,8 +143,17 @@ local M = {}
 ---                       read a tool card in, and unlike the float -- whose
 ---                       floor is a hard layout requirement -- how narrow is
 ---                       too narrow here is a matter of taste.
----@field composer integer  Rows the composer gets, under the conversation.
+---@field composer integer  The MOST rows the composer grows to, under the
+---                       conversation -- a ceiling, not a size, read the same
+---                       way as the float's.
 ---@field position "right"|"left"  Which side the pane opens on.
+
+---@class paseo.Config.Voice
+---@field enabled boolean  Bind the dictation key at all.
+---@field key string|false  What starts and stops it, in the composer.
+---@field recorder string[]|nil  A full argv, or nil to find one.
+---@field rate integer    Sample rate. The daemon resamples, so this is about
+---                       what your microphone does well, not what it wants.
 
 ---@class paseo.Config.UI.Answer
 ---@field width integer   A CAP, in cells, not a share of anything. The overlay
@@ -290,6 +303,8 @@ local defaults = {
     sidebar = {
       width = 40,
       min_width = 60,
+      -- A CEILING, read exactly as the float's is: the box is one row over an
+      -- empty buffer and grows with what you type.
       composer = 8,
       position = "right",
     },
@@ -316,6 +331,21 @@ local defaults = {
       },
       presets = {},
     },
+  },
+
+  -- Speaking into the composer. Speech-to-TEXT only -- the daemon also has a
+  -- duplex voice mode with synthesised replies, and an editor that talks back
+  -- needs a player, an interrupt and somewhere to put the transcript, which is
+  -- a surface rather than a key.
+  voice = {
+    enabled = true,
+    key = "<C-t>",
+    -- Absent means "find one": arecord, then rec (sox), then ffmpeg. A table
+    -- is a full argv, for a machine with two sound cards or a device that has
+    -- to be named. It must produce RAW PCM16 mono at `rate` on stdout --
+    -- headerless, no container -- because that is what the daemon parses.
+    recorder = nil,
+    rate = 16000,
   },
 
   workspaces = {
@@ -394,6 +424,15 @@ function M.setup(opts)
     config.ui.animate = { bars = true, flash = true, fps = 30 }
   end
   config.ui.animate.fps = math.max(1, math.min(60, math.floor(config.ui.animate.fps or 30)))
+  vim.validate("voice.enabled", config.voice.enabled, "boolean")
+  vim.validate("voice.key", config.voice.key, function(v)
+    return v == false or type(v) == "string"
+  end, "a key, or false to leave it unbound")
+  vim.validate("voice.recorder", config.voice.recorder, function(v)
+    return v == nil or (type(v) == "table" and #v > 0 and type(v[1]) == "string")
+  end, "a full argv, or nil to find one")
+  config.voice.rate = math.max(8000, math.floor(config.voice.rate or 16000))
+
   vim.validate("workspaces.open", config.workspaces.open, function(v)
     return type(v) == "function" or v == "tab" or v == "tcd" or v == "cd"
   end, '"tab", "tcd", "cd", or a function taking the workspace')
@@ -441,6 +480,7 @@ function M.setup(opts)
   for where, keys in pairs {
     float = { "width", "height", "row", "col", "composer" },
     sidebar = { "width", "min_width", "composer" },
+    terminal = { "width", "height", "row", "col", "list" },
   } do
     for _, key in ipairs(keys) do
       vim.validate(("ui.%s.%s"):format(where, key), config.ui[where][key], function(v)

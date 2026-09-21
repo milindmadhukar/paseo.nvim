@@ -389,7 +389,7 @@ ui.sidebar                                                          table
         sidebar = {
           width = 40,        -- percent of the editor's columns, or a function
           min_width = 60,    -- ...but never narrower than this, in CELLS
-          composer = 8,      -- rows the composer gets
+          composer = 8,      -- the MOST rows the composer grows to
           position = "right" -- or "left"
         }
 <
@@ -397,6 +397,11 @@ ui.sidebar                                                          table
     pane too narrow to read a tool card in: 40% of a 100-column terminal is 40
     columns. The float's equivalent floor is fixed at 60x20 instead, because
     there it is a hard layout requirement rather than a matter of taste.
+
+    `composer` reads exactly as |paseo-config.ui.float.composer| does, and the
+    sidebar's box grows the same way: one row over an empty buffer, up to this
+    as you type, and back again when you send. A fixed eight rows here was a
+    third of a narrow pane spent on whitespace for the whole of a session.
 
     The width is also capped at what 'winwidth' leaves for the window you came
     back from. Neovim claws the difference back the instant focus returns
@@ -509,6 +514,24 @@ Daemon discovery ~
 
     `:checkhealth paseo` prints every candidate and what it answered.
 
+                                                       *paseo-config.voice*
+voice                                                               table
+
+    Dictation -- |paseo-dictation|. >lua
+        voice = {
+          enabled = true,
+          key = "<C-t>",   -- in the composer; false to bind nothing
+          recorder = nil,  -- nil finds one; a table is a full argv
+          rate = 16000     -- what your microphone does well
+        }
+<
+    `recorder` must write RAW PCM16 mono at `rate` to stdout -- headerless,
+    no container. That is what the daemon parses; nothing here checks it,
+    because nothing can.
+
+    The daemon resamples, so `rate` is about what your microphone does well
+    rather than about what the transcriber wants.
+
                                                  *paseo-config.workspaces.dir*
 workspaces.dir                              string, default `".workspaces"`
 
@@ -615,6 +638,13 @@ skills.method                                       `"link"`|`"copy"`, default `
 
     Put the chat in the sidebar, beside your code. The same conversation and
     the same draft; only the windows change.
+
+:Paseo stop                                                  *:Paseo-stop*
+
+    Interrupt the turn the current chat's agent is running. A no-op if it is
+    not running. `<C-c>` in the chat does the same. See |paseo-chat-stop|.
+
+    NOT `:Paseo agent stop`, which shuts down the sidecar process.
 
 :Paseo model [provider/model]                               *:Paseo-model*
 
@@ -941,6 +971,52 @@ still sitting there on disk. That is the whole point: the generated file used
 to say `PRUNE THIS` in a comment, and nothing that re-read the project ever
 honoured the answer.
 
+                                                      *paseo-workspaces-grouping*
+Grouping ~
+
+The sidebar and the picker nest a workspace under the project it LIVES IN,
+which is not always the project Paseo has it filed under.
+
+An assembled workspace is a plain directory -- it has to be, because a git
+worktree is per repo and a unit of work spanning four repos has nowhere else
+to live. So it is not a git repo, and when the daemon is asked to open
+`~/Code/openfin/.workspaces/billing` it registers that directory as its own
+TOP-LEVEL project called `billing`, a sibling of `openfin` rather than
+something inside it.
+
+The shape is recognisable from the path alone -- some ancestor's parent is
+|paseo-config.workspaces.dir| -- so the editor groups on that. Nothing is
+renamed and nothing is migrated: the daemon's own record is left exactly as it
+is, and a workspace made in the app lands in the same group as one made here.
+
+                                                       *paseo-workspaces-panel*
+On the Workspaces tab (`6`) ~
+
+Each group is a heading, with its workspaces under it. Two destructive acts,
+deliberately in different places because they are not two strengths of one
+thing:
+
+    <CR>            open a chat on the workspace under the cursor
+    d               archive it. Retires that unit of work, and takes its
+                    worktrees and their `ws/<name>` branches with it. Refuses,
+                    and says what it would lose, if a member holds work that
+                    exists nowhere else
+    x               forget the project the cursor is in -- from the heading or
+                    from any workspace under it. Drops PASEO'S RECORD of a
+                    directory tree, never the files. This is how you get rid
+                    of the top-level project the daemon invented for a
+                    `.workspaces/<name>` directory. A group can span several
+                    such records; it removes all of them, and says how many
+                    before it does
+
+Two keys rather than one that decides from the line you are on: archiving
+retires a unit of work and forgetting drops a record of a whole tree, and one
+key for both is the shape of a mistake. Both confirm first.
+
+With the pointer, the same two are offered on the row and on the heading --
+under the pointer only, because a column of destructive glyphs down the side
+of a list is a column of mistakes.
+
                                                           *paseo-workspaces-keys*
 In the workspace picker (|:Paseo-workspaces|) ~
 
@@ -1204,7 +1280,7 @@ sideways every time the count gained a digit. The SIDEBAR has no footer to put
 it in -- it is a split whose only chrome is that winbar -- so there it goes on
 the end of the header instead.
 
-                                                         *paseo-chat-context*
+                                                           *paseo-chat-gauge*
 The CONTEXT GAUGE sits in the same line, once the daemon has reported any
 usage: a six-cell bar and the figure it stands for. >
 
@@ -1236,7 +1312,7 @@ tab for every other thing Paseo knows: >
     2 Sessions    the agents AND terminals here, live -- open one
     3 Settings    mode, thinking level, model and feature toggles
     4 Changes     what is changed on disk -- open one
-    5 Usage       context window, tokens and cost
+    5 Usage       context window, tokens, cost and what is left of the plan
     6 Workspaces  every workspace, and the repos in this unit of work
 <
 `1`-`6` jump, `<M-1>`-`<M-6>` and `<Tab>`/`<S-Tab>` do the same, and
@@ -1248,6 +1324,42 @@ key that does not work.
 
 Both surfaces share the same buffers, so switching preserves your draft and
 your scroll position.
+
+                                                           *paseo-chat-usage*
+The USAGE tab (`5`) answers two different questions, from two different
+places.
+
+The top is about THIS SESSION: how full the context window is, and what the
+last turn cost. That rides the agent snapshot and needs no polling. A tile is
+drawn only when it has a figure -- an empty card is not information, it is a
+box taking up a third of the row to tell you nothing.
+
+The tokens and the dollar figure arrive ONLY on turn completion, and the
+daemon does not keep them: the provider's streaming usage update carries the
+context window and nothing else, and it REPLACES the snapshot's copy rather
+than merging into it. So the plugin keeps the last complete turn itself, and
+the tile says `Last turn` when that is what you are looking at.
+
+The bottom is about the ACCOUNT -- `Plan limits`. ONE card, for the provider
+this session is on, headed with the plan name, with a bar per window: >
+
+    Claude  Max 20x
+      Session   23%   resets in 2h 14m
+      Weekly    91%   resets in 3d 4h
+<
+Only this session's provider, not every provider the daemon can authenticate:
+a wall of quotas for providers you are not using is neither the question you
+asked nor affordable in rows -- the body of a panel is truncated rather than
+scrolled. Switching model on the Session tab switches the card.
+
+`claude` reports a five-hour window, a weekly one, and a weekly window per
+scoped model; `codex` reports a session window, a weekly one, a code-review
+window and a credit balance. A provider with no quota fetcher in the daemon --
+`fable` and `gemini` have none -- says so rather than leaving a gap, and one
+you are not signed in to shows what the daemon said about it.
+
+The numbers are the daemon's cache of the provider's own usage endpoint, not a
+poll: the panel asks once when you open it.
 
                                                          *paseo-chat-session*
 The SETTINGS tab (`3`) is the one you drive from the keyboard. Every setting
@@ -1364,7 +1476,12 @@ In the composer ~
     <M-1>..6  the same, without taking the count keys
     <Tab>     next tab, <S-Tab> the previous one
     <C-f>     switch surface
+    <C-c>     stop the turn -- normal or insert. See |paseo-chat-stop|
+    <C-t>     speak instead of typing. See |paseo-dictation|
     q         close the chat
+
+The box is the size of what is in it: |paseo-config.ui.sidebar| `composer` is
+a ceiling it grows to, not a fixed height.
 
 In the conversation ~
 
@@ -1374,6 +1491,7 @@ In the conversation ~
     <M-1>..6  the same, without taking the count keys
     gp        reopen a pending permission prompt
     <C-f>     switch surface
+    <C-c>     stop the turn. See |paseo-chat-stop|
     q         close the chat
 
 On the Settings tab ~
@@ -1401,6 +1519,7 @@ Plus, per tab: >
                  d  kill a terminal, or archive an agent -- asked first
     Workspaces   n  new here         o  the full picker
                  d  archive -- asked first, and by name
+                 x  forget the project this row is in -- see below
 <
 `r` is re-fetch on ALL of them, and on the Settings tab, which is why rename
 is `R`: one key meaning "ask the daemon again" on five tabs and "rename this
@@ -1430,6 +1549,61 @@ exactly when it has grown enough to need them.
 These are bound only while that tab is showing, and whatever they displaced
 is put back on the way out -- the six panels share one buffer, so a `<CR>`
 left bound here would try to apply a session setting from the Changes tab.
+
+                                                          *paseo-chat-stop*
+Stopping a turn ~
+
+`<C-c>`, or |:Paseo-stop|. One `cancelAgent` -- the same thing the app's stop
+button does and the same thing `paseo agent stop` does. Nothing local is torn
+down, because nothing local is what is running: the agent lives on the daemon
+and the cancellation comes back as a `turn_canceled` on the timeline, like any
+other turn outcome.
+
+Nothing running is a NO-OP, deliberately not an error. `<C-c>` is a key you
+hit reflexively.
+
+    NOTE: `:Paseo agent stop` is a different command and shuts down the
+    SIDECAR PROCESS, not a turn.
+
+The other interrupt is |paseo-permission-overlay|'s "decline and stop", which
+only works while a permission request is waiting to be answered -- it cannot
+stop a turn that is running freely, which is what this is for.
+
+                                                          *paseo-dictation*
+Dictation ~
+
+`<C-t>` in the composer opens the microphone; `<C-t>` again closes it and puts
+what you said in at the cursor. The header says `listening` while it is open,
+on either surface.
+
+One key for both halves, and not a hold-to-talk one, because Neovim delivers a
+keypress and never a key RELEASE -- "while held" cannot be expressed.
+
+NEOVIM CANNOT RECORD AUDIO, so this shells out. The first of these that is
+installed is used: >
+
+    arecord     ALSA; on essentially every Linux box with sound
+    rec         sox
+    ffmpeg      PulseAudio on Linux, avfoundation on macOS
+<
+`:checkhealth paseo` reports which one it found, or that it found none.
+|paseo-config.voice| `recorder` overrides the search with a full argv, for a
+machine with two sound cards or a device that has to be named -- it still has
+to produce RAW PCM16 mono on stdout, headerless, because that is what goes
+over the wire.
+
+Audio is streamed WHILE YOU SPEAK rather than recorded and then uploaded: the
+daemon transcribes as it goes, so by the time you stop talking most of the
+work is done and the text arrives in about as long as it takes to lift your
+finger.
+
+THE DAEMON DOES THE TRANSCRIBING. A microphone is not enough -- if it has no
+speech model it says so, in its own words, the first time you press the key.
+That is a Paseo setting, not one of this plugin's.
+
+Speech-to-TEXT only. Paseo also has a duplex voice mode with synthesised
+replies; an editor that talks back needs a player, an interrupt and somewhere
+to put the transcript, which is a surface rather than a key.
 
                                                         *paseo-chat-composer*
 The composer ~

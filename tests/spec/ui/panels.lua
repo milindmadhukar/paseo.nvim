@@ -369,13 +369,44 @@ local function test_panels()
   local hint = vim.wo[surface_chat.win_composer].winbar
   truthy("ui: the composer's hint does not advertise ^V", hint:find("^V", 1, true) == nil, hint)
   truthy("ui: it still says how to send", hint:find("send", 1, true) ~= nil, hint)
+
+  -- THE HINT BAR DEGRADES RATHER THAN TRUNCATING, the way the tab bar does.
+  -- A winbar wider than its window is cut, and the cut takes the LEFT -- so a
+  -- narrow sidebar with five hints showed `<nd · <C-f> full screen · …`,
+  -- having eaten the one thing you most need to know.
+  local wide = widgets.hints({
+    { "<CR>", "send" },
+    { "<C-f>", "screen" },
+    { "<C-c>", "stop" },
+    { "q", "close" },
+  }, nil, 200)
+  local narrow = widgets.hints({
+    { "<CR>", "send" },
+    { "<C-f>", "screen" },
+    { "<C-c>", "stop" },
+    { "q", "close" },
+  }, nil, 20)
+  truthy("ui: a wide bar keeps every hint", render.width(wide) > render.width(narrow))
+  truthy("ui: a narrow one keeps the first", render.to_winbar(narrow):find("send", 1, true) ~= nil)
+  truthy(
+    "ui: and drops whole hints rather than cutting one in half",
+    render.width(narrow) <= 20,
+    render.width(narrow)
+  )
   sidebar.close(surface_chat)
   eq("ui: and the sidebar closes both its windows", #vim.api.nvim_list_wins(), wins_at_hint)
 
   -- The sidebar is configurable in the same units as the float, which is the
   -- point of the units: one number means one thing everywhere.
   config.setup {
-    ui = { sidebar = { width = 30, min_width = 20, composer = 4, position = "left" } },
+    ui = {
+      sidebar = {
+        width = 30,
+        min_width = 20,
+        composer = 9,
+        position = "left",
+      },
+    },
   }
   sidebar.open(surface_chat)
   eq(
@@ -383,10 +414,41 @@ local function test_panels()
     vim.api.nvim_win_get_width(surface_chat.win_conversation),
     math.max(20, math.floor(vim.o.columns * 30 / 100))
   )
+
+  -- THE BOX IS THE SIZE OF WHAT IS IN IT, here as well as on the dashboard.
+  -- `composer` is a ceiling, not a height: a fixed eight rows spent a third of
+  -- a narrow sidebar on whitespace for the whole of a session.
+  --
+  -- `nvim_win_get_height` counts the winbar row, and this composer carries the
+  -- hint bar -- so every assertion here is `rows + 1`. Without adding it back
+  -- in `fit_composer`, `ui.sidebar.composer` would mean one thing here and
+  -- another on the dashboard, whose composer has no winbar.
+  local bar = vim.wo[surface_chat.win_composer].winbar ~= "" and 1 or 0
   eq(
-    "ui: and an explicit composer height",
+    "ui: an empty composer is a single row",
     vim.api.nvim_win_get_height(surface_chat.win_composer),
-    4
+    1 + bar
+  )
+  vim.api.nvim_buf_set_lines(surface_chat.composer, 0, -1, false, { "one", "two", "three", "four" })
+  sidebar.fit_composer(surface_chat)
+  eq(
+    "ui: and grows with what you type",
+    vim.api.nvim_win_get_height(surface_chat.win_composer),
+    4 + bar
+  )
+  vim.api.nvim_buf_set_lines(surface_chat.composer, 0, -1, false, vim.split(("x\n"):rep(40), "\n"))
+  sidebar.fit_composer(surface_chat)
+  eq(
+    "ui: up to the ceiling and no further",
+    vim.api.nvim_win_get_height(surface_chat.win_composer),
+    9 + bar
+  )
+  vim.api.nvim_buf_set_lines(surface_chat.composer, 0, -1, false, { "" })
+  sidebar.fit_composer(surface_chat)
+  eq(
+    "ui: and shrinks back when it is sent",
+    vim.api.nvim_win_get_height(surface_chat.win_composer),
+    1 + bar
   )
   truthy(
     "ui: `position = left` puts it on the left",
@@ -744,9 +806,221 @@ local function test_list()
   )
 end
 
+--- The Usage panel draws what it has and nothing else.
+---
+--- Two empty cards sat on that panel for most of every session, and it took
+--- reading the daemon to find out why: `usage_updated` REPLACES `lastUsage`
+--- with a payload carrying only the context window, so the tokens and cost
+--- from `turn_completed` are wiped seconds after they arrive. The panel had no
+--- opinion about that -- it drew three tiles unconditionally and put an em
+--- dash in two of them.
+local function test_usage_panel()
+  local usage = require "paseo.ui.panels.usage"
+  local bridge = require "paseo.bridge"
+
+  -- The plan limits are a daemon round trip. Stub it, both because the sidecar
+  -- is not running here and because the interesting assertions are about what
+  -- the panel does with the answer.
+  local old_ensure, old_request = bridge.ensure, bridge.request
+  local fetched
+  bridge.ensure = function(fn)
+    fn(nil)
+  end
+  bridge.request = function(op, _args, cb)
+    fetched = op
+    cb(nil, {
+      fetchedAt = "2026-09-21T10:00:00Z",
+      providers = {
+        {
+          providerId = "claude",
+          displayName = "Claude",
+          status = "available",
+          planLabel = "Max 20x",
+          windows = {
+            { id = "five_hour", label = "Session", usedPct = 23 },
+            { id = "weekly", label = "Weekly", usedPct = 91 },
+          },
+        },
+        {
+          providerId = "codex",
+          displayName = "Codex",
+          status = "available",
+          planLabel = "Pro",
+          windows = { { id = "primary", label = "Session", usedPct = 12 } },
+        },
+      },
+    })
+  end
+
+  ---@param chat table
+  ---@return string
+  local function drawn(chat)
+    local out = {}
+    for _, line in ipairs(usage.lines(chat, 100)) do
+      for _, cell in ipairs(line) do
+        out[#out + 1] = cell[1] or ""
+      end
+      out[#out + 1] = "\n"
+    end
+    return table.concat(out)
+  end
+
+  usage.invalidate()
+  local chat = {
+    provider = "claude/claude-opus-5",
+    usage = { contextWindowUsedTokens = 236028, contextWindowMaxTokens = 1000000 },
+  }
+  -- The first draw is the one that ASKS; it returns "loading" because in
+  -- production the answer is a round trip. The stub answers synchronously, so
+  -- the second draw has it.
+  drawn(chat)
+  eq("ui: the Usage panel asks the daemon for plan limits", fetched, "providers.usage")
+  local context_only = drawn(chat)
+  truthy("ui: context is drawn when it is known", context_only:find("Context", 1, true) ~= nil)
+  truthy(
+    "ui: an empty turn tile is not drawn at all",
+    context_only:find("This turn", 1, true) == nil
+      and context_only:find("Last turn", 1, true) == nil
+  )
+  truthy("ui: nor an empty cost tile", context_only:find("Cost", 1, true) == nil)
+  truthy("ui: nor a table of three em dashes", context_only:find("cached", 1, true) == nil)
+
+  -- The plan is the thing the panel could not answer before.
+  truthy("ui: the plan name is on the limits card", context_only:find("Max 20x", 1, true) ~= nil)
+  truthy("ui: with the five-hour window", context_only:find("Session", 1, true) ~= nil)
+  truthy("ui: and the weekly one", context_only:find("Weekly", 1, true) ~= nil)
+  -- ONLY THE PROVIDER THIS SESSION IS ON. A daemon will report on every
+  -- provider it can authenticate, and a wall of other people's quotas is
+  -- neither the question nor affordable in rows -- the body is truncated,
+  -- not scrolled.
+  truthy(
+    "ui: and nothing about a provider this session is not on",
+    context_only:find("Codex", 1, true) == nil,
+    context_only
+  )
+
+  -- What `chat.lua` kept off the `usage` event, because the snapshot will not
+  -- keep it. Labelled as the LAST turn, since that is what it is by then.
+  local after_turn = drawn {
+    provider = "claude/claude-opus-5",
+    usage = { contextWindowUsedTokens = 1, contextWindowMaxTokens = 10 },
+    last_turn_usage = {
+      inputTokens = 120,
+      cachedInputTokens = 9400,
+      outputTokens = 300,
+      totalCostUsd = 0.1234,
+    },
+  }
+  truthy(
+    "ui: the last completed turn survives the snapshot",
+    after_turn:find("Last turn", 1, true) ~= nil
+  )
+  truthy("ui: with its cost", after_turn:find("$0.1234", 1, true) ~= nil)
+  truthy("ui: and its breakdown", after_turn:find("cached", 1, true) ~= nil)
+
+  -- A provider the daemon has no quota fetcher for -- fable and gemini have
+  -- none -- must say so rather than leave a gap.
+  local no_fetcher = drawn { provider = "fable/fable-5-1" }
+  truthy(
+    "ui: a provider with no quota fetcher says so",
+    no_fetcher:find("no plan limits reported for ", 1, true) ~= nil
+  )
+
+  bridge.ensure, bridge.request = old_ensure, old_request
+  usage.invalidate()
+end
+
+--- Workspaces nest under the project they live in.
+---
+--- The daemon cannot get this right and it is not its fault: a `ws` workspace
+--- is a plain directory, so opening `~/Code/openfin/.workspaces/billing`
+--- registers it as a top-level project called `billing`, a SIBLING of
+--- `openfin` rather than something inside it. Asserted on the sections the
+--- panel hands the list view, because that is where the nesting lives.
+local function test_workspaces_panel()
+  local panel = require "paseo.ui.panels.workspaces"
+  local workspaces = require "paseo.workspaces"
+  local agents = require "paseo.agents"
+
+  local old_list, old_watch, old_summary = workspaces.list, agents.watch, agents.summary
+  agents.watch = function() end
+  agents.summary = function()
+    return "idle"
+  end
+  workspaces.list = function(cb)
+    local known = {
+      {
+        id = "w1",
+        name = "openfin",
+        directory = "/x/Code/openfin",
+        project = "openfin",
+        projectId = "prj_root",
+      },
+      {
+        id = "w2",
+        name = "billing",
+        directory = "/x/Code/openfin/.workspaces/billing",
+        project = "billing",
+        projectId = "prj_billing",
+      },
+      {
+        id = "w3",
+        name = "testing",
+        directory = "/x/Code/paseo.nvim",
+        project = "paseo.nvim",
+        projectId = "prj_nvim",
+      },
+    }
+    for _, ws in ipairs(known) do
+      ws.group = workspaces.group(ws)
+    end
+    cb(known, nil)
+  end
+
+  panel.invalidate()
+  local chat = { root = "/x/Code/openfin" }
+  panel.lines(chat, 100, 40)
+  vim.wait(200)
+  local drawn = {}
+  for _, line in ipairs(panel.lines(chat, 100, 40)) do
+    local cells = {}
+    for _, cell in ipairs(line) do
+      cells[#cells + 1] = cell[1] or ""
+    end
+    drawn[#drawn + 1] = table.concat(cells)
+  end
+  local text = table.concat(drawn, "\n")
+
+  local at_openfin, at_billing, at_nvim
+  for i, line in ipairs(drawn) do
+    at_openfin = at_openfin or (line:find("openfin", 1, true) and i or nil)
+    at_billing = at_billing or (line:find("billing", 1, true) and i or nil)
+    at_nvim = at_nvim or (line:find("paseo.nvim", 1, true) and i or nil)
+  end
+  truthy("ui: the workspaces panel draws a group heading", at_openfin ~= nil, text)
+  truthy(
+    "ui: with the .workspaces child under it rather than beside it",
+    at_billing ~= nil and at_openfin ~= nil and at_billing > at_openfin,
+    text
+  )
+  truthy(
+    "ui: and the next group after both of them",
+    at_nvim ~= nil and at_billing ~= nil and at_nvim > at_billing,
+    text
+  )
+  -- One `billing` line: it used to be both a group and a row under itself.
+  eq("ui: and billing is a workspace, not also a project", select(2, text:gsub("billing", "")), 1)
+  truthy("ui: the panel says how to forget a project", text:find("forget", 1, true) ~= nil, text)
+
+  workspaces.list, agents.watch, agents.summary = old_list, old_watch, old_summary
+  panel.invalidate()
+end
+
 return {
   { "ui.session", test_session_source },
   { "ui.panels", test_panels },
   { "ui.toggles", test_toggle_height },
   { "ui.list", test_list },
+  { "ui.usage", test_usage_panel },
+  { "ui.workspaces", test_workspaces_panel },
 }

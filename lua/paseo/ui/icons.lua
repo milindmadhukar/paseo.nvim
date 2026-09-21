@@ -131,6 +131,12 @@ M.ui = {
   new = g(0xf0415), -- md-plus
   more = g(0xf01d9), -- md-dots_vertical
   switch = g(0xf04e1), -- md-swap_horizontal
+  limits = g(0xf04c5), -- md-speedometer -- plan quota
+  clock = g(0xf0954), -- md-clock_outline -- when a window resets
+  archive = g(0xf00b7), -- md-archive
+  remove = g(0xf0156), -- md-close
+  stop = g(0xf04db), -- md-stop
+  mic = g(0xf036c), -- md-microphone
 }
 
 ---Braille spinner. Ten frames, so a full cycle is a round second at 100ms --

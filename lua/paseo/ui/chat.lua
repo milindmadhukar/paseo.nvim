@@ -31,6 +31,11 @@ local M = {}
 ---@field seq integer|nil    Highest timeline seq rendered.
 ---@field epoch string|nil   The epoch those seqs belong to.
 ---@field initialised boolean  Subscribed, history fetched, settings loaded.
+---@field rendered_width integer|nil  Width the transcript is currently drawn at.
+---@field resize_group integer|nil    Augroup holding the debounced resize watch.
+---@field resize_pending boolean|nil  A redraw is already scheduled.
+---@field last_turn_usage table|nil   Tokens and cost from the last completed turn.
+---@field dictating boolean|nil      The microphone is open. Drawn on the header.
 ---@field config_snapshot table|nil  Last `agent.config`; the Session panel draws it.
 ---@field available_modes table[]|nil  `{id, label}`, per provider. Ids to labels.
 ---@field answer_state table<string, table>|nil  Half-answered question sets, by
@@ -277,6 +282,42 @@ end
 
 -- ------------------------------------------------------------------ sending
 
+---Interrupt the turn this chat's agent is running.
+---
+---What the app's stop button does and what `paseo agent stop` does: one
+---`cancelAgent`. Nothing local is torn down, because nothing local is what is
+---running -- the agent lives on the daemon, and the cancellation comes back
+---as a `turn_canceled` on the timeline like any other turn outcome.
+---
+---A no-op when nothing is running, deliberately not an error. `<C-c>` is a key
+---you hit reflexively, and telling you off for stopping something that had
+---already stopped is noise.
+---@param chat? paseo.Chat
+function M.stop(chat)
+  chat = chat or current
+  if not (chat and chat.agent_id) then
+    return
+  end
+  if not chat.streaming then
+    return
+  end
+
+  bridge.request("agent.cancel", { agentId = chat.agent_id }, function(err)
+    if err then
+      vim.schedule(function()
+        notice(chat, "stop failed: " .. err, "error")
+      end)
+    end
+  end)
+
+  -- Optimistic, and it has to be: the header is the only thing that says a
+  -- turn is running, and leaving the spinner going until the daemon gets round
+  -- to saying so reads as the key not having worked. A `turn_*` event puts it
+  -- right either way.
+  M.set_streaming(chat, false)
+  notice(chat, "stopped", "warning")
+end
+
 ---@param chat paseo.Chat
 local function send(chat)
   local body = vim.api.nvim_buf_get_lines(chat.composer, 0, -1, false)
@@ -315,7 +356,7 @@ local function send(chat)
   -- Explicitly rather than through the autocmd: a `nvim_buf_set_lines` is not
   -- a user edit, and leaving it to `TextChanged` is how a four-line prompt
   -- leaves a four-line empty box behind after it is sent.
-  require("paseo.ui.float").resize_composer(chat)
+  M.fit_composer(chat)
   M.set_streaming(chat, true)
 
   bridge.request("agent.send", {
@@ -332,6 +373,37 @@ local function send(chat)
       end)
     end
   end)
+end
+
+---Put text in the composer, at the cursor when that is where you are.
+---
+---The same rule the image placeholder follows: at the cursor when the composer
+---is focused, appended when it is not -- dictating from a code buffer should
+---not need the chat focused. Multi-line because a spoken paragraph comes back
+---as one, and splitting it here is what keeps the composer a buffer rather
+---than a field.
+---@param chat paseo.Chat
+---@param text string
+function M.insert(chat, text)
+  local lines = vim.split(vim.trim(text), "\n", { plain = true })
+  local win = chat.win_composer
+
+  if win and vim.api.nvim_win_is_valid(win) and vim.api.nvim_get_current_win() == win then
+    local row, col = unpack(vim.api.nvim_win_get_cursor(win))
+    vim.api.nvim_buf_set_text(chat.composer, row - 1, col, row - 1, col, lines)
+    local last = #lines == 1 and (col + #lines[1]) or #lines[#lines]
+    pcall(vim.api.nvim_win_set_cursor, win, { row + #lines - 1, last })
+  else
+    local existing = vim.api.nvim_buf_get_lines(chat.composer, 0, -1, false)
+    local tail = existing[#existing] or ""
+    existing[#existing] = tail == "" and lines[1] or (tail .. " " .. lines[1])
+    for i = 2, #lines do
+      existing[#existing + 1] = lines[i]
+    end
+    vim.api.nvim_buf_set_lines(chat.composer, 0, -1, false, existing)
+  end
+
+  M.fit_composer(chat)
 end
 
 -- ------------------------------------------------------------------- images
@@ -361,6 +433,7 @@ local function attach_image(chat, image)
     lines[#lines] = tail == "" and placeholder or (tail .. " " .. placeholder)
     vim.api.nvim_buf_set_lines(chat.composer, 0, -1, false, lines)
   end
+  M.fit_composer(chat)
 
   vim.notify(
     ("paseo: %s attached (%s)"):format(placeholder, require("paseo.image").describe(image)),
@@ -396,6 +469,68 @@ end
 -- ------------------------------------------------------------------- layout
 
 ---@param chat paseo.Chat
+---Grow the composer to what is in it, on whichever surface it is on.
+---
+---Routed here rather than owned by either surface for the same reason
+---`sidebar.refresh` routes the header: it is one act on two windows, and a
+---caller should not have to know which one is up.
+---@param chat paseo.Chat
+local function fit_composer(chat)
+  local float = require "paseo.ui.float"
+  if float.is_open(chat) then
+    return float.resize_composer(chat)
+  end
+  sidebar.fit_composer(chat)
+end
+
+M.fit_composer = fit_composer
+
+---Re-render the transcript when the window it is drawn into changes width.
+---
+---GLOBAL, not `buffer = chat.conversation`, and that is a bug fix rather than
+---a tidy-up. `WinResized`'s pattern is matched against the window-ID of the
+---FIRST window that resized, and a buffer-local autocmd is matched against
+---that window's buffer -- so with the default right-hand sidebar, which sorts
+---last in the layout, dragging the separator from your code resized the pane
+---and fired nothing at all. Measured, not reasoned about.
+---
+---Debounced, because the other half of the old bug was that when it DID fire
+---it fired per column of the drag, and each one re-rendered every block in the
+---transcript. 50ms and the pending flag are the answer overlay's, which has
+---the same problem for the same reason.
+---
+---The width guard in `transcript.redraw` is what makes a global autocmd
+---affordable: a resize that did not change OUR width -- another split, the
+---composer growing, a height-only drag -- costs one `nvim_win_get_width`.
+---@param chat paseo.Chat
+local function watch_size(chat)
+  chat.resize_group = vim.api.nvim_create_augroup(
+    "paseo.chat.resize." .. tostring(chat.conversation),
+    { clear = true }
+  )
+  vim.api.nvim_create_autocmd({ "VimResized", "WinResized" }, {
+    group = chat.resize_group,
+    callback = function()
+      if chat.resize_pending then
+        return
+      end
+      chat.resize_pending = true
+      vim.defer_fn(function()
+        chat.resize_pending = false
+        -- Only while the transcript is on screen. Without a window
+        -- `transcript.width` falls back to 72, and re-rendering a closed chat
+        -- to a fallback width is both wasted work and a wrong `rendered_width`
+        -- for whatever surface opens next.
+        local win = chat.win_conversation
+        if win and vim.api.nvim_win_is_valid(win) then
+          transcript.redraw(chat)
+        end
+      end, 50)
+    end,
+    desc = "paseo: re-render the transcript at the new width",
+  })
+end
+
 local function make_buffers(chat)
   if not (chat.conversation and vim.api.nvim_buf_is_valid(chat.conversation)) then
     chat.conversation = vim.api.nvim_create_buf(false, true)
@@ -432,16 +567,16 @@ local function make_buffers(chat)
         desc = "paseo: sidebar <-> full screen",
       })
     )
+    -- The key you already reach for. Free on both buffers: the transcript is
+    -- not modifiable, so `<C-c>` here meant nothing at all, and there was no
+    -- way to stop a running turn from the editor -- the only interrupt this
+    -- plugin had was the permission dialog's "decline AND stop", which only
+    -- works while something is waiting to be answered.
+    vim.keymap.set("n", "<C-c>", function()
+      M.stop(chat)
+    end, vim.tbl_extend("force", conv, { desc = "paseo: stop the turn" }))
 
-    -- Cards are drawn to the window width, so a resize leaves every box either
-    -- short or wrapped. Re-render rather than live with it.
-    vim.api.nvim_create_autocmd("WinResized", {
-      buffer = chat.conversation,
-      callback = function()
-        transcript.redraw(chat)
-      end,
-      desc = "paseo: re-render the transcript at the new width",
-    })
+    watch_size(chat)
   end
 
   if not (chat.composer and vim.api.nvim_buf_is_valid(chat.composer)) then
@@ -454,6 +589,21 @@ local function make_buffers(chat)
       chat.composer,
       "paseo://compose/" .. vim.fs.basename(chat.root)
     )
+
+    -- The box is the size of what is in it: three rows for a question, more
+    -- for a paragraph, back to three once it is sent. A fixed eight rows was
+    -- a third of a sidebar spent on whitespace for the whole of every session.
+    --
+    -- `TextChanged` does NOT fire for `nvim_buf_set_lines`, so every
+    -- programmatic write to this buffer calls `fit_composer` itself. The one
+    -- that matters most is `send`, which clears it.
+    vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
+      buffer = chat.composer,
+      callback = function()
+        fit_composer(chat)
+      end,
+      desc = "paseo: grow the composer with the prompt",
+    })
 
     -- The composer is an ordinary buffer on purpose: your insert-mode
     -- keymaps, completion, abbreviations and undo all work, which is the
@@ -469,6 +619,40 @@ local function make_buffers(chat)
     vim.keymap.set("n", "<C-s>", function()
       send(chat)
     end, vim.tbl_extend("force", opts, { desc = "paseo: send" }))
+    -- Speak it instead of typing it. Neovim cannot record audio, so this
+    -- shells out to arecord/sox/ffmpeg -- see `paseo.voice` for why that is
+    -- the feature rather than a workaround for it.
+    --
+    -- One key for both halves. A hold-to-talk key would be better and is not
+    -- available: Neovim delivers a keypress, never a key RELEASE, so "while
+    -- held" cannot be expressed. Press to start, press to stop and insert.
+    local voice_key = (config.get().voice or {}).key
+    if voice_key and (config.get().voice or {}).enabled ~= false then
+      for _, mode in ipairs { "n", "i" } do
+        vim.keymap.set(mode, voice_key, function()
+          require("paseo.voice").toggle {
+            on_state = function(recording)
+              chat.dictating = recording or nil
+              set_winbar(chat)
+            end,
+            insert = function(text)
+              M.insert(chat, text)
+            end,
+          }
+        end, vim.tbl_extend("force", opts, { desc = "paseo: dictate" }))
+      end
+    end
+
+    -- In insert mode too: you are usually typing the next thing when you
+    -- decide the current thing should stop.
+    for _, mode in ipairs { "n", "i" } do
+      vim.keymap.set(mode, "<C-c>", function()
+        if mode == "i" then
+          vim.cmd.stopinsert()
+        end
+        M.stop(chat)
+      end, vim.tbl_extend("force", opts, { desc = "paseo: stop the turn" }))
+    end
     -- PASTE IS PASTE. An image on the clipboard is invisible to Neovim's
     -- registers -- `"+p` yields nothing for a screenshot -- so the ordinary
     -- paste cannot reach it without help. The help used to be a key of its
@@ -847,6 +1031,9 @@ function M.attach(ref_text, opts)
         vim.list_extend(existing, vim.split(opts.prompt, "\n"))
       end
       vim.api.nvim_buf_set_lines(chat.composer, 0, -1, false, existing)
+      -- Before the cursor move, so the line it lands on is on screen: this
+      -- path can write a whole prompt into a three-row box.
+      M.fit_composer(chat)
 
       vim.api.nvim_set_current_win(chat.win_composer)
       vim.api.nvim_win_set_cursor(chat.win_composer, { #existing, 0 })
@@ -1157,10 +1344,24 @@ function M.attach_events()
     M.apply_settings(chat, payload)
   end)
 
+  -- KEPT, not just stored, because the daemon throws these away.
+  --
+  -- This event rides `turn_completed`/`turn_failed`/`turn_canceled`, and it is
+  -- the ONLY place the token counts and the dollar figure ever arrive: the
+  -- provider's streaming `usage_updated` carries the context window and
+  -- nothing else, and the daemon REPLACES `lastUsage` with it wholesale rather
+  -- than merging. So the cost of a turn survives on the snapshot for about as
+  -- long as it takes the next turn to start streaming, and the Usage panel
+  -- spent the rest of the session drawing two empty cards. Holding the last
+  -- complete turn here costs one table and is what the panel falls back to.
   bridge.on("usage", function(payload)
     local chat = by_agent(payload.agentId)
     if chat then
       chat.usage = payload.usage
+      local turn = payload.usage or {}
+      if turn.inputTokens or turn.outputTokens or turn.totalCostUsd then
+        chat.last_turn_usage = turn
+      end
       set_winbar(chat)
     end
   end)

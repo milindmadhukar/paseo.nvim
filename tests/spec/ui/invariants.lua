@@ -63,6 +63,49 @@ local function test_invariants()
     )
   end
 
+  -- THE RESIZE WATCH IS GLOBAL, and pinned here because the buffer-local
+  -- version looked correct and silently did nothing. `WinResized`'s pattern is
+  -- the window-ID of the FIRST window that resized, and a buffer-local autocmd
+  -- is matched against that window's buffer -- so the default right-hand
+  -- sidebar, which sorts last, never fired it at all.
+  if chat_source then
+    truthy(
+      "ui: the transcript resize watch is global and in its own augroup",
+      chat_source:find('nvim_create_augroup(\n    "paseo.chat.resize.', 1, true) ~= nil
+    )
+    truthy(
+      "ui: and debounced rather than run per column of a drag",
+      chat_source:find("chat.resize_pending", 1, true) ~= nil
+    )
+  end
+
+  -- The other half: a redraw the width did not change writes nothing.
+  local transcript_source = source_of "lua/paseo/ui/transcript.lua"
+  if transcript_source then
+    truthy(
+      "ui: the transcript guards a redraw on the width it last drew at",
+      transcript_source:find("chat.rendered_width == width", 1, true) ~= nil
+    )
+  end
+
+  -- THE COMPOSER IS A WINDOW, NOT A SECTION, and `fit_composer` must not
+  -- forget it. Volt records each section's start row when the layout is
+  -- measured, so a rebuild on keystroke would be a rebuild per character --
+  -- and there is nothing to rebuild: the chrome's height and width do not
+  -- change when a floated pane is resized, and on the Chat tab the body draws
+  -- nothing at all.
+  local float_source = source_of "lua/paseo/ui/float.lua"
+  if float_source then
+    local fit = float_source:match "function M%.resize_composer.-\nend"
+    truthy("ui: float.resize_composer exists", fit ~= nil)
+    if fit then
+      truthy(
+        "ui: and does not rebuild the chrome on a keystroke",
+        fit:find("rebuild", 1, true) == nil
+      )
+    end
+  end
+
   -- Volt sets `modifiable = false` and binds `q`/`<Esc>` to close. Handing it
   -- the composer would make the one buffer you type into untypeable.
   for _, path in ipairs { "lua/paseo/ui/chat.lua", "lua/paseo/ui/transcript.lua" } do

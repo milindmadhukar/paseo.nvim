@@ -9,6 +9,8 @@ import {
 import { providerOps, describeSettings } from "./bridge-providers.ts";
 import { describeItem } from "./bridge-timeline.ts";
 import { terminalOps } from "./bridge-terminals.ts";
+import { workspaceOps } from "./bridge-workspaces.ts";
+import { voiceOps } from "./bridge-voice.ts";
 import { emit } from "./bridge-io.ts";
 
 /** stdout IS the protocol, so asserting on it is asserting on the wire. */
@@ -264,6 +266,209 @@ test("catalog retains choices and feature lookup follows the model", async () =>
     cwd: "/work",
   });
   assert.equal(featureRequests[1].provider, "codex/gpt-5.5");
+});
+
+test("plan limits come through whole, including a provider that failed", async () => {
+  // `listProviderUsage` lives on the raw DaemonClient rather than the typed
+  // API, so this also pins that the op reaches for `ctx.raw()` -- a typed-API
+  // lookup would be undefined and throw.
+  const ctx = new BridgeConnection();
+  ctx.raw = (() => ({
+    async listProviderUsage() {
+      return {
+        fetchedAt: "2026-09-21T10:00:00Z",
+        providers: [
+          {
+            providerId: "claude",
+            displayName: "Claude",
+            status: "available",
+            planLabel: "Max 20x",
+            windows: [
+              { id: "five_hour", label: "Session", usedPct: 23 },
+              { id: "weekly", label: "Weekly", usedPct: 91 },
+            ],
+          },
+          {
+            providerId: "codex",
+            displayName: "Codex",
+            status: "unavailable",
+            planLabel: null,
+            windows: [],
+            error: "not signed in",
+          },
+        ],
+      };
+    },
+  })) as any;
+  const usage: any = await providerOps(ctx)["providers.usage"]({
+    op: "providers.usage",
+  });
+  assert.equal(usage.providers[0].planLabel, "Max 20x");
+  assert.deepEqual(
+    usage.providers[0].windows.map((w: any) => w.id),
+    ["five_hour", "weekly"],
+  );
+  // An unavailable provider is passed through rather than filtered out: the
+  // panel draws "not signed in", which is the answer to a question the user
+  // asked, unlike a card that is silently missing.
+  assert.equal(usage.providers[1].error, "not signed in");
+
+  // A daemon too old for the request must not take the panel down with it.
+  const empty = new BridgeConnection();
+  empty.raw = (() => ({
+    async listProviderUsage() {
+      return undefined;
+    },
+  })) as any;
+  assert.deepEqual(
+    await providerOps(empty)["providers.usage"]({ op: "providers.usage" }),
+    { fetchedAt: null, providers: [] },
+  );
+});
+
+test("a workspace carries its project id, and a project can be forgotten", async () => {
+  // `projectId` was read off the wire and dropped one field before it was
+  // useful. Removing a project -- which the app offers beside archiving -- is
+  // keyed on it and on nothing else, and for a `ws` workspace it is how you
+  // get rid of the top-level project the daemon invented for
+  // `<project>/.workspaces/<name>`.
+  const removed: string[] = [];
+  const ctx = new BridgeConnection();
+  ctx.connected = (() => ({
+    workspaces: {
+      async list() {
+        return {
+          entries: [
+            {
+              id: "w1",
+              name: "billing",
+              workspaceDirectory: "/x/Code/openfin/.workspaces/billing",
+              projectId: "prj_billing",
+              projectDisplayName: "billing",
+              projectRootPath: "/x/Code/openfin/.workspaces/billing",
+              projectKind: "non_git",
+              workspaceKind: "directory",
+              status: "done",
+            },
+          ],
+        };
+      },
+    },
+  })) as any;
+  ctx.raw = (() => ({
+    async removeProject(id: string) {
+      removed.push(id);
+      return { removed: true };
+    },
+  })) as any;
+
+  const ops = workspaceOps(ctx);
+  const page: any = await ops["workspaces.list"]({ op: "workspaces.list" });
+  assert.equal(page.entries[0].projectId, "prj_billing");
+  assert.deepEqual(
+    await ops["project.remove"]({
+      op: "project.remove",
+      projectId: "prj_billing",
+    }),
+    { removed: true },
+  );
+  assert.deepEqual(removed, ["prj_billing"]);
+
+  // A missing id is an error, not a request that removes something else.
+  await assert.rejects(() => ops["project.remove"]({ op: "project.remove" }));
+});
+
+test("stopping a turn goes through the raw client, which is the only one that has it", async () => {
+  // `PaseoAgentHandle` has no cancel in 0.8.0 -- the typed API cannot express
+  // this at all -- so the op reaches for `ctx.raw()`. That is not a
+  // workaround: `paseo agent stop` calls exactly this method.
+  const canceled: string[] = [];
+  const ctx = new BridgeConnection();
+  ctx.raw = (() => ({
+    async cancelAgent(id: string) {
+      canceled.push(id);
+    },
+  })) as any;
+  const ops = agentOps(ctx);
+  assert.deepEqual(
+    await ops["agent.cancel"]({ op: "agent.cancel", agentId: "a1" }),
+    { canceled: true },
+  );
+  assert.deepEqual(canceled, ["a1"]);
+  await assert.rejects(() => ops["agent.cancel"]({ op: "agent.cancel" }));
+});
+
+test("dictation is raw PCM16 with the rate in the format string", async () => {
+  // The format string is not decoration: the daemon parses the sample rate out
+  // of it with /rate\s*=\s*(\d+)/ and resamples from there, and what rides
+  // in `audio` is headerless little-endian PCM16 -- no wav, no webm, no opus.
+  // Getting either wrong transcribes at the wrong speed rather than failing.
+  const calls: any[] = [];
+  const ctx = new BridgeConnection();
+  ctx.raw = (() => ({
+    async startDictationStream(id: string, format: string) {
+      calls.push(["start", id, format]);
+    },
+    sendDictationStreamChunk(
+      id: string,
+      seq: number,
+      audio: string,
+      format: string,
+    ) {
+      calls.push(["chunk", id, seq, audio, format]);
+    },
+    async finishDictationStream(id: string, finalSeq: number) {
+      calls.push(["finish", id, finalSeq]);
+      return { dictationId: id, text: "hello there" };
+    },
+    cancelDictationStream(id: string) {
+      calls.push(["cancel", id]);
+    },
+  })) as any;
+
+  const ops = voiceOps(ctx);
+  const format = "pcm16;rate=16000";
+  await ops["dictation.start"]({ op: "dictation.start", dictationId: "d1", format });
+  await ops["dictation.chunk"]({
+    op: "dictation.chunk",
+    dictationId: "d1",
+    seq: 1,
+    audio: "AAEC",
+    format,
+  });
+  const done: any = await ops["dictation.finish"]({
+    op: "dictation.finish",
+    dictationId: "d1",
+    finalSeq: 1,
+  });
+  assert.equal(done.text, "hello there");
+  assert.deepEqual(calls, [
+    ["start", "d1", format],
+    ["chunk", "d1", 1, "AAEC", format],
+    ["finish", "d1", 1],
+  ]);
+
+  await ops["dictation.cancel"]({ op: "dictation.cancel", dictationId: "d1" });
+  assert.deepEqual(calls.at(-1), ["cancel", "d1"]);
+
+  // A daemon with no speech model rejects the START, and that rejection is the
+  // message worth showing -- `dispatch` turns it into {ok:false,error}, so the
+  // op must not swallow it.
+  const broken = new BridgeConnection();
+  broken.raw = (() => ({
+    async startDictationStream() {
+      throw new Error("speech models are not downloaded");
+    },
+  })) as any;
+  await assert.rejects(
+    () =>
+      voiceOps(broken)["dictation.start"]({
+        op: "dictation.start",
+        dictationId: "d2",
+        format,
+      }),
+    /speech models are not downloaded/,
+  );
 });
 
 test("a timeline item keeps its kind on the payload, not just in the event name", async () => {

@@ -244,7 +244,18 @@ local function from_colourscheme()
   -- themes make markedly greyer -- `morning` links `NormalFloat` to `Pmenu` at
   -- #b2b2b2 against a #e4e4e4 editor, and deriving from that put a grey slab
   -- over a white screen.
-  local bg = bg_of "Normal" or bg_of "NormalFloat"
+  --
+  -- A THEME MAY STATE NO BACKGROUND AT ALL. `morning` does: it sets `Normal`'s
+  -- foreground and leaves the background to the terminal. Everything derived
+  -- by blending towards the background then comes back nil, and each of those
+  -- falls through to a fallback picked for its HUE rather than its
+  -- neutrality -- `PaseoTrack` landed on `LineNr`, which on `morning` is
+  -- brown, so the EMPTY half of every bar was drawn in a saturated red and a
+  -- bar at 3% read as a bar at 97%. Assuming the obvious background is both
+  -- right and the only thing that keeps those derivations neutral.
+  local bg = bg_of "Normal"
+    or bg_of "NormalFloat"
+    or (vim.o.background == "light" and "#ffffff" or "#000000")
   local text = fg_of "Normal"
 
   -- volt's `Ex*` groups are only trustworthy when base46 is: its OTHER path
@@ -585,7 +596,15 @@ function M.groups(t)
     -- the comment colour, because a track is the absence of fill and has to
     -- read as such -- on `morning`, a comment-derived track came out pale blue
     -- and the bar looked full at 42%.
-    PaseoTrack = { fg = bg.bg4 or M.blend(c.grey, c.bg, 70) or c.border },
+    -- ...and never `c.border` as a last resort, whatever happens above: a
+    -- track is the absence of fill and has to read as such, while `border` is
+    -- whatever hue the theme gave `LineNr`.
+    PaseoTrack = {
+      fg = bg.bg4
+        or M.blend(c.grey, c.bg, 70)
+        or M.shift(c.bg, vim.o.bg == "dark" and 12 or -12)
+        or c.grey,
+    },
   }
 
   -- Identity swatches: one per hue, legible on the surface they are drawn on.

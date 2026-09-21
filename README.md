@@ -109,7 +109,7 @@ require("paseo").setup {
     sidebar = {
       width = 40,                 -- percent of the editor's columns
       min_width = 60,             -- ...but never narrower than this, in cells
-      composer = 8,               -- rows the composer gets
+      composer = 8,               -- the MOST rows the composer grows to
       position = "right",         -- or "left"
     },
 
@@ -125,6 +125,13 @@ require("paseo").setup {
       backdrop = true,            -- dim the conversation behind it
       zindex = 190,               -- above everything; see below
     },
+  },
+
+  voice = {                       -- dictation; see below
+    enabled = true,
+    key = "<C-t>",                -- in the composer; false binds nothing
+    recorder = nil,               -- nil finds one; a table is a full argv
+    rate = 16000,
   },
 
   workspaces = {
@@ -228,7 +235,8 @@ there it goes on the end of the header instead.
 ### The full-screen surface
 
 The default. `:Paseo chat` opens it, `:Paseo chat` again closes it, `<C-f>`
-swaps to the sidebar and back.
+swaps to the sidebar and back. `<C-c>` stops the turn — from the composer or
+the conversation, normal mode or insert.
 
 ```
    claude/sonnet-5 · acceptEdits · 󰧑 think · ⚡ · ││││││ 42% left   ~/Code/paseo.nvim
@@ -237,7 +245,9 @@ swaps to the sidebar and back.
 
 The tab bar **degrades rather than truncates**, because the tab that would
 fall off the end is always the last one — which is the one you had not
-discovered yet. Four levels, widest that fits:
+discovered yet. The hint bars do the same: a winbar wider than its window is
+cut from the *left*, so a narrow sidebar was eating `send` — the first thing
+you need — to keep `close`. Four levels, widest that fits:
 
 | | |
 |---|---|
@@ -255,8 +265,8 @@ composer geometry are both measured against it.
 | `Sessions` | the agents **and terminals** here, live; open one |
 | `Settings` | mode, thinking level, model, feature toggles — keyboard or click |
 | `Changes` | what is changed on disk, per repo; open one |
-| `Usage` | context window, tokens, cost |
-| `Workspaces` | every workspace Paseo knows, plus the repos in this unit of work |
+| `Usage` | context window, tokens, cost — and this provider's 5-hour and weekly limits |
+| `Workspaces` | every workspace Paseo knows, grouped by project; archive one, or forget a project |
 
 `Sessions`, `Workspaces` and `Changes` are one kind of screen and take one set
 of keys — `j`/`k` to move, `h`/`l` by section, `g`/`G` to the ends, `<CR>` to
@@ -340,6 +350,13 @@ the escape hatch for a size no percentage can express, and returns cells.
 Whatever you ask for is clamped to 60×20 — below that the tab bar and the
 composer stop fitting — and to the editor, so no setting can put the border
 off screen.
+
+**The composer is the size of what is in it**, on the sidebar as well as the
+dashboard. One row over an empty buffer, growing as you type up to `composer`,
+shrinking back when you send — measured in *screen* rows rather than buffer
+lines, because it soft-wraps and one pasted sentence is three rows in a narrow
+pane. A fixed eight rows in the sidebar was a third of that pane spent on
+whitespace for the whole of a session.
 
 **The sidebar takes the same units**, under `ui.sidebar`: `width` as a
 percentage, `min_width` as a floor in cells (40% of a 100-column terminal is a
@@ -911,6 +928,31 @@ abbreviations and undo, and cannot hold a question with a blank line in it.
 paragraph.
 
 `:Paseo explain` does not open the box; it already has a question, the rubric.
+
+### Dictation
+
+`<C-t>` in the composer opens the microphone; `<C-t>` again closes it and puts
+what you said in at the cursor. The header says `listening` while it is open,
+on either surface. One key for both halves, and not hold-to-talk, because
+Neovim delivers a keypress and never a key *release* — "while held" cannot be
+expressed.
+
+Neovim cannot record audio, so this shells out to the first of `arecord`,
+`rec` (sox) or `ffmpeg` that is installed. `:checkhealth paseo` says which one
+it found, or that it found none — the failure mode otherwise is a key that
+appears to do nothing.
+
+Audio is streamed **while you speak** rather than recorded and then uploaded:
+the daemon transcribes as it goes, so the text arrives in about as long as it
+takes to lift your finger. What goes over the wire is raw PCM16 mono, base64,
+with the sample rate in the format string — no container.
+
+The **daemon** does the transcribing, and a microphone is not enough: if it has
+no speech model it says so, in its own words, the first time you press the key.
+
+Speech-to-*text* only. Paseo also has a duplex voice mode with synthesised
+replies; an editor that talks back needs a player, an interrupt and somewhere
+to put the transcript, which is a surface rather than a key.
 
 ### References are locations, not quotations
 
