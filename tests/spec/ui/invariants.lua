@@ -88,6 +88,24 @@ local function test_invariants()
     )
   end
 
+  -- THE COMPOSER IS A WINDOW, NOT A SECTION, and `fit_composer` must not
+  -- forget it. Volt records each section's start row when the layout is
+  -- measured, so a rebuild on keystroke would be a rebuild per character --
+  -- and there is nothing to rebuild: the chrome's height and width do not
+  -- change when a floated pane is resized, and on the Chat tab the body draws
+  -- nothing at all.
+  local float_source = source_of "lua/paseo/ui/float.lua"
+  if float_source then
+    local fit = float_source:match "function M%.fit_composer.-\nend"
+    truthy("ui: float.fit_composer exists", fit ~= nil)
+    if fit then
+      truthy(
+        "ui: and does not rebuild the chrome on a keystroke",
+        fit:find("rebuild", 1, true) == nil
+      )
+    end
+  end
+
   -- Volt sets `modifiable = false` and binds `q`/`<Esc>` to close. Handing it
   -- the composer would make the one buffer you type into untypeable.
   for _, path in ipairs { "lua/paseo/ui/chat.lua", "lua/paseo/ui/transcript.lua" } do

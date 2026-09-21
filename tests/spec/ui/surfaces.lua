@@ -207,6 +207,38 @@ local function test_surfaces()
     squeezed.height
   )
   float.close()
+
+  -- THE SAME BOX, ON THE OTHER SURFACE. The dashboard's composer is a floating
+  -- window positioned by `layout.panes` rather than a split, so growing it has
+  -- to move the conversation out of its way in the same breath -- and the
+  -- composer's bottom border must still land on the last body row rather than
+  -- on the footer.
+  config.setup { ui = { float = { composer = 10, min_composer = 3 } } }
+  float.open(surface_chat)
+  vim.api.nvim_buf_set_lines(surface_chat.composer, 0, -1, false, { "" })
+  float.fit_composer(surface_chat)
+  eq(
+    "ui: the dashboard's composer starts at its floor too",
+    vim.api.nvim_win_get_config(surface_chat.win_composer).height,
+    3
+  )
+  vim.api.nvim_buf_set_lines(surface_chat.composer, 0, -1, false, { "a", "b", "c", "d", "e", "f" })
+  float.fit_composer(surface_chat)
+  local grown = vim.api.nvim_win_get_config(surface_chat.win_composer)
+  eq("ui: and grows with the draft", grown.height, 6)
+  truthy(
+    "ui: keeping its ring while it does",
+    grown.border ~= nil and grown.border ~= "none",
+    vim.inspect(grown.border)
+  )
+  local above = vim.api.nvim_win_get_config(surface_chat.win_conversation)
+  truthy(
+    "ui: the conversation moved out of its way rather than being overlapped",
+    above.row + above.height <= grown.row,
+    ("conversation ends %d, composer starts %d"):format(above.row + above.height, grown.row)
+  )
+  float.close()
+  vim.api.nvim_buf_set_lines(surface_chat.composer, 0, -1, false, { "" })
   config.setup {}
 
   float.open(surface_chat)

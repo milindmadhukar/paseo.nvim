@@ -313,6 +313,9 @@ local function send(chat)
   -- a prompt typed in the Paseo app would appear only once. The timeline is
   -- the single source of truth for what was said, whoever said it.
   vim.api.nvim_buf_set_lines(chat.composer, 0, -1, false, { "" })
+  -- An API write, so nothing fired. Without this the box stays as tall as the
+  -- prompt you just sent, for the rest of the session.
+  M.fit_composer(chat)
   chat.pending = {}
   chat.images = {}
   M.set_streaming(chat, true)
@@ -360,6 +363,7 @@ local function attach_image(chat, image)
     lines[#lines] = tail == "" and placeholder or (tail .. " " .. placeholder)
     vim.api.nvim_buf_set_lines(chat.composer, 0, -1, false, lines)
   end
+  M.fit_composer(chat)
 
   vim.notify(
     ("paseo: %s attached (%s)"):format(placeholder, require("paseo.image").describe(image)),
@@ -395,6 +399,22 @@ end
 -- ------------------------------------------------------------------- layout
 
 ---@param chat paseo.Chat
+---Grow the composer to what is in it, on whichever surface it is on.
+---
+---Routed here rather than owned by either surface for the same reason
+---`sidebar.refresh` routes the header: it is one act on two windows, and a
+---caller should not have to know which one is up.
+---@param chat paseo.Chat
+local function fit_composer(chat)
+  local float = require "paseo.ui.float"
+  if float.is_open(chat) then
+    return float.fit_composer(chat)
+  end
+  sidebar.fit_composer(chat)
+end
+
+M.fit_composer = fit_composer
+
 ---Re-render the transcript when the window it is drawn into changes width.
 ---
 ---GLOBAL, not `buffer = chat.conversation`, and that is a bug fix rather than
@@ -491,6 +511,21 @@ local function make_buffers(chat)
       chat.composer,
       "paseo://compose/" .. vim.fs.basename(chat.root)
     )
+
+    -- The box is the size of what is in it: three rows for a question, more
+    -- for a paragraph, back to three once it is sent. A fixed eight rows was
+    -- a third of a sidebar spent on whitespace for the whole of every session.
+    --
+    -- `TextChanged` does NOT fire for `nvim_buf_set_lines`, so every
+    -- programmatic write to this buffer calls `fit_composer` itself. The one
+    -- that matters most is `send`, which clears it.
+    vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
+      buffer = chat.composer,
+      callback = function()
+        fit_composer(chat)
+      end,
+      desc = "paseo: grow the composer with the prompt",
+    })
 
     -- The composer is an ordinary buffer on purpose: your insert-mode
     -- keymaps, completion, abbreviations and undo all work, which is the
@@ -857,6 +892,9 @@ function M.attach(ref_text, opts)
         vim.list_extend(existing, vim.split(opts.prompt, "\n"))
       end
       vim.api.nvim_buf_set_lines(chat.composer, 0, -1, false, existing)
+      -- Before the cursor move, so the line it lands on is on screen: this
+      -- path can write a whole prompt into a three-row box.
+      M.fit_composer(chat)
 
       vim.api.nvim_set_current_win(chat.win_composer)
       vim.api.nvim_win_set_cursor(chat.win_composer, { #existing, 0 })

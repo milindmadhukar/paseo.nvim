@@ -79,8 +79,12 @@ local M = {}
 ---@field col integer?    not sizes. Absent means CENTRED, with the same
 ---                       `(total - size) / 2` floaterm centres with -- so the
 ---                       two at one size land in one place.
----@field composer integer  Rows the composer gets. The rest of the box, less
----                       the header, tab bar and footer, is the conversation.
+---@field composer integer  The MOST rows the composer grows to. It sits at
+---                       `min_composer` when empty and grows with what you
+---                       type, so this is a ceiling rather than a size. The
+---                       rest of the box, less the header, tab bar and footer,
+---                       is the conversation.
+---@field min_composer integer  ...and what it sits at with nothing in it.
 ---@field zindex integer  Base z-index of the surface. DELIBERATELY BELOW 50,
 ---                       which is what floating windows and plenary popups get
 ---                       by default: a dashboard that outranks them hides the
@@ -107,7 +111,10 @@ local M = {}
 ---                       read a tool card in, and unlike the float -- whose
 ---                       floor is a hard layout requirement -- how narrow is
 ---                       too narrow here is a matter of taste.
----@field composer integer  Rows the composer gets, under the conversation.
+---@field composer integer  The MOST rows the composer grows to, under the
+---                       conversation -- a ceiling, not a size, read the same
+---                       way as the float's.
+---@field min_composer integer  ...and what it sits at with nothing in it.
 ---@field position "right"|"left"  Which side the pane opens on.
 
 ---@class paseo.Config.UI.Answer
@@ -249,7 +256,13 @@ local defaults = {
       width = 94,
       height = 86,
       -- row and col are deliberately absent: absent means centred.
-      composer = 7,
+      --
+      -- A CEILING, not a size: the composer starts at `min_composer` and grows
+      -- with what you type. Which is why the default went UP -- the number
+      -- costs nothing at rest now, so it can be the one you actually want for
+      -- a paragraph rather than a compromise with the transcript.
+      composer = 12,
+      min_composer = 3,
       zindex = 30,
       backdrop = true,
       tab_keys = true,
@@ -258,7 +271,10 @@ local defaults = {
     sidebar = {
       width = 40,
       min_width = 60,
-      composer = 8,
+      -- The same floor-and-ceiling pair as `width`/`min_width` three lines up,
+      -- and for the same reason: one number that means one thing.
+      composer = 12,
+      min_composer = 3,
       position = "right",
     },
 
@@ -405,8 +421,8 @@ function M.setup(opts)
   -- as `nvim_open_win` complaining about a width -- true, and no help at all in
   -- finding the key that caused it.
   for where, keys in pairs {
-    float = { "width", "height", "row", "col", "composer" },
-    sidebar = { "width", "min_width", "composer" },
+    float = { "width", "height", "row", "col", "composer", "min_composer" },
+    sidebar = { "width", "min_width", "composer", "min_composer" },
     terminal = { "width", "height", "row", "col", "list" },
   } do
     for _, key in ipairs(keys) do

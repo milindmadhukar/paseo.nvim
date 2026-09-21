@@ -69,10 +69,18 @@ local function geometry()
   local col = type(ui.col) == "number" and math.floor(ui.col) or math.floor((columns - w) / 2)
 
   -- The composer is measured from the bottom, so the conversation gets what is
-  -- left. Clamped to leave the conversation at least five rows: a composer
-  -- taller than the box would give it a negative height.
-  local composer = type(ui.composer) == "number" and math.floor(ui.composer) or 7
-  composer = math.max(1, math.min(composer, h - 10))
+  -- left. `composer` is a CEILING it grows to and `min_composer` is where it
+  -- sits empty; `composer` here is the LIVE height, which `fit_composer` later
+  -- writes back so a tab round-trip does not lose it.
+  --
+  -- The ceiling is `layout.composer_max`, not the `h - 10` this used to clamp
+  -- with. That one lands on four rows of conversation and leans on `panes`'
+  -- own `math.max(5, …)` to overlap a row rather than admit it does not fit.
+  local composer_max = type(ui.composer) == "number" and math.floor(ui.composer) or 12
+  local composer_min = type(ui.min_composer) == "number" and math.floor(ui.min_composer) or 3
+  local ceiling = layout.composer_max { height = h }
+  composer_max = math.max(1, math.min(composer_max, ceiling))
+  composer_min = math.max(1, math.min(composer_min, composer_max))
 
   local z = ui.zindex or 30
   return {
@@ -80,7 +88,9 @@ local function geometry()
     height = h,
     row = math.max(0, math.min(row, lines - h)),
     col = math.max(0, math.min(col, columns - w)),
-    composer = composer,
+    composer = composer_min,
+    composer_min = composer_min,
+    composer_max = composer_max,
     backdrop = ui.backdrop ~= false,
     -- The panes are ABOVE the chrome they sit on and below anything opened
     -- over the whole surface.
@@ -535,6 +545,71 @@ local function show_chat_panes()
 
   M.refresh_header(chat)
   transcript.redraw(chat)
+  M.fit_composer(chat)
+end
+
+---Grow the composer, and move the conversation out of its way.
+---
+---Both panes come from ONE call to `layout.panes`, as they do in
+---`show_chat_panes` -- the composer's bottom border landing on the last body
+---row rather than on the footer is that function's invariant, and re-deriving
+---either window's row here is how three copies of the chrome's arithmetic
+---happened the first time.
+---
+---VOLT IS NOT INVOLVED, which is worth saying because it is the constraint
+---everything else on this surface bends around. The chrome records each
+---section's start row when the layout is measured, and a section that changes
+---height draws every section below it at the wrong row -- but the composer is
+---not a section. It is a real window floated over a body that, on the Chat
+---tab, draws nothing at all. The chrome's height and width are untouched, so
+---`rebuild` must NOT run here; on a keystroke it would be a rebuild per
+---character.
+---@param chat table
+function M.fit_composer(chat)
+  if not (state and state.chat == chat and state.tab == "Chat") then
+    return
+  end
+  local win = chat.win_composer
+  if not (win and api.nvim_win_is_valid(win)) then
+    return
+  end
+
+  local g = state.geometry
+  local rows = layout.composer_rows {
+    buf = chat.composer,
+    win = win,
+    min = g.composer_min or 3,
+    max = math.min(g.composer_max or 12, layout.composer_max(g)),
+  }
+  if rows == g.composer then
+    return
+  end
+  g.composer = rows
+
+  local panes = layout.panes(g)
+  local stick = transcript.at_bottom(chat)
+  -- The conversation first, so the two never overlap mid-flight.
+  if chat.win_conversation and api.nvim_win_is_valid(chat.win_conversation) then
+    pcall(api.nvim_win_set_config, chat.win_conversation, {
+      relative = "editor",
+      row = panes.top,
+      col = panes.col,
+      width = panes.width,
+      height = panes.conversation,
+    })
+  end
+  -- `border` and `zindex` are deliberately not restated: omitted keys are
+  -- preserved by `nvim_win_set_config`, so the composer keeps its ring.
+  pcall(api.nvim_win_set_config, win, {
+    relative = "editor",
+    row = panes.composer_row,
+    col = panes.col,
+    width = panes.width,
+    height = panes.composer,
+  })
+  if stick then
+    transcript.to_bottom(chat)
+  end
 end
 
 ---@param chat table

@@ -362,7 +362,15 @@ local function test_panels()
   -- The sidebar is configurable in the same units as the float, which is the
   -- point of the units: one number means one thing everywhere.
   config.setup {
-    ui = { sidebar = { width = 30, min_width = 20, composer = 4, position = "left" } },
+    ui = {
+      sidebar = {
+        width = 30,
+        min_width = 20,
+        composer = 9,
+        min_composer = 3,
+        position = "left",
+      },
+    },
   }
   sidebar.open(surface_chat)
   eq(
@@ -370,10 +378,41 @@ local function test_panels()
     vim.api.nvim_win_get_width(surface_chat.win_conversation),
     math.max(20, math.floor(vim.o.columns * 30 / 100))
   )
+
+  -- THE BOX IS THE SIZE OF WHAT IS IN IT. `composer` is a ceiling, not a
+  -- height: an empty composer sits at `min_composer`, which is where a fixed
+  -- eight rows used to spend a third of a narrow sidebar on whitespace.
+  --
+  -- `nvim_win_get_height` counts the winbar row, and this composer carries the
+  -- hint bar -- so every assertion here is `rows + 1`. Without adding it back
+  -- in `fit_composer`, `min_composer = 3` would mean three rows of typing in
+  -- the dashboard and two in the sidebar.
+  local bar = vim.wo[surface_chat.win_composer].winbar ~= "" and 1 or 0
   eq(
-    "ui: and an explicit composer height",
+    "ui: an empty composer sits at its floor",
     vim.api.nvim_win_get_height(surface_chat.win_composer),
-    4
+    3 + bar
+  )
+  vim.api.nvim_buf_set_lines(surface_chat.composer, 0, -1, false, { "one", "two", "three", "four" })
+  sidebar.fit_composer(surface_chat)
+  eq(
+    "ui: and grows with what you type",
+    vim.api.nvim_win_get_height(surface_chat.win_composer),
+    4 + bar
+  )
+  vim.api.nvim_buf_set_lines(surface_chat.composer, 0, -1, false, vim.split(("x\n"):rep(40), "\n"))
+  sidebar.fit_composer(surface_chat)
+  eq(
+    "ui: up to the ceiling and no further",
+    vim.api.nvim_win_get_height(surface_chat.win_composer),
+    9 + bar
+  )
+  vim.api.nvim_buf_set_lines(surface_chat.composer, 0, -1, false, { "" })
+  sidebar.fit_composer(surface_chat)
+  eq(
+    "ui: and shrinks back when it is sent",
+    vim.api.nvim_win_get_height(surface_chat.win_composer),
+    3 + bar
   )
   truthy(
     "ui: `position = left` puts it on the left",

@@ -99,4 +99,40 @@ function M.panes(g)
   }
 end
 
+---Rows the composer should get for what is in it, between `min` and `max`.
+---
+---Measured in SCREEN rows, not buffer lines. The composer soft-wraps, and a
+---sixty-column sidebar turns one pasted sentence into three rows -- so a box
+---that counted lines would say "1" while holding three rows of text, which is
+---a box you type into blind. `prompt.lua` counts lines because its own box is
+---78 columns wide and wrapping is the exception there; here it is the rule.
+---
+---`nvim_win_text_height` measures against the window's WIDTH, so changing the
+---height cannot change the answer. That is what makes the fit converge in one
+---pass instead of oscillating against its own resize event.
+---@param opts { buf: integer, win?: integer, min: integer, max: integer }
+---@return integer
+function M.composer_rows(opts)
+  local rows
+  if opts.win and vim.api.nvim_win_is_valid(opts.win) then
+    local ok, height = pcall(vim.api.nvim_win_text_height, opts.win, {})
+    rows = ok and height and height.all or nil
+  end
+  rows = rows or vim.api.nvim_buf_line_count(opts.buf)
+  return math.max(opts.min, math.min(opts.max, rows))
+end
+
+---The most rows the float's composer may take and still leave the
+---conversation five.
+---
+---`panes` gives the conversation `body_last - composer - 1 - body_first`, so
+---this is `body_height - 7`. One tighter than the `h - 10` the geometry used
+---to clamp with, which lands on four and leans on `panes`' own `math.max(5,
+---…)` to overlap a row rather than admit it does not fit.
+---@param g table
+---@return integer
+function M.composer_max(g)
+  return math.max(1, M.rows(g.height).body_height - 7)
+end
+
 return M

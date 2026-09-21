@@ -294,10 +294,26 @@ ui.float.col                                          number, unset
     switching between them does not move the frame under you.
 
                                               *paseo-config.ui.float.composer*
-ui.float.composer                                     number, default `7`
+ui.float.composer                                    number, default `12`
+                                          *paseo-config.ui.float.min_composer*
+ui.float.min_composer                                 number, default `3`
 
-    Rows the composer gets. The conversation gets what is left of the box
-    after the header, the tab bar, the footer and this.
+    A CEILING and a FLOOR, not a size. The composer sits at `min_composer`
+    with nothing in it and grows with what you type, up to `composer`. The
+    conversation gets what is left of the box after the header, the tab bar,
+    the footer and whatever the composer is currently taking.
+
+    BEHAVIOUR CHANGE: `composer` used to be a fixed height. A configured
+    `composer = 20` now means "up to 20", never "always 20".
+
+    The default went UP, from 7, because the number no longer costs anything
+    at rest -- so it can be the height you actually want for a paragraph
+    rather than a compromise with the transcript.
+
+    Measured in SCREEN rows, not buffer lines: the composer soft-wraps, and
+    one pasted sentence is three rows in a narrow pane. The ceiling is capped
+    again at whatever leaves the conversation five rows, so a small terminal
+    cannot be typed into blind.
 
                                                 *paseo-config.ui.float.zindex*
 ui.float.zindex                                       number, default `30`
@@ -331,7 +347,8 @@ ui.sidebar                                                          table
         sidebar = {
           width = 40,        -- percent of the editor's columns, or a function
           min_width = 60,    -- ...but never narrower than this, in CELLS
-          composer = 8,      -- rows the composer gets
+          composer = 12,     -- the MOST rows the composer grows to
+          min_composer = 3,  -- ...and what it sits at, empty
           position = "right" -- or "left"
         }
 <
@@ -339,6 +356,11 @@ ui.sidebar                                                          table
     pane too narrow to read a tool card in: 40% of a 100-column terminal is 40
     columns. The float's equivalent floor is fixed at 60x20 instead, because
     there it is a hard layout requirement rather than a matter of taste.
+
+    `composer`/`min_composer` is the same floor-and-ceiling pair, in rows, and
+    reads exactly as |paseo-config.ui.float.composer| does: the box is the
+    size of what is in it. A question gets three rows; a paragraph grows the
+    box and sending it shrinks the box back.
 
     The width is also capped at what 'winwidth' leaves for the window you came
     back from. Neovim claws the difference back the instant focus returns

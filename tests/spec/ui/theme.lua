@@ -190,17 +190,50 @@ local function test_layout()
     eq("ui: the footer owns the last row at " .. height, rows.footer, height)
     eq("ui: the body ends above it at " .. height, rows.body_last, height - 1)
 
-    local g = { row = 2, col = 3, width = 100, height = height, composer = 7 }
-    local panes = layout.panes(g)
-    eq("ui: the panes start below the rule at " .. height, panes.top, g.row + 3)
     -- The composer's bottom border lands ON the last body row, never on the
-    -- footer.
-    eq(
-      "ui: the composer's border lands on the last body row at " .. height,
-      panes.composer_row + panes.composer,
-      layout.screen_row(g, rows.body_last)
-    )
+    -- footer -- and it has to keep doing that at every height the box now
+    -- grows through, not only at the one the geometry picked.
+    for _, composer in ipairs { 3, 7, layout.composer_max { height = height } } do
+      local g = { row = 2, col = 3, width = 100, height = height, composer = composer }
+      local panes = layout.panes(g)
+      eq("ui: the panes start below the rule at " .. height, panes.top, g.row + 3)
+      eq(
+        ("ui: the composer's border lands on the last body row at %d/%d"):format(height, composer),
+        panes.composer_row + panes.composer,
+        layout.screen_row(g, rows.body_last)
+      )
+      -- ...without the conversation being clamped into overlapping it, which
+      -- is what `h - 10` used to allow: four rows, rounded up to five.
+      truthy(
+        ("ui: and the conversation genuinely fits at %d/%d"):format(height, composer),
+        panes.top + panes.conversation <= panes.composer_row,
+        ("conversation ends %d, composer starts %d"):format(
+          panes.top + panes.conversation,
+          panes.composer_row
+        )
+      )
+    end
   end
+
+  -- The box is the size of what is in it, between a floor and a ceiling.
+  local fitted = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(fitted, 0, -1, false, { "one", "two", "three", "four" })
+  eq(
+    "ui: an empty-ish composer is held up to its floor",
+    layout.composer_rows { buf = fitted, min = 6, max = 12 },
+    6
+  )
+  eq(
+    "ui: a draft sizes the box to itself",
+    layout.composer_rows { buf = fitted, min = 3, max = 12 },
+    4
+  )
+  eq(
+    "ui: and a long one stops at the ceiling",
+    layout.composer_rows { buf = fitted, min = 1, max = 2 },
+    2
+  )
+  vim.api.nvim_buf_delete(fitted, { force = true })
 
   -- Two rows of chrome plus the panel's own heading. `item_at` returns nil
   -- above the list rather than a zero or a negative, so a click on the heading

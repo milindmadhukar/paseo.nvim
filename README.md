@@ -99,7 +99,8 @@ require("paseo").setup {
       width = 94,                 -- percent of the editor, 1-100
       height = 86,
       -- row and col are absent: absent means centred
-      composer = 7,               -- rows the composer gets
+      composer = 12,              -- the MOST rows the composer grows to
+      min_composer = 3,           -- ...and what it sits at, empty
       zindex = 30,                -- BELOW the 50 a float gets by default
       backdrop = true,
       tab_keys = true,            -- bare 1-7 switch tabs; see below
@@ -108,7 +109,8 @@ require("paseo").setup {
     sidebar = {
       width = 40,                 -- percent of the editor's columns
       min_width = 60,             -- ...but never narrower than this, in cells
-      composer = 8,               -- rows the composer gets
+      composer = 12,              -- the MOST rows the composer grows to
+      min_composer = 3,           -- ...and what it sits at, empty
       position = "right",         -- or "left"
     },
 
@@ -288,10 +290,18 @@ Whatever you ask for is clamped to 60×20 — below that the tab bar and the
 composer stop fitting — and to the editor, so no setting can put the border
 off screen.
 
+**The composer is the size of what is in it.** It sits at `min_composer` rows
+with nothing in it and grows as you type, up to `composer`, then shrinks back
+when you send. Both surfaces do this, measured in *screen* rows rather than
+buffer lines, because the composer soft-wraps and one pasted sentence is three
+rows in a narrow pane. Note the behaviour change: `composer` is now a ceiling,
+so a configured `composer = 20` means "up to 20", not "always 20".
+
 **The sidebar takes the same units**, under `ui.sidebar`: `width` as a
 percentage, `min_width` as a floor in cells (40% of a 100-column terminal is a
 pane too narrow to read a tool card in, and a percentage has no way to know
-that), `composer` in rows, and `position` for which side it opens on. Its
+that), `composer`/`min_composer` in rows, and `position` for which side it
+opens on. Its
 width is also capped at what `'winwidth'` leaves for the window you came back
 from — Neovim claws the difference back the instant focus returns there, so a
 bigger number is not a wider sidebar, it is a number that quietly does not
