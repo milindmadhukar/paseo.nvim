@@ -871,6 +871,37 @@ function M.is_open(chat)
     M.close()
     return false
   end
+  -- AND ON THE TAB PAGE YOU ARE LOOKING AT. A float belongs to the tab it was
+  -- opened on, so after `workspaces.open`'s default `tabnew` the previous
+  -- dashboard is still a perfectly valid window -- just an invisible one. Left
+  -- unasked, `chat.toggle` saw "already open", took its close branch, and the
+  -- first press of the chat key in a new workspace did nothing you could see.
+  -- The second one opened it, which reads as a key that needs pressing twice.
+  if api.nvim_win_get_tabpage(state.win) ~= api.nvim_get_current_tabpage() then
+    return false
+  end
+  return state.chat == chat
+end
+
+---Is this chat's dashboard up AT ALL -- on any tab page?
+---
+---The other question, and not the one `is_open` answers. `is_open` means "is
+---it usable from where you are standing", because its callers go on to focus
+---a window or to decide that a toggle should close. This one means "is there
+---a chat on screen somewhere", which is what |paseo.ui.chat|.follow needs:
+---the whole point of following is to move a surface that is on the tab you
+---just LEFT onto the one you are on now, and a tab-aware test would answer
+---"nothing open" at exactly that moment and leave it behind.
+---@param chat table
+---@return boolean
+function M.showing(chat)
+  if not state then
+    return false
+  end
+  if not (state.win and api.nvim_win_is_valid(state.win)) then
+    M.close()
+    return false
+  end
   return state.chat == chat
 end
 

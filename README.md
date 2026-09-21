@@ -1004,6 +1004,16 @@ too but never takes focus; that belongs to whatever your review autocmd opens.
 A `workspaces.open` function that spawns its own window doesn't move this
 Neovim, so the chat in it stays put.
 
+**And if you open the chat afterwards instead**, `:Paseo chat` resolves the
+directory you are *standing in* — the workspace containing the cwd, else the
+repo containing it, else the cwd. It used to read the git toplevel of the
+**buffer**, falling back to the cwd only for an unnamed one, which is what
+made "switch workspace, open the chat" land you back in the workspace you
+left: with `workspaces.open = "tcd"` the switch reuses the tab, so the file
+you had open in the old worktree is still the current buffer. Anything that
+means a particular *file* — `:Paseo ask`, `:Paseo explain` — still resolves
+from that file; only "open the chat", which means *here*, reads the cwd.
+
 To keep the built-in switch and only decide what the new tab *shows*, listen for
 `User PaseoWorkspaceOpen` instead; it fires after the `tcd`, with the root in
 `data.root`:

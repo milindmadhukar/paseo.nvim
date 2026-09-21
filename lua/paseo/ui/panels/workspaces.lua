@@ -77,7 +77,12 @@ function M.lines(chat, width)
     }
   end
 
-  local here = vim.fn.resolve(vim.fn.fnamemodify(chat.root, ":p")):gsub("/+$", "")
+  -- Where you are STANDING, not what the chat is pointed at. Those are the
+  -- same thing right up until you switch workspace without opening a chat, at
+  -- which point `chat.root` is the workspace you left and this list puts the
+  -- "you are here" marker on the wrong row -- while the row you are actually
+  -- in sits unmarked two lines below it.
+  local here = vim.fn.resolve(vim.fn.fnamemodify(vim.fn.getcwd(), ":p")):gsub("/+$", "")
   local list = cache.list or {}
 
   -- Widths from the data, not guessed: project names run from `kora` to

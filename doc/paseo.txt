@@ -1026,11 +1026,26 @@ Three things it deliberately does not do:
 `<C-r>` re-points the chat too, but never takes focus -- the cursor belongs in
 whatever |paseo-review-autocmd| opens.
 
+AND WHEN YOU OPEN THE CHAT AFTERWARDS instead, `:Paseo chat` resolves the
+directory you are STANDING IN -- the workspace containing the cwd, else the
+repository containing it, else the cwd itself. It used to read the git
+toplevel of the BUFFER, with the cwd reached only for an unnamed one, and
+that is what made switching workspace and then opening the chat show you the
+workspace you had just left: with `workspaces.open = "tcd"` the switch reuses
+the tab, so the file you had open in the old worktree is still the current
+buffer.
+
+`:Paseo ask`, `:Paseo explain` and everything else that means a particular
+FILE still resolves from that file. Only "open the chat", which means "here",
+reads the cwd.
+
                                                         *paseo.ui.chat.follow*
 require("paseo.ui.chat").follow({root}, {opts})              -> boolean
 
-    Re-point the open chat at `root`. Returns false, having done nothing, when
-    no chat is on screen. `opts.focus` overrides the rule above.
+    Re-point the open chat at `root`. Returns false when no chat is on screen
+    -- having dropped the plugin's idea of which chat is CURRENT, so that the
+    next `:Paseo chat` resolves where it is from scratch rather than reopening
+    the workspace you just left. `opts.focus` overrides the rule above.
 
                                                  *paseo-workspace-open-autocmd*
 Opening a workspace (|paseo-workspaces-keys|) fires `User PaseoWorkspaceOpen`
