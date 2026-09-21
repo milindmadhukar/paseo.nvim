@@ -335,10 +335,10 @@ local function test_surfaces()
 
     local volt_cr = buf_map "<CR>"
     truthy("ui: volt binds <CR> on the chrome buffer", volt_cr ~= nil)
-    eq("ui: and the Session keys are not bound on another tab", buf_map "h", nil)
+    eq("ui: and the Settings keys are not bound on another tab", buf_map "h", nil)
 
-    float.select "Session"
-    truthy("ui: the Session panel takes the movement keys", buf_map "h" ~= nil)
+    float.select "Settings"
+    truthy("ui: the Settings panel takes the movement keys", buf_map "h" ~= nil)
     truthy("ui: and its group mnemonics", buf_map "s" ~= nil)
     truthy("ui: and displaces volt's <CR>", buf_map("<CR>").callback ~= volt_cr.callback)
 

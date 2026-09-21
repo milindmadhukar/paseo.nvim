@@ -3,7 +3,7 @@
 --- `render.lua` gives us a LINE -- a list of `{ text, highlight, click }`
 --- cells. That is the alphabet. This is the vocabulary built on top of it, and
 --- it exists because every panel had been spelling the same words out by hand:
---- `active and "  ● " or "  ○ "` in `panels/session.lua`, `mine and "  ▌ " or
+--- `active and "  ● " or "  ○ "` in `panels/settings.lua`, `mine and "  ▌ " or
 --- "    "` in two more, `string.rep("─", width - 2)` in a fourth, and the same
 --- footer hint row copied verbatim into five files.
 ---

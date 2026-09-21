@@ -7,7 +7,7 @@ local render = require "paseo.ui.render"
 local config = require "paseo.config"
 local float = require "paseo.ui.float"
 local session = require "paseo.ui.session"
-local session_panel = require "paseo.ui.panels.session"
+local session_panel = require "paseo.ui.panels.settings"
 local widgets = require "paseo.ui.widgets"
 local transcript = require "paseo.ui.transcript"
 
@@ -114,6 +114,19 @@ local function test_session_source()
   end
   table.sort(blank)
   eq("ui: no glyph in the registry is empty", blank, {})
+
+  -- EVERY TAB HAS AN ICON, and the two lists are keyed by the same string.
+  -- `tab_lines` does `icons.panel[name] or ""`, so a tab the registry does not
+  -- spell identically draws a blank pill and nothing anywhere errors -- which
+  -- is exactly how a rename goes unnoticed until you look at the bar.
+  local missing = {}
+  for _, name in ipairs(require("paseo.ui.float").TABS) do
+    if vim.api.nvim_strwidth(registry.panel[name] or "") < 1 then
+      missing[#missing + 1] = name
+    end
+  end
+  table.sort(missing)
+  eq("ui: every dashboard tab has an icon under its own name", missing, {})
 
   -- The two selection markers additionally have to be exactly ONE cell. They
   -- are drawn in fixed-width rows, and a two-cell marker shifts everything to
@@ -452,7 +465,7 @@ end
 ---inside `vim.on_key`. `chips_body` has always reserved that height; this is
 ---the same guard for the toggles that now carry descriptions.
 local function test_toggle_height()
-  local panel = require "paseo.ui.panels.session"
+  local panel = require "paseo.ui.panels.settings"
 
   local source = {
     keys = {},

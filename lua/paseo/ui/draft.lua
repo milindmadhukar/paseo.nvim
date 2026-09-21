@@ -417,7 +417,7 @@ function M.result(draft)
   }
 end
 
----The draft, as the interface |paseo.ui.panels.session| draws.
+---The draft, as the interface |paseo.ui.panels.settings| draws.
 ---@param draft paseo.Draft
 ---@return paseo.SettingsSource
 function M.source(draft)

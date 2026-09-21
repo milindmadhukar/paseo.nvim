@@ -1137,8 +1137,8 @@ The FULL SCREEN surface -- the DEFAULT -- is `:Paseo chat`, `:Paseo dash`, or
 tab for every other thing Paseo knows: >
 
     1 Chat        the conversation and composer
-    2 Session     mode, thinking level, model and feature toggles
-    3 Sessions    the agents AND terminals here, live -- open one
+    2 Sessions    the agents AND terminals here, live -- open one
+    3 Settings    mode, thinking level, model and feature toggles
     4 Changes     what is changed on disk -- click a file to open it
     5 Usage       context window, tokens and cost
     6 Workspaces  every workspace, and the repos in this unit of work
@@ -1154,7 +1154,7 @@ Both surfaces share the same buffers, so switching preserves your draft and
 your scroll position.
 
                                                          *paseo-chat-session*
-The SESSION tab (`2`) is the one you drive from the keyboard. Every setting
+The SETTINGS tab (`3`) is the one you drive from the keyboard. Every setting
 this session has is on it at once, grouped into cards, with what is currently
 set filled in rather than marked with a dot: >
 
@@ -1203,7 +1203,7 @@ The same four cards open on their own, centred, without the dashboard: >
     :Paseo session       all of them
 <
 Same keys, plus `q`/`<Esc>` to close. These used to be `vim.ui.select` lists
-of strings with a `●` glued to the front of one of them; they are the Session
+of strings with a `●` glued to the front of one of them; they are the Settings
 tab's renderer in a window of its own, so there is no second implementation to
 drift.
 
@@ -1280,7 +1280,7 @@ In the conversation ~
     <C-f>     switch surface
     q         close the chat
 
-On the Session tab ~
+On the Settings tab ~
 
     h j k l   move between settings
     <CR>      apply the focused setting

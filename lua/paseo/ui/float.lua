@@ -34,7 +34,7 @@ local ns = api.nvim_create_namespace "paseo.float"
 ---@type table|nil
 local state
 
-M.TABS = { "Chat", "Session", "Sessions", "Changes", "Usage", "Workspaces" }
+M.TABS = { "Chat", "Sessions", "Settings", "Changes", "Usage", "Workspaces" }
 
 -- ------------------------------------------------------------------ geometry
 
@@ -115,11 +115,11 @@ local function header_lines()
   end
   local line = sidebar.header(state.chat)
 
-  -- Everything the header names is a thing the Session panel can change, so
+  -- Everything the header names is a thing the Settings panel can change, so
   -- the header is the shortest route to it. Cells carry volt's third element;
   -- `volt.events.add` on this buffer is what turns that into a click.
   for _, cell in ipairs(line) do
-    cell[3] = goto_tab "Session"
+    cell[3] = goto_tab "Settings"
   end
 
   return { render.truncate(line, state.geometry.width - 2) }

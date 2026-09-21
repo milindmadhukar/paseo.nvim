@@ -102,7 +102,7 @@ require("paseo").setup {
       composer = 7,               -- rows the composer gets
       zindex = 30,                -- BELOW the 50 a float gets by default
       backdrop = true,
-      tab_keys = true,            -- bare 1-7 switch tabs; see below
+      tab_keys = true,            -- bare 1-6 switch tabs; see below
     },
 
     sidebar = {
@@ -208,7 +208,7 @@ On the sidebar it is the conversation window's winbar. On the full-screen
 surface it is **not**: a winbar belongs to a window, the conversation window
 only exists on the Chat tab, and every other tab therefore had no header and
 could not tell you which model it was on. There it is a volt section in the
-chrome, drawn above the tab bar, true on all seven tabs — and clicking it takes
+chrome, drawn above the tab bar, true on all six tabs — and clicking it takes
 you to the panel that can change what it says.
 
 ### The full-screen surface
@@ -218,7 +218,7 @@ swaps to the sidebar and back.
 
 ```
   ⠹ 14s  claude/sonnet-5 · acceptEdits · 󰧑 think · ⚡ · 21%   ~/Code/paseo.nvim
-   1 󰀄 Chat   2 󱕂 Session   3 󱙺 Sessions   4 󰘬 Changes   5 󰄨 Usage   6 󰙅 Workspaces   7 󰆍 Terminals
+   1 󰀄 Chat   2 󱙺 Sessions   3 󱕂 Settings   4 󰘬 Changes   5 󰄨 Usage   6 󰙅 Workspaces
 ```
 
 The tab bar **degrades rather than truncates**, because the tab that would
@@ -229,7 +229,7 @@ discovered yet. Four levels, widest that fits:
 |---|---|
 | `1 󰀄 Chat` | number, icon and name |
 | `1 Chat` | the icon goes first: the name is what you read, the icon is what you recognise |
-| `1 󰀄` | seven of these fit in 41 columns |
+| `1 󰀄` | six of these fit in 36 columns |
 | `1` | and at the last level the active tab alone keeps its name |
 
 The row count never changes at any level, because the body height and the
@@ -238,13 +238,13 @@ composer geometry are both measured against it.
 | | |
 |---|---|
 | `Chat` | the conversation and the composer, real buffers floated on top |
-| `Session` | mode, thinking level, model, feature toggles — keyboard or click |
 | `Sessions` | the agents **and terminals** here, live; open one |
+| `Settings` | mode, thinking level, model, feature toggles — keyboard or click |
 | `Changes` | what is changed on disk, per repo; click a file to open it |
 | `Usage` | context window, tokens, cost |
 | `Workspaces` | every workspace Paseo knows, plus the repos in this unit of work |
 
-`1`–`7` jump, `<M-1>`–`<M-7>` and `<Tab>`/`<S-Tab>` do the same, and
+`1`–`6` jump, `<M-1>`–`<M-6>` and `<Tab>`/`<S-Tab>` do the same, and
 everything that does something responds to a click.
 
 A bare digit is also a **count**, and the two panes these are bound on are
@@ -309,7 +309,7 @@ header repaints ten times a second while a turn runs, and a single section
 would drag the `Changes` panel — one `git status` per repo — through every
 frame.
 
-### The Session tab
+### The Settings tab
 
 Everything this session is set to, at once, with the current value **filled in**
 rather than marked with a dot:
