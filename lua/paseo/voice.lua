@@ -130,8 +130,67 @@ function M.recorder()
 end
 
 ---@type { id: string, proc: vim.SystemObj, seq: integer, held: string, format: string,
----        on_state: fun(recording: boolean)|nil, finishing: boolean }|nil
+---        on_state: fun(recording: boolean)|nil, on_level: fun(level: number)|nil,
+---        finishing: boolean, stderr: string }|nil
 local live
+
+---How loud the last few hundred samples were, as 0..1.
+---
+---THIS IS WHAT THE VISUALISER DRAWS, and it is computed here rather than in the
+---UI because this is the only place the audio exists -- the bytes are handed
+---to `vim.base64.encode` and forgotten a line later.
+---
+---Decimated: `step` takes every eighth sample, which at 16kHz is still 2kHz of
+---envelope and is plenty for a bar that moves twenty times a second. Reading
+---all 800 samples of every chunk would be 16,000 `string.byte` calls a second
+---for a readout whose whole job is to twitch.
+---
+---RMS rather than peak. A peak meter is pinned by one click of the desk and
+---reads the same for a whisper as for a sentence; RMS is the one that tracks
+---your voice.
+---
+---RAW, and deliberately not scaled to anything. There is no useful constant to
+---scale it BY: this laptop's microphone sits at 91% gain and reads 0.17 in a
+---silent room, which any fixed gain that makes a quiet mic visible turns into
+---a meter pinned at full before anyone has said a word -- measured, on the
+---machine this was written on. What a bar has to show is the difference
+---between the room and your voice, and only something watching the last few
+---seconds can know where that line is. So the scaling lives with the history,
+---in |paseo.ui.composer|, and this reports what it heard.
+---@param pcm string  Raw little-endian signed 16-bit mono.
+---@return number  RMS, 0..1. A quiet room is whatever this microphone's quiet
+---        room is; it is not necessarily near zero.
+local function level_of(pcm)
+  local n = #pcm
+  if n < 2 then
+    return 0
+  end
+
+  local step = 16 -- every eighth sample: two bytes each
+  local sum, count = 0, 0
+  for i = 1, n - 1, step do
+    local lo, hi = pcm:byte(i, i + 1)
+    if not hi then
+      break
+    end
+    local sample = lo + hi * 256
+    if sample >= 32768 then
+      sample = sample - 65536
+    end
+    local scaled = sample / 32768
+    sum = sum + scaled * scaled
+    count = count + 1
+  end
+  if count == 0 then
+    return 0
+  end
+
+  return math.min(1, math.sqrt(sum / count))
+end
+
+---Exposed for the suite: the meter is the feature, so it is worth asserting
+---that silence reads as silence and a loud tone does not.
+M._level_of = level_of
 
 ---@return boolean
 function M.recording()
@@ -164,6 +223,13 @@ local function flush(session, force)
     end
     local audio = session.held:sub(1, take)
     session.held = session.held:sub(take + 1)
+    -- CHUNKS ARE NUMBERED FROM ZERO, and that is not a detail. The daemon
+    -- acknowledges the stream itself with `ackSeq = -1` and then reassembles
+    -- the audio by sequence, so a first chunk numbered 1 leaves a hole at 0
+    -- that never fills: every chunk is held in the reorder buffer, nothing is
+    -- ever transcribed, and `dictation.finish` sits there until it gives up
+    -- with "Timed out waiting for final transcription". Which is exactly what
+    -- dictation from this editor did, on a daemon whose own app dictates fine.
     session.seq = session.seq + 1
     bridge.request("dictation.chunk", {
       dictationId = session.id,
@@ -172,6 +238,22 @@ local function flush(session, force)
       format = session.format,
     })
   end
+end
+
+---Push audio into the live stream as the recorder's own stdout would.
+---
+---A test seam, and it earns its place: the chunking and the numbering are the
+---half of this file that fails silently -- a chunk split down the middle of a
+---sample is refused by the daemon with a message nobody sees, and a first
+---chunk numbered 1 is transcribed as nothing at all -- and the only other way
+---to exercise either is to open a microphone, which no suite may do.
+---@param pcm string
+function M._feed(pcm)
+  if not live then
+    return
+  end
+  live.held = live.held .. pcm
+  flush(live, false)
 end
 
 ---Stop recording and hand the text back.
@@ -221,7 +303,7 @@ end
 ---NOT when the process starts. A recording indicator that appears before the
 ---daemon has agreed to listen is an indicator that lies for as long as it
 ---takes to find out the speech models are not installed.
----@param opts? { on_state?: fun(recording: boolean) }
+---@param opts? { on_state?: fun(recording: boolean), on_level?: fun(level: number) }
 ---@param on_error? fun(err: string)
 function M.start(opts, on_error)
   opts = opts or {}
@@ -242,11 +324,18 @@ function M.start(opts, on_error)
   local rate = math.floor(voice.rate or 16000)
   local session = {
     id = ("nvim-%d-%d"):format(vim.uv.os_getpid(), math.floor(vim.uv.hrtime() / 1e6)),
-    seq = 0,
+    -- The seq of the LAST chunk sent, and -1 is "none yet" -- the number the
+    -- daemon acks the stream itself with. `flush` increments before it sends,
+    -- so the first chunk on the wire is 0, which is the one the daemon waits
+    -- for. See the note there.
+    seq = -1,
     held = "",
     format = ("pcm16;rate=%d"):format(rate),
     on_state = opts.on_state,
+    on_level = opts.on_level,
     finishing = false,
+    -- The recorder's complaint, kept for the message we make out of its exit.
+    stderr = "",
   }
 
   bridge.ensure(function(err)
@@ -286,9 +375,47 @@ function M.start(opts, on_error)
             end
             session.held = session.held .. data
             flush(session, false)
+            -- The meter, off the SAME bytes, before they are encoded and
+            -- dropped. `ffmpeg` hands over 50ms at a time, so this fires about
+            -- twenty times a second -- which is the visualiser's frame rate,
+            -- and why it has no timer of its own.
+            if session.on_level then
+              local level = level_of(data)
+              vim.schedule(function()
+                if live == session then
+                  session.on_level(level)
+                end
+              end)
+            end
           end,
-          stderr = function() end,
-        })
+          -- KEPT, not discarded. It is the only thing that can say why the
+          -- recorder would not start -- "Device or resource busy", say -- and
+          -- the exit handler below is what puts it in front of you.
+          stderr = function(_, chunk)
+            if chunk and session.stderr then
+              session.stderr = (session.stderr .. chunk):sub(-400)
+            end
+          end,
+        }, function(obj)
+          -- THE RECORDER DIED ON ITS OWN. Until this existed that was silent:
+          -- the indicator stayed lit, no audio was ever sent, and the key
+          -- appeared to have stopped working. A microphone that is busy, or
+          -- missing, or refused by the portal is the ordinary way in.
+          vim.schedule(function()
+            if live ~= session or session.finishing then
+              return
+            end
+            local detail = vim.trim((session.stderr or ""):gsub("%s+", " "))
+            M.cancel()
+            on_error(
+              ("%s stopped recording (exit %s)%s"):format(
+                recorder.name,
+                tostring(obj.code),
+                detail ~= "" and (": " .. detail) or ""
+              )
+            )
+          end)
+        end)
         if not ok then
           bridge.request("dictation.cancel", { dictationId = session.id })
           return on_error(("could not start %s: %s"):format(recorder.name, tostring(proc)))
@@ -304,7 +431,7 @@ function M.start(opts, on_error)
 end
 
 ---`<C-t>`: start, or stop and insert what was said.
----@param opts { insert: fun(text: string), on_state?: fun(recording: boolean) }
+---@param opts { insert: fun(text: string), on_state?: fun(recording: boolean), on_level?: fun(level: number) }
 function M.toggle(opts)
   if M.recording() then
     return M.finish(function(text, err)
@@ -317,7 +444,7 @@ function M.toggle(opts)
       opts.insert(text)
     end)
   end
-  M.start { on_state = opts.on_state }
+  M.start { on_state = opts.on_state, on_level = opts.on_level }
 end
 
 return M

@@ -102,6 +102,66 @@ local function test_voice()
   eq("voice: cancelling tells the daemon to forget it", sent[#sent].op, "dictation.cancel")
   eq("voice: and nothing is left recording", voice.recording(), false)
 
+  -- CHUNKS ARE NUMBERED FROM ZERO. This is the bug that made dictation from
+  -- this editor fail against a daemon whose own app dictates fine: the daemon
+  -- acks the stream with `ackSeq = -1` and reassembles by sequence, so a first
+  -- chunk numbered 1 leaves a hole at 0 that never fills. Nothing is ever
+  -- transcribed and `dictation.finish` gives up with "Timed out waiting for
+  -- final transcription" -- verified against a live daemon, which returns the
+  -- transcript for the same audio the moment the numbering starts at 0.
+  --
+  -- Driven through `flush` rather than through a microphone: the numbering is
+  -- the thing under test, and nothing in the suite may open an input device.
+  sent = {}
+  voice.start({}, function() end)
+  vim.wait(1000, function()
+    return voice.recording()
+  end)
+  voice._feed(("\0\1"):rep(40 * 1024))
+  local chunks = {}
+  for _, message in ipairs(sent) do
+    if message.op == "dictation.chunk" then
+      chunks[#chunks + 1] = message.args.seq
+    end
+  end
+  truthy("voice: audio reaches the daemon in chunks", #chunks > 0, vim.inspect(chunks))
+  eq("voice: and the first of them is seq 0, never 1", chunks[1], 0)
+
+  voice.finish(function() end)
+  vim.wait(1000, function()
+    return not voice.recording()
+  end)
+  -- Recollected: `finish` flushes the tail, so the last chunk on the wire is
+  -- sent by the finish itself.
+  local final, all = nil, {}
+  for _, message in ipairs(sent) do
+    if message.op == "dictation.chunk" then
+      all[#all + 1] = message.args.seq
+    elseif message.op == "dictation.finish" then
+      final = message.args.finalSeq
+    end
+  end
+  -- The LAST seq sent, which with 0-based numbering is one less than the
+  -- count. Off by one here and the daemon waits for a chunk that never comes.
+  eq("voice: and the finish names the last chunk, not the count", final, all[#all])
+  local contiguous = true
+  for i, seq in ipairs(all) do
+    contiguous = contiguous and seq == i - 1
+  end
+  truthy("voice: with no gap in the numbering", contiguous, vim.inspect(all))
+
+  -- THE METER IS RAW RMS, deliberately unscaled -- see `paseo.voice`. Silence
+  -- is silence on any microphone; how loud a quiet ROOM reads is a property
+  -- of the microphone, which is why the scaling lives with the history in
+  -- |paseo.ui.composer| and not here.
+  local silence = voice._level_of(("\0\0"):rep(800))
+  eq("voice: digital silence reads as nothing", silence, 0)
+  -- Alternating +8192/-8192 as bytes: a loud square wave.
+  local loud = voice._level_of(("\0\32\0\224"):rep(400))
+  truthy("voice: and a loud signal reads as loud", loud > 0.2, loud)
+  truthy("voice: never over one", loud <= 1, loud)
+  eq("voice: an empty read is not an error", voice._level_of "", 0)
+
   bridge.ensure, bridge.request = old_ensure, old_request
   config.setup {}
 end
