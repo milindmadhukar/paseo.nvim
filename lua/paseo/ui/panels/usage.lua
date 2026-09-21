@@ -2,7 +2,7 @@
 ---
 --- The numbers arrive push-driven on `usage_updated`, so this is current
 --- without polling. The context-window figure is the one worth having in front
---- of you: it is the difference between finishing a session and being
+--- of you: it is the difference between finishing an agent session and being
 --- compacted halfway through a thought.
 ---
 --- Drawn as a dashboard rather than as a list of labelled numbers. Three tiles

@@ -30,7 +30,7 @@ end
 -- ------------------------------------------------------------------ status
 --
 -- What a unit of work is doing. Used by the timeline's tool cards, the
--- Sessions panel and the Terminals panel -- one vocabulary, so a running tool
+-- Agents & terminals panel and the terminal surface -- one vocabulary, so a running tool
 -- and a running agent are the same shape.
 
 M.status = {
@@ -92,7 +92,7 @@ M.tool = {
 
 -- -------------------------------------------------------------------- panels
 --
--- The seven dashboard tabs, plus the surfaces that open on their own. Keyed by
+-- The dashboard tabs, plus the surfaces that open on their own. Keyed by
 -- the tab name exactly as `float.M.TABS` spells it.
 
 M.panel = {
@@ -104,6 +104,8 @@ M.panel = {
   Workspaces = g(0xf0645), -- md-file_tree
   Terminals = g(0xf018d), -- md-console
 }
+M.panel.Agent = M.panel.Session
+M.panel["Agents & terminals"] = M.panel.Sessions
 
 -- --------------------------------------------------------------------- misc
 

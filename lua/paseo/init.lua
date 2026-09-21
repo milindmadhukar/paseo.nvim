@@ -75,8 +75,7 @@ commands.ws = {
           where = args[i]
         end
       end
-      local root = where and vim.fn.fnamemodify(vim.fn.expand(where), ":p")
-        or assert(vim.uv.cwd())
+      local root = where and vim.fn.fnamemodify(vim.fn.expand(where), ":p") or assert(vim.uv.cwd())
       root = root:gsub("/+$", "")
 
       local ui = require "paseo.ui.manifest"
@@ -207,7 +206,7 @@ commands.ws = {
 }
 
 commands.workspaces = {
-  desc = "Workspace picker: open, sessions, new, archive",
+  desc = "Workspace picker: open, agent sessions, new, archive",
   run = function()
     require("paseo.pickers.workspaces").open()
   end,
@@ -220,12 +219,15 @@ commands.wcreate = {
   end,
 }
 
-commands.sessions = {
-  desc = "Sessions in the workspace containing this directory",
+commands.agents = {
+  desc = "Agent sessions in the workspace containing this directory",
   run = function()
     require("paseo.pickers.sessions").here()
   end,
 }
+
+-- Compatibility alias for the former ambiguous command name.
+commands.sessions = commands.agents
 
 commands.term = {
   desc = "The Paseo terminals in this workspace (toggle)",
@@ -235,7 +237,8 @@ commands.term = {
 }
 
 -- The old name. It used to mean "the tab listing them", and that tab is gone:
--- the list is on the Sessions tab now and the terminals are their own surface.
+-- the list is on the Agents & terminals tab now and terminals also have their
+-- own focused surface.
 -- Kept because the help tag is published.
 commands.terminals = commands.term
 
@@ -247,7 +250,7 @@ commands.chat = {
 }
 
 commands.dash = {
-  desc = "Open the chat full screen, with the session panels",
+  desc = "Open the chat full screen, with the agent panels",
   run = function()
     -- Not `fullscreen()`, which is the `<C-f>` TOGGLE: `:Paseo dash` asked for
     -- the dashboard, and with the dashboard already the default surface a
@@ -285,14 +288,14 @@ commands.qfask = {
 }
 
 commands.mode = {
-  desc = "Permission / operating mode for this session",
+  desc = "Permission / operating mode for this agent session",
   run = function()
     require("paseo.ui.session").mode()
   end,
 }
 
 commands.thinking = {
-  desc = "Reasoning level for this session",
+  desc = "Reasoning level for this agent session",
   run = function()
     require("paseo.ui.session").thinking()
   end,
@@ -306,21 +309,24 @@ commands.fast = {
 }
 
 commands.plan = {
-  desc = "Toggle this session's planning mode",
+  desc = "Toggle this agent session's planning mode",
   run = function()
     require("paseo.ui.session").plan()
   end,
 }
 
-commands.session = {
-  desc = "What this session is set to",
+commands["agent-settings"] = {
+  desc = "What this agent session is set to",
   run = function()
     require("paseo.ui.session").status()
   end,
 }
 
+-- Compatibility alias for the former ambiguous command name.
+commands.session = commands["agent-settings"]
+
 commands.switchmodel = {
-  desc = "Change the running session's model",
+  desc = "Change the running agent session's model",
   run = function()
     require("paseo.ui.session").model()
   end,
@@ -448,11 +454,7 @@ commands.skills = {
           action.reason and (" — " .. action.reason) or ""
         )
       end
-      return vim.notify(
-        table.concat(lines, "\n"),
-        vim.log.levels.INFO,
-        { title = "paseo: skills" }
-      )
+      return vim.notify(table.concat(lines, "\n"), vim.log.levels.INFO, { title = "paseo: skills" })
     end
 
     local lines, refused, backed_up = skills.apply(plan)
@@ -462,9 +464,7 @@ commands.skills = {
     end
     vim.notify(
       table.concat(lines, "\n"),
-      refused and vim.log.levels.ERROR
-        or backed_up and vim.log.levels.WARN
-        or vim.log.levels.INFO,
+      refused and vim.log.levels.ERROR or backed_up and vim.log.levels.WARN or vim.log.levels.INFO,
       { title = "paseo: skills" }
     )
   end,
@@ -493,6 +493,11 @@ function M.setup(opts)
 
   -- Streaming events have to be wired before anything can arrive on them.
   require("paseo.ui.chat").attach_events()
+
+  -- Guard the standard interactive routes. Existing command-line
+  -- abbreviations and mappings are preserved; configs with a central quit
+  -- router can call `require("paseo.quit").guard` directly.
+  require("paseo.quit").install()
 
   -- The sidecar is a child process; leaving it behind on :qa would leak one per
   -- session.

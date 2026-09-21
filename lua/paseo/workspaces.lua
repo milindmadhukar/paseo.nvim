@@ -185,8 +185,8 @@ end
 ---paths converge on the same thing: an ordinary Paseo workspace with a
 ---directory. That is the seam -- Paseo never learns whether it is looking at
 ---six assembled worktrees, one it cut itself, or a plain checkout.
----@param opts { name: string, root?: string, configure?: fun(ctx: table, done: fun(m: table|nil, notes: table[]|nil)) }
----@param callback fun(id: string|nil, err: string|nil, plan: paseo.Strategy|nil)
+---@param opts { name: string, root?: string, new?: boolean, configure?: fun(ctx: table, done: fun(m: table|nil, notes: table[]|nil)) }
+---@param callback fun(id: string|nil, err: string|nil, plan: paseo.Strategy|nil, workspace: paseo.PaseoWorkspace|nil)
 function M.create(opts, callback)
   if not opts.name or opts.name == "" then
     return callback(nil, "a workspace needs a name")
@@ -250,8 +250,8 @@ end
 ---Split out of `create` only because the dialog made that question
 ---asynchronous; the three shapes still converge here exactly as before.
 ---@param plan paseo.Strategy
----@param opts { name: string, root?: string }
----@param callback fun(id: string|nil, err: string|nil, plan: paseo.Strategy|nil)
+---@param opts { name: string, root?: string, new?: boolean }
+---@param callback fun(id: string|nil, err: string|nil, plan: paseo.Strategy|nil, workspace: paseo.PaseoWorkspace|nil)
 function M.assemble(plan, opts, callback)
   local directory = plan.root
   if plan.kind == "assemble" then
@@ -290,16 +290,53 @@ function M.assemble(plan, opts, callback)
         base = plan.base,
         title = opts.name,
       }, function(create_err, result)
-        callback(result and result.id, create_err, plan)
+        callback(result and result.id, create_err, plan, result and {
+          id = result.id,
+          name = opts.name,
+          directory = result.directory,
+          project = plan.repo,
+          kind = "worktree",
+          ownedWorktree = true,
+          assembled = false,
+          members = {},
+        } or nil)
       end)
     end
 
     -- `open` rather than `create`: it reuses the active workspace for that
     -- exact directory, so assembling twice does not litter the app with
     -- duplicates pointing at the same place.
-    bridge.request("workspace.open", { cwd = directory }, function(open_err, result)
-      callback(result and result.id, open_err, plan)
+    local op = opts.new and "workspace.create" or "workspace.open"
+    local args = opts.new and { cwd = directory, title = opts.name } or { cwd = directory }
+    bridge.request(op, args, function(open_err, result)
+      callback(result and result.id, open_err, plan, result and {
+        id = result.id,
+        name = opts.name,
+        directory = result.directory or directory,
+        project = plan.project or plan.root,
+        kind = plan.kind == "local" and "directory" or plan.kind,
+        ownedWorktree = false,
+        assembled = plan.kind == "assemble",
+        members = {},
+      } or nil)
     end)
+  end)
+end
+
+---One workspace by daemon id.
+---@param id string
+---@param callback fun(workspace: paseo.PaseoWorkspace|nil, err: string|nil)
+function M.get(id, callback)
+  M.list(function(list, err)
+    if err then
+      return callback(nil, err)
+    end
+    for _, ws in ipairs(list or {}) do
+      if ws.id == id then
+        return callback(ws, nil)
+      end
+    end
+    callback(nil, "the created workspace is not in Paseo's workspace list")
   end)
 end
 
@@ -393,10 +430,10 @@ function M.archive(ws, opts, callback)
   end)
 end
 
----Sessions -- the agents -- in a workspace.
+---Agent sessions in a workspace.
 ---@param ws paseo.PaseoWorkspace
----@param callback fun(sessions: table[]|nil, err: string|nil)
-function M.sessions(ws, callback)
+---@param callback fun(agent_sessions: table[]|nil, err: string|nil)
+function M.agent_sessions(ws, callback)
   bridge.ensure(function(err)
     if err then
       return callback(nil, err)
@@ -423,14 +460,17 @@ function M.sessions(ws, callback)
   end)
 end
 
----Start a new session in a workspace.
+---Compatibility alias for the old ambiguous name.
+M.sessions = M.agent_sessions
+
+---Start a new agent session in a workspace.
 ---@param ws paseo.PaseoWorkspace
 ---@param opts? { title?: string }
 ---The Paseo workspace a directory belongs to.
 ---
 ---A workspace's `directory` is its working directory, and anything under it is
 ---in it -- which is how a member worktree resolves to the workspace that
----assembled it. One walk, in one place: the sessions picker and the Sessions
+---assembled it. One walk, in one place: the agent picker and the Agents & terminals
 ---panel both need the answer and had no business each writing it.
 ---@param root string
 ---@param callback fun(ws: paseo.PaseoWorkspace|nil, err: string|nil)
@@ -451,7 +491,7 @@ function M.for_dir(root, callback)
 end
 
 ---@param callback fun(id: string|nil, err: string|nil)
-function M.new_session(ws, opts, callback)
+function M.new_agent_session(ws, opts, callback)
   opts = opts or {}
   require("paseo.ui.create").review({
     cwd = ws.directory,
@@ -475,5 +515,8 @@ function M.new_session(ws, opts, callback)
     end)
   end)
 end
+
+---Compatibility alias for the former ambiguous name.
+M.new_session = M.new_agent_session
 
 return M

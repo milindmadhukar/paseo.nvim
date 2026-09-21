@@ -16,7 +16,7 @@ M.title = "Changes"
 
 ---Buffer line -> the file on it, rebuilt on every draw.
 ---
----Same shape as the Sessions panel's, and for the same reason: a map is
+---Same shape as the Agents & terminals panel's, and for the same reason: a map is
 ---checkable against a real draw, where arithmetic on the cursor row is a
 ---second copy of the chrome's layout that has to be kept in step by hand.
 ---@type table<integer, string>

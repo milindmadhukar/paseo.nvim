@@ -2,7 +2,7 @@
 ---
 --- ONE LIST, because that is what Paseo has. A workspace holds agent sessions
 --- and PTYs side by side, they show up in the app together, and splitting them
---- across two tabs here meant the Sessions tab was quietly a lie about what was
+--- across two tabs here meant the Agents & terminals tab was quietly a lie about what was
 --- running -- it could say "no agents here yet" on a workspace with three
 --- `claude` terminals in it. The kind glyph is what tells them apart.
 ---
@@ -12,7 +12,7 @@
 ---
 --- A row is an ACTION, not a label: an agent row points this surface at that
 --- agent, a terminal row opens |paseo.ui.termfloat| on it. Everything else
---- about sessions -- searching, archiving in bulk -- still hands off to the
+--- about agent sessions -- searching, archiving in bulk -- still hands off to the
 --- telescope picker rather than being reimplemented here.
 
 local agents = require "paseo.agents"
@@ -22,7 +22,7 @@ local widgets = require "paseo.ui.widgets"
 
 local M = {}
 
-M.title = "Sessions"
+M.title = "Agents & terminals"
 
 ---Status glyphs, from the registry -- the timeline says the same four things
 ---about a tool call, and the two had spelled them differently.
@@ -74,7 +74,7 @@ end
 ---Deliberately a map rather than arithmetic on the cursor row. The panel this
 ---absorbed computed `row - 5` from the number of heading rows it happened to
 ---have, so adding a line to the heading silently retargeted `d`.
----@type table<integer, { kind: "agent"|"terminal", id: string, root: string|nil }>
+---@type table<integer, { kind: "agent"|"terminal", id: string, title: string|nil, root: string|nil }>
 M._rows = {}
 
 ---@return integer  The buffer line the panel's first line is drawn on.
@@ -98,15 +98,15 @@ function M.lines(chat, width)
   local lines = {
     {
       { "  " .. icons.panel.Sessions .. "  ", "PaseoBlue1" },
-      { "Sessions in ", "PaseoHeader" },
+      { "Agents & terminals in ", "PaseoHeader" },
       { vim.fn.fnamemodify(chat.root, ":~"), "PaseoDim" },
     },
     {},
   }
 
   ---Record which entity the line just appended belongs to.
-  local function claim(kind, id, root)
-    M._rows[#lines + offset()] = { kind = kind, id = id, root = root }
+  local function claim(kind, id, root, title)
+    M._rows[#lines + offset()] = { kind = kind, id = id, root = root, title = title }
   end
 
   if #agent_list == 0 and #terminal_list == 0 then
@@ -162,7 +162,7 @@ function M.lines(chat, width)
       click,
       mine
     )
-    claim("agent", agent.id, agent.cwd or chat.root)
+    claim("agent", agent.id, agent.cwd or chat.root, agent.title)
   end
 
   if #terminal_list > 0 then
@@ -209,6 +209,7 @@ function M.lines(chat, width)
     { "<CR>", "open" },
     { "c", "terminal" },
     { "a", "agent" },
+    { "y", "agent ID" },
     { "r", "rename" },
     { "d", "kill" },
   }
@@ -253,7 +254,7 @@ function M.attach(chat, buf)
           require("paseo.ui.chat").open { root = row.root, agent_id = row.id }
         end
       end,
-      "paseo: open this session",
+      "paseo: open this agent session",
     },
     -- `c` makes a terminal and `a` makes an agent. One key for both would have
     -- to ask which, and a list holding two kinds is exactly where that
@@ -278,7 +279,7 @@ function M.attach(chat, buf)
             if not ws then
               return vim.notify("paseo: " .. tostring(err), vim.log.levels.WARN)
             end
-            require("paseo.workspaces").new_session(ws, {}, function(id, create_err)
+            require("paseo.workspaces").new_agent_session(ws, {}, function(id, create_err)
               if create_err and create_err ~= "cancelled" then
                 return vim.notify("paseo: " .. create_err, vim.log.levels.ERROR)
               end
@@ -293,6 +294,16 @@ function M.attach(chat, buf)
         end)
       end,
       "paseo: new agent",
+    },
+    {
+      "y",
+      function()
+        local row = row_kind "agent"
+        if row then
+          agents.copy_id { id = row.id, title = row.title }
+        end
+      end,
+      "paseo: copy this agent ID",
     },
     {
       "r",
@@ -314,9 +325,9 @@ function M.attach(chat, buf)
         if row.kind == "terminal" then
           return require("paseo.ui.termfloat").kill(row.id)
         end
-        -- Archiving an agent is not killing it -- the session survives on the
+        -- Archiving an agent is not killing it -- the agent session survives on the
         -- daemon -- but it does take it off every list, so it is asked for too.
-        vim.ui.select({ "no", "yes" }, { prompt = "Archive this session?" }, function(choice)
+        vim.ui.select({ "no", "yes" }, { prompt = "Archive this agent session?" }, function(choice)
           if choice ~= "yes" then
             return
           end
@@ -330,7 +341,7 @@ function M.attach(chat, buf)
           end)
         end)
       end,
-      "paseo: kill or archive this session",
+      "paseo: kill terminal or archive agent session",
     },
   })
 end

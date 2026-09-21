@@ -146,7 +146,7 @@ function M.actions(request, available_modes)
     return nil
   end
 
-  -- The daemon offers this one only when the session was in `bypassPermissions`
+  -- The daemon offers this one only when the agent session was in `bypassPermissions`
   -- before it entered plan mode, and it restores that mode server-side. It
   -- needs no `mode` from us, and inventing one would fight the daemon for a
   -- decision it is already making correctly.

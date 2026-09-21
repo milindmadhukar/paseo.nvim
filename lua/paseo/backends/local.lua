@@ -5,7 +5,7 @@
 --- the whole review layer are ours regardless, so this costs little.
 ---
 --- It is strictly worse than the Paseo backend and is not the default: there is
---- no streaming (the reply stays in the terminal), no session reuse across
+--- no streaming (the reply stays in the terminal), no agent-session reuse across
 --- Neovim restarts, and prompts go in as keystrokes -- which is the one place
 --- bracketed paste matters.
 

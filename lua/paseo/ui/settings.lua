@@ -1,11 +1,11 @@
---- The session settings, on their own.
+--- The agent settings, on their own.
 ---
 --- `:Paseo mode` used to be a `vim.ui.select` listing five strings with a `●`
 --- glued to the front of one of them. This is the same four settings drawn the
 --- same way the dashboard draws them -- because it IS the dashboard's view
 --- object, at a different width, with its own window.
 ---
---- The window itself is |paseo.ui.popup|'s, which is also what the new-session
+--- The window itself is |paseo.ui.popup|'s, which is also what the new-agent
 --- screen opens. Those two used to be a volt popup and a plain buffer, and the
 --- reason was only ever that the open sequence lived here.
 
@@ -61,7 +61,7 @@ function M.open(chat, only)
     zindex = 60,
     title = function(handle)
       local inner = handle.w - (2 * XPAD)
-      local left = { { "󰒓  Session", "PaseoHeader" } }
+      local left = { { "󰒓  Agent", "PaseoHeader" } }
       local right = {}
       if chat.provider then
         right[#right + 1] = { chat.provider, "PaseoDim" }

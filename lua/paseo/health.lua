@@ -49,7 +49,7 @@ local function check_core()
 
   for name, why in pairs {
     ["gitsigns"] = "finding the hunk under the cursor (`:Paseo ask hunk`)",
-    ["telescope"] = "the workspace and session pickers",
+    ["telescope"] = "the workspace and agent-session pickers",
   } do
     if pcall(require, name) then
       ok(("%s is available (%s)"):format(name, why))
@@ -282,7 +282,13 @@ local function check_skills()
     elseif installed == 0 then
       warn(("%s — none installed; run `:Paseo skills install`"):format(short))
     else
-      warn(("%s — %d of %d installed; run `:Paseo skills install`"):format(short, installed, #bundled))
+      warn(
+        ("%s — %d of %d installed; run `:Paseo skills install`"):format(
+          short,
+          installed,
+          #bundled
+        )
+      )
     end
     for _, problem in ipairs(problems) do
       warn(("%s: %s"):format(short, problem))
@@ -293,7 +299,7 @@ local function check_skills()
   -- project skills from that repo, not from the project root two levels up --
   -- so a project install is invisible to exactly the agent these are for, and
   -- somebody will otherwise reach for it as "the tidier option".
-  local project = skills.targets("project")
+  local project = skills.targets "project"
   if project then
     info(
       "a `project` install lands at "

@@ -14,7 +14,7 @@
 --- repo and WHICH SIBLINGS are shared context rather than junk that happens to
 --- sit in the directory. Both are one keypress here.
 ---
---- It is |paseo.ui.panels.session|'s view over a draft, the way the new-session
+--- It is |paseo.ui.panels.session|'s view over a draft, the way the new-agent
 --- screen is -- same cards, same focus model, same footer. A second renderer of
 --- "a list of things with a state each" is how the two drift.
 ---
@@ -52,16 +52,18 @@ M.KEYS = { repos = "m", shared = "s" }
 ---@param path string
 ---@return string[]
 function M.refs(path)
-  local res = vim.system({
-    "git",
-    "-C",
-    path,
-    "for-each-ref",
-    "--format=%(refname:short)",
-    "--sort=-committerdate",
-    "refs/heads",
-    "refs/remotes",
-  }, { text = true }):wait()
+  local res = vim
+    .system({
+      "git",
+      "-C",
+      path,
+      "for-each-ref",
+      "--format=%(refname:short)",
+      "--sort=-committerdate",
+      "refs/heads",
+      "refs/remotes",
+    }, { text = true })
+    :wait()
   if res.code ~= 0 then
     return {}
   end
@@ -180,10 +182,7 @@ function M.reload(draft, done)
   done = done or function() end
   local found, notes = require("paseo.workspace").discover(draft.root)
   if not found then
-    vim.notify(
-      "paseo: could not re-read this project — " .. tostring(notes),
-      vim.log.levels.WARN
-    )
+    vim.notify("paseo: could not re-read this project — " .. tostring(notes), vim.log.levels.WARN)
     return done()
   end
   merge(draft, found, notes, M.result(draft))
@@ -327,12 +326,15 @@ function M.choose_base(draft, name, done)
   local path = vim.fs.joinpath(draft.root, name)
   local choices = M.refs(path)
   if #choices == 0 then
-    return vim.ui.input({ prompt = ("base for %s: "):format(name), default = repo.base }, function(value)
-      if value and vim.trim(value) ~= "" then
-        repo.base = vim.trim(value)
+    return vim.ui.input(
+      { prompt = ("base for %s: "):format(name), default = repo.base },
+      function(value)
+        if value and vim.trim(value) ~= "" then
+          repo.base = vim.trim(value)
+        end
+        done()
       end
-      done()
-    end)
+    )
   end
 
   choices[#choices + 1] = "other…"

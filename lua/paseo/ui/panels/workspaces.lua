@@ -1,8 +1,8 @@
 --- Workspaces and repos: the other half of the plugin, on the dashboard.
 ---
 --- The full-screen surface is meant to be the whole of Paseo without the app,
---- and until this panel existed it stopped at the session -- everything about
---- the unit of work the session runs IN was only reachable through a telescope
+--- and until this panel existed it stopped at the agent session -- everything about
+--- the unit of work the agent session runs IN was only reachable through a telescope
 --- picker, which is a different window, over the top, that you have to dismiss.
 ---
 --- Read-mostly. Clicking a workspace opens a chat on it; creating one and the
@@ -146,10 +146,10 @@ function M.lines(chat, width)
     { "  " .. icons.ui.new .. " ", "PaseoKey", new },
     { "new workspace here", "PaseoDim", new },
     { "      " .. icons.ui.more .. " ", "PaseoKey", picker },
-    { "open, sessions, archive", "PaseoDim", picker },
+    { "open, agent sessions, archive", "PaseoDim", picker },
   }
 
-  -- The repos of the unit of work this session is in -- `:Paseo repos`, which
+  -- The repos of the unit of work this agent session is in -- `:Paseo repos`, which
   -- is otherwise a notification you have to ask for.
   lines[#lines + 1] = {}
   lines[#lines + 1] = {

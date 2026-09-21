@@ -1,4 +1,4 @@
---- Session controls: mode, thinking level, model, feature toggles.
+--- Agent-session controls: mode, thinking level, model, feature toggles.
 ---
 --- The same four things `ui/session.lua` drives, but shown all at once with the
 --- current value FILLED IN, instead of four separate prompts you have to open
@@ -23,12 +23,12 @@ local widgets = require "paseo.ui.widgets"
 
 local M = {}
 
-M.title = "Session"
+M.title = "Agent"
 
 ---Focus is stored BY ID, never by index: the lists change under us -- switching
 ---model replaces every thinking option -- and an index kept across that lands
 ---on whatever happens to be third now.
----@class paseo.SessionView
+---@class paseo.AgentSettingsView
 ---@field source paseo.SettingsSource
 ---@field only string|nil   Draw just this group.
 ---@field section string    The volt section a hover repaints.
@@ -42,7 +42,7 @@ View.__index = View
 
 ---@param source paseo.SettingsSource  |paseo.ui.session|.source or |paseo.ui.draft|.source
 ---@param opts? { only?: string, section?: string, hints?: table[], redraw?: fun() }
----@return paseo.SessionView
+---@return paseo.AgentSettingsView
 function M.new(source, opts)
   opts = opts or {}
   return setmetatable({
@@ -224,7 +224,7 @@ local function is_focused(focus, group, entry)
   return focus.group == group.id and focus.entry == entry.id
 end
 
----@param self paseo.SessionView
+---@param self paseo.AgentSettingsView
 ---@param group table
 ---@param entry table
 ---@return function
@@ -285,7 +285,7 @@ local function description_block(group, focused, w)
 end
 
 ---The body of a chips group: the pills, then the focused one's description.
----@param self paseo.SessionView
+---@param self paseo.AgentSettingsView
 ---@param group table
 ---@param focus table  `{ group = id, entry = id }`
 ---@param w integer
@@ -321,7 +321,7 @@ local function chips_body(self, group, focus, w)
   return lines
 end
 
----@param self paseo.SessionView
+---@param self paseo.AgentSettingsView
 ---@param group table
 ---@param focus table  `{ group = id, entry = id }`
 ---@param w integer
@@ -345,7 +345,7 @@ local function radio_body(self, group, focus, w)
   return lines
 end
 
----@param self paseo.SessionView
+---@param self paseo.AgentSettingsView
 ---@param group table
 ---@param focus table  `{ group = id, entry = id }`
 ---@param w integer
@@ -392,7 +392,7 @@ local function toggles_body(self, group, focus, w)
 end
 
 ---One group, as a card.
----@param self paseo.SessionView
+---@param self paseo.AgentSettingsView
 ---@param group table
 ---@param focus table  `{ group = id, entry = id }`
 ---@param w integer
@@ -449,7 +449,7 @@ local function card(self, group, focus, w)
   }
 end
 
----@param self paseo.SessionView
+---@param self paseo.AgentSettingsView
 ---@param width integer
 ---@param height? integer  Rows available. Tightens the layout if it will not fit.
 ---@return table[][]
@@ -465,7 +465,7 @@ function View:lines(width, height)
   return self:draw(width)
 end
 
----@param self paseo.SessionView
+---@param self paseo.AgentSettingsView
 ---@param width integer
 ---@return table[][]
 function View:draw(width)
@@ -483,7 +483,7 @@ function View:draw(width)
         self.redraw()
       end)
     end
-    return { { { "  loading session settings…", "PaseoDim" } } }
+    return { { { "  loading agent settings…", "PaseoDim" } } }
   end
 
   -- Resolved once and carried as IDS, because every `groups()` call builds
@@ -500,8 +500,8 @@ function View:draw(width)
   -- Short cards go side by side: Thinking and Features together cost five rows
   -- instead of ten, which on an 80x24 terminal is exactly the difference
   -- between the model list fitting on screen and not. Which cards pair is the
-  -- SOURCE's business -- the new-session screen has a Provider card the
-  -- running-session one does not, and one more full-width card is one more
+  -- SOURCE's business -- the new-agent screen has a Provider card the
+  -- running-agent one does not, and one more full-width card is one more
   -- than a short editor has room for. Only when there is room for two
   -- readable columns: a card narrower than ~32 truncates its own title, and
   -- two truncated cards are worse than two full-width ones.
@@ -539,7 +539,7 @@ function View:draw(width)
     end
   end
 
-  -- A surface may put a row of its own under the cards: the new-session screen
+  -- A surface may put a row of its own under the cards: the new-agent screen
   -- has a "create" action, which is not a setting and must not be drawn as a
   -- card that looks like one.
   if self.footer then
@@ -547,8 +547,8 @@ function View:draw(width)
   end
 
   -- The mnemonics come from the groups being DRAWN, not from a literal: this
-  -- view is also the one the new-session screen uses, and that one has a
-  -- Provider card the running-session one does not.
+  -- view is also the one the new-agent screen uses, and that one has a
+  -- Provider card the running-agent one does not.
   local keys = {}
   for _, group in ipairs(groups) do
     if group.key then
@@ -632,13 +632,13 @@ function View:bind(buf)
   end
   -- Through |paseo.ui.keys|, which saves what it displaces -- the panels share
   -- one chrome buffer and volt owns `<CR>` on it.
-  self.bound = require("paseo.ui.keys").take(buf, self:mappings(), "paseo: session settings")
+  self.bound = require("paseo.ui.keys").take(buf, self:mappings(), "paseo: agent settings")
 end
 
 ---Give the buffer its keys back.
 ---
 ---Required, not tidiness: the dashboard's chrome buffer is shared by six
----panels, and `<CR>` left bound here would keep trying to apply a session
+---panels, and `<CR>` left bound here would keep trying to apply an agent
 ---setting from the Changes tab.
 ---@param buf integer
 function View:unbind(buf)
@@ -650,11 +650,11 @@ end
 -- ------------------------------------------------- the dashboard panel API
 
 ---The dashboard's view. One surface, one view; rebuilt when the chat changes.
----@type paseo.SessionView|nil
+---@type paseo.AgentSettingsView|nil
 local panel_view
 
 ---@param chat table
----@return paseo.SessionView
+---@return paseo.AgentSettingsView
 local function view_for(chat)
   if not panel_view or panel_view.source.chat ~= chat then
     panel_view = M.new(session.source(chat), {

@@ -54,12 +54,12 @@ end
 ---@field win integer|nil
 ---@field w integer
 ---@field h integer
----@field view paseo.SessionView
+---@field view paseo.AgentSettingsView
 ---@field rebuild fun()
 ---@field close fun()
 
 ---Open a popup around a settings view.
----@param opts { view: paseo.SessionView, width: fun(): integer, title: fun(handle: paseo.Popup): table[][], filetype?: string, zindex?: integer, keys?: table[], on_close?: fun() }
+---@param opts { view: paseo.AgentSettingsView, width: fun(): integer, title: fun(handle: paseo.Popup): table[][], filetype?: string, zindex?: integer, keys?: table[], on_close?: fun() }
 ---@return paseo.Popup
 function M.open(opts)
   local volt = require "volt"

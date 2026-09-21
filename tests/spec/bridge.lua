@@ -135,6 +135,23 @@ local function test_bridge()
       source:find("agentId = chat.agent_id", 1, true) ~= nil
     )
   end
+
+  local init = assert(io.open(vim.fn.getcwd() .. "/lua/paseo/init.lua", "r"))
+  local init_source = init:read "*a"
+  init:close()
+  truthy(
+    "bridge: `agents` is the canonical agent-session command",
+    init_source:find("commands.agents =", 1, true) ~= nil
+  )
+  truthy(
+    "bridge: `sessions` remains a compatibility alias",
+    init_source:find("commands.sessions = commands.agents", 1, true) ~= nil
+  )
+  truthy(
+    "bridge: `agent-settings` is canonical and `session` remains an alias",
+    init_source:find('commands["agent-settings"] =', 1, true) ~= nil
+      and init_source:find('commands.session = commands["agent-settings"]', 1, true) ~= nil
+  )
 end
 
 return {

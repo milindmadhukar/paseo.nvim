@@ -48,6 +48,8 @@ local files = {
   "terminals",
   "draft",
   "settings",
+  "fork",
+  "quit",
   "workspace_create",
   "skills",
   "chat",

@@ -35,7 +35,7 @@ M.RUBRIC = table.concat({
 ---from git, hand it the ids and let it look.
 ---
 ---Agents carrying a `paseo.nvim` label are OURS -- the review agent itself, and
----any session chat -- and are filtered out. Listing the agent you are talking
+---any agent-session chat -- and are filtered out. Listing the agent you are talking
 ---to as a source to interrogate is a loop, and a confusing one.
 ---@param root string
 ---@return string|nil
@@ -155,10 +155,11 @@ function M.quickfix()
   end
 
   local repos = require "paseo.repos"
-  local lines, root = {
-    "The changes currently under review. The code is not quoted -- open the",
-    "files and read them:",
-  }, nil
+  local lines, root =
+    {
+      "The changes currently under review. The code is not quoted -- open the",
+      "files and read them:",
+    }, nil
 
   for _, item in ipairs(items) do
     local name = item.bufnr ~= 0 and vim.api.nvim_buf_get_name(item.bufnr) or (item.filename or "")

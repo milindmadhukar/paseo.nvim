@@ -160,6 +160,33 @@ local function test_terminals()
     truthy("sessions: the row map carries both kinds", at_agent and at_terminal)
     truthy("sessions: and they are on different rows", at_agent ~= at_terminal)
 
+    -- The cross-agent workflow needs the complete opaque id, never the title
+    -- or a prefix. The same key deliberately does nothing on a terminal row.
+    local previous_buf = vim.api.nvim_get_current_buf()
+    local key_buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(key_buf, 0, -1, false, vim.fn["repeat"]({ "" }, #text + 8))
+    vim.api.nvim_set_current_buf(key_buf)
+    panel.attach(chat, key_buf)
+    vim.api.nvim_win_set_cursor(0, { at_agent, 0 })
+    vim.api.nvim_feedkeys("y", "x", false)
+    eq("agents: y copies the complete agent ID", vim.fn.getreg '"', "a1")
+    vim.fn.setreg('"', "unchanged")
+    vim.api.nvim_win_set_cursor(0, { at_terminal, 0 })
+    vim.api.nvim_feedkeys("y", "x", false)
+    eq("agents: terminal rows do not offer an agent ID", vim.fn.getreg '"', "unchanged")
+    local picker_file =
+      assert(io.open(vim.fs.joinpath(t.repo_root, "lua", "paseo", "pickers", "sessions.lua")))
+    local picker_source = picker_file:read "*a"
+    picker_file:close()
+    truthy(
+      "agents: the picker offers the same copy-ID action on <C-y>",
+      picker_source:find('"<C-y>"', 1, true) ~= nil
+        and picker_source:find("copy_id(entry.value)", 1, true) ~= nil
+    )
+    panel.detach(chat, key_buf)
+    vim.api.nvim_set_current_buf(previous_buf)
+    vim.api.nvim_buf_delete(key_buf, { force = true })
+
     -- Reorder, redraw, and the map must follow. Sorted by name, so renaming
     -- `shell` to `aaa` moves it above `zzz-last`.
     apply {

@@ -2,6 +2,7 @@ import { need, guarded, emit, type Ops, type Request } from "./bridge-io.ts";
 import { BridgeConnection } from "./bridge-connection.ts";
 import { pictures, withFallbackActions } from "./bridge-normalize.ts";
 import { workspaceFor } from "./bridge-workspaces.ts";
+import { describeSettings } from "./bridge-providers.ts";
 
 export function matchesReviewAgent(
   agent: any,
@@ -318,9 +319,55 @@ export function agentOps(ctx: BridgeConnection): Ops {
         config: creationConfig(req, provider),
         ...(req.title ? { title: String(req.title) } : {}),
         ...(req.prompt ? { prompt: String(req.prompt) } : {}),
+        ...(Array.isArray(req.attachments) && req.attachments.length > 0
+          ? { attachments: req.attachments as any }
+          : {}),
         labels: { "paseo.nvim": "session" },
       });
       return { id: agent.id, provider };
+    },
+
+    async "agent.forkContext"(req) {
+      const api = connected();
+      const raw = ctx.raw();
+      if (raw.getLastServerInfoMessage()?.features?.agentForkContext !== true) {
+        throw new Error(
+          "this Paseo host does not support agent forking; update Paseo and try again",
+        );
+      }
+
+      const agentId = String(need(req.agentId, "agentId"));
+      const agent: any = api.agents.ref(agentId);
+      await agent.refresh();
+      const snapshot: any = agent.current();
+      const settings: any = describeSettings(snapshot);
+      const context = await raw.buildAgentForkContext(agentId);
+
+      if (!context.attachment) {
+        throw new Error("Paseo could not build fork context for this agent");
+      }
+
+      return {
+        attachment: context.attachment,
+        itemCount: context.itemCount,
+        workspaceId: snapshot?.workspaceId ?? null,
+        cwd: snapshot?.cwd ?? null,
+        title: snapshot?.title ?? null,
+        config: {
+          provider:
+            settings.provider && settings.model
+              ? `${settings.provider}/${settings.model}`
+              : null,
+          modeId: settings.modeId ?? null,
+          thinkingOptionId: settings.thinkingOptionId ?? null,
+          featureValues: Object.fromEntries(
+            (settings.features ?? []).map((feature: any) => [
+              feature.id,
+              feature.value,
+            ]),
+          ),
+        },
+      };
     },
 
     async "agent.archive"(req) {

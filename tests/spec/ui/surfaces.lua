@@ -62,6 +62,11 @@ local function test_surfaces()
     "ui: and on the conversation, which is the other pane you read from",
     mapping(surface_chat.conversation, "5") ~= nil
   )
+  local chat_file = assert(io.open(vim.fs.joinpath(t.repo_root, "lua", "paseo", "ui", "chat.lua")))
+  local chat_source = chat_file:read "*a"
+  chat_file:close()
+  local _, fork_maps = chat_source:gsub('desc = "paseo: fork into a new workspace"', "")
+  eq("ui: f is mapped in both main chat buffers", fork_maps, 2)
   -- Pressed where the cursor actually is.
   vim.api.nvim_feedkeys("5", "x", false)
   eq("ui: pressing 5 in the composer jumps to the fifth tab", float.tab(), float.TABS[5])
@@ -215,7 +220,7 @@ local function test_surfaces()
   -- and the conversation window only exists on the Chat tab -- so every other
   -- tab had no header at all and the dashboard could not tell you which model
   -- it was on. It is a volt section in the chrome now.
-  -- The Sessions tab maps CURSOR ROWS to sessions, and the only thing between
+  -- The Agents & terminals tab maps CURSOR ROWS to entities, and the only thing between
   -- a panel's own line numbering and the buffer's is `body_row_offset`. It is
   -- a constant, so it is checked against a real open dashboard rather than
   -- against itself -- the panel this replaced hardcoded the same sum and was
@@ -227,7 +232,7 @@ local function test_surfaces()
     agents.for_root = function()
       return { { id = "row-probe", title = "row-probe", status = "idle" } }
     end
-    float.select "Sessions"
+    float.select "Agents & terminals"
     local probe
     for line, row in pairs(require("paseo.ui.panels.sessions")._rows) do
       if row.id == "row-probe" then
@@ -259,7 +264,7 @@ local function test_surfaces()
       on_that_row = table.concat(parts)
     end
     truthy(
-      "ui: a Sessions row is on the buffer line its map claims",
+      "ui: an agent row is on the buffer line its map claims",
       on_that_row:find("row-probe", 1, true) ~= nil,
       ("row %s holds %q"):format(tostring(probe), on_that_row)
     )
@@ -325,7 +330,7 @@ local function test_surfaces()
     -- The six panels SHARE the chrome buffer, so a panel that binds keys has
     -- to give them back. `<CR>` is the one that matters: volt binds it at open
     -- and that is how every other panel's rows are reached from the keyboard,
-    -- so a Session panel that simply DELETED its own `<CR>` on the way out
+    -- so an Agent panel that simply DELETED its own `<CR>` on the way out
     -- would leave the key dead on all five of the others.
     local function buf_map(lhs)
       local found = vim.fn.maparg(lhs, "n", false, true)
@@ -335,10 +340,10 @@ local function test_surfaces()
 
     local volt_cr = buf_map "<CR>"
     truthy("ui: volt binds <CR> on the chrome buffer", volt_cr ~= nil)
-    eq("ui: and the Session keys are not bound on another tab", buf_map "h", nil)
+    eq("ui: and the Agent keys are not bound on another tab", buf_map "h", nil)
 
-    float.select "Session"
-    truthy("ui: the Session panel takes the movement keys", buf_map "h" ~= nil)
+    float.select "Agent"
+    truthy("ui: the Agent panel takes the movement keys", buf_map "h" ~= nil)
     truthy("ui: and its group mnemonics", buf_map "s" ~= nil)
     truthy("ui: and displaces volt's <CR>", buf_map("<CR>").callback ~= volt_cr.callback)
 

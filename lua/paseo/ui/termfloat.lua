@@ -1,6 +1,6 @@
 --- The terminal surface: a rail of Paseo's terminals, and the one you are in.
 ---
---- Paseo runs terminals as well as agents -- the `claude` and `codex` sessions
+--- Paseo runs terminals as well as agents -- the `claude` and `codex` terminal processes
 --- started from the app are PTYs on the daemon -- and this is where they are
 --- driven from. It replaces a dashboard tab that could show exactly one at a
 --- time and closed it again the moment you switched tabs.

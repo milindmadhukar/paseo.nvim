@@ -1,9 +1,9 @@
---- Sessions in a workspace.
+--- Agent sessions in a workspace.
 ---
---- A Paseo workspace holds several sessions at once -- in the app they are
+--- A Paseo workspace holds several agent sessions at once -- in the app they are
 --- tabs. Here they are agents you can open a chat on, switch between, and add
 --- to. They all share the workspace's working directory: isolation is a
---- property of the WORKSPACE, not of the session.
+--- property of the WORKSPACE, not of an agent session.
 
 local workspaces = require "paseo.workspaces"
 
@@ -37,14 +37,14 @@ function M.open(ws, opts)
   local state = require "telescope.actions.state"
   local conf = require("telescope.config").values
 
-  workspaces.sessions(ws, function(sessions, err)
+  workspaces.agent_sessions(ws, function(agent_sessions, err)
     if err then
       return vim.notify("paseo: " .. err, vim.log.levels.ERROR)
     end
 
     vim.schedule(function()
       local width = 0
-      for _, agent in ipairs(sessions) do
+      for _, agent in ipairs(agent_sessions) do
         width = math.max(width, #(agent.provider or "?"))
       end
 
@@ -53,12 +53,12 @@ function M.open(ws, opts)
           actions.close(bufnr)
         end
         vim.ui.input(
-          { prompt = "New session in " .. (ws.name or "workspace") .. ": " },
+          { prompt = "New agent session in " .. (ws.name or "workspace") .. ": " },
           function(title)
             if title == nil then
               return
             end
-            workspaces.new_session(
+            workspaces.new_agent_session(
               ws,
               { title = title ~= "" and title or nil },
               function(id, create_err)
@@ -81,16 +81,16 @@ function M.open(ws, opts)
         )
       end
 
-      if #sessions == 0 then
-        vim.notify("paseo: no sessions in this workspace yet", vim.log.levels.INFO)
+      if #agent_sessions == 0 then
+        vim.notify("paseo: no agent sessions in this workspace yet", vim.log.levels.INFO)
         return start_new(nil)
       end
 
       pickers
         .new(opts, {
-          prompt_title = "Sessions · " .. (ws.name or ws.directory),
+          prompt_title = "Agent sessions · " .. (ws.name or ws.directory),
           finder = finders.new_table {
-            results = sessions,
+            results = agent_sessions,
             entry_maker = function(agent)
               return {
                 value = agent,
@@ -105,7 +105,7 @@ function M.open(ws, opts)
               local entry = state.get_selected_entry()
               actions.close(bufnr)
               if entry then
-                -- Opening an EXISTING session: the chat fetches its timeline,
+                -- Opening an EXISTING agent session: the chat fetches its timeline,
                 -- so you land in the conversation as it stands rather than a
                 -- blank window.
                 require("paseo.ui.chat").open {
@@ -120,6 +120,13 @@ function M.open(ws, opts)
               start_new(bufnr)
             end)
 
+            map({ "i", "n" }, "<C-y>", function()
+              local entry = state.get_selected_entry()
+              if entry then
+                require("paseo.agents").copy_id(entry.value)
+              end
+            end)
+
             map({ "i", "n" }, "<C-d>", function()
               local entry = state.get_selected_entry()
               if not entry then
@@ -132,7 +139,7 @@ function M.open(ws, opts)
                 function(archive_err)
                   vim.notify(
                     archive_err and ("paseo: " .. archive_err)
-                      or ("paseo: archived " .. (entry.value.title or "session")),
+                      or ("paseo: archived " .. (entry.value.title or "agent session")),
                     archive_err and vim.log.levels.ERROR or vim.log.levels.INFO
                   )
                 end
@@ -147,7 +154,7 @@ function M.open(ws, opts)
   end)
 end
 
----Sessions in whichever workspace contains the cwd.
+---Agent sessions in whichever workspace contains the cwd.
 function M.here()
   workspaces.for_dir(assert(vim.uv.cwd()), function(ws, err)
     vim.schedule(function()

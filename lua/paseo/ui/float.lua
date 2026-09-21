@@ -1,9 +1,9 @@
 --- The full-screen surface: the conversation, plus everything about the
---- session, on tabs.
+--- agent session, on dashboard tabs.
 ---
 --- The DEFAULT surface. The sidebar is for asking a question beside your code;
 --- this is for the rest of the time -- when you want to see what the agent is
---- doing, what it has cost, what is changed on disk, which sessions are running
+--- doing, what it has cost, what is changed on disk, which agent sessions are running
 --- and where, and to change the mode without a `vim.ui.select` prompt covering
 --- the thing you are reading.
 ---
@@ -34,7 +34,16 @@ local ns = api.nvim_create_namespace "paseo.float"
 ---@type table|nil
 local state
 
-M.TABS = { "Chat", "Session", "Sessions", "Changes", "Usage", "Workspaces" }
+M.TABS = { "Chat", "Agent", "Agents & terminals", "Changes", "Usage", "Workspaces" }
+
+local PANEL_MODULE = {
+  Agent = "session",
+  ["Agents & terminals"] = "sessions",
+}
+
+local function panel_module(name)
+  return PANEL_MODULE[name] or name:lower()
+end
 
 -- ------------------------------------------------------------------ geometry
 
@@ -101,7 +110,7 @@ local function goto_tab(name)
   end
 end
 
----The session header: the same cells the sidebar puts in its winbar.
+---The agent-session header: the same cells the sidebar puts in its winbar.
 ---
 ---It lives in the CHROME rather than on the conversation window's winbar, and
 ---that is the fix for "the dashboard does not say which model it is on": a
@@ -115,11 +124,11 @@ local function header_lines()
   end
   local line = sidebar.header(state.chat)
 
-  -- Everything the header names is a thing the Session panel can change, so
+  -- Everything the header names is a thing the Agent panel can change, so
   -- the header is the shortest route to it. Cells carry volt's third element;
   -- `volt.events.add` on this buffer is what turns that into a click.
   for _, cell in ipairs(line) do
-    cell[3] = goto_tab "Session"
+    cell[3] = goto_tab "Agent"
   end
 
   return { render.truncate(line, state.geometry.width - 2) }
@@ -248,9 +257,9 @@ local function body_lines()
   local lines = {}
 
   if state.tab ~= "Chat" then
-    local ok, panel = pcall(require, "paseo.ui.panels." .. state.tab:lower())
+    local ok, panel = pcall(require, "paseo.ui.panels." .. panel_module(state.tab))
     -- The height is passed as well as the width. A panel that can tighten
-    -- itself -- Session drops the breathing room inside its cards -- needs to
+    -- itself -- Agent drops the breathing room inside its cards -- needs to
     -- know how many rows it is being given, and the rest simply ignore it.
     local body = ok and panel.lines(state.chat, g.width - 4, height)
       or {
@@ -280,8 +289,8 @@ end
 ---The buffer line a panel's first line is drawn on.
 ---
 ---Header, tab bar, rule -- so body row 1 is buffer line 4. Exposed rather than
----re-derived by the panel that needs it: the Sessions panel maps cursor rows
----to sessions, and the panel this replaced hardcoded the sum as `row - 5`,
+---re-derived by the panel that needs it: the Agents & terminals panel maps cursor rows
+---to entities, and the panel this replaced hardcoded the sum as `row - 5`,
 ---which meant adding a heading line silently retargeted its kill key.
 ---
 ---The number itself comes from |paseo.ui.layout|, which is the one place the
@@ -500,7 +509,7 @@ local function show_chat_panes()
   )
 
   -- The surface reads as ONE sheet: the conversation shares the chrome's
-  -- background, and the composer is a raised card -- the same tier the Session
+  -- background, and the composer is a raised card -- the same tier the Agent
   -- panel's cards sit on, so "where you type" is visibly a control and not
   -- more transcript.
   pcall(function()
@@ -559,7 +568,7 @@ end
 ---@param name string
 ---@return table|nil
 local function panel_for(name)
-  local ok, panel = pcall(require, "paseo.ui.panels." .. name:lower())
+  local ok, panel = pcall(require, "paseo.ui.panels." .. panel_module(name))
   return ok and panel or nil
 end
 
@@ -567,7 +576,7 @@ end
 ---
 ---The six panels SHARE one buffer, so a panel that binds `<CR>` has to unbind
 ---it on the way out or the Changes tab inherits it and tries to apply a
----session setting. `attach`/`detach` are both optional: the panel contract has
+---agent setting. `attach`/`detach` are both optional: the panel contract has
 ---always been pcall-and-optional.
 ---@param name string
 ---@param method "attach"|"detach"
