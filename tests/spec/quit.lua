@@ -109,6 +109,32 @@ local function test_quit()
     eq("quit: closing one Neovim tab page does not count as exiting", quit.would_exit "q", false)
     vim.cmd.tabclose()
 
+    -- The dashboard's buffer mount is a window in the LAYOUT, not a float --
+    -- so `layout_windows` counts it, and the guard would have to be told
+    -- about it if the tab page were not already the answer. `:q` in your code
+    -- with a dashboard tab open closes a window, not Neovim.
+    local dash_chat = {
+      root = vim.uv.cwd(),
+      agent_id = "quit-agent",
+      provider = "test",
+      streaming = false,
+      pending = {},
+      conversation = vim.api.nvim_create_buf(false, true),
+      composer = vim.api.nvim_create_buf(false, true),
+    }
+    require("paseo.ui.transcript").reset(dash_chat)
+    local dash = require "paseo.ui.float"
+    dash.open(dash_chat, { mount = "buffer" })
+    eq(
+      "quit: the dashboard's own tab means :q in your code is not an exit",
+      quit.would_exit "q",
+      false
+    )
+    dash.close()
+    for _ = 1, 20 do
+      vim.wait(10)
+    end
+
     local float_buf = vim.api.nvim_create_buf(false, true)
     local float_win = vim.api.nvim_open_win(float_buf, true, {
       relative = "editor",

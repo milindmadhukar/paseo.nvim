@@ -308,7 +308,18 @@ function M.refresh(chat)
   require("paseo.ui.composer").refresh(chat)
 
   local float = require "paseo.ui.float"
-  if float.is_open(chat) then
+  -- `showing` rather than `is_open`. The question here is "is the dashboard
+  -- drawing this chat", not "can you see it from where you are standing" --
+  -- and `is_open` is tab-aware, so with the dashboard on another tab page it
+  -- answered no and the fallback below wrote a winbar onto the dashboard's
+  -- OWN conversation pane. That pane's winbar is emptied deliberately (the
+  -- header is a volt section in the chrome), so the result was the header
+  -- drawn twice, one row apart, and a row stolen from the conversation --
+  -- ten times a second for the length of every turn.
+  --
+  -- Latent while the dashboard floated, because living on another tab page
+  -- was the exception. On the buffer mount it is the point.
+  if float.showing(chat) then
     return float.refresh_header(chat)
   end
 

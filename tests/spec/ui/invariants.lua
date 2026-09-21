@@ -192,6 +192,32 @@ local function test_invariants()
     nil
   )
 
+  -- THE PANES MAY NOT BE ANCHORED TO THE EDITOR. The dashboard has two mounts
+  -- -- floating over your code, and a window of its own on a tab page -- and
+  -- the only thing that differs between them is what the conversation, the
+  -- composer and the PTY hang off. They go through `placed(g, ...)`, which
+  -- reads it from the geometry; a hardcoded `relative = "editor"` works
+  -- perfectly on the float and puts the panes over the wrong window, on the
+  -- wrong tab page, on the buffer mount.
+  --
+  -- Five occurrences are legitimate: FOUR window configs, all of them the
+  -- surface's own box rather than a pane -- the backdrop and the chrome, each
+  -- opened in `M.open` and re-fitted in `M.relayout`, both float-only by
+  -- construction -- plus the `relative` field of `float_geometry`'s own
+  -- return, which is the thing `placed` reads. A sixth means a pane went back
+  -- to being hardcoded.
+  --
+  -- And six `placed(g,`: its definition, and the five panes -- the composer
+  -- and the conversation in `resize_composer`, both of them again in
+  -- `show_agent_panes`, and the PTY in `show_terminal_pane`.
+  local float_source = source_of "lua/paseo/ui/float.lua"
+  if float_source then
+    local _, anchored = float_source:gsub('relative = "editor",\n', "")
+    eq("ui: only the dashboard's own box is anchored to the editor", anchored, 5)
+    local _, placed = float_source:gsub("placed%(g, ", "")
+    eq("ui: and every pane is anchored through the geometry", placed, 6)
+  end
+
   local source_line = { { "click me", "PaseoKey", { click = function() end } } }
   local handed = render.to_volt { source_line }
   truthy("ui: to_volt hands volt a different table", handed[1] ~= source_line)

@@ -801,8 +801,12 @@ end
 local function layout(chat)
   make_buffers(chat)
   local surface = chat.surface or require("paseo.config").get().ui.surface
-  if surface == "float" then
-    require("paseo.ui.float").open(chat)
+  -- Two mounts of ONE module. The dashboard is the same surface floating over
+  -- your code or sitting in a window of its own -- same chrome, same tabs,
+  -- same panes -- so the name goes in as the mount rather than picking
+  -- between two implementations of it.
+  if surface == "float" or surface == "buffer" then
+    require("paseo.ui.float").open(chat, { mount = surface })
   else
     sidebar.open(chat)
   end
@@ -941,7 +945,7 @@ end
 ---`surface` overrides where this chat last was. Only `M.follow` passes it: the
 ---surface you are looking at belongs to the window, not to the conversation
 ---you are switching to.
----@param opts? { root?: string, focus?: boolean, agent_id?: string, title?: string, create?: boolean, surface?: "float"|"sidebar" }
+---@param opts? { root?: string, focus?: boolean, agent_id?: string, title?: string, create?: boolean, surface?: "float"|"sidebar"|"buffer" }
 ---@param callback? fun(chat: paseo.Chat|nil, err: string|nil)
 function M.open(opts, callback)
   opts = opts or {}
@@ -1266,7 +1270,10 @@ function M.follow(root, opts)
   local surface = chat.surface or config.get().ui.surface
   local focus = opts.focus
   if focus == nil then
-    focus = surface == "float"
+    -- Anything but the sidebar takes the cursor: both dashboard mounts cover
+    -- what you were looking at, so you need to be able to type into them. The
+    -- sidebar sits BESIDE your code, which is the whole of the difference.
+    focus = surface ~= "sidebar"
   end
 
   M.close()
@@ -1278,7 +1285,7 @@ end
 ---
 ---Both live on the chat rather than in a window, so this is genuinely just a
 ---matter of closing one set of windows and opening another.
----@param name "float"|"sidebar"
+---@param name "float"|"sidebar"|"buffer"
 function M.surface(name)
   local chat = current
   if not chat then
@@ -1296,14 +1303,31 @@ function M.surface(name)
     sidebar.open(chat)
   else
     sidebar.close(chat)
-    chat.surface = "float"
-    float.open(chat)
+    chat.surface = name
+    float.open(chat, { mount = name })
   end
 end
 
 ---`<C-f>`: swap to the other surface.
 function M.fullscreen()
   local chat = current
+
+  -- NOT A KEY ON THE BUFFER SURFACE. `<C-f>` names one swap -- the sidebar
+  -- beside your code and the float over it -- and the buffer surface is
+  -- neither: it is a place of its own, on a tab page of its own. A key that
+  -- silently moved you between two of three surfaces depending on where you
+  -- were standing would be a key with no meaning.
+  --
+  -- Declined HERE rather than by leaving it unbound, because the conversation
+  -- and composer bind it permanently and they are shared with the sidebar --
+  -- the chrome is the only buffer that can simply not have it.
+  --
+  -- Silently. A notification for "this key does nothing here" is noise on a
+  -- key people press by reflex.
+  local mounted = require("paseo.ui.float").mount()
+  if chat and mounted == "buffer" and require("paseo.ui.float").showing(chat) then
+    return
+  end
   -- The answer overlay is anchored to the conversation WINDOW, and the swap closes
   -- it -- so without this a question you were halfway through disappears on
   -- `<C-f>`. Reopened rather than migrated: the picks live on the chat, so
