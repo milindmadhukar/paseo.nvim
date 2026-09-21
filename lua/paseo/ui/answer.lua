@@ -921,14 +921,17 @@ local function open_box(o, insert, note)
     vim.keymap.set(mode, key, fn, { buffer = buf, nowait = true, silent = true })
   end
 
-  -- The composer's contract, verbatim, so there is one thing to learn for both
-  -- of the boxes in this plugin you type into: `<C-s>` sends from either mode,
-  -- `<CR>` in normal mode sends, `<CR>` in insert mode is a newline.
-  map("i", "<C-s>", function()
-    vim.cmd.stopinsert()
-    commit()
-  end)
-  map("n", "<C-s>", commit)
+  -- The composer's contract, verbatim, so there is one thing to learn for every
+  -- box in this plugin you type into: `<M-CR>` sends from either mode, `<CR>`
+  -- in normal mode sends, `<CR>` in insert mode is a newline. NOT `<C-s>`,
+  -- which is the session list everywhere and cannot also be send here.
+  for _, key in ipairs { "<M-CR>", "<C-CR>" } do
+    map("i", key, function()
+      vim.cmd.stopinsert()
+      commit()
+    end)
+    map("n", key, commit)
+  end
   map("n", "<CR>", commit)
   -- `<Esc>` in INSERT mode is left alone -- it leaves insert, the way it does
   -- everywhere. In normal mode it backs out without answering, and because these

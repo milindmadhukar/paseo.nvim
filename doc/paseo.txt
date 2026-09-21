@@ -869,7 +869,7 @@ window for one sentence and puts you in the conversation before you have said
 anything.
 
     <CR>        send (normal mode)
-    <C-s>       send (normal or insert)
+    <M-CR>      send (normal or insert). Not <C-s>: see |paseo-chat-keys-send|
     <Esc>, q    cancel, throwing the draft away
 
 An EMPTY box cancels: sending nothing costs a turn and gets you "what would
@@ -1321,22 +1321,60 @@ you are doing.
                                                           *paseo-chat-header*
 The header ~
 
-The line above the conversation, drawn by both surfaces from one builder so
+The row ABOVE THE BOX YOU TYPE IN, drawn by both surfaces from one builder so
 they cannot disagree about which mode the session is in. It says what the
 session IS: >
 
-      claude/sonnet-5 · acceptEdits · 󰧑 think · ⚡
+    ─ claude/sonnet-5 · acceptEdits · 󰧑 think · ⚡ · ~/Code/kora ── ⠹ 14s ─ 󰌑 send ─
 <
 A pending permission shouts from here -- `` needs you`` -- because then the
 agent is not working, it is waiting for YOU.
 
+It used to live at the far TOP of the screen -- a winbar over the transcript in
+the sidebar, the first row of the chrome on the dashboard -- which is as far
+from the cursor as that screen goes. You decide what to type with these facts
+and you decide it while looking at the composer, so they belong against the
+composer. It doubles as the box's title row, which is what lets the box drop
+its drawn border and become a plate like every other card; see
+|paseo-chat-composer|.
+
+Where there is no box there is still a header: on every dashboard tab but
+`Chat` it is a volt section in the chrome above the tab bar, so "which model is
+this" does not stop being answerable on the Usage panel, and clicking it opens
+the panel that can change what it says. On the `Chat` tab that row goes back to
+the transcript.
+
+IT DEGRADES BY DROPPING WHOLE FACTS rather than by cutting the row. A sixty
+column sidebar cannot say all of it, and truncation takes the RIGHT -- which is
+where the working directory is. So it gives up what it can spare, cheapest
+first -- the feature toggles, then the thinking level, then the context
+figure, then the model -- and keeps the mode and the directory: >
+
+    ─ Plan Mode · paseo.nvim   ⠹ 1m 12s ─ 󰌑 / Alt + 󰌑 send ─
+<
+Shortening is tried only once there is nothing cheaper left to drop:
+`~/Code/paseo.nvim` beats `paseo.nvim`, and `paseo.nvim` beats no directory at
+all. Nothing outranks a pending permission, which is never dropped at any
+width.
+
+                                                            *paseo-chat-rule*
+THE ROW IS ALSO THE BOX'S TOP EDGE. Without a frame the composer was a slab of
+card colour with a row of text on it, and on a theme whose elevation tiers sit
+close together that is not a box -- it is the same screen, slightly different.
+A rule of its own would cost a row of the transcript to say something true the
+whole time, so the bar IS the rule: it starts and ends on a hairline, the gaps
+between its clusters are drawn in it, and the words sit on it the way a title
+sits on a frame. `PaseoComposerBorder` is the group, because that is what it
+is now.
+
                                                           *paseo-chat-status*
 The status ~
 
-What the turn is DOING -- a spinner and how long it has been running -- lives
-at the BOTTOM, on the right of the hint bar: >
+What the turn is DOING -- a spinner and how long it has been running -- is on
+the RIGHT-HAND END OF THE SAME ROW, on top of the box: what you are waiting for
+is the answer to whatever is in it. >
 
-     1-6  tabs    󰌒  cycle    Ctrl + f  sidebar    q  close       ⠹ 28m 49s
+    ─ claude/sonnet-5 · acceptEdits · 58% left · ~/Code/kora ── ⠹ 28m 49s ─ 󰌑 send ─
 <
 The count is the point. A static dot looked the same at two seconds and at two
 minutes, so a wedged turn and a working one were the same picture and the only
@@ -1347,34 +1385,35 @@ is a duration. Past an hour the seconds are dropped (`1h 24m`) -- at that scale
 they are noise, and dropping them stops the field growing a third segment that
 shifts everything beside it.
 
-At the bottom rather than in the header because it is the one field that
-changes ten times a second, and among five static ones it pushed the provider
-sideways every time the count gained a digit. The SIDEBAR has no footer to put
-it in -- it is a split whose only chrome is that winbar -- so there it goes on
-the end of the header instead.
+It is given a FIXED-WIDTH slot, ten columns whether it needs them or not. That
+is the answer to the reason this used to live at the bottom of the screen: it
+is the one field on the row that changes ten times a second, and among static
+ones it pushed everything beside it sideways every time the count gained a
+digit. In a slot of its own it cannot.
 
-                                                           *paseo-chat-gauge*
-The CONTEXT GAUGE sits in the same line, once the daemon has reported any
-usage: a six-cell bar and the figure it stands for. >
+The dashboard's footer keeps a copy for the tabs that have NO composer on them.
+A turn runs on while you read the Changes panel, and that is exactly when "is
+it still going" is hard to answer -- nothing else on those tabs moves.
 
-    ⠹ 14s  claude/sonnet-5 · acceptEdits · ││││││ 58% left  ~/Code/kora
+                                                              *paseo-chat-left*
+HOW MUCH CONTEXT IS LEFT sits in the same row, once the daemon has reported any
+usage: >
+
+    58% left
 <
-The bar is one glyph repeated and the FILL IS COLOUR, not shape -- the same
-two-tone track |paseo.ui.widgets|.bar draws everywhere else, because a track
-made of spaces is a hole rather than a track. On paper here it is six
-identical bars; on screen the first two or three are lit.
+It says what is LEFT, not what is spent. It used to be a bare `42%`, which said
+neither what the number counted nor which way it ran -- and it counted the
+fraction USED, so the figure you watched climbing was the one you wanted to
+watch falling.
 
-It says what is LEFT and the bar FILLS as you spend it, and both halves of
-that are deliberate. It used to be a bare `42%`, which said neither what the
-number counted nor which way it ran -- and it counted the fraction USED, so
-the figure you watched climbing was the one you wanted to watch falling.
-
-The bar fills rather than drains for the same reason: the colour lives on the
-filled run, so a draining bar had nothing left to paint at `5% left`, and went
-quietly colourless at exactly the moment it was supposed to be shouting. Full
-and red now means the same thing the words do -- the window is nearly full and
-there is not much room. The thresholds are the ones the Usage tab uses, so
-amber and red mean one thing on both screens.
+NO BAR BESIDE IT. There was a six-cell gauge here, and a gauge earns its place
+by being readable at a glance in a way a number is not -- which is true on the
+Usage panel, where it sits in a card with room to be a real readout, and false
+in six cells wedged into a row of text: the difference between 58% and 71% was
+two glyphs, in a row you are scanning for words. The pressure colour went with
+it, for the same reason a number that changes colour in a row of dim text is a
+twitch rather than a warning. |paseo-chat-usage| is where a context window in
+trouble is worth looking at.
 
                                                            *paseo-chat-float*
 The FULL SCREEN surface -- the DEFAULT -- is `:Paseo chat`, `:Paseo dash`, or
@@ -1590,7 +1629,10 @@ the one window that must not be covered.
 In the composer ~
 
     <CR>      (normal mode) send
-    <C-s>     send, from normal or insert mode
+    <M-CR>    send, from normal or insert mode. NOT <C-s>: that is the
+              session list, here as everywhere else -- see |paseo-chat-keys-send|
+    <C-CR>    the same, where the terminal can send it
+    <C-s>     the session list
     p  P      paste -- an image if the clipboard has one, text otherwise
     1-6       jump to a tab (full screen; see ui.float.tab_keys)
     <M-1>..6  the same, without taking the count keys
@@ -1653,6 +1695,31 @@ THE FOCUSED ROW IS PAINTED, in the same colour hover uses: pointing at a row
 and moving to it are the same state. Arriving at a tab puts focus on a row --
 the one you are in, else the first -- so the first `<CR>` does something.
 
+                                                        *paseo-chat-gutter*
+WHERE THE CURSOR IS AND WHICH ONE IS OPEN ARE TWO DIFFERENT MARKS. The focus
+band is one flat sweep across the row, so "this is the session you are in" --
+which used to be a coloured bar and a coloured title INSIDE that sweep -- said
+nothing the moment you pointed at the row, and the two states were
+indistinguishable whenever they were the same row. Both marks live in a two
+column gutter the band never paints over: >
+
+       ▌ 󱙺 󰦖 fix the archive redraw          claude/opus   open, not focused
+         󱙺 󰧞 sidebar perf                  claude/sonnet
+      ▸  󱙺 󰀦 voice dictation                  codex/gpt   focused, not open
+<
+Their groups are `PaseoRowCaret` and `PaseoRowBar`, with one variant per band
+(`PaseoRowBarHover`, `PaseoRowBarActive`) -- a foreground-only group on a
+filled row is a hole in the middle of the fill.
+
+A PUSH REPAINTS THE SURFACE. Both directories are fed by the daemon rather
+than polled, and nothing used to ask the screen to draw them again: archiving
+a session left its row up until the next `j`, and an agent that started
+working did not change colour until you moved. The data was right and the
+picture was a second-hand copy of it. One archive produces three `remove`
+events from a live daemon, so the repaint is coalesced -- and it redraws the
+session strip and the list, not the Changes panel, which shells out to
+`git status` per repo and is not what changed.
+
 None of that was true before. Selection lived on the CURSOR, which volt resets
 to line 1 after every click; nothing was drawn to say where it was; and the
 cursor was never put on a row in the first place. So Sessions had working
@@ -1694,11 +1761,46 @@ stop a turn that is running freely, which is what this is for.
 Dictation ~
 
 `<C-t>` in the composer opens the microphone; `<C-t>` again closes it and puts
-what you said in at the cursor. The header says `listening` while it is open,
-on either surface.
+what you said in at the cursor; `<Esc>` throws the recording away.
 
 One key for both halves, and not a hold-to-talk one, because Neovim delivers a
 keypress and never a key RELEASE -- "while held" cannot be expressed.
+
+                                                        *paseo-dictation-meter*
+THE BOX BECOMES A METER. While the microphone is open, the bar over the
+composer is the recorder and a scrolling waveform is drawn INSIDE the box: >
+
+     󰍬 listening  ▁▁▂▃▅▆▇▅▃▂▁▁▁▁▁▁  0:04   Ctrl + t  stop    󱊷  discard
+     ▁▁▁▂▃▅▇█▇▅▃▂▁▁▁▂▄▆▇▇▅▃▁▁▁▁▂▃▅▆▇▇▆▄▂▁▁▁
+<
+The wave is VIRTUAL TEXT, never written lines: the composer holds your draft,
+and a visualiser that typed itself into the buffer would be indistinguishable
+from one that ate it. It is there because "it is not clear when I am speaking"
+is the whole problem with dictation you cannot see -- a word missed by a muted
+microphone and a word missed by a thinking daemon look identical when the only
+feedback is text that has not arrived yet.
+
+IT IS A RATIO AGAINST THE ROOM, IN DECIBELS. Raw loudness means nothing on its
+own: the laptop this was written on reads 0.16 RMS with nobody in the room,
+while a headset a foot away reads a hundredth of that. So the floor is the
+quietest reading of the last twenty seconds, and the wave is how far over it
+you are -- four times the room being full scale.
+
+A DIFFERENCE WOULD NOT DO, and this is the part that failed twice. On a
+microphone whose room reads 0.16, a sound that genuinely doubles the input
+moves the number by 0.16; the same doubling on a quiet headset moves it by
+0.002. Subtracting, and then gating on a fraction of the floor, is a test a
+loud room can never pass -- and an earlier version that crept the floor upward
+at a fixed rate instead had the floor climb over the voice a few seconds into
+a sentence, so the wave died mid-word. Both drew a flat line at a working
+microphone, which is the one answer it must never give. A ratio has neither
+failure mode: it is the same event on every microphone, which is what your ear
+says too.
+
+A RECORDER THAT DIES SAYS SO, with whatever it printed on the way out -- a
+microphone that is busy, or refused. That used to be silent: the indicator
+stayed lit, no audio was ever sent, and the key appeared to have stopped
+working.
 
 NEOVIM CANNOT RECORD AUDIO, so this shells out. The first of these that is
 installed is used: >
@@ -1717,6 +1819,14 @@ Audio is streamed WHILE YOU SPEAK rather than recorded and then uploaded: the
 daemon transcribes as it goes, so by the time you stop talking most of the
 work is done and the text arrives in about as long as it takes to lift your
 finger.
+
+CHUNKS ARE NUMBERED FROM ZERO, and that is not a detail. The daemon
+acknowledges the stream itself with `ackSeq: -1` and reassembles the audio by
+sequence, so a first chunk numbered 1 leaves a hole at 0 that never fills:
+every chunk waits in the reorder buffer, nothing is transcribed, and
+`dictation.finish` gives up with "Timed out waiting for final transcription".
+Which is exactly what dictation from this editor did, on a daemon whose own
+app dictates fine.
 
 THE DAEMON DOES THE TRANSCRIBING. A microphone is not enough -- if it has no
 speech model it says so, in its own words, the first time you press the key.
@@ -1738,26 +1848,41 @@ On the full-screen surface it GROWS with the prompt -- one row when empty, up
 to |paseo-config.ui.float.composer| rows as you fill it, and back again when
 you send: >
 
-    ╭ ❯ ──────────────────────────────────────────────────────────────────╮
-    │ why is the ref suite opening a file it then deletes?                 │
-    ╰──────────────────────────────────────────────── ⏎ / Ctrl + s  send ╯
+    ─ claude/sonnet-5 · acceptEdits · 58% left · ~/Code/kora ─ ⠹ 14s ─ 󰌑 send ─
+     why is the ref suite opening a file it then deletes?
 <
 A box standing at its configured height over an empty buffer was the largest
-and emptiest shape on the screen: seven rows of flat card colour, no edge, and
-nothing saying you could type in it. Wrapped lines count towards the height --
+and emptiest shape on the screen: seven rows of flat card colour with nothing
+saying you could type in it. Wrapped lines count towards the height --
 `wrap` is on, so a 300-column paragraph is four rows on screen, and asking the
 buffer for its line count would say one and leave the cursor off the bottom.
 
-The border is DRAWN rather than painted fg == bg, and it carries both things an
-input has to say: a prompt chevron for what it is, and the send keys for how to
-use it. BOTH keys, because they are not interchangeable -- `<CR>` sends from
-normal mode and opens a line from insert mode, so `<C-s>` is the one that
-always works. They live in the frame rather than on a row of their own, which
-would cost the conversation a row to say something true the whole time.
+                                                     *paseo-chat-keys-send*
+NO BOX IS DRAWN AROUND IT under `plate`, which is the default and where nothing
+else on the surface has an edge either. A hard rounded rule around the composer,
+inside a window whose own edge is invisible, above cards with no frames, was
+the one thing on the dashboard that ignored |paseo-config.ui.style|. What
+separates the box from the transcript now is what separates every other card
+from it: one tier of elevation, and a title row. Under `rounded` and `square`
+it keeps a real frame, because that is what those styles are for.
 
-Its groups are `PaseoComposerBorder`, `PaseoComposerLabel`,
+The title row is |paseo-chat-header|, and it ends with HOW TO SEND. Both keys,
+because they are not interchangeable: `<CR>` sends from normal mode and opens a
+line from insert mode, so the one that works while you are still typing is
+`<M-CR>` -- Alt and Enter. `<C-CR>` is bound beside it for terminals that speak
+the kitty keyboard protocol; the ones that do not never deliver it.
+
+`<C-s>` IS NOT EITHER OF THEM. It means THE SESSION LIST on the chrome, in
+every terminal, and on the session strip drawn four rows above the box -- so a
+composer that quietly sent on it was one key with two meanings, both advertised
+on screen at once. From the composer it now does what it does everywhere else.
+
+Its groups are `PaseoComposerBar` (the title row, and the base every cell on
+it is combined with), `PaseoComposerBorder`, `PaseoComposerLabel`,
 `PaseoComposerHint` and `PaseoComposerKey` -- separate from the card's, so
-|paseo-config.ui.theme| can move the composer without moving every card.
+|paseo-config.ui.theme| can move the composer without moving every card. The
+microphone meter adds `PaseoVoiceOn` for the recording dot and
+`PaseoVoiceIdle` / `PaseoVoiceLive` / `PaseoVoiceLoud` for the wave.
 
 The conversation is an ordinary buffer too, on purpose: `y`, `/` and soft-wrap
 work on an agent's reply. Volt draws the chrome around it -- the header, the
@@ -2141,8 +2266,9 @@ the provider parses back.
 
 Typing an answer opens a REAL buffer inside the card, not a prompt: your
 completion, abbreviations, insert-mode maps and undo all work, and `<CR>` in
-insert mode is a newline. `<C-s>`, or `<CR>` in normal mode, saves it; `<Esc>`
-twice discards it. That is the composer's contract verbatim, because it is the
+insert mode is a newline. `<M-CR>`, or `<CR>` in normal mode, saves it;
+`<Esc>` twice discards it. That is the composer's contract verbatim -- down to
+NOT being `<C-s>`, which is the session list -- because it is the
 same act. A question with no options at all opens the box for you and starts
 insert -- there is nothing else to do on one.
 

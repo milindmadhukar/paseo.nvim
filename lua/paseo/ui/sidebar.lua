@@ -46,30 +46,24 @@ end
 
 -- -------------------------------------------------------------------- header
 
----How much of the context window is LEFT, as a gauge.
+---How much of the context window is LEFT.
 ---
----This was a bare `42%` in `PaseoDim`, wedged between the feature toggles and
----the path. Two things were wrong with it and they compound: nothing said what
----the number counted, and it counted the wrong direction -- it was the
----fraction USED, so the figure you watched climbing was the one you wanted to
----watch falling, and a reader who assumed the obvious read it exactly
----backwards at the one moment it matters.
+---This was a bare `42%` in `PaseoDim`, and two things were wrong with it that
+---compound: nothing said what the number counted, and it counted the wrong
+---direction -- it was the fraction USED, so the figure you watched climbing
+---was the one you wanted to watch falling, and a reader who assumed the
+---obvious read it exactly backwards at the one moment it matters. So it counts
+---DOWN and says so: `42% left`.
 ---
----So: a gauge that FILLS, over a number that counts down. Those agree -- a
----bar nearly full and `5% left` are one reading, "the tank is nearly full and
----there is not much room" -- and filling is the direction that puts the weight
----in the right place. A bar that drained instead was empty and colourless at
----exactly the moment it mattered: the pressure colour lives on the filled run,
----so at 5% left there was no filled run to carry it and the red never showed.
----
----The colour is pressure, from the thresholds |paseo.ui.widgets|.pressure_hl
----already holds for the Usage panel, so amber and red mean the same thing on
----both screens.
----
----Drawn INLINE rather than right-aligned. `header` has no width to align
----against -- it is rendered both into a `winbar` string and into a volt line
----that the dashboard truncates itself -- and the readout belongs beside the
----model and the mode anyway, which is the cluster you are already reading.
+---NO BAR BESIDE IT. There was a six-cell gauge here, and a gauge earns its
+---place by being readable at a glance in a way a number is not -- which is
+---true on the Usage panel, where it sits in a card with room to be a real
+---readout, and false in six cells wedged into a row of text. Two glyphs of
+---difference between 58% and 71% is not a reading; `58% left` is, and it was
+---already right there. The pressure colour goes with it for the same reason:
+---it lived on the filled run of a bar that no longer exists, and a number that
+---changes colour in a row of dim text is a twitch rather than a warning. The
+---Usage tab is where a context window in trouble is worth looking at.
 ---@param chat table
 ---@return table[]  Cells; empty until the daemon has reported any usage.
 function M.context(chat)
@@ -82,19 +76,13 @@ function M.context(chat)
     return {}
   end
 
-  local widgets = require "paseo.ui.widgets"
   -- Clamped: a context window can report over 100% once the overhead is
   -- counted, and "-4% left" is a worse answer than "0% left".
   local spent = math.max(0, math.min(100, (used / max) * 100))
-  local left = 100 - spent
-
-  local cells = { { " · ", "PaseoDim" } }
-  -- Six cells is the smallest bar that still reads as a bar rather than as
-  -- three punctuation marks, and the header has room for it on both surfaces.
-  local gauge = widgets.bar { w = 6, val = spent, hl = widgets.pressure_hl(spent), thin = true }
-  vim.list_extend(cells, gauge)
-  cells[#cells + 1] = { (" %d%% left"):format(math.floor(left)), "PaseoDim" }
-  return cells
+  return {
+    { " · ", "PaseoDim" },
+    { ("%d%% left"):format(math.floor(100 - spent)), "PaseoDim" },
+  }
 end
 
 ---The status line above the conversation, as cells.
@@ -109,12 +97,18 @@ end
 ---at two seconds and at two minutes, so a wedged turn was indistinguishable
 ---from a working one without opening the app to check.
 ---
----This lives at the BOTTOM of whichever surface is drawing, beside the hint
----bar, rather than in the header. A progress readout is the thing your eye
----goes back to while you wait, and the header is where the session's SETTINGS
----are -- putting the one changing field among five static ones made the whole
----row twitch, and pushed the provider sideways every time the count gained a
----digit.
+---It is drawn ON THE COMPOSER'S BAR, at the right-hand end -- see
+---|paseo.ui.composer|. A progress readout is the thing your eye goes back to
+---while you wait, and what you are waiting for is the answer to whatever is in
+---that box, so the box is where it belongs. It sits in a fixed-width slot
+---there: the count grows from `9s` to `28m 49s` while you watch it, and a row
+---measured against its true width would reflow every time it crossed a
+---threshold, which is the twitch that had this at the bottom of the screen in
+---the first place.
+---
+---The dashboard's footer keeps it for the tabs that have no composer on them.
+---A turn runs on while you read the Changes panel, and that is exactly when
+---"is it still going" is hard to answer: nothing else on those tabs moves.
 ---@param chat table
 ---@return table[]
 function M.status(chat)
@@ -133,52 +127,171 @@ function M.status(chat)
   return {}
 end
 
-function M.header(chat)
-  local line = { { "  ", "PaseoDim" } }
+---What the header says, as droppable parts.
+---
+---WHY PARTS AND NOT A LINE. This row now lives on the composer's bar, one row
+---above the box, which in a sixty-column sidebar is a third of the space the
+---top of the screen had. Handing that to `render.truncate` cuts the RIGHT --
+---so the first things to go were the working directory and the mode, which
+---are the two facts the row is most worth having. A `rank` per part lets the
+---row give up the readouts it can spare, in order, and keep those.
+---
+---`rank` is what it is worth, lowest first: nothing outranks something waiting
+---on you, then the mode you are in, then where you are, then which model, and
+---the three readouts after that are the ones that go when the pane is narrow.
+---@param chat table
+---@return { rank: integer, cells: table[], shrink?: fun(): table[] }[]
+local function parts(chat)
+  local out = {}
 
-  -- RECORDING FIRST, because while it is true it is the only thing on this row
-  -- that is about you rather than about the agent, and it is the state most
-  -- worth being certain of. On the header rather than on the composer's own
-  -- hint bar so it works on both surfaces: the dashboard's composer has no
-  -- winbar at all.
-  if chat.dictating then
-    line[#line + 1] = { icons.ui.mic .. " ", "PaseoToolFail" }
-    line[#line + 1] = { "listening · ", "PaseoDim" }
+  ---@param rank integer
+  ---@param cells table[]
+  ---@param shrink? fun(): table[]
+  local function part(rank, cells, shrink)
+    out[#out + 1] = { rank = rank, cells = cells, shrink = shrink }
   end
 
-  line[#line + 1] = { chat.provider or "…", "PaseoHeader" }
+  part(4, { { chat.provider or "…", "PaseoHeader" } })
 
   if chat.mode then
-    line[#line + 1] = { " · ", "PaseoDim" }
-    line[#line + 1] = { chat.mode, "PaseoAgent" }
+    part(2, { { chat.mode, "PaseoAgent" } })
   end
   if chat.thinking then
-    line[#line + 1] = { " · ", "PaseoDim" }
-    line[#line + 1] = { "󰧑 " .. chat.thinking, "PaseoThinking" }
+    part(6, { { icons.ui.thinking .. " " .. chat.thinking, "PaseoThinking" } })
   end
   -- The daemon supplies feature names; Codex Plan and Fast are separate
   -- toggles, and future providers may add others.
   for _, feature in ipairs(chat.feature_list or {}) do
     if feature.type == "toggle" and chat.features and chat.features[feature.id] then
-      line[#line + 1] = { " · " .. (feature.label or feature.id), "PaseoKey" }
+      part(7, { { feature.label or feature.id, "PaseoKey" } })
     end
   end
 
-  vim.list_extend(line, M.context(chat))
-
-  -- Something is waiting on you. Worth shouting about: the agent is blocked
-  -- until it is answered.
-  if chat.permissions and #chat.permissions > 0 then
-    line[#line + 1] = { "  " .. icons.status.permission .. " needs you (gp) ", "PaseoDanger" }
+  local context = M.context(chat)
+  if #context > 0 then
+    -- `context` builds its own leading separator, for the callers that append
+    -- it to a line of their own; here the separator is the assembler's job.
+    part(5, vim.list_slice(context, 2))
   end
 
-  line[#line + 1] = { "  ", "PaseoDim" }
-  line[#line + 1] = {
-    chat.title or vim.fn.fnamemodify(chat.root, ":~"),
-    "PaseoDim",
-  }
+  -- Something is waiting on you. Worth shouting about: the agent is blocked
+  -- until it is answered, so this is the one part that is never dropped.
+  if chat.permissions and #chat.permissions > 0 then
+    part(1, { { icons.status.permission .. " needs you (gp)", "PaseoDanger" } })
+  end
 
-  return line
+  -- THE DIRECTORY, not the session's title. Which agent session this is gets
+  -- said twice already -- by the dashboard's session strip and by the
+  -- sidebar's own top bar -- and neither of them says WHERE it is working,
+  -- which is the fact you want when you are about to tell it to change
+  -- something on disk.
+  local path = vim.fn.fnamemodify(chat.root, ":~")
+  part(3, { { path, "PaseoDim" } }, function()
+    -- The last component, when the whole path will not fit. `~/Code/openfin/
+    -- clm_api` says more than nothing does, and `clm_api` says most of it.
+    return { { vim.fs.basename(path), "PaseoDim" } }
+  end)
+
+  return out
+end
+
+---The status line above the conversation -- or, on the composer's bar, above
+---the box you type in.
+---@param chat table
+---@param opts? { bar?: boolean, width?: integer }
+---            `bar`: drawn over the box, where the recording readout has the
+---            whole row to itself and saying it twice would be noise.
+---            `width`: degrade to fit this many columns. Absent means say
+---            everything and let the caller cut it.
+---@return table[]
+function M.header(chat, opts)
+  opts = opts or {}
+
+  -- On the composer's bar the lead-in is the RULE's, not ours: the row starts
+  -- with a hairline running into the text -- see |paseo.ui.composer|.
+  local lead = opts.bar and {} or { { "  ", "PaseoDim" } }
+
+  -- RECORDING FIRST, because while it is true it is the only thing on this row
+  -- that is about you rather than about the agent, and it is the state most
+  -- worth being certain of. Drawn here as well as over the box because the
+  -- dashboard puts this row on every tab, and the box is only on one of them.
+  if chat.dictating and not opts.bar then
+    lead[#lead + 1] = { icons.ui.mic .. " ", "PaseoToolFail" }
+    lead[#lead + 1] = { "listening · ", "PaseoDim" }
+  end
+
+  local chosen = parts(chat)
+
+  ---@param list table[]
+  ---@param shrunk boolean
+  ---@return table[]
+  local function assemble(list, shrunk)
+    local line = vim.deepcopy(lead)
+    for i, item in ipairs(list) do
+      if i > 1 then
+        line[#line + 1] = { " · ", "PaseoDim" }
+      end
+      vim.list_extend(line, (shrunk and item.shrink) and item.shrink() or item.cells)
+    end
+    return line
+  end
+
+  if not opts.width then
+    return assemble(chosen, false)
+  end
+
+  ---@param list table[]
+  ---@param shrunk boolean
+  ---@return boolean
+  local function fits(list, shrunk)
+    return render.width(assemble(list, shrunk)) <= opts.width
+  end
+
+  -- WHOLE BEFORE SHORTENED, SHORTENED BEFORE DROPPED. At each width the row
+  -- prefers to say everything it still has in full; failing that, to say the
+  -- same things with the path shortened to its last component; and only then
+  -- to give up the cheapest part it is carrying and try again.
+  --
+  -- The order matters in both directions. Shortening too eagerly gives you
+  -- `~/Code/pas…` while the row is still carrying a thinking level -- three
+  -- facts half-said instead of two said properly. Dropping too eagerly loses
+  -- the working directory entirely in a sixty-column sidebar, where
+  -- `paseo.nvim` would have fitted with room to spare, and the directory is
+  -- the second most valuable thing on the row.
+  ---The cheapest part that could be shortened instead of dropped.
+  local shrinkable = math.huge
+  for _, item in ipairs(chosen) do
+    if item.shrink then
+      shrinkable = math.min(shrinkable, item.rank)
+    end
+  end
+
+  while true do
+    if fits(chosen, false) then
+      return assemble(chosen, false)
+    end
+
+    local worst, at = -1, 1
+    for i, item in ipairs(chosen) do
+      if item.rank > worst then
+        worst, at = item.rank, i
+      end
+    end
+
+    -- Shortening is tried only once there is nothing cheaper left to give up.
+    -- `~/Code/paseo.nvim` beats `paseo.nvim`, so the thinking level and the
+    -- context figure go first -- but `paseo.nvim` beats no directory at all,
+    -- so once the row is down to the things worth keeping it shortens rather
+    -- than dropping another one.
+    if worst <= shrinkable and fits(chosen, true) then
+      return assemble(chosen, true)
+    end
+    if #chosen <= 1 then
+      break
+    end
+    table.remove(chosen, at)
+  end
+  return render.truncate(assemble(chosen, true), opts.width)
 end
 
 ---Repaint the header of whichever windows this chat currently has.
@@ -189,29 +302,49 @@ end
 ---winbar nobody would see.
 ---@param chat table
 function M.refresh(chat)
+  -- The bar over the box, on whichever surface owns the composer right now.
+  -- First, because it is the row carrying the session's settings on both of
+  -- them and it does not go through volt.
+  require("paseo.ui.composer").refresh(chat)
+
   local float = require "paseo.ui.float"
   if float.is_open(chat) then
     return float.refresh_header(chat)
   end
 
-  -- The sidebar has no footer to put the status in -- it is a split, and its
-  -- only chrome is this winbar -- so it goes on the end of the header instead.
-  -- The float, which does have a footer, draws it there.
-  local line = M.header(chat)
-  local status = M.status(chat)
-  if #status > 0 then
-    line[#line + 1] = { "  ", "PaseoDim" }
-    vim.list_extend(line, status)
+  -- What is left for the top of the sidebar: WHICH session this is, and
+  -- whether it is working. The settings cluster that used to be here has moved
+  -- down to the composer's bar -- see |paseo.ui.composer| -- and the status
+  -- stayed, because a spinner belongs beside the thing it is a spinner for.
+  -- The float, which has a footer, draws the status there instead.
+  local win = chat.win_conversation
+  if not (win and api.nvim_win_is_valid(win)) then
+    return
   end
 
-  local bar = render.to_winbar(line)
-  for _, win in ipairs { chat.win_conversation } do
-    if win and api.nvim_win_is_valid(win) then
-      pcall(function()
-        vim.wo[win].winbar = bar
-      end)
-    end
-  end
+  local widgets = require "paseo.ui.widgets"
+  local width = api.nvim_win_get_width(win)
+  local line = {
+    { "  ", "PaseoDim" },
+    { chat.title or vim.fn.fnamemodify(chat.root, ":~"), "PaseoHeader" },
+  }
+
+  -- The surface's own keys on the right. NOT the spinner, which used to be
+  -- here: the elapsed count belongs against the box -- see |paseo.ui.composer|
+  -- -- because the thing you are waiting on is the answer to what you typed
+  -- in it, and a readout at the top of a pane you are not looking at is a
+  -- readout you check by moving your eyes off the work.
+  local right = widgets.hints({
+    { "<C-f>", "screen" },
+    { "<C-t>", "speak" },
+    { "q", "close" },
+  }, nil, math.max(0, width - 24))
+
+  pcall(function()
+    vim.wo[win].winbar = render.to_winbar(
+      widgets.row(render.truncate(line, math.max(4, width - render.width(right) - 2)), right, width)
+    )
+  end)
 end
 
 -- -------------------------------------------------------------------- layout
@@ -254,10 +387,10 @@ function M.open(chat)
   chat.win_composer = api.nvim_get_current_win()
   api.nvim_win_set_buf(chat.win_composer, chat.composer)
   style(chat.win_composer)
-  -- No `^V image` hint. Pasting an image is now what `p` does, so it is not a
-  -- key you have to be told about -- and a hint you do not need is a hint that
-  -- costs you the width it occupies.
-  M.refresh_hints(chat)
+  -- The box is a CARD here too, at the same elevation the dashboard gives it,
+  -- so "where you type" is the same object on both surfaces. Its bar carries
+  -- the session's settings -- and, while you dictate, the microphone meter.
+  require("paseo.ui.composer").style(chat)
 
   -- An unrelated `:split` -- or a user's `winheight` -- must not reflow the box
   -- out from under the fit. Explicit `nvim_win_set_height` still works on a
@@ -275,26 +408,17 @@ function M.open(chat)
   api.nvim_set_current_win(from)
 end
 
----The composer's hint bar, sized to the pane.
+---The composer's bar, sized to the pane.
 ---
----DEGRADES RATHER THAN TRUNCATES. A winbar wider than its window is cut, and
----the cut takes the LEFT -- so a sixty-column sidebar with five hints on the
----bar showed `<nd · <C-f> full screen · …`, having eaten the one thing you
----most need to know. `widgets.hints` drops whole hints off the end instead,
----which puts `send` first and leaves `close` to be the one that goes.
+---Kept as a name of its own because `ui/chat.lua` and the tests call it, but
+---the row it draws is |paseo.ui.composer|'s now: the session's model, mode and
+---directory with the send keys on the end, or the microphone meter while you
+---are dictating. What it used to be -- five hints, one of which was `send` --
+---said nothing about the session at all, which is the row this surface had
+---least of and the one place there was room for it.
 ---@param chat table
 function M.refresh_hints(chat)
-  local win = chat.win_composer
-  if not (win and api.nvim_win_is_valid(win)) then
-    return
-  end
-  vim.wo[win].winbar = render.to_winbar(require("paseo.ui.widgets").hints({
-    { "<CR>", "send" },
-    { "<C-f>", "screen" },
-    { "<C-c>", "stop" },
-    { "<C-t>", "speak" },
-    { "q", "close" },
-  }, nil, api.nvim_win_get_width(win) - 2))
+  require("paseo.ui.composer").refresh(chat)
 end
 
 ---Grow the composer to what is in it, and shrink it back.

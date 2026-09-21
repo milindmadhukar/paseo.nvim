@@ -38,6 +38,7 @@ local files = {
   "ui.render",
   "ui.surfaces",
   "ui.panels",
+  "ui.composer",
   "ui.theme",
   "ui.invariants",
   "provider",

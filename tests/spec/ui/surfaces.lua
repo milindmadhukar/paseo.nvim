@@ -219,8 +219,12 @@ local function test_surfaces()
   -- -- seven rows of flat card colour, none of it saying anything.
   do
     float.open(surface_chat)
+    -- TEXT rows, which is the window's height less its BAR. The bar is a
+    -- winbar -- inside the window, not around it -- carrying the session's
+    -- model, mode and directory, and the microphone meter while you dictate;
+    -- see |paseo.ui.composer|.
     local composer = function()
-      return vim.api.nvim_win_get_height(surface_chat.win_composer)
+      return vim.api.nvim_win_get_height(surface_chat.win_composer) - 1
     end
     local conversation = function()
       return vim.api.nvim_win_get_height(surface_chat.win_conversation)
@@ -377,6 +381,42 @@ local function test_surfaces()
     end
     truthy("ui: the list takes the movement keys", chrome and bound "j")
     truthy("ui: and its per-row verbs", chrome and bound "d")
+
+    -- THE ROW YOU ARCHIVED IS GONE BEFORE YOU MOVE. Both directories are
+    -- push-fed, and the surface used to redraw for none of it: archiving a
+    -- session left its row on screen until something else caused a repaint,
+    -- which in practice was the next `j`. The data was right and the picture
+    -- was a second-hand copy of it.
+    ---@return string
+    local function drawn_chrome()
+      local out = {}
+      for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(chrome, -1, 0, -1, { details = true })) do
+        for _, cell in ipairs(mark[4].virt_text or {}) do
+          out[#out + 1] = cell[1]
+        end
+      end
+      return table.concat(out)
+    end
+
+    agents.for_root = function()
+      return { { id = "row-other", title = "row-other", status = "idle" } }
+    end
+    -- What the daemon sends when an agent is archived -- verified against a
+    -- live one, which emits `remove` three times for the same archive, which
+    -- is why the repaint is coalesced rather than immediate.
+    agents._apply { kind = "remove", id = "row-probe" }
+    vim.wait(600, function()
+      return drawn_chrome():find("row-probe", 1, true) == nil
+    end, 20)
+    truthy(
+      "ui: an archived session leaves the list without anyone moving",
+      drawn_chrome():find("row-probe", 1, true) == nil,
+      drawn_chrome()
+    )
+    truthy(
+      "ui: and the sessions that are still there stay",
+      drawn_chrome():find("row-other", 1, true) ~= nil
+    )
 
     agents.for_root, agents.watch = old_for_root, old_watch
   end
@@ -624,13 +664,16 @@ local function test_terminal_session()
     float.select "Usage"
     eq("terminal: the strip survives a tab change", float.session().id, "t1")
 
-    ---The session strip, as `{ text = highlight }`. Row 4 of the chrome: the
-    ---header, the tab bar, the rule, then this.
+    ---The session strip, as `{ text = highlight }`. The header, the tab bar,
+    ---the rule, then this -- except on the Chat tab, which has no header row:
+    ---there the session's model, mode and directory are drawn on the bar over
+    ---the composer instead, and everything below moves up a row.
     local function strip()
       local out = {}
       local buf = float.chrome_buf()
+      local rows = require("paseo.ui.layout").rows(0, { header = float.tab() ~= "Chat" })
       for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, -1, 0, -1, { details = true })) do
-        if mark[2] + 1 == require("paseo.ui.layout").rows(0).strip then
+        if mark[2] + 1 == rows.strip then
           for _, cell in ipairs(mark[4].virt_text or {}) do
             local text = vim.trim(cell[1])
             if text ~= "" then

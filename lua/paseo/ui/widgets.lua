@@ -406,6 +406,52 @@ function M.bar(opts)
   }
 end
 
+---The microphone meter: one column per level, newest on the RIGHT.
+---
+---A scrolling waveform rather than a single bar, because the question it
+---answers is not "how loud is it now" -- which is answered a hundred times a
+---second and read never -- but "is it hearing me at all", and that is a
+---question about the last second or two. A flat row of `▁` means the
+---microphone is open and silent; a row that moves means you are being heard.
+---
+---Quiet columns are drawn in the TRACK colour and loud ones in the accent, so
+---the shape carries the answer even where the glyph height is hard to judge --
+---a one-eighth block and a two-eighths block are nearly the same mark at a
+---glance, and two different colours are not.
+---@param levels number[]  Each 0..1, oldest first.
+---@param opts? { w?: integer, hl?: string, idle?: string, loud?: string }
+---@return table[]
+function M.waveform(levels, opts)
+  opts = opts or {}
+  local width = math.max(1, math.floor(opts.w or #levels))
+  local glyphs = style.WAVE
+  local out = {}
+
+  -- Right-aligned: the newest column is the last one, so the wave grows into
+  -- the row from the right rather than jumping to the left edge when it is
+  -- not yet full.
+  local first = #levels - width + 1
+  for i = first, #levels do
+    local level = levels[i]
+    if level == nil then
+      -- Not yet spoken into. The FLOOR glyph rather than a space: the meter
+      -- has to look like a meter before it has anything to report, or "not
+      -- recording" and "recording in silence" are the same picture.
+      out[#out + 1] = { glyphs[1], opts.idle or "PaseoVoiceIdle" }
+    else
+      local step = math.max(1, math.min(#glyphs, math.floor(level * #glyphs) + 1))
+      local hl = opts.idle or "PaseoVoiceIdle"
+      if step >= 6 then
+        hl = opts.loud or "PaseoVoiceLoud"
+      elseif step >= 2 then
+        hl = opts.hl or "PaseoVoiceLive"
+      end
+      out[#out + 1] = { glyphs[step], hl }
+    end
+  end
+  return out
+end
+
 ---A KPI tile: an accented icon, a neutral label, a value, and a bar.
 ---
 ---Colour lives in the ICON, not in the label. That restraint is most of why

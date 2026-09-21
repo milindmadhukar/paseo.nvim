@@ -657,6 +657,28 @@ function M.groups(t)
     groups.PaseoComposerLabel = { fg = ink(c.blue, bg.bg2), bg = bg.bg2, bold = true }
     groups.PaseoComposerHint = { fg = M.blend(c.grey, bg.bg2, 30) or c.grey, bg = bg.bg2 }
     groups.PaseoComposerKey = { fg = ink(c.yellow, bg.bg2), bg = bg.bg2 }
+
+    -- The row above the box: the card's TITLE ROW, and the base group the
+    -- winbar is painted with. Everything drawn on it -- the model, the mode,
+    -- the path -- names a foreground-only group, and Neovim combines a
+    -- statusline or winbar item with its base, so they all land on this
+    -- background without every one of them needing a card variant.
+    groups.PaseoComposerBar = { fg = c.text, bg = bg.bg2 }
+
+    -- The microphone meter, at composer elevation. Speech is the agent's own
+    -- green, so a glance at the box says whether it is hearing you without
+    -- anything having to write the word "yes".
+    --
+    -- Quiet is DIM, not invisible. It was `bg4` -- the progress bars' track,
+    -- which is meant to disappear -- and a flat row of one-eighth blocks in a
+    -- colour a shade off the card is indistinguishable from an empty row. That
+    -- is the whole meter, at exactly the moment it is telling you the truth:
+    -- the microphone is open and it is not hearing anything yet.
+    groups.PaseoVoiceIdle = { fg = M.blend(c.grey, bg.bg2, 20) or c.grey, bg = bg.bg2 }
+    groups.PaseoVoiceLive = { fg = ink(c.green, bg.bg2), bg = bg.bg2 }
+    groups.PaseoVoiceLoud = { fg = ink(c.yellow, bg.bg2), bg = bg.bg2 }
+    -- The recording dot. Red, because that is what a recording dot is.
+    groups.PaseoVoiceOn = { fg = ink(c.red, bg.bg2), bg = bg.bg2, bold = true }
     groups.PaseoCardRule = { fg = M.blend(c.border, bg.bg2, 45) or c.border, bg = bg.bg2 }
     groups.PaseoCardTitle = { fg = ink(c.blue, bg.bg2), bg = bg.bg2, bold = true }
     groups.PaseoCardDim = { fg = c.grey, bg = bg.bg2 }
@@ -666,6 +688,21 @@ function M.groups(t)
     -- here would compete with whatever the row itself is saying.
     groups.PaseoRowHover = { bg = bg.bg3 }
     groups.PaseoRowActive = { bg = bg.bg4 }
+
+    -- THE GUTTER, which is how "the one I am in" survives being pointed at.
+    -- A focused row is painted in one flat band, so an active row that said so
+    -- with a coloured background and a coloured title said NOTHING the moment
+    -- you moved onto it -- the band overwrote both, and the row you were on
+    -- and the session you were in became indistinguishable.
+    --
+    -- So the claim moves to a two-column gutter the band never touches: a
+    -- caret for where the cursor is, a bar for which session is open. One
+    -- variant per band, because a foreground-only group on a filled row is a
+    -- hole in the middle of the fill.
+    groups.PaseoRowBar = { fg = on_surface(c.green), bold = true }
+    groups.PaseoRowBarHover = { fg = ink(c.green, bg.bg3), bg = bg.bg3, bold = true }
+    groups.PaseoRowBarActive = { fg = ink(c.green, bg.bg4), bg = bg.bg4, bold = true }
+    groups.PaseoRowCaret = { fg = ink(c.blue, bg.bg3), bg = bg.bg3, bold = true }
 
     -- Chips and plates. `mix(accent, bg, N)` is mostly background with a hint
     -- of the accent; the accent itself goes on top as the foreground, pushed
@@ -723,6 +760,11 @@ function M.groups(t)
     groups.PaseoComposerLabel = { fg = c.blue, bold = true }
     groups.PaseoComposerHint = { fg = c.grey }
     groups.PaseoComposerKey = { fg = c.yellow }
+    groups.PaseoComposerBar = {}
+    groups.PaseoVoiceIdle = { fg = c.grey }
+    groups.PaseoVoiceLive = { fg = c.green }
+    groups.PaseoVoiceLoud = { fg = c.yellow }
+    groups.PaseoVoiceOn = { fg = c.red, bold = true }
     groups.PaseoCardRule = { fg = c.border }
     groups.PaseoCardTitle = { fg = c.blue, bold = true }
     groups.PaseoCardDim = { fg = c.grey }
@@ -730,6 +772,10 @@ function M.groups(t)
 
     groups.PaseoRowHover = { bold = true }
     groups.PaseoRowActive = { reverse = true }
+    groups.PaseoRowBar = { fg = c.green, bold = true }
+    groups.PaseoRowBarHover = { fg = c.green, bold = true }
+    groups.PaseoRowBarActive = { fg = c.green, bold = true, reverse = true }
+    groups.PaseoRowCaret = { fg = c.blue, bold = true }
 
     groups.PaseoChipOff = { fg = c.grey }
     groups.PaseoChipWarnOff = { fg = c.yellow }

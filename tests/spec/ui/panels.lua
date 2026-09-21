@@ -509,35 +509,22 @@ local function test_panels()
     render.concat(sidebar.header(surface_chat)):find("70% left", 1, true) ~= nil
   )
 
-  -- Pressure is the USED fraction, and it agrees with the Usage panel's
-  -- thresholds -- amber and red have to mean the same thing on both screens.
-  --
-  -- Measured on a cell with WIDTH, which is the whole point. The gauge used to
-  -- drain rather than fill, so the pressure colour sat on the shrinking run and
-  -- at `5% left` there was nothing left of it to see: the bar went quietly
-  -- all-track at exactly the moment it was supposed to be shouting.
-  ---@return string|nil hl, integer width  The pressure-coloured run, and how
-  ---wide it is. A roomy context paints almost none of the bar, which is the
-  ---point of it being calm; a tight one has to paint nearly all of it.
-  local function tone(used)
-    surface_chat.usage = { contextWindowUsedTokens = used, contextWindowMaxTokens = 100 }
-    for _, cell in ipairs(sidebar.context(surface_chat)) do
-      if cell[2] and cell[2] ~= "PaseoDim" and cell[2] ~= "PaseoTrack" then
-        return cell[2], vim.api.nvim_strwidth(cell[1] or "")
-      end
+  -- NO BAR BESIDE THE NUMBER. There was a six-cell gauge here, and six cells
+  -- is not a reading: the difference between 58% and 71% was two glyphs, in a
+  -- row of text you are scanning for words. The Usage panel is where a context
+  -- window is drawn as a bar, in a card with room to be one.
+  local coloured = {}
+  for _, cell in ipairs(sidebar.context(surface_chat)) do
+    if cell[2] and cell[2] ~= "PaseoDim" then
+      coloured[#coloured + 1] = cell[2]
     end
   end
-  eq("ui: a roomy context is calm", (tone(10)), widgets.pressure_hl(10))
-  eq("ui: a tight one is not", (tone(95)), widgets.pressure_hl(95))
-  truthy("ui: and those two are different colours", tone(10) ~= tone(95))
-
-  -- The gauge used to DRAIN rather than fill, so the pressure colour sat on
-  -- the shrinking run: at `5% left` there was none of it left to see and the
-  -- bar went quietly all-track at exactly the moment it should have shouted.
-  local _, loud = tone(95)
-  truthy("ui: a nearly-full context paints most of the bar, not none of it", loud >= 5, loud)
-  local _, quiet = tone(5)
-  truthy("ui: and a nearly-empty one paints almost none", quiet <= 1, quiet)
+  eq("ui: the context readout is a number, not a bar", coloured, {})
+  eq(
+    "ui: and it costs the row nothing but the number",
+    render.concat(sidebar.context(surface_chat)),
+    " · 70% left"
+  )
 
   -- Over 100% is a thing a context window genuinely reports once the overhead
   -- is counted, and "-4% left" is a worse answer than "0% left".
@@ -667,6 +654,7 @@ local function test_list()
   local list = require "paseo.ui.list"
   local render = require "paseo.ui.render"
   local widgets = require "paseo.ui.widgets"
+  local icons = require "paseo.ui.icons"
 
   ---@param ids string[]
   local function source(ids, active)
@@ -746,6 +734,64 @@ local function test_list()
     widgets.row_hl("x", { active = true }),
     "PaseoRowActive"
   )
+
+  -- WHICH ONE IS OPEN, AND WHERE THE CURSOR IS, AT THE SAME TIME. Focus wins
+  -- the band, and the band is one flat sweep -- so "this is the session you
+  -- are in", which used to be a coloured marker and a coloured title inside
+  -- that sweep, said nothing the moment you pointed at the row. The two marks
+  -- now live in a gutter the band never paints over: a caret for the keyboard,
+  -- a bar for the live one, and both at once when both are true.
+  do
+    local marks = {
+      { id = "a", cells = { { "first" } }, activate = function() end },
+      { id = "b", active = true, cells = { { "second" } }, activate = function() end },
+    }
+    data = { { id = "s", title = "Sessions", rows = marks } }
+    view.focus = { section = "s", row = "a" }
+
+    ---@return string caret, string bar, table hl
+    local function gutter_of(row_id)
+      for _, line in ipairs(view:lines(40)) do
+        local text = ""
+        for _, cell in ipairs(line) do
+          text = text .. cell[1]
+        end
+        if text:find(row_id == "a" and "first" or "second", 1, true) then
+          return line[1][1], line[2][1], { line[1][2], line[2][2] }
+        end
+      end
+      return "", "", {}
+    end
+
+    local caret_focused = gutter_of "a"
+    local _, bar_active = gutter_of "b"
+    truthy(
+      "list: the focused row carries a caret",
+      caret_focused:find(icons.marker.focus, 1, true) ~= nil,
+      caret_focused
+    )
+    truthy(
+      "list: and the open one carries a bar, even while the caret is elsewhere",
+      bar_active:find(icons.marker.mine, 1, true) ~= nil,
+      bar_active
+    )
+
+    -- Both on one row. This is the case that used to be unreadable.
+    view.focus = { section = "s", row = "b" }
+    local caret, bar, hls = gutter_of "b"
+    truthy(
+      "list: focus and active on one row keep both marks",
+      caret:find(icons.marker.focus, 1, true) ~= nil and bar:find(icons.marker.mine, 1, true) ~= nil,
+      caret .. bar
+    )
+    -- And the gutter is painted for the band it sits in rather than left on
+    -- the surface colour, which would be a hole in the middle of the fill.
+    eq("list: the caret takes the band's background", hls[1], "PaseoRowCaret")
+    eq("list: and so does the bar", hls[2], "PaseoRowBarHover")
+
+    data = source { "a", "b", "c" }
+    view.focus = { section = "s", row = "a" }
+  end
 
   -- A list taller than the body scrolls, keeps the focused row on screen, and
   -- draws every line to exactly one width so the scrollbar is a COLUMN.

@@ -245,6 +245,17 @@ local function test_layout()
     eq("ui: the footer owns the last row at " .. height, rows.footer, height)
     eq("ui: the body ends above it at " .. height, rows.body_last, height - 1)
 
+    -- THE CHAT TAB HAS NO HEADER ROW. The session's model, mode and directory
+    -- are drawn on the bar over the composer there -- against the box you are
+    -- typing in rather than at the far top of the screen -- so that row goes
+    -- back to the transcript and everything under it moves up one. Every
+    -- other tab keeps it: none of them has a composer to put it over.
+    local chat = layout.rows(height, { header = false })
+    eq("ui: the Chat tab gets that row back at " .. height, chat.body_height, height - 4)
+    eq("ui: the tab bar moves up into it at " .. height, chat.tabs, 1)
+    eq("ui: and so does the session strip at " .. height, chat.strip, 3)
+    eq("ui: the footer does not move at " .. height, chat.footer, height)
+
     -- BORDERED, which every `ui.style` but `border = "none"` is. That matters
     -- and is where an off-by-one lived: `nvim_open_win` is handed the BORDER's
     -- row, not the content's, so chrome buffer line 1 is at `g.row + 1`. The
@@ -252,11 +263,13 @@ local function test_layout()
     -- was blank; the session strip put content there and it became visible as
     -- a strip you could see the last three columns of.
     local g = { row = 2, col = 3, width = 100, height = height, composer = 7, border = true }
+    -- The panes only ever cover the Chat tab, so they are laid out against the
+    -- headerless chrome: one row higher than the rest of the tabs.
     local panes = layout.panes(g)
-    eq("ui: the panes start below the strip at " .. height, panes.top, g.row + 5)
+    eq("ui: the panes start below the strip at " .. height, panes.top, g.row + 4)
     eq(
       "ui: and the strip is the row above them at " .. height,
-      layout.screen_row(g, rows.strip),
+      layout.screen_row(g, chat.strip),
       panes.top - 1
     )
 
@@ -265,7 +278,7 @@ local function test_layout()
     eq(
       "ui: without a border there is no row to skip at " .. height,
       layout.panes(flat).top,
-      g.row + 4
+      g.row + 3
     )
 
     -- A terminal session has no composer and gets the body outright. Same
@@ -274,24 +287,35 @@ local function test_layout()
     eq(
       "ui: the body pane is the whole panel area at " .. height,
       panes.body.height,
-      rows.body_height
+      chat.body_height
     )
     eq("ui: and shares the conversation's left edge at " .. height, panes.body.col, panes.col)
     eq("ui: and its width at " .. height, panes.body.width, panes.width)
-    -- The composer's bottom border lands ON the last body row, never on the
-    -- footer.
-    -- The composer is bordered too, so it costs `composer + 2` rows and its
-    -- BOTTOM BORDER is at `row + composer + 1`. That border belongs on the
-    -- last body row; a row lower is the footer, which is the row that says
-    -- which keys the surface has.
+
+    -- WHAT THE BOX COSTS BESIDE ITS TEXT. Under `plate` -- the default, and
+    -- what `panes` assumes unless told otherwise -- the composer has no frame
+    -- at all: the bar above it is a winbar, which lives INSIDE the window, so
+    -- the box ends on the last body row rather than two rows lower.
     eq(
-      "ui: the composer's border lands on the last body row at " .. height,
-      panes.composer_row + panes.composer + 1,
-      layout.screen_row(g, rows.body_last)
+      "ui: an unframed composer ends on the last body row at " .. height,
+      panes.composer_row + panes.composer,
+      layout.screen_row(g, chat.body_last)
+    )
+    eq("ui: and costs nothing outside itself at " .. height, panes.frame, 0)
+
+    -- Framed -- `ui.style = "rounded"` or `"square"` -- it costs two rows
+    -- more, and the BOTTOM BORDER is what has to land on the last body row. A
+    -- row lower is the footer, which is the row that says which keys the
+    -- surface has.
+    local framed = layout.panes(g, nil, { framed = true })
+    eq(
+      "ui: a framed one puts its bottom border there instead at " .. height,
+      framed.composer_row + framed.composer + framed.frame,
+      layout.screen_row(g, chat.body_last)
     )
     truthy(
       "ui: so the footer is never covered at " .. height,
-      panes.composer_row + panes.composer + 1 < layout.screen_row(g, rows.footer)
+      framed.composer_row + framed.composer + framed.frame < layout.screen_row(g, chat.footer)
     )
   end
 

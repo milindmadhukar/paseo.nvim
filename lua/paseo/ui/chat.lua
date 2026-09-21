@@ -406,6 +406,44 @@ function M.insert(chat, text)
   M.fit_composer(chat)
 end
 
+-- ---------------------------------------------------------------- dictation
+
+---`<Esc>` throws a recording away, while there is one.
+---
+---Bound only for as long as the microphone is open, and only in NORMAL mode.
+---In insert mode `<Esc>` is how you leave insert, and taking that over to add
+---a discard key would be the worst trade in this file; in normal mode it does
+---nothing, which is exactly the key a discard wants.
+---@param chat paseo.Chat
+---@param recording boolean
+local function dictation_keys(chat, recording)
+  if not (chat.composer and vim.api.nvim_buf_is_valid(chat.composer)) then
+    return
+  end
+  if recording then
+    vim.keymap.set("n", "<Esc>", function()
+      require("paseo.voice").cancel()
+    end, { buffer = chat.composer, nowait = true, desc = "paseo: discard the recording" })
+  else
+    pcall(vim.keymap.del, "n", "<Esc>", { buffer = chat.composer })
+  end
+end
+
+---The session list, from wherever you are.
+---
+---`<C-s>`'s one meaning. On the dashboard that is a tab; from the sidebar it
+---is the dashboard, opened on that tab -- which is the same answer, because
+---the list only exists there.
+---@param chat paseo.Chat
+function M.sessions(chat)
+  local float = require "paseo.ui.float"
+  if not float.is_open(chat) then
+    chat.surface = "float"
+    float.open(chat)
+  end
+  float.select "Agents & terminals"
+end
+
 -- ------------------------------------------------------------------- images
 
 ---Put an image in the composer.
@@ -615,13 +653,39 @@ local function make_buffers(chat)
     vim.keymap.set("n", "<CR>", function()
       send(chat)
     end, vim.tbl_extend("force", opts, { desc = "paseo: send" }))
-    vim.keymap.set("i", "<C-s>", function()
-      vim.cmd.stopinsert()
-      send(chat)
-    end, vim.tbl_extend("force", opts, { desc = "paseo: send" }))
-    vim.keymap.set("n", "<C-s>", function()
-      send(chat)
-    end, vim.tbl_extend("force", opts, { desc = "paseo: send" }))
+
+    -- ALT-ENTER, and not `<C-s>`. `<CR>` from insert mode is a newline, so a
+    -- second key is needed for "send it while I am still typing" -- and the
+    -- key that used to be was `<C-s>`, which means THE SESSION LIST on the
+    -- chrome, in every terminal and in the session strip drawn four rows above
+    -- this box. One key with two meanings, one of them advertised on screen
+    -- directly over the other. `<C-CR>` is bound beside it for terminals that
+    -- speak the kitty keyboard protocol, where it is the more natural chord;
+    -- terminals that do not send it simply never deliver it, and `<M-CR>` is
+    -- the one that works everywhere.
+    for _, key in ipairs { "<M-CR>", "<C-CR>" } do
+      vim.keymap.set("i", key, function()
+        vim.cmd.stopinsert()
+        send(chat)
+      end, vim.tbl_extend("force", opts, { desc = "paseo: send" }))
+      vim.keymap.set("n", key, function()
+        send(chat)
+      end, vim.tbl_extend("force", opts, { desc = "paseo: send" }))
+    end
+
+    -- And `<C-s>` means here what it means everywhere else: the session list.
+    -- From the box that is a surface change, so it opens the dashboard on that
+    -- tab rather than doing nothing when the dashboard is not up.
+    local sessions_key = config.get().ui.terminal.keys.sessions
+    if sessions_key then
+      vim.keymap.set({ "n", "i" }, sessions_key, function()
+        if vim.fn.mode() ~= "n" then
+          vim.cmd.stopinsert()
+        end
+        M.sessions(chat)
+      end, vim.tbl_extend("force", opts, { desc = "paseo: the session list" }))
+    end
+
     -- Speak it instead of typing it. Neovim cannot record audio, so this
     -- shells out to arecord/sox/ffmpeg -- see `paseo.voice` for why that is
     -- the feature rather than a workaround for it.
@@ -634,9 +698,15 @@ local function make_buffers(chat)
       for _, mode in ipairs { "n", "i" } do
         vim.keymap.set(mode, voice_key, function()
           require("paseo.voice").toggle {
+            -- The visible half of dictation is |paseo.ui.composer|'s: the
+            -- meter over the box, the clock, and taking the indicator down
+            -- again however the recording ends.
             on_state = function(recording)
-              chat.dictating = recording or nil
-              set_winbar(chat)
+              require("paseo.ui.composer").dictating(chat, recording)
+              dictation_keys(chat, recording)
+            end,
+            on_level = function(level)
+              require("paseo.ui.composer").push_level(chat, level)
             end,
             insert = function(text)
               M.insert(chat, text)
@@ -1094,6 +1164,15 @@ function M.close()
   local chat = current
   if not chat then
     return
+  end
+  -- A MICROPHONE DOES NOT SURVIVE THE WINDOW IT WAS OPENED IN. Closing the
+  -- chat takes the meter, the clock and the box the text was going to land in
+  -- with it, so a recorder left running would be a process holding the
+  -- microphone open with nothing on screen saying so and no key left to stop
+  -- it.
+  if chat.dictating then
+    require("paseo.voice").cancel()
+    require("paseo.ui.composer").dictating(chat, false)
   end
   require("paseo.ui.float").close()
   sidebar.close(chat)

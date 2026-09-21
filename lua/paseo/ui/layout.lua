@@ -47,17 +47,27 @@ M.CHROME = {
 ---@field footer integer
 
 ---Where each part of the chrome lives, in 1-based BUFFER rows.
+---
+---`opts.header = false` takes the header row out, which is what the Chat tab
+---does: there the session's model, mode and directory are drawn on the bar
+---over the composer instead -- against the box you are typing in, rather than
+---at the far top of the screen -- so a second copy at the top would be one row
+---of the transcript spent saying the same thing twice. Every other tab keeps
+---it, because those have no composer to put it over.
 ---@param height integer  The chrome window's height, in cells.
+---@param opts? { header?: boolean }
 ---@return paseo.Layout.Rows
-function M.rows(height)
-  local body_height = math.max(0, height - M.CHROME.above - M.CHROME.below)
+function M.rows(height, opts)
+  local header = not (opts and opts.header == false)
+  local above = M.CHROME.above - (header and 0 or M.PARTS.header)
+  local body_height = math.max(0, height - above - M.CHROME.below)
   return {
-    header = 1,
-    tabs = 2,
-    rule = 3,
-    strip = 4,
-    body_first = M.CHROME.above + 1,
-    body_last = M.CHROME.above + body_height,
+    header = header and 1 or 0,
+    tabs = header and 2 or 1,
+    rule = header and 3 or 2,
+    strip = header and 4 or 3,
+    body_first = above + 1,
+    body_last = above + body_height,
     body_height = body_height,
     footer = height,
   }
@@ -97,29 +107,40 @@ end
 ---                   have typed rather than standing at its full height over
 ---                   an empty buffer, so this is a function of the content and
 ---                   not of the config alone -- see `float.composer_rows`.
----@return { top: integer, col: integer, width: integer, conversation: integer, composer_row: integer, composer: integer, body: { row: integer, col: integer, width: integer, height: integer } }
-function M.panes(g, composer_h)
-  local rows = M.rows(g.height)
+---@param opts? { framed?: boolean }  The composer has a drawn box, which only
+---                   `ui.style`'s `rounded` and `square` give it. Unframed it
+---                   still costs one row more than its content: the bar above
+---                   it, which is a `winbar` and therefore inside the window.
+---@return { top: integer, col: integer, width: integer, conversation: integer, composer_row: integer, composer: integer, frame: integer, body: { row: integer, col: integer, width: integer, height: integer } }
+function M.panes(g, composer_h, opts)
+  -- The panes only ever cover the Chat tab, and the Chat tab is the one with
+  -- no header row: the header is drawn on the composer's bar instead.
+  local rows = M.rows(g.height, { header = false })
   local top = M.screen_row(g, rows.body_first)
   composer_h = math.max(1, math.min(composer_h or g.composer, g.composer))
 
-  -- The composer is BORDERED, and `nvim_open_win` is handed the border's row,
-  -- not the content's -- so the window costs `composer_h + 2` rows and its
-  -- bottom border sits at `row + composer_h + 1`. Putting that border on the
-  -- last body row, rather than a row further down where the footer is, is what
-  -- the `- 1` buys: without it the composer covers the footer, which is the
-  -- row that says which keys the surface has.
-  local composer_row = M.screen_row(g, rows.body_last) - composer_h - 1
+  -- WHAT THE BOX COSTS BESIDE ITS TEXT. The bar above it is a `winbar`, so it
+  -- is INSIDE the window and comes out of the window's height -- that is the
+  -- `+ 1` every caller adds to `composer`. A FRAME is outside it: two more
+  -- rows, and `nvim_open_win` is handed the border's row rather than the
+  -- content's. Either way the bottom of the box lands on the last body row,
+  -- never a row lower, because a row lower is the footer -- which is the row
+  -- that says which keys the surface has.
+  local frame = (opts and opts.framed) and 2 or 0
+  local composer_row = M.screen_row(g, rows.body_last) - composer_h - frame
 
   local col, width = g.col + 2, g.width - 4
   return {
     top = top,
     col = col,
     width = width,
-    -- One row of gap between the conversation and the composer's top border.
+    -- One row of gap between the conversation and the top of the box.
     conversation = math.max(5, composer_row - 1 - top),
     composer_row = composer_row,
+    -- TEXT rows. The window is one taller than this -- the bar -- and, when
+    -- the style frames it, two rows wider than the window on screen.
     composer = composer_h,
+    frame = frame,
     body = { row = top, col = col, width = width, height = rows.body_height },
   }
 end

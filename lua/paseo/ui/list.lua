@@ -324,6 +324,40 @@ local function heading(section)
   return line
 end
 
+---Columns every row gives up to the gutter. Four, which is exactly the indent
+---the panels used to write themselves -- so this costs no width at all.
+local GUTTER = 4
+
+---The four columns that say WHERE YOU ARE and WHICH ONE IS LIVE.
+---
+---Two questions, two marks, and they have to be separable because they are
+---frequently both true of the same row. A caret for the keyboard; the same
+---left half block the panels used for "this is the session you are in".
+---
+---Outside the band on purpose. `fill_row` repaints every cell it is handed in
+---one flat colour -- that is what makes the focus band an unbroken sweep --
+---so a marker inside it is a marker that disappears exactly when you point at
+---it, which is how "the active session and the highlighted session look the
+---same" happened. The gutter is painted separately, in a variant of its group
+---per band, so it keeps its colour on a lit row without punching a hole in
+---the fill.
+---@param row paseo.ListRow
+---@param band string|nil  The row's background group, if it has one.
+---@param focused boolean
+---@return table[]
+local function gutter(row, band, focused)
+  local suffix = (band == "PaseoRowHover" and "Hover")
+    or (band == "PaseoRowActive" and "Active")
+    or ""
+  return {
+    { focused and (" " .. widgets.icons.focus) or "  ", focused and "PaseoRowCaret" or band },
+    {
+      row.active and (widgets.icons.mine .. " ") or "  ",
+      row.active and ("PaseoRowBar" .. suffix) or band,
+    },
+  }
+end
+
 ---One row, painted whole when it is focused, hovered or current.
 ---
 ---`fill_row` drops per-cell colour, so the band is one unbroken sweep across
@@ -337,20 +371,30 @@ end
 ---@return table[]
 function View:paint(row, width, focused)
   local id = self.section .. "." .. row.id
+  local body = math.max(1, width - GUTTER)
   local cells = vim.deepcopy(row.cells or {})
   if row.right and #row.right > 0 then
-    cells = widgets.row(cells, vim.deepcopy(row.right), width)
+    cells = widgets.row(cells, vim.deepcopy(row.right), body)
   end
 
   local action = row.activate and widgets.hover(id, self.section, row.activate) or nil
+  local lit = focused or widgets.hovered(id)
   local hl = widgets.row_hl(id, { focused = focused, active = row.active })
+
+  local line = gutter(row, hl, lit)
+  for _, cell in ipairs(line) do
+    cell[3] = action
+  end
+
   if hl then
-    return widgets.fill_row(cells, width, hl, action)
+    vim.list_extend(line, widgets.fill_row(cells, body, hl, action))
+    return line
   end
   for _, cell in ipairs(cells) do
     cell[3] = action
   end
-  return cells
+  vim.list_extend(line, cells)
+  return line
 end
 
 ---@param width integer

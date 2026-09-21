@@ -52,7 +52,6 @@ local function sections(chat)
         rows[#rows + 1] = {
           id = file,
           cells = {
-            { "    " },
             { status[1], status[2] },
             { repos.relative(repo, change.path) or change.path, "PaseoPath" },
           },

@@ -82,6 +82,25 @@ M.BAR = {
   dot_off = g(0x00b7), -- MIDDLE DOT -- the chart's background grid
 }
 
+---The microphone level meter, quietest first.
+---
+---Eight steps of LOWER BLOCK, which is the one run of glyphs in Unicode that
+---is a bar chart by construction: every one of them sits on the baseline and
+---each is an eighth taller than the last, so a row of them reads as a
+---waveform rather than as eight unrelated shapes. Nothing nerd-font about
+---them -- a meter that says "am I being heard" must not be the thing that
+---depends on a font being installed correctly.
+M.WAVE = {
+  g(0x2581), -- ▁
+  g(0x2582), -- ▂
+  g(0x2583), -- ▃
+  g(0x2584), -- ▄
+  g(0x2585), -- ▅
+  g(0x2586), -- ▆
+  g(0x2587), -- ▇
+  g(0x2588), -- █
+}
+
 ---@class paseo.Style
 ---@field card "plate"|"rule"|"rounded"|"square"
 ---@field border "invisible"|"rounded"|"single"|"none"
@@ -186,6 +205,33 @@ function M.window_border(style)
     return "none", "PaseoNormalBorder"
   end
   return style.border, "PaseoSurfaceBorder"
+end
+
+---What to frame the COMPOSER with, in the same vocabulary.
+---
+---The composer used to be bordered in every style, always, and that was the
+---one thing on the dashboard that ignored `ui.style` entirely -- a drawn box
+---sitting inside a `plate` surface where nothing else had an edge, which is
+---the "three frame weights in one window" complaint with the third weight
+---being the box you type into.
+---
+---So it follows the card style like everything else. Under `plate` and `rule`
+---it has NO frame: it is a card -- a bar row and a body one elevation tier
+---above the surface -- and the bar above it is the card's title row, which is
+---where the model, the mode and the path now live. Under `rounded` and
+---`square` it keeps a real box, because that is what those styles are for.
+---@param style? paseo.Style
+---@return string border, string group
+function M.composer_border(style)
+  style = style or M.get()
+
+  if style.card == "rounded" then
+    return "rounded", "PaseoComposerBorder"
+  end
+  if style.card == "square" then
+    return "single", "PaseoComposerBorder"
+  end
+  return "none", "PaseoComposerBorder"
 end
 
 return M

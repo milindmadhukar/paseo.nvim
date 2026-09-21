@@ -219,14 +219,15 @@ and named in the error.
 The header says what the session *is*:
 
 ```
-  codex/gpt-5.6-sol · Auto-review · 󰧑 high · Fast · Plan · ││││││ 58% left   ~/Code/paseo.nvim
+─ codex/gpt-5.6-sol · Auto-review · 󰧑 high · Fast · 58% left · ~/Code/paseo.nvim ──── ⠹ 28m 49s ─ ⏎ send ─
 ```
 
-While a turn runs, a spinner and an elapsed count say what it is *doing* — and
-those live at the **bottom**, on the right of the hint bar:
+While a turn runs, a spinner and an elapsed count say what it is *doing*, on
+the same row — **on top of the box**, because what you are waiting for is the
+answer to whatever is in it:
 
 ```
- 1-6  tabs    󰌒  cycle    Ctrl + f  sidebar    q  close              ⠹ 28m 49s
+─ claude/sonnet-5 · acceptEdits · 58% left · ~/Code/kora ────── ⠹ 28m 49s ─ ⏎ send ─
 ```
 
 The count is the point: a static dot looked identical at two seconds and at two
@@ -236,22 +237,55 @@ duration. Past an hour the seconds are dropped (`1h 24m`); at that scale they
 are noise, and dropping them stops the field growing a third segment that
 shifts everything beside it.
 
-Bottom rather than in the header because this is the one field that changes ten
-times a second, and among five static ones it pushed the provider sideways
-every time the count gained a digit. A pending permission still shouts from the
-header itself — ` needs you` — because then the agent is not working, it is
-waiting for you.
+It sits in a **fixed-width slot**, which is the answer to the reason it used to
+live at the bottom of the screen: it is the one field on the row that changes
+ten times a second, and among static ones it pushed everything beside it
+sideways every time the count gained a digit. Given ten columns whether it
+needs them or not, it cannot. The dashboard's footer keeps a copy for the tabs
+that have **no** composer on them — a turn runs on while you read the Changes
+panel, and that is exactly when nothing else on screen is moving.
 
-On the sidebar the header is the conversation window's winbar. On the
-full-screen surface it is **not**: a winbar belongs to a window, the
-conversation window only exists on the Chat tab, and every other tab therefore
-had no header and could not tell you which model it was on. There it is a volt
-section in the chrome, drawn above the tab bar, true on all six tabs — and
-clicking it takes you to the panel that can change what it says.
+A pending permission shouts from the header itself — ` needs you` — because
+then the agent is not working, it is waiting for you.
 
-That also decides where the status goes. The full-screen surface has a footer
-and puts it there; the sidebar is a split whose only chrome is that winbar, so
-there it goes on the end of the header instead.
+**It is drawn against the box you type in**, one row above it, on both
+surfaces. That is a move: it used to live at the far top of the screen — a
+winbar over the transcript in the sidebar, the first row of the chrome on the
+dashboard — which is as far from the cursor as that screen goes. You decide
+what to type with those five facts and you decide it while looking at the
+composer, so they belong there. It doubles as the composer's title row, which
+is what lets the box drop its drawn border and be a plate like everything else
+([below](#the-composer)).
+
+Where there is no box there is still a header: on every dashboard tab but
+`Chat` it is a volt section in the chrome above the tab bar, so "which model is
+this" does not stop being answerable when you look at Usage — and clicking it
+takes you to the panel that can change what it says. On the `Chat` tab that
+row is given back to the transcript.
+
+**The row is also the box's top edge.** Without a frame the composer was a slab
+of card colour with a row of text on it, and on a theme whose elevation tiers
+sit close together that is not a box — it is the same screen, slightly
+different. A rule of its own would cost a row of the transcript to say
+something that is true the whole time, so the bar *is* the rule: it starts and
+ends on a hairline and the words sit on it, the way a title sits on a frame.
+
+**It degrades by dropping whole facts, not by cutting the row.** A sixty-column
+sidebar cannot say all of it, and `truncate` cuts from the right, which is
+where the working directory is. So it gives up what it can spare, cheapest
+first — the feature toggles, then the thinking level, then the context figure,
+then the model. Shortening is tried only once there is nothing cheaper left to
+drop: `~/Code/paseo.nvim` beats `paseo.nvim`, and `paseo.nvim` beats no
+directory at all.
+
+```
+─ Plan Mode · paseo.nvim   ⠹ 1m 12s ─ 󰌑 / Alt + 󰌑 send ─
+```
+
+Nothing outranks a pending permission, which is never dropped at any width.
+
+The row at the top of the sidebar is left saying which session you are looking
+at, with the surface's own keys on the end of it.
 
 ### The full-screen surface
 
@@ -260,8 +294,8 @@ swaps to the sidebar and back. `<C-c>` stops the turn — from the composer or
 the conversation, normal mode or insert.
 
 ```
-   claude/sonnet-5 · acceptEdits · 󰧑 think · ⚡ · ││││││ 42% left   ~/Code/paseo.nvim
    1 󰀄 Chat   2 󱙺 Agents & terminals   3 󱕂 Settings   4 󰘬 Changes   5 󰄨 Usage   6 󰙅 Workspaces
+   󱙺 main   󱙺 reviewer   󰆍 lazygit                                    Ctrl + s  sessions
 ```
 
 The tab bar **degrades rather than truncates**, because the tab that would
@@ -296,6 +330,28 @@ ends, `<CR>` to open, `r` to re-fetch — plus their own verbs:
 uses, and arriving at a tab puts focus on a row so the first `<CR>` does
 something.
 
+**Where the cursor is and which one is open are two different marks.** The
+focus band is one flat sweep across the row, so "this is the session you are
+in" — which used to be a coloured bar and a coloured title *inside* that sweep
+— said nothing the moment you pointed at the row, and the two states were
+indistinguishable whenever they were the same row. Both marks live in a
+two-column gutter the band never paints over now: a caret for the keyboard, a
+bar for the live one.
+
+```
+   ▌ 󱙺 󰦖 fix the archive redraw                            claude/opus     ← open, not focused
+     󱙺 󰧞 sidebar perf                                    claude/sonnet
+  ▸  󱙺 󰀦 voice dictation                     needs you      codex/gpt     ← focused, not open
+```
+
+**A push repaints the surface.** Both directories are fed by the daemon rather
+than polled, and nothing used to ask the screen to draw them again — so
+archiving a session left its row up until the next `j`, and an agent that
+started working did not change colour until you moved. One archive produces
+three `remove` events from a live daemon, so the repaint is coalesced, and it
+redraws the session strip plus the list itself and nothing else: the Changes
+panel shells out to `git status` per repo, and it is not what changed.
+
 None of that was true before. Selection lived on the **cursor**, which volt
 resets to line 1 after every click, nothing was drawn to say where it was, and
 the cursor was never put on a row — so Sessions had working keymaps and read as
@@ -312,24 +368,34 @@ The box you type in **grows with the prompt** — one row when it is empty, up t
 `ui.float.composer` rows as you fill it, and back again when you send:
 
 ```
-╭ ❯ ───────────────────────────────────────────────────────────────────────────╮
-│ why is the ref suite opening a file it then deletes?                          │
-╰────────────────────────────────────────────────────────── ⏎ / Ctrl + s  send ╯
+─ claude/claude-opus-5 · Plan Mode · 71% left · ~/Code/paseo.nvim ───── ⠹ 1m 9s ─ 󰌑 / Alt + 󰌑 send ─
+ why is the ref suite opening a file it then deletes?
 ```
 
 Standing at its configured height over an empty buffer made it the largest and
-emptiest shape on the screen: seven rows of flat card colour, no edge, nothing
-saying you could type in it. Wrapped lines count towards the height — `wrap` is
-on, so a 300-column paragraph is four rows on screen, and asking the buffer for
-its line count would say one and leave the cursor off the bottom of the box.
+emptiest shape on the screen: seven rows of flat card colour, nothing saying
+you could type in it. Wrapped lines count towards the height — `wrap` is on, so
+a 300-column paragraph is four rows on screen, and asking the buffer for its
+line count would say one and leave the cursor off the bottom of the box.
 
-The border is **drawn** rather than painted `fg == bg`, and it carries both
-things an input has to say: a prompt chevron for *what it is*, and the send
-keys for *how to use it*. Both keys, because they are not interchangeable —
-`<CR>` sends from normal mode and opens a line from insert mode, so `<C-s>` is
-the one that always works. They live in the frame rather than on a row of their
-own, which would cost the conversation a row to say something that is true the
-whole time.
+**No box drawn around it, under `plate`** — which is the default, and where
+nothing else on the surface has an edge either. A hard rounded rule around the
+composer, inside a window whose own edge is invisible, above cards with no
+frames, was the one thing on the dashboard that ignored `ui.style`. What
+separates the box from the transcript now is what separates every other card
+from it: one tier of elevation, and a title row. Under `rounded` and `square` it
+keeps a real frame, because that is what those styles are for.
+
+The title row is [the header](#the-header), and it ends with **how to send**.
+Both keys, because they are not interchangeable: `<CR>` sends from normal mode
+and opens a line from insert mode, so the one that works while you are still
+typing is `<M-CR>` — Alt and Enter. (`<C-CR>` is bound beside it for terminals
+that speak the kitty keyboard protocol; the ones that do not simply never send
+it.) **`<C-s>` is not either of them.** It means *the session list* on the
+chrome, in every terminal, and in the session strip drawn four rows above the
+box — so a composer that quietly sent on it was one key with two meanings, both
+advertised on screen at once. From the composer it now does what it does
+everywhere else: takes you to the session list.
 
 A bare digit is also a **count**, and the two panes these are bound on are
 ordinary buffers — so while the dashboard is open, `3p` and `5j` in the
@@ -526,7 +592,7 @@ one shows it **on the Chat tab**, where the conversation would be:
 
 ```
  ╭──────────────────────────────────────────────────────────────────────╮
- │  claude/opus-5 · acceptEdits · ││││││ 58% left        ~/Code/kora     │
+ │  claude/opus-5 · acceptEdits · 58% left               ~/Code/kora     │
  │  1 󰀄 Chat   2 󱙺 Agents & terminals   3 󱕂   4 󰘬   5 󰄨   6 󰙅           │
  │ ──────────────────────────────────────────────────────────────────── │
  │  󱙺 main   󱙺 reviewer   󰆍 lazygit   󰆍 shell      Ctrl + s  sessions   │
@@ -618,6 +684,13 @@ ui = { style = { preset = "rounded", border = "none" } }
 | `rule` | a title, then one hairline **inset** from both edges — full-bleed reads as a table border, not a divider |
 | `rounded` | real boxes, `╭╮╰╯`, title inset in the top rule |
 | `square` | the same with `┌┐└┘` |
+
+**The composer follows this too**, which it did not before: it was framed in
+every style, always — a hard rounded rule around the box you type in, inside a
+window whose own edge is invisible, above cards with no frames. Under `plate`
+and `rule` it is a card like any other, its bar the title row; under `rounded`
+and `square` it keeps a box. The geometry is measured from the same answer, so
+the bottom of the box lands on the last body row either way.
 
 | `border` | the outer edge |
 |---|---|
@@ -859,8 +932,9 @@ until the last question and `⏎ send the answers` on it.
 card — so your completion, abbreviations, insert-mode maps and undo all work,
 which a `vim.ui.input` prompt could never give you. A question with no options at
 all opens it for you and starts insert; there is nothing else to do on one.
-`<C-s>` or `<CR>` in normal mode saves, `<Esc>` twice discards. The same contract
-as the composer, because it is the same act.
+`<M-CR>`, or `<CR>` in normal mode, saves; `<Esc>` twice discards. The same
+contract as the composer, because it is the same act — including *not* being
+`<C-s>`, which means the session list everywhere in this plugin.
 
 `<Esc>` is later, not no: the request stays pending and `gp` reopens it **with
 your answers still in it**. `n` declines to answer and `N` declines and stops the
@@ -961,7 +1035,7 @@ one sentence, and it put you in the conversation before you had said anything.
 | | |
 |---|---|
 | `<CR>` | send (normal mode) |
-| `<C-s>` | send (normal or insert) |
+| `<M-CR>` | send (normal or insert) |
 | `<Esc>` / `q` | cancel, throwing the draft away |
 
 An empty box cancels. The box grows with the question, to a cap.
@@ -977,20 +1051,63 @@ paragraph.
 ### Dictation
 
 `<C-t>` in the composer opens the microphone; `<C-t>` again closes it and puts
-what you said in at the cursor. The header says `listening` while it is open,
-on either surface. One key for both halves, and not hold-to-talk, because
-Neovim delivers a keypress and never a key *release* — "while held" cannot be
-expressed.
+what you said in at the cursor; `<Esc>` throws the recording away. One key for
+both halves, and not hold-to-talk, because Neovim delivers a keypress and never
+a key *release* — "while held" cannot be expressed.
+
+**The box becomes a meter.** While the microphone is open the bar over the
+composer is the recorder — a red dot, a level, how long you have been talking,
+and the key that stops it — and a scrolling waveform is drawn *inside* the box,
+as virtual text, so your draft is untouched:
+
+```
+ 󰍬 listening  ▁▁▂▃▅▆▇▅▃▂▁▁▁▁▁▁  0:04   Ctrl + t  stop    󱊷  discard
+ ▁▁▁▂▃▅▇█▇▅▃▂▁▁▁▂▄▆▇▇▅▃▁▁▁▁▂▃▅▆▇▇▆▄▂▁▁▁
+```
+
+That is there because *"it is not clear when I am speaking"* is the whole
+problem with dictation you cannot see: a word missed by a muted microphone and
+a word missed by a thinking daemon look identical if the only feedback is text
+that has not arrived yet.
+
+**The meter is a ratio against the room, in decibels.** Raw loudness means
+nothing on its own — the laptop this was written on reads 0.16 RMS with nobody
+in the room, while a headset a foot away reads a hundredth of that — so the
+floor is the quietest reading of the last twenty seconds and the wave is how
+far over it you are, with four times the room as full scale. A *difference*
+would not do: on a microphone whose room reads 0.16, genuinely doubling the
+input moves the number by 0.16 and the same doubling on a quiet headset moves
+it by 0.002, so a meter built on subtraction is calibrated for exactly one
+microphone. As a ratio both are the same event — which is what your ear says
+too.
+
+Two versions of this were wrong before it worked, and both failed the same
+way, by drawing a flat line at a working microphone: one crept its floor
+upwards at a fixed rate, so a few seconds into a sentence the floor had climbed
+over the voice and the wave died mid-word; the next gated on a fraction of that
+floor, which in a loud room is a bar an ordinary voice cannot clear. A twenty
+second window and a decibel ratio have neither failure mode.
 
 Neovim cannot record audio, so this shells out to the first of `arecord`,
 `rec` (sox) or `ffmpeg` that is installed. `:checkhealth paseo` says which one
 it found, or that it found none — the failure mode otherwise is a key that
-appears to do nothing.
+appears to do nothing. If the recorder **dies** — a microphone that is busy, or
+refused — you are told, with whatever it said on its way out. It used to be
+silent: the indicator stayed lit, no audio was ever sent, and the key appeared
+to have stopped working.
 
 Audio is streamed **while you speak** rather than recorded and then uploaded:
 the daemon transcribes as it goes, so the text arrives in about as long as it
 takes to lift your finger. What goes over the wire is raw PCM16 mono, base64,
 with the sample rate in the format string — no container.
+
+**Chunks are numbered from zero**, and that is not a detail. The daemon
+acknowledges the stream itself with `ackSeq: -1` and then reassembles the audio
+by sequence, so a first chunk numbered `1` leaves a hole at `0` that never
+fills: every chunk waits in the reorder buffer, nothing is transcribed, and
+`dictation.finish` eventually gives up with *"Timed out waiting for final
+transcription"*. Which is exactly what dictation from this editor did, on a
+daemon whose own app dictates fine.
 
 The **daemon** does the transcribing, and a microphone is not enough: if it has
 no speech model it says so, in its own words, the first time you press the key.

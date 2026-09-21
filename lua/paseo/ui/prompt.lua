@@ -150,15 +150,23 @@ function M.open(opts, callback)
     vim.keymap.set(mode, key, fn, { buffer = buf, nowait = true, silent = true })
   end
 
-  -- The composer's keys, so there is one thing to learn: <CR> from normal
-  -- mode, <C-s> from either. <CR> is NOT bound in insert mode -- that is how
-  -- you write a second paragraph.
+  -- The composer's keys, so there is one thing to learn: `<CR>` from normal
+  -- mode, `<M-CR>` from either. `<CR>` is NOT bound in insert mode -- that is
+  -- how you write a second paragraph.
+  --
+  -- `<C-s>` used to be the second key here and in the composer, and it is the
+  -- session list -- on the chrome, in every terminal, and on the strip over
+  -- the box. One key cannot mean both, and "send" is the one with an
+  -- alternative. `<C-CR>` rides along for terminals that speak the kitty
+  -- keyboard protocol; the rest never deliver it.
   map("n", "<CR>", accept)
-  map("n", "<C-s>", accept)
-  map("i", "<C-s>", function()
-    vim.cmd.stopinsert()
-    accept()
-  end)
+  for _, key in ipairs { "<M-CR>", "<C-CR>" } do
+    map("n", key, accept)
+    map("i", key, function()
+      vim.cmd.stopinsert()
+      accept()
+    end)
+  end
   map("n", "<Esc>", function()
     finish(nil)
   end)

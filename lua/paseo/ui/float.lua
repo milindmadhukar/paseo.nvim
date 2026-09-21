@@ -48,6 +48,63 @@ local function panel_module(name)
   return PANEL_MODULE[name] or name:lower()
 end
 
+-- --------------------------------------------------------------- push feeds
+
+---A repaint is already queued.
+local settling = false
+
+---Redraw what a CHANGE IN THE DIRECTORY changes: the session strip, and the
+---session list if that is the tab you are on.
+---
+---THIS IS WHY ARCHIVING A SESSION DID NOTHING until you moved. Both
+---directories are push-fed -- that is the entire point of the sidecar -- and
+---both were being kept perfectly up to date in |paseo.agents| and
+---|paseo.terminals| with nothing asking the surface to draw them again. The
+---row only disappeared when something else caused a redraw, which in practice
+---was the next `j`, or a mouse-move over the panel: the data was right and the
+---picture was a second-hand copy of it.
+---
+---Coalesced, because one archive produces three `remove` events (measured
+---against a live daemon) and an agent working produces a status update every
+---few hundred milliseconds. `gen_data` is deliberately NOT re-run: every
+---panel's `lines` is padded to the body height, so the sections keep the row
+---counts volt measured.
+local function directory_changed()
+  if not state or settling then
+    return
+  end
+  settling = true
+  vim.defer_fn(function()
+    settling = false
+    if not (state and api.nvim_buf_is_valid(state.buf)) then
+      return
+    end
+    local sections = { "strip" }
+    -- Only the list tab draws the directory in its body. Redrawing any other
+    -- would re-run that panel's `lines` -- `git status` per repo, on the
+    -- Changes tab -- for a change it does not show.
+    if state.tab == "Agents & terminals" then
+      sections[#sections + 1] = "body"
+    end
+    pcall(require("volt").redraw, state.buf, sections)
+  end, 120)
+end
+
+---Follow both directories, once per session.
+---
+---Subscribing is |paseo.agents|' and |paseo.terminals|' job and they are
+---already doing it -- the panels ask for it when they draw. All this adds is
+---the listener that turns an update into a repaint.
+local watching = false
+local function watch_directories()
+  if watching then
+    return
+  end
+  watching = true
+  require("paseo.agents").on_change(directory_changed)
+  require("paseo.terminals").on_change(directory_changed)
+end
+
 -- ------------------------------------------------------------------ geometry
 
 ---Where the surface sits, how big it is, and how it stacks.
@@ -130,7 +187,17 @@ local function header_lines()
   if not state then
     return { {} }
   end
-  local line = sidebar.header(state.chat)
+
+  -- NOT ON THE CHAT TAB. There the same cells are drawn on the bar over the
+  -- composer -- see |paseo.ui.composer| -- which is where you are looking when
+  -- they matter, and drawing them here as well would be the same row twice,
+  -- twenty lines apart. `layout.rows` is told the same thing, so the tab bar
+  -- moves up into the row this gives back rather than leaving a blank one.
+  if state.tab == "Chat" then
+    return {}
+  end
+
+  local line = sidebar.header(state.chat, { width = state.geometry.width - 2 })
 
   -- Everything the header names is a thing the Settings panel can change, so
   -- the header is the shortest route to it. Cells carry volt's third element;
@@ -356,7 +423,11 @@ local function body_lines()
     return { {} }
   end
   local g = state.geometry
-  local height = layout.rows(g.height).body_height
+  -- The Chat tab has no header row -- the header is over the composer there --
+  -- so its body is one row taller. `header_lines` is where that is decided;
+  -- this has to agree with it or the panel is padded to the wrong height and
+  -- the footer is drawn over.
+  local height = layout.rows(g.height, { header = state.tab ~= "Chat" }).body_height
   local lines = {}
 
   if state.tab ~= "Chat" then
@@ -408,21 +479,21 @@ local function footer_lines()
     return { widgets.hints(pairs_) }
   end
 
-  -- Sized to what is left after the elapsed count, and DEGRADING rather than
-  -- truncating: the hint that falls off the end is the least important one,
-  -- whereas a row cut to fit loses whichever end the renderer happens to cut.
-  local status = sidebar.status(state.chat)
+  -- The spinner and the elapsed count are on the COMPOSER'S BAR now -- against
+  -- the box whose answer you are waiting for. They stay here for the tabs that
+  -- have no composer on them, because a turn keeps running while you read the
+  -- Changes panel and that is exactly when "is it still going" is hard to
+  -- answer: on those tabs there is nothing else on screen that moves.
+  local status = {}
+  if state.tab ~= "Chat" or (state.session and state.session.kind == "terminal") then
+    status = sidebar.status(state.chat)
+  end
+
+  -- Sized to what is left after it, and DEGRADING rather than truncating: the
+  -- hint that falls off the end is the least important one, whereas a row cut
+  -- to fit loses whichever end the renderer happens to cut.
   local hints = widgets.hints(pairs_, nil, state.geometry.width - 2 - render.width(status) - 2)
 
-  -- The spinner and the elapsed count, right-aligned against the hints. Here
-  -- rather than in the header for two reasons: this is the row your eye goes
-  -- back to while you wait, and it is the only changing field on it -- in the
-  -- header it pushed the provider sideways every time the count gained a
-  -- digit.
-  --
-  -- The footer rather than the composer's border, even though the composer is
-  -- where you are looking: the composer only exists on the Chat tab, and a
-  -- turn keeps running while you read the Changes panel.
   return {
     widgets.row(hints, status, state.geometry.width - 2, "PaseoNormal"),
   }
@@ -591,24 +662,6 @@ local function unbind_tabs(buf, cycle)
   end
 end
 
----What the composer's bottom border says: how to send it.
----
----How to send is the one question every chat composer gets asked, and the
----answer was only in `:help paseo`. BOTH keys, because they are not
----interchangeable: `<CR>` sends from normal mode and inserts a newline from
----insert mode, so the key that always works is `<C-s>` -- and a hint naming
----only `<CR>` would be actively wrong for anyone still typing.
----@return table[]
-local function composer_hint()
-  return {
-    { " ", "PaseoComposerHint" },
-    { icons.spell "<CR>", "PaseoComposerKey" },
-    { " / ", "PaseoComposerHint" },
-    { icons.spell "<C-s>", "PaseoComposerKey" },
-    { " send ", "PaseoComposerHint" },
-  }
-end
-
 ---How many rows the composer wants for what is in it.
 ---
 ---An input that stands at its full configured height over an empty buffer is
@@ -655,8 +708,9 @@ function M.resize_composer(chat)
   end
 
   local g = state.geometry
-  local panes = layout.panes(g, composer_rows(chat, g))
-  if api.nvim_win_get_height(win) == panes.composer then
+  local panes = layout.panes(g, composer_rows(chat, g), { framed = M.composer_framed() })
+  -- `+ 1` is the bar, which is a winbar and therefore inside the height.
+  if api.nvim_win_get_height(win) == panes.composer + 1 then
     return
   end
 
@@ -665,7 +719,7 @@ function M.resize_composer(chat)
     row = panes.composer_row,
     col = panes.col,
     width = panes.width,
-    height = panes.composer,
+    height = panes.composer + 1,
   })
   if conversation and api.nvim_win_is_valid(conversation) then
     pcall(api.nvim_win_set_config, conversation, {
@@ -682,6 +736,16 @@ function M.resize_composer(chat)
   end
 end
 
+---Does the composer have a drawn box, or is it a plate?
+---
+---`ui.style`'s answer, not ours -- see |paseo.ui.style|'s `composer_border`.
+---Public because the geometry depends on it in three places and they must
+---agree: a box costs two rows the plate does not.
+---@return boolean
+function M.composer_framed()
+  return (require("paseo.ui.style").composer_border()) ~= "none"
+end
+
 ---Float the real conversation and composer over the Chat tab.
 local function show_agent_panes()
   if not state then
@@ -693,7 +757,8 @@ local function show_agent_panes()
   -- Where each pane goes is `ui/layout.lua`'s arithmetic, not ours: the same
   -- numbers decide how many rows the body gets and which row the terminals
   -- panel maps a click to, and they were three independent copies.
-  local panes = layout.panes(g, composer_rows(chat, g))
+  local border, border_hl = require("paseo.ui.style").composer_border()
+  local panes = layout.panes(g, composer_rows(chat, g), { framed = border ~= "none" })
 
   chat.win_conversation = api.nvim_open_win(chat.conversation, false, {
     relative = "editor",
@@ -710,18 +775,16 @@ local function show_agent_panes()
     row = panes.composer_row,
     col = panes.col,
     width = panes.width,
-    height = panes.composer,
+    -- The bar is a winbar, so it comes out of the window's own height.
+    height = panes.composer + 1,
     style = "minimal",
-    border = "rounded",
-    -- The border row is the only chrome an input field gets for free, so it
-    -- carries both things the box has to say: what it is, and how to send it.
-    -- Written INTO the frame rather than on a row of its own -- a hint bar
-    -- under the composer would cost a row of the conversation to say something
-    -- that is true the whole time.
-    title = { { " " .. icons.marker.prompt .. " ", "PaseoComposerLabel" } },
-    title_pos = "left",
-    footer = composer_hint(),
-    footer_pos = "right",
+    -- WHATEVER `ui.style` SAYS, which under the default `plate` is nothing at
+    -- all. A drawn box here was the one thing on the surface that ignored the
+    -- style: a hard rounded rule around the composer, inside a window whose
+    -- own edge is invisible, with cards below it that have no frame either.
+    -- What separates the box from the transcript now is what separates every
+    -- other card from it -- one tier of elevation, and a title row.
+    border = border,
     zindex = g.z_panes,
   })
 
@@ -729,18 +792,10 @@ local function show_agent_panes()
   -- background, and the composer is a raised card -- the same tier the Agent
   -- panel's cards sit on, so "where you type" is visibly a control and not
   -- more transcript.
-  --
-  -- The border is drawn rather than hidden, and that is the fix for "it is an
-  -- opaque rectangle". Painted fg == bg it was a ring of padding, so the whole
-  -- control was one flat slab of card colour with no edge and no affordance;
-  -- a quiet rule around it is what makes the same box read as a field you type
-  -- in. `PaseoComposerBorder` is one group for exactly this, so `ui.theme` can
-  -- have it back.
   pcall(function()
     vim.wo[chat.win_conversation].winhl = "Normal:PaseoNormal,NormalFloat:PaseoNormal"
-    vim.wo[chat.win_composer].winhl =
-      "Normal:PaseoCard,NormalFloat:PaseoCard,FloatBorder:PaseoComposerBorder"
   end)
+  require("paseo.ui.composer").style(chat, { border = border ~= "none" and border_hl or nil })
 
   -- Grow and shrink with what is typed. `TextChangedP` is in the list because
   -- a completion popup inserting a multi-line snippet changes the buffer
@@ -765,15 +820,18 @@ local function show_agent_panes()
       -- global `scrolloff` of 8 it cannot: the view stops eight rows early and
       -- the transcript never looks like it reached the bottom.
       scrolloff = 0,
-      -- The header lives in the chrome now. A winbar here would draw it
-      -- twice, one row apart.
-      winbar = "",
     } do
       pcall(function()
         vim.wo[win][option] = value
       end)
     end
   end
+  -- The transcript has no bar of its own: the session strip is two rows above
+  -- it saying which session this is, and the composer's bar is under it saying
+  -- what that session is set to.
+  pcall(function()
+    vim.wo[chat.win_conversation].winbar = ""
+  end)
 
   bind_tabs(chat.conversation, false)
   bind_tabs(chat.composer, true)
@@ -1157,6 +1215,11 @@ function M.open(chat)
   -- re-derived on `ColorScheme` -- but a user who opens the dashboard before
   -- anything else has touched the highlights still gets them.
   require("paseo.ui.hl").setup()
+
+  -- An agent archived, started, or finishing a turn repaints the surface from
+  -- here on. Registered once per session, and harmless while the dashboard is
+  -- closed: `directory_changed` returns on a nil `state`.
+  watch_directories()
 
   local g = geometry()
 

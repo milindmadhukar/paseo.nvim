@@ -137,8 +137,11 @@ local function sections(chat)
     agent_rows[#agent_rows + 1] = {
       id = "agent." .. agent.id,
       active = mine,
+      -- No leading indent and no "this one is mine" marker: |paseo.ui.list|
+      -- draws both, in a gutter the focus band cannot paint over. Writing it
+      -- into the row is what made the active session invisible the moment you
+      -- pointed at it.
       cells = {
-        { mine and "  " .. widgets.icons.mine .. " " or "    ", mine and "PaseoAgent" or nil },
         { KIND.agent[1] .. " ", KIND.agent[2] },
         { glyph[1] .. " ", glyph[2] },
         { agent.title or agent.id, mine and "PaseoAgent" or nil },
@@ -181,7 +184,6 @@ local function sections(chat)
       id = "terminal." .. item.id,
       active = here ~= nil and here.kind == "terminal" and here.id == item.id,
       cells = {
-        { "    " },
         { KIND.terminal[1] .. " ", KIND.terminal[2] },
         { glyph[1] .. " ", glyph[2] },
         { terminals.label(item), nil },

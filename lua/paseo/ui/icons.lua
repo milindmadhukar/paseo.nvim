@@ -63,6 +63,13 @@ M.marker = {
   check_on = g(0x25a0), -- BLACK SQUARE
   check_off = g(0x25a1), -- WHITE SQUARE
   mine = g(0x258c), -- LEFT HALF BLOCK -- the "this one is yours" gutter
+  -- Where the keyboard is, as opposed to which row is the live one. The two
+  -- are different questions and used to have one answer between them: a
+  -- focused row was painted in a band that wiped out everything the active
+  -- row was saying, so the session you were IN and the row you were POINTING
+  -- AT looked identical the moment they were the same row -- and when they
+  -- were not, you could not tell which band meant which.
+  focus = g(0x25b8), -- BLACK RIGHT-POINTING SMALL TRIANGLE
   bullet = g(0x00b7), -- MIDDLE DOT
   swatch = g(0xf14fb), -- md-square_rounded -- repo/agent accent dots
   more_up = g(0x2191), -- UPWARDS ARROW
@@ -206,6 +213,19 @@ function M.spell(key)
   local prefix = M.key["<" .. modifier:upper() .. ">"]
   if not prefix then
     return key
+  end
+
+  -- A chord whose second half is itself a NAMED key keeps that key's glyph:
+  -- `<M-CR>` is `Alt + ⏎`, not `Alt + cr`, which is how it read for as long
+  -- as this only looked the modifier up. The hint bar is the only place most
+  -- people will ever see the send key, so spelling it as two letters of
+  -- Vim notation is the hint failing at the one job it has.
+  -- Never for a single character: `<S>`, `<C>`, `<M>` and `<D>` are in the
+  -- same table as the key names, so a bare lookup turns `<C-s>` into
+  -- "Ctrl + Shift".
+  local named = #rest > 1 and M.key["<" .. rest:upper() .. ">"] or nil
+  if named then
+    return prefix .. " + " .. named
   end
 
   -- A chord's second half is shown lowercase -- `Ctrl + w`, not `Ctrl + W` --

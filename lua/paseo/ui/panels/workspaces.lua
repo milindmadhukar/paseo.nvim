@@ -179,8 +179,9 @@ local function sections(chat)
     group.rows[#group.rows + 1] = {
       id = "ws." .. (ws.directory or ws.name or ""),
       active = mine,
+      -- The gutter -- the indent and the "you are in this one" bar -- belongs
+      -- to |paseo.ui.list|, which draws it outside the focus band.
       cells = {
-        { mine and "  " .. widgets.icons.mine .. " " or "    ", mine and "PaseoAgent" or nil },
         { ("%-" .. w_name .. "s  "):format(ws.name or ""), mine and "PaseoAgent" or nil },
         { ("%-9s"):format(shape(ws)), "PaseoBadge" },
         { "  " .. agents.summary(ws.directory or ""), "PaseoDim" },
@@ -213,7 +214,6 @@ local function sections(chat)
       id = "repo." .. repo.worktree,
       skip = true,
       cells = {
-        { "    " },
         widgets.swatch(repo.name),
         { " " .. repo.name, nil },
         { "   " .. vim.fn.fnamemodify(repo.worktree, ":~"), "PaseoPath" },
