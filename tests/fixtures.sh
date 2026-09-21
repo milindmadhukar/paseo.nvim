@@ -13,7 +13,14 @@ rm -rf "$root"
 mkdir -p "$root"
 
 git_init() { git -C "$1" init -q -b main .; }
-commit()   { git -C "$1" add -A && git -C "$1" -c commit.gpgsign=false commit -qm "${2:-wip}"; }
+# An identity of its own: a CI runner has no global git config, and a fixture
+# commit is nobody's work anyway.
+commit()   {
+  git -C "$1" add -A && git -C "$1" \
+    -c commit.gpgsign=false \
+    -c user.name="paseo tests" -c user.email="tests@paseo.invalid" \
+    commit -qm "${2:-wip}"
+}
 
 # ---------------------------------------------------------------- single repo
 solo="$root/solo"

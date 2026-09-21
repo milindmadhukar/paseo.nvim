@@ -1,0 +1,82 @@
+# The same three things `tests/run.sh` runs locally, on every push and every
+# pull request, against the Neovim versions this plugin claims to support.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  spec:
+    name: spec (neovim ${{ matrix.neovim }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor, what people actually run, and what is coming. Nightly is
+        # allowed to fail: it breaks for reasons that are not this plugin's,
+        # and a red X there should inform rather than block.
+        neovim: [v0.11.7, stable, nightly]
+        include:
+          - neovim: nightly
+            experimental: true
+    continue-on-error: ${{ matrix.experimental == true }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: ${{ matrix.neovim }}
+
+      - uses: oven-sh/setup-bun@v2
+
+      # Shallow clones of volt, gitsigns and telescope. `tests/deps.sh` fetches
+      # into this directory on every run, so a hit here is a speed-up and never
+      # a reason the suite is testing yesterday's volt.
+      - name: Cache the plugins under test
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/paseo-nvim/test-deps
+          key: test-deps-${{ runner.os }}
+
+      - name: Install the sidecar's dependencies
+        run: bun install
+        working-directory: sidecar
+
+      - run: tests/run.sh
+
+  orphan:
+    name: orphan (${{ matrix.runtime }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # bun and node leave by different routes -- the watchdog and the stdout
+        # error -- so passing under one proves nothing about the other.
+        runtime: [bun, node]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        if: matrix.runtime == 'bun'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install the sidecar's dependencies
+        run: npm install --no-package-lock
+        working-directory: sidecar
+
+      - run: tests/orphan.sh
+        env:
+          PASEO_RUNTIME: ${{ matrix.runtime }}

@@ -1,25 +1,39 @@
 #!/usr/bin/env bash
 # Build fixtures, run the spec in a real Neovim, exit non-zero on failure.
+#
+#   tests/run.sh            everything, including the sidecar's own tests
+#   tests/run.sh git        only the suites whose name matches `git`
 set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
+root="$(cd "$here/.." && pwd)"
+filter="${1:-}"
+
 fixtures="${PASEO_FIXTURES:-${TMPDIR:-/tmp}/paseo-nvim-tests}"
+deps="${PASEO_TEST_DEPS:-${XDG_CACHE_HOME:-$HOME/.cache}/paseo-nvim/test-deps}"
 
 "$here/fixtures.sh" "$fixtures" >/dev/null
+"$here/deps.sh" "$deps" >/dev/null
 
-# Test the tree you are STANDING IN, not the one lazy.nvim has on its rtp.
-#
-# The lazy spec loads paseo.nvim with `dev = true` out of ~/Code/paseo.nvim, so
-# running this from a worktree loaded spec.lua from the worktree and every
-# module under test from the main checkout -- a suite that passes while testing
-# none of your changes. Prepending cwd makes `require` find this tree first.
-PASEO_FIXTURES="$fixtures" nvim --headless \
-  -c "lua vim.opt.runtimepath:prepend('$(cd "$here/.." && pwd)')" \
-  -c 'lua require("lazy").load({ plugins = { "paseo.nvim" } })' \
-  -c "lua vim.opt.runtimepath:prepend('$(cd "$here/.." && pwd)')" \
-  -c 'lua local failed = require("tests.spec").run(); vim.cmd(failed > 0 and "cq" or "qa!")' \
+# `-u` and nothing else: no user configuration, no plugin manager, no shada.
+# See tests/minimal_init.lua. VIMRUNTIME goes with it: an inherited one belongs
+# to whichever Neovim was installed last, and the suite is only meaningful
+# against the runtime of the binary actually running it.
+unset VIMRUNTIME
+cd "$root"
+PASEO_FIXTURES="$fixtures" PASEO_TEST_DEPS="$deps" PASEO_TEST_FILTER="$filter" \
+  nvim --headless -i NONE -u tests/minimal_init.lua \
+  -c 'lua local failed = require("tests.spec").run(vim.env.PASEO_TEST_FILTER); vim.cmd(failed > 0 and "cq" or "qa!")' \
   2>&1
 status=$?
+
+# A filtered run is someone iterating on one suite; the TypeScript half is not
+# what they are waiting on.
+if [ -n "$filter" ]; then
+  echo
+  [ $status -eq 0 ] && echo "PASS ($filter)" || echo "FAIL ($filter, exit $status)"
+  exit $status
+fi
 
 sidecar="$here/../sidecar"
 if [ ! -d "$sidecar/node_modules/typescript" ]; then

@@ -1011,12 +1011,43 @@ back up. Paseo is the engine; you should not need to look at it.
 ## Tests
 
 ```sh
-tests/run.sh
+tests/run.sh          # everything
+tests/run.sh git      # only the suites whose name matches `git`
 ```
 
 The suite runs Neovim, the sidecar typecheck, and TypeScript tests. Install
 the sidecar dependencies first with `bun install` or `npm install`; the test
 harness uses Bun when present and Node plus the local TypeScript otherwise.
+
+Neovim is started with `-u tests/minimal_init.lua` and nothing else, so none of
+your own configuration is loaded: volt, gitsigns and telescope are cloned into
+`~/.cache/paseo-nvim/test-deps` by `tests/deps.sh` and the suite runs against
+those. A green run means the plugin works, not that one laptop is set up right
+— which is also what makes it runnable on a machine with no configuration at
+all, and is why the same command is all CI does:
+
+```
+tests/
+  run.sh              fixtures, then Neovim, then the sidecar's own tests
+  fixtures.sh         the git repositories every assertion is made against
+  deps.sh             shallow clones of the plugins under test
+  minimal_init.lua    the Neovim the suite runs in
+  spec.lua            the runner: the suite files, in the order they run
+  spec/               one file per area
+    helpers.lua       eq, truthy, and the shared fixtures
+    git.lua  ui/      ...
+  orphan.sh           does the sidecar die when Neovim does?
+```
+
+The suites share one Neovim and one fixture tree, so `tests/spec.lua` lists
+them in a deliberate order rather than discovering them — a file nobody listed
+fails the run instead of silently never being run.
+
+[![tests](https://github.com/milindmadhukar/paseo.nvim/actions/workflows/tests.yml/badge.svg)](https://github.com/milindmadhukar/paseo.nvim/actions/workflows/tests.yml)
+
+Every push and pull request runs the suite against Neovim 0.11, stable and
+nightly, plus `tests/orphan.sh` under both Bun and Node. Nightly is allowed to
+fail: it breaks for reasons that are not this plugin's.
 
 ## Agent skills
 
@@ -1076,7 +1107,7 @@ lua/paseo/          the plugin
 sidecar/            paseo-bridge.ts entry point, bridge-*.ts modules, SDK deps
 .agents/skills/     the bundled agent skills -- the source of truth
 .claude/skills/     symlinks into .agents/skills, for Claude Code
-tests/              fixtures + spec, run by tests/run.sh
+tests/              fixtures + suites, run by tests/run.sh
 doc/                :help paseo
 ```
 
