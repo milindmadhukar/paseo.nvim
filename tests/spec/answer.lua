@@ -73,11 +73,12 @@ local function test_answer()
   }
 
   local asked = questions.parse(request)
-  local sent, declined
+  local sent, sent_notes, declined
   local function handlers()
     return {
       submit = function(state)
         sent = questions.answers(state)
+        sent_notes = state.notes
       end,
       choose = function() end,
       reject = function(interrupt)
@@ -96,6 +97,15 @@ local function test_answer()
   -- the editor. Anchoring is what makes "takes over the chat window" true on
   -- both surfaces without a branch per surface.
   truthy("ask: the card is a volt buffer", require("volt.state")[card] ~= nil)
+
+  -- A description says what an option MEANS, and the half of it that used to
+  -- fall off the end of its single row was the half that told it apart from
+  -- the option below. Wrapped, it is all there.
+  truthy(
+    "ask: an option's description is shown in full, not truncated",
+    drawn(card):find("Replay mine on top", 1, true) ~= nil,
+    drawn(card)
+  )
   eq(
     "ask: and is anchored to the chat window",
     vim.api.nvim_win_get_config(card_win).relative,
@@ -156,6 +166,29 @@ local function test_answer()
   truthy("ask: picking advances to the next question", shown:find("2 of 3", 1, true) ~= nil, shown)
   consistent "after stepping"
 
+  -- A picked option KEEPS its description. The focused one explains what you
+  -- are deciding; the picked one explains what you are about to send, and an
+  -- answer whose meaning vanished the moment you chose it cannot be checked.
+  press "<S-Tab>"
+  truthy(
+    "ask: the option you picked keeps its description",
+    drawn(card):find("Replay mine on top", 1, true) ~= nil,
+    drawn(card)
+  )
+
+  -- `c` writes a note ABOUT that pick -- the caveat the options did not cover.
+  press "c"
+  local note_box = vim.api.nvim_get_current_buf()
+  truthy("ask: `c` opens a box for a note", note_box ~= card and vim.bo[note_box].modifiable)
+  vim.api.nvim_buf_set_lines(note_box, 0, -1, false, { "only for new workspaces" })
+  press "<CR>"
+  truthy(
+    "ask: and the note is shown back on the card",
+    drawn(card):find("only for new workspaces", 1, true) ~= nil,
+    drawn(card)
+  )
+  press "<Tab>"
+
   -- Multi-select accumulates and stays put.
   press "1"
   press "2"
@@ -189,6 +222,12 @@ local function test_answer()
   eq("ask: single-select, as its label", sent and sent[1], "Rebase")
   eq("ask: multi-select, joined", sent and sent[2], "tests, lint")
   eq("ask: and the typed answer, flattened onto one line", sent and sent[3], "looks right")
+  -- The note travels with the set, attached to the answer it qualifies.
+  eq(
+    "ask: and the note rides along with it",
+    sent_notes and sent_notes[1],
+    "only for new workspaces"
+  )
 
   ask.close()
   sent = nil
@@ -343,6 +382,43 @@ local function test_answer()
     "ask: one Implement per mode it could land in",
     drawn(card):find("accept edits", 1, true) ~= nil,
     drawn(card)
+  )
+
+  -- Focusable, or the WHEEL cannot reach it: an unfocusable float is one the
+  -- mouse lands straight through, so the plan sat still while the conversation
+  -- underneath it scrolled -- which is what "scrolling does not work" was.
+  local body_win
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_get_buf(win) == body then
+      body_win = win
+    end
+  end
+  truthy(
+    "ask: the plan's body can be focused, so the mouse can scroll it",
+    body_win and vim.api.nvim_win_get_config(body_win).focusable,
+    body_win and vim.inspect(vim.api.nvim_win_get_config(body_win))
+  )
+  -- And since you can now END UP in it, it answers the same keys the card does
+  -- -- otherwise the mouse puts you somewhere with no way to accept or reject.
+  truthy(
+    "ask: and answers the same keys, so it is not a dead end",
+    vim.fn.maparg("y", "n", false, true).buffer == 1 or #vim.api.nvim_buf_get_keymap(body, "n") > 0,
+    vim.inspect(#vim.api.nvim_buf_get_keymap(body, "n"))
+  )
+
+  -- Scrolling actually moves it. `j` is proxied from the card into the body,
+  -- and a plan you cannot move is a plan you approve half-read.
+  local before = vim.api.nvim_win_call(body_win, function()
+    return vim.fn.line "w0"
+  end)
+  press "<C-d>"
+  local after = vim.api.nvim_win_call(body_win, function()
+    return vim.fn.line "w0"
+  end)
+  truthy(
+    "ask: and the scroll keys really move it",
+    after > before,
+    ("%d -> %d"):format(before, after)
   )
 
   press "1"
