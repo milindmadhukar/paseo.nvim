@@ -71,6 +71,23 @@ local function on_disk()
   return found
 end
 
+---A buffer left naming a file the suite has deleted is not that suite's
+---problem until it is someone else's: the next thing to check timestamps takes
+---`E211: File ... no longer available` and fails THERE. On nightly that was
+---eight suites later, inside a `vim.wait` in the provider suite, and the log
+---blamed the wrong one. Reported against the suite that leaked it, and wiped,
+---so it is named once rather than by everything that follows.
+---@param suite string
+local function sweep(suite)
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    local path = vim.api.nvim_buf_get_name(buf)
+    if path:sub(1, 1) == "/" and not vim.uv.fs_stat(path) then
+      t.record(("%s left a buffer on %s, which no longer exists"):format(suite, path), false)
+      pcall(vim.api.nvim_buf_delete, buf, { force = true })
+    end
+  end
+end
+
 ---@param filter? string  run only the suites whose name or file matches
 ---@return integer failed
 function M.run(filter)
@@ -123,6 +140,7 @@ function M.run(filter)
             results.failed = results.failed + 1
             results.lines[#results.lines + 1] = ("  FAIL  %s threw\n          %s"):format(name, err)
           end
+          sweep(name)
           flush()
         end
       end

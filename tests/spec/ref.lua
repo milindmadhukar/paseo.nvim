@@ -21,6 +21,7 @@ local function test_ref()
   -- us -- that makes :edit fail with E1513.
   vim.cmd "tabnew"
   vim.cmd.edit(vim.fn.fnameescape(loose))
+  local loose_buf = vim.api.nvim_get_current_buf()
   local file = ref.file()
   truthy("ref: a file outside any git repo still yields a reference", file ~= nil)
   eq("ref: and it has no repo", file and file.repo, nil)
@@ -109,7 +110,13 @@ local function test_ref()
     live
   )
 
+  -- `tabclose` closes the WINDOW; the buffer stays loaded, and it is about to
+  -- name a file that no longer exists. The next time anything checks
+  -- timestamps -- which on nightly is inside the `vim.wait` the provider suite
+  -- makes eight suites later -- Neovim answers `E211: File ... no longer
+  -- available` for it, and that suite fails for something this one did.
   vim.cmd "tabclose"
+  pcall(vim.api.nvim_buf_delete, loose_buf, { force = true })
   os.remove(loose)
 end
 
