@@ -168,6 +168,12 @@ end
 ---paints the glyphs `fg == bg`, which turns the frame into a one-cell ring of
 ---padding in the surface's own colour. Dropping the border instead would take
 ---the padding with it and put content hard against the window edge.
+---
+---A DRAWN edge gets `PaseoSurfaceBorder` rather than `PaseoBorder`, and the
+---difference is the background. `PaseoBorder` has none, so the glyphs rendered
+---on the editor's background and the framed styles lost the one cell of
+---padding the unframed ones get -- the frame read as a hairline pasted onto
+---the editor rather than as the edge of a raised sheet.
 ---@param style? paseo.Style
 ---@return string border, string group
 function M.window_border(style)
@@ -179,7 +185,7 @@ function M.window_border(style)
   if style.border == "none" then
     return "none", "PaseoNormalBorder"
   end
-  return style.border, "PaseoBorder"
+  return style.border, "PaseoSurfaceBorder"
 end
 
 return M

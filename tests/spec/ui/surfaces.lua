@@ -209,6 +209,47 @@ local function test_surfaces()
   float.close()
   config.setup {}
 
+  -- THE COMPOSER GROWS WITH THE PROMPT. Standing at its full configured height
+  -- over an empty buffer made it the largest and emptiest shape on the screen
+  -- -- seven rows of flat card colour, none of it saying anything.
+  do
+    float.open(surface_chat)
+    local composer = function()
+      return vim.api.nvim_win_get_height(surface_chat.win_composer)
+    end
+    local conversation = function()
+      return vim.api.nvim_win_get_height(surface_chat.win_conversation)
+    end
+
+    ---@param lines string[]
+    local function typed(lines)
+      vim.api.nvim_buf_set_lines(surface_chat.composer, 0, -1, false, lines)
+      float.resize_composer(surface_chat)
+    end
+
+    typed { "" }
+    local empty, roomy = composer(), conversation()
+    eq("ui: an empty composer is one row", empty, 1)
+
+    typed { "a", "b", "c" }
+    eq("ui: three lines make it three", composer(), 3)
+    eq("ui: and the conversation gives up exactly those rows", conversation(), roomy - 2)
+
+    -- `wrap` is on, so asking the buffer for its line count says one and the
+    -- box would stay a single row with the cursor off the bottom of it.
+    typed { string.rep("x", vim.o.columns * 2) }
+    truthy("ui: a wrapped line counts the rows it OCCUPIES", composer() > 1, composer())
+
+    -- The configured height is the ceiling, not the resting state.
+    typed { "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l" }
+    eq("ui: and it never grows past ui.float.composer", composer(), 7)
+
+    typed { "" }
+    eq("ui: sending shrinks it back", composer(), empty)
+    eq("ui: and the conversation gets its rows back", conversation(), roomy)
+    float.close()
+  end
+
   float.open(surface_chat)
 
   -- FEATURE PARITY. The header used to be the conversation window's winbar,

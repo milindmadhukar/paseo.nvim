@@ -169,8 +169,13 @@ function M.card(opts)
   lines[#lines + 1] = header
 
   if kind == "rule" then
+    -- INSET by two, not by one. At one cell the hairline starts exactly where
+    -- the content starts and ends exactly where it ends, which is a table
+    -- border -- the thing the style's own docstring says it is not. Pulling it
+    -- in past the text on both sides is what makes the same glyph read as a
+    -- divider under a heading.
     lines[#lines + 1] = {
-      { " " .. string.rep(style.BOX.square.h, math.max(0, w - 2)) .. " ", rule },
+      { "  " .. string.rep(style.BOX.square.h, math.max(0, w - 4)) .. "  ", rule },
     }
   end
 
@@ -200,10 +205,15 @@ end
 ---@param h integer
 ---@param w integer  The card's width.
 ---@param rule? string
+---@param kind? string  The style the card was BUILT with. Defaults to the live
+---                 one, which is right for every current caller -- but a card
+---                 built with an explicit `opts.kind` and then grown would
+---                 otherwise get filler rows in a different shape from its own
+---                 sides, which draws as a box with a gap punched in it.
 ---@return table[][]
-function M.card_to_height(lines, h, w, rule)
+function M.card_to_height(lines, h, w, rule, kind)
   rule = rule or "PaseoCardRule"
-  local box = style.BOX[style.get().card]
+  local box = style.BOX[kind or style.get().card]
 
   while #lines < h do
     -- Inserted one from the end, so the filler lands INSIDE the card: above

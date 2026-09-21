@@ -7,7 +7,6 @@
 local M = {}
 
 ---@class paseo.Config
----@field backend "paseo"|"local"  Where agents run. See README, "Backend seam".
 ---@field paseo paseo.Config.Paseo
 ---@field ui paseo.Config.UI
 ---@field workspaces paseo.Config.Workspaces
@@ -46,16 +45,49 @@ local M = {}
 ---                       changes. "plate" is the default and draws NO frame
 ---                       around a card: sections are separated by background
 ---                       elevation and padding instead. See `paseo.ui.style`.
+---@field colors "auto"|"fixed"  Where the eight base colours come from.
+---                       "auto" derives them from the colourscheme, which is
+---                       what makes the dashboard look like it belongs to
+---                       whatever you have loaded. "fixed" uses the plugin's
+---                       own instead -- for a theme whose colours the agent
+---                       surfaces read badly in, or which simply is not what
+---                       you want them to look like.
+---@field palette paseo.Config.UI.Palette  Those eight colours, by name, laid
+---                       over whichever source `colors` names. Everything
+---                       downstream still runs: naming `bg` and `blue` alone
+---                       gets a full elevation ladder and four accent ramps
+---                       built from them.
 ---@field theme table<string, vim.api.keyset.highlight>  Highlight overrides,
----                       laid over the derived groups. This is a config key
----                       rather than "set the group again after setup()"
----                       because the derivation re-runs on `ColorScheme` and
----                       used to overwrite anything set that way.
+---                       laid over the derived groups. The LAST word, and a
+---                       different question from `palette`: a colour set there
+---                       is a token every derived group is built from, while
+---                       one set here is the one group you named. This is a
+---                       config key rather than "set the group again after
+---                       setup()" because the derivation re-runs on
+---                       `ColorScheme` and used to overwrite anything set that
+---                       way.
 ---@field animate boolean|paseo.Config.UI.Animate  Motion. `false` is instant.
 ---@field float paseo.Config.UI.Float
 ---@field sidebar paseo.Config.UI.Sidebar
 ---@field ask paseo.Config.UI.Answer
 ---@field terminal paseo.Config.UI.Terminal
+
+---@class paseo.Config.UI.Palette
+---@field red string?     Failure, and a destructive permission.
+---@field green string?   Success, and the agent's own voice.
+---@field blue string?    Your voice, headings, paths, and the seed the eight
+---                       identity swatches are rotated off.
+---@field yellow string?  Running, and a warning.
+---@field grey string?    Everything that has to recede: dividers, labels,
+---                       disabled rows.
+---@field border string?  Frames, where a style draws them.
+---@field text string?    Body text.
+---@field bg string?      The editor background the five elevation tiers are
+---                       stepped off, and the colour every accent ramp blends
+---                       towards. Leave it unset on a TRANSPARENT theme:
+---                       absent is what tells the derivation there is nothing
+---                       to build tiers on, and painting an opaque rectangle
+---                       over someone's wallpaper is worse than having no card.
 
 ---@class paseo.Config.UI.Animate
 ---@field bars boolean    Ease a progress bar towards its new value rather than
@@ -201,8 +233,6 @@ local M = {}
 
 ---@type paseo.Config
 local defaults = {
-  backend = "paseo",
-
   paseo = {
     -- url, home, password and provider are all deliberately absent rather than
     -- nil-valued: absent means "work it out", and a discovered endpoint is
@@ -211,6 +241,11 @@ local defaults = {
 
   ui = {
     surface = "float",
+
+    -- Derived from the colourscheme. The alternative is a plugin that looks
+    -- pasted in, which is why this is the default and not the other way round.
+    colors = "auto",
+    palette = {},
 
     -- No frame around a card. This is the single biggest visual change and it
     -- is the default because a box per card, drawn inside the float's own
@@ -324,9 +359,6 @@ local config = vim.deepcopy(defaults)
 function M.setup(opts)
   config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts or {})
 
-  vim.validate("backend", config.backend, function(v)
-    return v == "paseo" or v == "local"
-  end, '"paseo" or "local"')
   vim.validate("review.agents", config.review.agents, "boolean")
   vim.validate("ui.surface", config.ui.surface, function(v)
     return v == "float" or v == "sidebar"
@@ -345,6 +377,20 @@ function M.setup(opts)
     require("paseo.ui.style").valid,
     'a preset name ("plate", "rule", "rounded", "square") or a table of card/border'
   )
+  vim.validate("ui.colors", config.ui.colors, function(v)
+    return v == "auto" or v == "fixed"
+  end, '"auto" or "fixed"')
+  -- Checked HERE rather than where it is read, so `#00ff0` is reported against
+  -- the key that holds it. A bad hex reaching `volt.color` comes back as the
+  -- input unchanged, which surfaces as one tier of the elevation ladder
+  -- silently collapsing into the one below it -- a bug with no error and no
+  -- obvious cause.
+  vim.validate("ui.palette", config.ui.palette, "table")
+  for _, role in ipairs(require("paseo.ui.theme").ROLES) do
+    vim.validate("ui.palette." .. role, config.ui.palette[role], function(v)
+      return v == nil or (type(v) == "string" and v:match "^#%x%x%x%x%x%x$" ~= nil)
+    end, "a #rrggbb colour")
+  end
   vim.validate("ui.theme", config.ui.theme, "table")
   vim.validate("ui.animate", config.ui.animate, function(v)
     return type(v) == "boolean" or type(v) == "table"

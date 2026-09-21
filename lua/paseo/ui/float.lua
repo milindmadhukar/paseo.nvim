@@ -223,18 +223,17 @@ local function tab_lines()
     }
   end
 
-  -- The rule under the tabs is drawn only by the framed styles. On the
-  -- unframed ones it would be the third frame weight in a window that already
-  -- has the float's own edge and, until this change, a box around every card;
-  -- the pills delimit the bar perfectly well on their own. The ROW stays
-  -- either way -- dropping it would shift every section below it, which volt
-  -- measured once and will not recompute.
-  local framed = style.BOX[style.get().card] ~= nil
-  return {
-    render.truncate(tabs, inner),
-    framed and { { string.rep(style.BOX.square.h, state.geometry.width - 2), "PaseoBorder" } }
-      or {},
-  }
+  -- NO rule under the tabs, in any style. It used to be drawn for the framed
+  -- ones, and that was the "three frame weights in one window" complaint in
+  -- miniature: the float's own edge, a full-bleed rule directly under the
+  -- pills, and a box around every card below it. The pills are a row of filled
+  -- shapes and delimit the bar perfectly well by themselves -- which is why
+  -- the unframed styles never wanted it and why the framed ones do not either.
+  --
+  -- The ROW stays. Dropping it would shift every section below, and volt
+  -- records each section's start row when the layout is measured and never
+  -- recomputes it on redraw.
+  return { render.truncate(tabs, inner), {} }
 end
 
 ---The active panel, padded to the space between the tabs and the footer.
@@ -298,13 +297,29 @@ local function footer_lines()
   -- One builder for every hint bar in the plugin. This row had been copied
   -- into five files and they had already drifted -- this one advertised
   -- "1-5 jump" while there were six tabs.
+  local widgets = require "paseo.ui.widgets"
+  local hints = widgets.hints {
+    { "1-" .. #M.TABS, "tabs" },
+    { "<Tab>", "cycle" },
+    { "<C-f>", "sidebar" },
+    { "q", "close" },
+  }
+
+  if not state then
+    return { hints }
+  end
+
+  -- The spinner and the elapsed count, right-aligned against the hints. Here
+  -- rather than in the header for two reasons: this is the row your eye goes
+  -- back to while you wait, and it is the only changing field on it -- in the
+  -- header it pushed the provider sideways every time the count gained a
+  -- digit.
+  --
+  -- The footer rather than the composer's border, even though the composer is
+  -- where you are looking: the composer only exists on the Chat tab, and a
+  -- turn keeps running while you read the Changes panel.
   return {
-    require("paseo.ui.widgets").hints {
-      { "1-" .. #M.TABS, "tabs" },
-      { "<Tab>", "cycle" },
-      { "<C-f>", "sidebar" },
-      { "q", "close" },
-    },
+    widgets.row(hints, sidebar.status(state.chat), state.geometry.width - 2, "PaseoNormal"),
   }
 end
 
@@ -382,14 +397,22 @@ end
 ---Called from `sidebar.refresh`, which the spinner drives at 10 Hz. Going
 ---through `rebuild` here would rebuild the Changes panel -- one `git status`
 ---per repo -- ten times a second for the length of every turn.
+---
+---The FOOTER is in the list because that is where the spinner and the elapsed
+---count live. Leaving it out is how the status would tick once and then sit
+---frozen at `0s` for the rest of the turn.
 ---@param chat table
 function M.refresh_header(chat)
   if not state or state.chat ~= chat or not api.nvim_buf_is_valid(state.buf) then
     return
   end
+  local sections = { "header", "footer" }
   -- Usage is the other thing a running turn changes, and it is pure Lua -- no
   -- subprocess -- so it can afford to ride along.
-  require("volt").redraw(state.buf, state.tab == "Usage" and { "header", "body" } or { "header" })
+  if state.tab == "Usage" then
+    sections[#sections + 1] = "body"
+  end
+  require("volt").redraw(state.buf, sections)
 end
 
 -- --------------------------------------------------------------- child panes
@@ -457,6 +480,97 @@ local function unbind_tabs(buf, cycle)
   end
 end
 
+---What the composer's bottom border says: how to send it.
+---
+---How to send is the one question every chat composer gets asked, and the
+---answer was only in `:help paseo`. BOTH keys, because they are not
+---interchangeable: `<CR>` sends from normal mode and inserts a newline from
+---insert mode, so the key that always works is `<C-s>` -- and a hint naming
+---only `<CR>` would be actively wrong for anyone still typing.
+---@return table[]
+local function composer_hint()
+  return {
+    { " ", "PaseoComposerHint" },
+    { icons.spell "<CR>", "PaseoComposerKey" },
+    { " / ", "PaseoComposerHint" },
+    { icons.spell "<C-s>", "PaseoComposerKey" },
+    { " send ", "PaseoComposerHint" },
+  }
+end
+
+---How many rows the composer wants for what is in it.
+---
+---An input that stands at its full configured height over an empty buffer is
+---the "opaque rectangle" complaint in one line: seven rows of flat card colour
+---is the largest and emptiest shape on the screen, and none of it is telling
+---you anything. So the box GROWS with the prompt, from one row up to the
+---configured maximum, which is what every chat composer does and what makes it
+---read as a field rather than as a panel.
+---
+---Wrapped lines count. `wrap` is on, so one 300-column paragraph is four rows
+---on screen and asking the buffer for its line count would say one -- and the
+---box would stay a single row with the cursor off the bottom of it.
+---@param chat table
+---@param g table
+---@return integer
+local function composer_rows(chat, g)
+  if not (chat.composer and api.nvim_buf_is_valid(chat.composer)) then
+    return 1
+  end
+
+  local width = math.max(1, layout.panes(g).width)
+  local rows = 0
+  for _, line in ipairs(api.nvim_buf_get_lines(chat.composer, 0, -1, false)) do
+    rows = rows + math.max(1, math.ceil(api.nvim_strwidth(line) / width))
+  end
+
+  return math.max(1, math.min(rows, g.composer))
+end
+
+---Re-seat the two panes for the composer's current height.
+---
+---Only the panes move. The chrome underneath is a fixed stack whose rows volt
+---measured once, and the body it draws on the Chat tab is blank anyway -- the
+---conversation is a real buffer floated over exactly that area -- so growing
+---the composer costs two `nvim_win_set_config` calls and no redraw.
+---@param chat table
+function M.resize_composer(chat)
+  if not state or state.chat ~= chat or state.tab ~= "Chat" then
+    return
+  end
+  local win, conversation = chat.win_composer, chat.win_conversation
+  if not (win and api.nvim_win_is_valid(win)) then
+    return
+  end
+
+  local g = state.geometry
+  local panes = layout.panes(g, composer_rows(chat, g))
+  if api.nvim_win_get_height(win) == panes.composer then
+    return
+  end
+
+  pcall(api.nvim_win_set_config, win, {
+    relative = "editor",
+    row = panes.composer_row,
+    col = panes.col,
+    width = panes.width,
+    height = panes.composer,
+  })
+  if conversation and api.nvim_win_is_valid(conversation) then
+    pcall(api.nvim_win_set_config, conversation, {
+      relative = "editor",
+      row = panes.top,
+      col = panes.col,
+      width = panes.width,
+      height = panes.conversation,
+    })
+    -- The conversation follows the agent, and it just got taller. Without this
+    -- the extra rows open up BELOW the last line and the transcript stops
+    -- looking like it reached the bottom.
+    transcript.follow(chat)
+  end
+end
+
 ---Float the real conversation and composer over the Chat tab.
 local function show_chat_panes()
   if not state then
@@ -468,8 +582,7 @@ local function show_chat_panes()
   -- Where each pane goes is `ui/layout.lua`'s arithmetic, not ours: the same
   -- numbers decide how many rows the body gets and which row the terminals
   -- panel maps a click to, and they were three independent copies.
-  local panes = layout.panes(g)
-  local _, border = require("paseo.ui.style").window_border()
+  local panes = layout.panes(g, composer_rows(chat, g))
 
   chat.win_conversation = api.nvim_open_win(chat.conversation, false, {
     relative = "editor",
@@ -489,25 +602,46 @@ local function show_chat_panes()
     height = panes.composer,
     style = "minimal",
     border = "rounded",
+    -- The border row is the only chrome an input field gets for free, so it
+    -- carries both things the box has to say: what it is, and how to send it.
+    -- Written INTO the frame rather than on a row of its own -- a hint bar
+    -- under the composer would cost a row of the conversation to say something
+    -- that is true the whole time.
+    title = { { " " .. icons.marker.prompt .. " ", "PaseoComposerLabel" } },
+    title_pos = "left",
+    footer = composer_hint(),
+    footer_pos = "right",
     zindex = g.z_panes,
   })
-  -- The composer's border follows `ui.style` like everything else: on the
-  -- default it is painted fg == bg, so it reads as a ring of padding marking
-  -- the box off from the conversation rather than as a second frame inside a
-  -- window that already has one.
-  vim.wo[chat.win_composer].winhl = ("Normal:PaseoNormal,NormalFloat:PaseoNormal,FloatBorder:%s"):format(
-    border
-  )
 
   -- The surface reads as ONE sheet: the conversation shares the chrome's
   -- background, and the composer is a raised card -- the same tier the Session
   -- panel's cards sit on, so "where you type" is visibly a control and not
   -- more transcript.
+  --
+  -- The border is drawn rather than hidden, and that is the fix for "it is an
+  -- opaque rectangle". Painted fg == bg it was a ring of padding, so the whole
+  -- control was one flat slab of card colour with no edge and no affordance;
+  -- a quiet rule around it is what makes the same box read as a field you type
+  -- in. `PaseoComposerBorder` is one group for exactly this, so `ui.theme` can
+  -- have it back.
   pcall(function()
     vim.wo[chat.win_conversation].winhl = "Normal:PaseoNormal,NormalFloat:PaseoNormal"
     vim.wo[chat.win_composer].winhl =
-      "Normal:PaseoCard,NormalFloat:PaseoCard,FloatBorder:PaseoCardBorder"
+      "Normal:PaseoCard,NormalFloat:PaseoCard,FloatBorder:PaseoComposerBorder"
   end)
+
+  -- Grow and shrink with what is typed. `TextChangedP` is in the list because
+  -- a completion popup inserting a multi-line snippet changes the buffer
+  -- without either of the other two firing.
+  api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "TextChangedP" }, {
+    group = api.nvim_create_augroup("PaseoComposerGrow", { clear = true }),
+    buffer = chat.composer,
+    desc = "paseo: grow the composer with its content",
+    callback = function()
+      M.resize_composer(chat)
+    end,
+  })
 
   for _, win in ipairs { chat.win_conversation, chat.win_composer } do
     for option, value in pairs {

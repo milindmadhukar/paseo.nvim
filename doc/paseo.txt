@@ -49,15 +49,16 @@ Hard:
   - gitsigns.nvim, for finding the hunk under the cursor (|:Paseo-ask|)
   - nvzone/volt, for the chat chrome, the panels and the permission dialog
 
-Optional, for the Paseo backend:
+Optional, for the agent half:
   - the `paseo` daemon, running
   - `bun`, or node >= 22, for the sidecar
 
 Optional, for pasting images into the composer:
   - `wl-paste` (Wayland), `xclip` (X11) or `pngpaste` (macOS)
 
-Run `:checkhealth paseo` to see what is present. Missing optional pieces
-degrade the plugin to the `local` backend; they do not break it.
+Run `:checkhealth paseo` to see what is present. Missing optional pieces cost
+you the surfaces that need them; the review half is local git and works with
+nothing running.
 
 ==============================================================================
 3. SETUP                                                         *paseo-setup*
@@ -73,8 +74,6 @@ installs a DirChanged hook that drops the resolved-repo cache.
 
 Defaults: >lua
     require("paseo").setup {
-      backend = "paseo",
-
       paseo = {
         -- url and home are absent by default: absent means "discover it".
       },
@@ -82,11 +81,16 @@ Defaults: >lua
       ui = {
         surface = "float",        -- or "sidebar"
 
+        style = "plate",          -- frame language
+        colors = "auto",          -- or "fixed": ignore the colourscheme
+        palette = {},             -- the eight base colours, by name
+        theme = {},               -- highlight group overrides
+
         float = {
           width = 94,             -- percent of the editor, 1-100
           height = 86,
           -- row and col are absent: absent means centred
-          composer = 7,           -- rows the composer gets
+          composer = 7,           -- MOST rows the composer may grow to
           zindex = 30,            -- below the 50 a float gets by default
           backdrop = true,
           tab_keys = true,
@@ -123,13 +127,6 @@ Defaults: >lua
       },
     }
 <
-                                                        *paseo-config.backend*
-backend                                            string, default `"paseo"`
-
-    `"paseo"` runs agents through the Paseo daemon. `"local"` runs them in a
-    floaterm terminal and pastes prompts with `nvim_chan_send`. Paseo is the
-    default and gets every feature.
-
                                                       *paseo-config.paseo.url*
 paseo.url                                                 string, unset
 
@@ -208,6 +205,20 @@ ui.style                                 string|table, default `"plate"`
     surface's own colour. Dropping the border instead takes that padding with
     it and puts content hard against the window edge.
 
+    A DRAWN edge is painted with `PaseoSurfaceBorder`, which carries the
+    surface's own background. It used to be `PaseoBorder`, which has none, so
+    the glyphs rendered on the EDITOR's background and the framed styles lost
+    the one cell of padding the unframed ones get -- which is what made the
+    frame read as a hairline pasted onto the editor rather than as the edge of
+    a raised sheet.
+
+    There is no rule under the tab bar in ANY style. It survived for the
+    framed ones and was the "three frame weights in one window" complaint in
+    miniature: the float's own edge, a full-bleed rule directly under the
+    pills, and a box around every card below it. The pills are a row of filled
+    shapes and delimit the bar by themselves. The ROW stays -- dropping it
+    would shift every section below, and volt does not recompute those.
+
     Every style produces the SAME number of rows for the same content. That is
     not tidiness: volt records a section's start row when the layout is
     measured and never recomputes it, so a card whose height depended on the
@@ -215,16 +226,64 @@ ui.style                                 string|table, default `"plate"`
 
     See |paseo-colours|.
 
+                                                     *paseo-config.ui.colors*
+ui.colors                                        string, default `"auto"`
+
+    Where the eight base colours come from.
+
+    `"auto"`     Derive them from the colourscheme. This is what makes the
+                 dashboard look like it belongs to whatever you have loaded,
+                 and it is re-derived on every |ColorScheme|.
+    `"fixed"`    Use the plugin's own instead, and do not follow the
+                 colourscheme at all. For a theme whose colours the agent
+                 surfaces read badly in, or which simply is not what you want
+                 them to look like. >lua
+        ui = { colors = "fixed" }
+<
+    See |paseo-colours|.
+
+                                                    *paseo-config.ui.palette*
+ui.palette                                            table, default `{}`
+
+    The eight base colours, by name, laid over WHICHEVER source
+    |paseo-config.ui.colors| names. Each is a `#rrggbb` string; anything
+    absent comes from that source. >lua
+        ui = { palette = { blue = "#7aa2f7" } }
+        ui = { colors = "fixed", palette = { bg = "#1a1b26" } }
+<
+    `red`      Failure, and a destructive permission.
+    `green`    Success, and the agent's own voice.
+    `blue`     Your voice, headings, paths, and the seed the eight identity
+               swatches are rotated off.
+    `yellow`   Running, and a warning.
+    `grey`     Everything that has to recede: dividers, labels, disabled rows.
+    `border`   Frames, where a style draws them.
+    `text`     Body text.
+    `bg`       The background the five elevation tiers are stepped off, and
+               what every accent ramp blends towards. Leave it UNSET on a
+               transparent theme: absent is what tells the derivation there is
+               nothing to build tiers on, and painting an opaque rectangle
+               over someone's wallpaper is worse than having no card.
+
+    This is a TOKEN, not a highlight group, and that is the difference between
+    it and |paseo-config.ui.theme|. Everything below still runs on what you set
+    here -- the elevation ladder, the four accent ramps, the contrast
+    corrections -- so naming two colours still gets a coherent set, and the
+    colour reaches every group derived from it rather than the one group you
+    happened to name.
+
                                                       *paseo-config.ui.theme*
 ui.theme                                              table, default `{}`
 
     Highlight overrides, laid over the derived groups AFTER derivation and
-    re-applied on every |ColorScheme|. >lua
+    re-applied on every |ColorScheme|. The LAST word. >lua
         ui = { theme = { PaseoChipOn = { bg = "#204a26" } } }
 <
     A config key rather than "set the group again after setup()", which is
     what the docs used to say and which quietly stopped working the moment you
-    changed colourscheme -- the derivation re-runs and overwrote it.
+    changed colourscheme -- the derivation re-runs and overwrote it. The same
+    is true of |paseo-config.ui.colors| and |paseo-config.ui.palette|: all
+    three are read on every re-derivation.
 
     See |paseo-colours| for the group names.
 
@@ -296,8 +355,13 @@ ui.float.col                                          number, unset
                                               *paseo-config.ui.float.composer*
 ui.float.composer                                     number, default `7`
 
-    Rows the composer gets. The conversation gets what is left of the box
-    after the header, the tab bar, the footer and this.
+    The MOST rows the composer may take. It is one row when empty and grows
+    with what you type, up to this; the conversation takes back whatever it is
+    not using. See |paseo-chat-composer|.
+
+    A box standing at its full height over an empty buffer was the largest and
+    emptiest shape on the screen, which is why this is a ceiling and not a
+    fixed size.
 
                                                 *paseo-config.ui.float.zindex*
 ui.float.zindex                                       number, default `30`
@@ -349,7 +413,7 @@ ui.sidebar                                                          table
 ui.terminal                                                         table
 
     The terminal surface -- |paseo-terminals|. `width` and `height` are
-    percentages of the editor, 1-100, the same unit |paseo-config.ui.float|
+    percentages of the editor, 1-100, the same unit |paseo-config.ui.float.width|
     takes, so a number means the same thing in both.
 
     `list` is the ONE exception and is in CELLS. The rail holds names, and 10%
@@ -1082,13 +1146,6 @@ The sidecar starts on the first request that needs it and is stopped on
 `VimLeavePre`. Agents it created keep running on the daemon and stay visible in
 Paseo; closing Neovim does not archive them.
 
-                                                         *paseo-bridge-local*
-With `backend = "local"` there is no sidecar: prompts go to a floaterm terminal
-through `nvim_chan_send`, wrapped in bracketed paste so a multi-line prompt
-arrives as one block rather than being submitted line by line. No streaming,
-no session reuse. It exists so a sidecar that cannot start is a degradation
-rather than an outage.
-
 ==============================================================================
 10. THE CHAT WINDOW                                              *paseo-chat*
 
@@ -1106,15 +1163,36 @@ you are doing.
 The header ~
 
 The line above the conversation, drawn by both surfaces from one builder so
-they cannot disagree about which mode the session is in. While a turn is
-running it spins and counts: >
+they cannot disagree about which mode the session is in. It says what the
+session IS: >
 
-    ⠹ 14s  claude/sonnet-5 · acceptEdits · 󰧑 think · ⚡
+      claude/sonnet-5 · acceptEdits · 󰧑 think · ⚡
 <
-The count is the point. A static dot looked the same at two seconds and at
-two minutes, so a wedged turn and a working one were the same picture and the
-only way to tell was to open the app. A pending permission replaces the
-spinner with `` needs you``.
+A pending permission shouts from here -- `` needs you`` -- because then the
+agent is not working, it is waiting for YOU.
+
+                                                          *paseo-chat-status*
+The status ~
+
+What the turn is DOING -- a spinner and how long it has been running -- lives
+at the BOTTOM, on the right of the hint bar: >
+
+     1-6  tabs    󰌒  cycle    Ctrl + f  sidebar    q  close       ⠹ 28m 49s
+<
+The count is the point. A static dot looked the same at two seconds and at two
+minutes, so a wedged turn and a working one were the same picture and the only
+way to tell was to open the app.
+
+It is HUMANISED for the same reason: `1729s` is arithmetic homework, `28m 49s`
+is a duration. Past an hour the seconds are dropped (`1h 24m`) -- at that scale
+they are noise, and dropping them stops the field growing a third segment that
+shifts everything beside it.
+
+At the bottom rather than in the header because it is the one field that
+changes ten times a second, and among five static ones it pushed the provider
+sideways every time the count gained a digit. The SIDEBAR has no footer to put
+it in -- it is a split whose only chrome is that winbar -- so there it goes on
+the end of the header instead.
 
                                                            *paseo-chat-float*
 The FULL SCREEN surface -- the DEFAULT -- is `:Paseo chat`, `:Paseo dash`, or
@@ -1284,17 +1362,56 @@ These are bound only while that tab is showing, and whatever they displaced
 is put back on the way out -- the six panels share one buffer, so a `<CR>`
 left bound here would try to apply a session setting from the Changes tab.
 
-The composer is an ORDINARY buffer, so your insert-mode keymaps, completion,
+                                                        *paseo-chat-composer*
+The composer ~
+
+It is an ORDINARY buffer, so your insert-mode keymaps, completion,
 abbreviations and undo all work. That is the difference between writing a
 prompt and filling in a text field, and it is why |:Paseo-ask| does not go
 through `vim.ui.input`.
+
+On the full-screen surface it GROWS with the prompt -- one row when empty, up
+to |paseo-config.ui.float.composer| rows as you fill it, and back again when
+you send: >
+
+    ╭ ❯ ──────────────────────────────────────────────────────────────────╮
+    │ why is the ref suite opening a file it then deletes?                 │
+    ╰──────────────────────────────────────────────── ⏎ / Ctrl + s  send ╯
+<
+A box standing at its configured height over an empty buffer was the largest
+and emptiest shape on the screen: seven rows of flat card colour, no edge, and
+nothing saying you could type in it. Wrapped lines count towards the height --
+`wrap` is on, so a 300-column paragraph is four rows on screen, and asking the
+buffer for its line count would say one and leave the cursor off the bottom.
+
+The border is DRAWN rather than painted fg == bg, and it carries both things an
+input has to say: a prompt chevron for what it is, and the send keys for how to
+use it. BOTH keys, because they are not interchangeable -- `<CR>` sends from
+normal mode and opens a line from insert mode, so `<C-s>` is the one that
+always works. They live in the frame rather than on a row of their own, which
+would cost the conversation a row to say something true the whole time.
+
+Its groups are `PaseoComposerBorder`, `PaseoComposerLabel`,
+`PaseoComposerHint` and `PaseoComposerKey` -- separate from the card's, so
+|paseo-config.ui.theme| can move the composer without moving every card.
 
 The conversation is an ordinary buffer too, on purpose: `y`, `/` and soft-wrap
 work on an agent's reply. Volt draws the chrome around it -- the header, the
 panels, the permission dialog -- because virtual text cannot be yanked.
 
                                                           *paseo-colours*
-Every colour is DERIVED, never hardcoded, and nothing here depends on NvChad.
+Every colour is DERIVED from your colourscheme by default, and nothing here
+depends on NvChad. Three keys control it, and they are different questions:
+
+    |paseo-config.ui.colors|    where the eight base colours come from
+    |paseo-config.ui.palette|   those eight colours, by name
+    |paseo-config.ui.theme|     finished highlight groups
+
+`palette` sets a TOKEN and `theme` sets a GROUP. Everything below still runs on
+a token, so naming two colours gets a coherent set and the colour reaches every
+group derived from it; a group override is the one group you named.
+
+The rest of this section is what `colors = "auto"` does.
 
 BACKGROUNDS are an elevation ladder stepped off `Normal`: the editor, the
 surface two points away, a card five, a chip eight, the selected row eleven.
