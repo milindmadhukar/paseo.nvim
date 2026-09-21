@@ -613,6 +613,13 @@ local function test_usage_panel()
             { id = "weekly", label = "Weekly", usedPct = 91 },
           },
         },
+        {
+          providerId = "codex",
+          displayName = "Codex",
+          status = "available",
+          planLabel = "Pro",
+          windows = { { id = "primary", label = "Session", usedPct = 12 } },
+        },
       },
     })
   end
@@ -654,6 +661,15 @@ local function test_usage_panel()
   truthy("ui: the plan name is on the limits card", context_only:find("Max 20x", 1, true) ~= nil)
   truthy("ui: with the five-hour window", context_only:find("Session", 1, true) ~= nil)
   truthy("ui: and the weekly one", context_only:find("Weekly", 1, true) ~= nil)
+  -- ONLY THE PROVIDER THIS SESSION IS ON. A daemon will report on every
+  -- provider it can authenticate, and a wall of other people's quotas is
+  -- neither the question nor affordable in rows -- the body is truncated,
+  -- not scrolled.
+  truthy(
+    "ui: and nothing about a provider this session is not on",
+    context_only:find("Codex", 1, true) == nil,
+    context_only
+  )
 
   -- What `chat.lua` kept off the `usage` event, because the snapshot will not
   -- keep it. Labelled as the LAST turn, since that is what it is by then.

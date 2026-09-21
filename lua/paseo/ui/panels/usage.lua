@@ -220,78 +220,38 @@ local function limits_lines(chat, width)
     return { { { "  loading plan limits…", "PaseoDim" } } }
   end
   if limits.err then
-    return {
-      { { "  " .. limits.err, "PaseoDim" } },
-    }
+    return { { { "  " .. limits.err, "PaseoDim" } } }
   end
 
-  local list = vim.deepcopy(limits.list or {})
-  -- Yours first. `chat.provider` is `"<provider>/<model>"`.
+  -- THE PROVIDER THIS SESSION IS ON, and only that one. The daemon will
+  -- happily report on every provider it can authenticate -- a dozen of them,
+  -- if you have a dozen configured -- and a wall of other people's quotas is
+  -- not what "can I keep going" looks like. It is also rows: the body of this
+  -- panel is truncated rather than scrolled, so every card for a provider you
+  -- are not using is a card pushing yours off the bottom.
+  --
+  -- `chat.provider` is `"<provider>/<model>"`.
   local mine = (chat.provider or ""):match "^([^/]+)"
-  table.sort(list, function(a, b)
-    local am, bm = a.providerId == mine, b.providerId == mine
-    if am ~= bm then
-      return am
-    end
-    return (a.displayName or a.providerId or "") < (b.displayName or b.providerId or "")
-  end)
-
-  local lines = {}
-  if #list == 0 then
-    lines[#lines + 1] = {
-      { "  no provider on this daemon reports plan limits", "PaseoDim" },
-    }
-    return lines
-  end
-
-  -- Two across when there is room for two readable cards, else stacked. 40 is
-  -- where a window label stops fitting beside its percentage.
-  local columns = (width >= 2 * 40 and #list > 1) and 2 or 1
-  local card_w = math.floor((width - (columns - 1) * 2) / columns)
-
-  local row, tallest = {}, 0
-  local function flush()
-    if #row == 0 then
-      return
-    end
-    for _, card in ipairs(row) do
-      widgets.card_to_height(card, tallest, card_w)
-    end
-    local cols = {}
-    for i, card in ipairs(row) do
-      cols[i] = { lines = card, w = card_w, pad = i < #row and 2 or 0 }
-    end
-    vim.list_extend(lines, widgets.grid_col(cols))
-    lines[#lines + 1] = {}
-    row, tallest = {}, 0
-  end
-
-  for _, usage in ipairs(list) do
-    local card = limits_card(usage, card_w)
-    row[#row + 1] = card
-    tallest = math.max(tallest, #card)
-    if #row == columns then
-      flush()
+  local usage
+  for _, entry in ipairs(limits.list or {}) do
+    if entry.providerId == mine then
+      usage = entry
     end
   end
-  flush()
 
-  -- `mine` may simply have no fetcher in the daemon -- fable and gemini do not
-  -- have one -- and an absence with no explanation reads as a broken panel.
-  if mine and mine ~= "" then
-    local found = false
-    for _, usage in ipairs(list) do
-      found = found or usage.providerId == mine
-    end
-    if not found then
-      lines[#lines + 1] = {
+  if not usage then
+    -- Said rather than left blank. Many providers have no quota fetcher in the
+    -- daemon at all -- fable and gemini among them -- and an absence with no
+    -- explanation reads as a panel that is broken.
+    return {
+      {
         { "  no plan limits reported for ", "PaseoDim" },
-        { mine, "PaseoCardText" },
-      }
-    end
+        { mine or "this provider", "PaseoCardText" },
+      },
+    }
   end
 
-  return lines
+  return limits_card(usage, width)
 end
 
 ---How many rows the Limits section is about to want.

@@ -153,7 +153,16 @@ local function test_theme()
         ("%s at %.2f"):format(c.grey, theme.saturation(c.grey))
       )
 
-      -- 3. "Green" has to be green. Sourcing it from `String` meant that on
+      -- 3. THE BACKGROUND IS NEVER UNKNOWN. `morning` states `Normal`'s
+      -- foreground and leaves the background to the terminal, so `bg_of`
+      -- came back nil -- and every colour derived by blending towards the
+      -- background came back nil with it, falling through to a fallback
+      -- picked for its HUE rather than its neutrality. That is how the EMPTY
+      -- half of a bar ended up drawn in `LineNr`'s brown: a quota bar at 3%
+      -- read as a quota bar at 97%.
+      truthy("ui: the background is known on " .. scheme, c.bg ~= nil)
+
+      -- 4. "Green" has to be green. Sourcing it from `String` meant that on
       -- `morning` a tool that SUCCEEDED was drawn in magenta -- the colour of
       -- a string literal, which is not a shade of "it worked". `Added` means
       -- what we mean; `String` only happens to.
@@ -172,8 +181,30 @@ local function test_theme()
   -- A bar's track is the ABSENCE of fill, so it is derived from the background
   -- rather than from the comment colour. On `morning` a comment-derived track
   -- came out pale blue and a 42% bar looked full.
-  local track = vim.api.nvim_get_hl(0, { name = "PaseoTrack" })
-  truthy("ui: the bar track is defined", track.fg ~= nil)
+  --
+  -- Checked against every scheme, and for NEUTRALITY rather than mere
+  -- existence: a track is only honest if it reads as empty, and a saturated
+  -- one reads as fill. This is the assertion that would have caught the
+  -- brown track on `morning`.
+  for _, scheme in ipairs { "habamax", "morning", "default", "desert" } do
+    if pcall(vim.cmd.colorscheme, scheme) then
+      require("paseo.ui.hl").setup()
+      local track = vim.api.nvim_get_hl(0, { name = "PaseoTrack", link = false })
+      truthy("ui: the bar track is defined on " .. scheme, track.fg ~= nil)
+      if track.fg then
+        local hex = ("#%06x"):format(track.fg)
+        truthy(
+          "ui: and reads as empty rather than as fill on " .. scheme,
+          theme.saturation(hex) <= theme.MAX_CHROME_SATURATION,
+          ("%s at %.2f"):format(hex, theme.saturation(hex))
+        )
+      end
+    end
+  end
+  if scheme_before then
+    pcall(vim.cmd.colorscheme, scheme_before)
+    require("paseo.ui.hl").setup()
+  end
 end
 
 local function test_layout()
