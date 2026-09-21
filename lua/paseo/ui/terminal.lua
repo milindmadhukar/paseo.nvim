@@ -23,7 +23,7 @@
 --- the old Terminals tab feel like a demo. What is per TERMINAL (a buffer, a
 --- libvterm channel, a subscription on the daemon) lives here, keyed by id.
 --- What is per WINDOW belongs to whatever is showing it -- see
---- |paseo.ui.termfloat|.
+--- |paseo.ui.float|, which floats it over the Chat tab.
 
 local bridge = require "paseo.bridge"
 

@@ -100,14 +100,8 @@ Defaults: >lua
         },
 
         terminal = {
-          width = 84,             -- percent of the editor, 1-100
-          height = 78,
-          -- row and col are absent: absent means centred
-          list = 22,              -- the terminal list, in CELLS
-          zindex = 45,            -- over the dashboard, under a picker
-          backdrop = true,
           keys = { next = "<C-j>", prev = "<C-k>",
-                   list = "<C-h>", terminal = "<C-l>" },
+                   sessions = "<C-s>", terminal = "<C-l>" },
           presets = {},           -- extra entries for `c`
         },
       },
@@ -348,24 +342,26 @@ ui.sidebar                                                          table
                                                 *paseo-config.ui.terminal*
 ui.terminal                                                         table
 
-    The terminal surface -- |paseo-terminals|. `width` and `height` are
-    percentages of the editor, 1-100, the same unit |paseo-config.ui.float|
-    takes, so a number means the same thing in both.
+    Terminals -- |paseo-terminals|. Two keys, because a terminal is a SESSION
+    on the dashboard rather than a surface of its own.
 
-    `list` is the ONE exception and is in CELLS. The rail holds names, and 10%
-    of a 300-column monitor is thirty columns of mostly nothing; it is clamped
-    to 16-36 and to half the box, so a narrow editor still gets a terminal.
+    `width`, `height`, `row`, `col`, `list`, `zindex` and `backdrop` are GONE
+    with the rail-and-pane window they described. A terminal is the size of
+    the dashboard, because it is the dashboard. A config still setting them
+    is harmless -- nothing reads them.
 
-    `zindex` is 45: above the dashboard's 30, because this opens over it, and
-    below the 50 telescope and `vim.ui.select` take, so the new-terminal
-    picker lands on top of it rather than underneath.
-
-    `keys` renames or disables the four navigation keys. `next`, `prev`,
-    `list` and `terminal` are bound in TERMINAL mode as well as normal, which
-    is what makes cycling worth having and also what takes them from whatever
-    is running inside. `false` leaves one unbound: >lua
+    `keys` renames or disables the navigation keys: >lua
         terminal = { keys = { next = false, prev = false } }
 <
+        next      the next session here, prev the previous
+        sessions  to the Sessions tab -- the way OUT of a terminal.
+                  This was `list`, which meant the rail
+        terminal  from the chrome back into the PTY
+
+    All are bound in TERMINAL mode as well as normal, which is what makes
+    them worth having and also what takes them from whatever is running
+    inside. Right for `claude`, wrong for `tmux`; `false` leaves one unbound.
+
     `presets` adds entries to what `c` offers, beside the shell and the
     providers the daemon reports. A string is its own command; a table may
     give a `label`, a `command` and `args`. See |paseo-terminals-presets|.
@@ -604,14 +600,13 @@ skills.method                                       `"link"`|`"copy"`, default `
 :Paseo term                                                  *:Paseo-term*
 :Paseo terminals                                        *:Paseo-terminals*
 
-    The terminal surface for this workspace, toggled: a list of the Paseo
-    terminals here down the left, and the one you are in filling the rest.
-    Several at once. See |paseo-terminals|.
+    The terminals in this workspace: the dashboard, on its Sessions tab,
+    which lists them beside the agents. Opening one shows it on the Chat tab.
+    See |paseo-terminals|.
 
-    `terminals` is the old name for it and still works. It used to mean "the
-    dashboard tab listing them"; that tab is gone, because the list belongs
-    with the agents on |paseo-chat-float|'s `3` tab, which is where Paseo
-    itself puts it.
+    It used to open a surface of its own -- a rail of names beside a terminal,
+    over the top of everything. `terminals` is the older name still and also
+    lands here; both tags are published, so both keep working.
 
 :Paseo ws [init|create|rm|ls|status]                           *:Paseo-ws*
 
@@ -1460,43 +1455,66 @@ toggled by hand is yours from then on and is never folded back under you.
 
                           *paseo-terminals* *paseo-chat-terminals*
 Paseo runs TERMINALS as well as agents -- the `claude` or `codex` sessions you
-started in the app are PTYs on the daemon -- and |:Paseo-term| is where you
-drive them. A list down the left, a bar naming what you are in, and the
-terminal filling the rest. SEVERAL AT ONCE: that is the point, and it is what
-the dashboard tab this replaced could not do.
+started in the app are PTYs on the daemon -- and A TERMINAL IS A SESSION. It
+lists on the Sessions tab beside the agents, and opening one shows it on the
+CHAT TAB, where the conversation would be. |:Paseo-term| goes to that list.
 
-In the list ~
+It used to be a surface of its own: a rail of names, a title bar, the terminal
+and a backdrop -- four windows over the top of whatever you were looking at,
+with its own geometry, its own z-index and its own keymaps. That shape was
+floaterm's, and it was the wrong one to borrow. A terminal you have to open a
+second application to reach is not a session; it is a place you get stuck, and
+the way back out was `q`.
 
-    <CR>   open the one under the cursor
-    1-9    open the nth
-    c      start a new one -- a shell, a provider's CLI, or a command
-    r      name it
-    d      kill it (asked first; something is usually running in there)
-    <C-l>  back to the terminal
-    q      close the surface
+Now there is one surface, and what changes is what fills the panel area: a
+conversation and its composer for an agent, the PTY outright for a terminal.
+
+                                                       *paseo-session-strip*
+THE SESSION STRIP, under the tab bar, is what makes that legible. One chip per
+session in this workspace, agents then terminals, the one you are in lit: >
+
+    󱙺 main   󱙺 reviewer   󰆍 lazygit   󰆍 shell        Ctrl + s  sessions
+<
+It is on EVERY tab, like the header, because "which session am I in" does not
+stop being worth answering when you look at Usage -- and a terminal has no
+transcript and no composer, so without it the dashboard could be showing a PTY
+with nothing on screen naming it. A chip is a click; `<C-s>` is the keyboard.
+
+Exactly one row, always. It degrades the way the tab bar does -- names, then
+glyphs, then a `+N` -- because volt records each section's row once and a
+strip that grew by a chip on hover would draw past the end of the buffer.
 
 In a terminal ~
 
-    <C-j>  the next one, <C-k> the previous -- bound in TERMINAL mode too
-    <C-h>  back to the list
-    <M-1>..9  open the nth
-    q      close the surface, from normal mode
+    <C-s>     the Sessions tab -- the way out
+    <C-j>     the next session here, <C-k> the previous
+    <M-1>..6  jump to a tab
+    q         close the dashboard, from normal mode
 <
-`<C-j>`, `<C-k>`, `<C-h>` and `<C-l>` are bound in terminal mode, which is the
-only way cycling is worth having -- otherwise it starts with `<C-\><C-n>`. That
-does take those keys from whatever is running inside, which is right for
-`claude` and wrong for `tmux`; `ui.terminal.keys` renames or disables any of
-them. The DIGITS are deliberately not bound in a terminal: a bare `5` there
-costs you `50k` to scroll back, and `<M-5>` reaches the same terminal.
+ALL OF THESE ARE BOUND IN TERMINAL MODE as well as normal, which is the only
+way any of them is worth having: a key you must press `<C-\><C-n>` to reach
+first is a key you do not reach. That does take them from whatever is running
+inside -- right for `claude`, wrong for `tmux` -- so any of them can be set
+`false` in |paseo-config.ui.terminal|.
+
+The DIGITS are deliberately not bound: a bare `5` in a terminal costs you
+`50k` to scroll back, and `<M-5>` reaches the same tab. `<C-c>` is not bound
+either -- it is SIGINT, and belongs to the program.
 
 `<Esc>` is never bound. It belongs to the PTY, so vim running inside one can
 still leave insert mode, and `<C-\><C-n>` is Neovim's own way out.
 
+On the Sessions tab, `c` starts a terminal, `R` renames one and `d` kills it
+(asked first -- something is usually running in there). See |paseo-chat-lists|.
+
                                                      *paseo-terminals-presets*
-`c` offers a SHELL, then one entry per provider the daemon has -- `claude` and
-`codex` today, and whatever you enable in Paseo tomorrow, because the list is
-read from the daemon rather than written here -- then anything in
-`ui.terminal.presets`, then a free-text command: >
+`c` opens a SCREEN, not a prompt -- the same card renderer every other choice
+in this plugin uses, because it was a `vim.ui.select` of bare labels opened
+over a surface that was itself an overlay. It offers a shell, then one entry
+per provider the daemon has -- `claude` and `codex` today, and whatever you
+enable in Paseo tomorrow, because the list is read from the daemon rather than
+written here -- then anything in `ui.terminal.presets`, then a free-text
+command: >
 
     ui = {
       terminal = {
@@ -1515,8 +1533,7 @@ as well. That is not belt and braces: `renameTerminal` sets a terminal's
 overwrites your name with `user@host:~/dir` within a second, and every
 terminal in one directory ends up labelled identically. The list therefore
 shows, in order: the name you gave, the stable one the daemon assigned
-(`Terminal 3`), then the live title. The BAR shows the live title beside the
-name, where there is room for it and where it is actually useful.
+(`Terminal 3`), then the live title.
 
                                                      *paseo-terminals-render*
 A terminal here is a REAL terminal. It is `nvim_open_term`, the same libvterm

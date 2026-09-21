@@ -228,15 +228,20 @@ commands.sessions = {
 }
 
 commands.term = {
-  desc = "The Paseo terminals in this workspace (toggle)",
+  desc = "The terminals in this workspace, on the Sessions tab",
   run = function()
-    require("paseo.ui.termfloat").toggle()
+    -- A terminal is a SESSION, so there is nowhere else to go: the dashboard's
+    -- Sessions tab lists the agents and the PTYs together, and opening either
+    -- shows it on the Chat tab. This used to open a rail-and-pane window of
+    -- its own, over the top of whatever you were looking at.
+    require("paseo.ui.chat").surface "float"
+    require("paseo.ui.float").select "Sessions"
   end,
 }
 
--- The old name. It used to mean "the tab listing them", and that tab is gone:
--- the list is on the Sessions tab now and the terminals are their own surface.
--- Kept because the help tag is published.
+-- The old name. It used to mean "the tab listing them"; the list is on the
+-- Sessions tab and this lands there too. Kept because the help tag is
+-- published.
 commands.terminals = commands.term
 
 commands.chat = {

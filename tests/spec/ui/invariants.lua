@@ -126,6 +126,29 @@ local function test_invariants()
   -- the actions permanently. So to_volt must hand over COPIES -- asserted by
   -- behaviour rather than by grepping for `vim.deepcopy`, which says nothing
   -- about whether the copy actually reaches volt.
+  -- THE DELETED SURFACE STAYS DELETED. `ui/termfloat.lua` was the rail-and-pane
+  -- window a terminal used to open in; a terminal is a session on the Chat tab
+  -- now, and a `require` of it would fail at the call site rather than here --
+  -- inside a keymap, on a surface that is otherwise working.
+  local resurrected = {}
+  for _, path in ipairs(vim.fn.glob(root_dir .. "/lua/**/*.lua", false, true)) do
+    local fd = io.open(path, "r")
+    if fd then
+      local text = fd:read "*a"
+      fd:close()
+      if text:find "paseo%.ui%.termfloat" then
+        resurrected[#resurrected + 1] = path:sub(#root_dir + 2)
+      end
+    end
+  end
+  table.sort(resurrected)
+  eq("ui: nothing requires the terminal surface that was deleted", resurrected, {})
+  eq(
+    "ui: and the file itself is gone",
+    vim.uv.fs_stat(root_dir .. "/lua/paseo/ui/termfloat.lua"),
+    nil
+  )
+
   local source_line = { { "click me", "PaseoKey", { click = function() end } } }
   local handed = render.to_volt { source_line }
   truthy("ui: to_volt hands volt a different table", handed[1] ~= source_line)

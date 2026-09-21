@@ -19,15 +19,28 @@
 
 local M = {}
 
+---The chrome's parts, each one row tall.
+---
+---Named rather than summed into a literal, which is what `above = 3` was --
+---in the file whose whole argument is that the number should be derived from
+---parts rather than written down. Adding the session strip was the change that
+---made that difference real: with a literal it is "find every 3 and hope".
+M.PARTS = { header = 1, tabs = 1, rule = 1, strip = 1, footer = 1 }
+
 ---Rows the chrome spends on itself, above and below the body.
 ---
----Above: the header, the tab bar, the rule under it. Below: the footer.
-M.CHROME = { above = 3, below = 1 }
+---Above: the header, the tab bar, the rule under it, the session strip.
+---Below: the footer.
+M.CHROME = {
+  above = M.PARTS.header + M.PARTS.tabs + M.PARTS.rule + M.PARTS.strip,
+  below = M.PARTS.footer,
+}
 
 ---@class paseo.Layout.Rows
 ---@field header integer    Buffer row of the header.
 ---@field tabs integer      Buffer row of the tab bar.
 ---@field rule integer      Buffer row of the rule under the tabs.
+---@field strip integer     Buffer row of the session strip.
 ---@field body_first integer  First buffer row the active panel gets.
 ---@field body_last integer   Last one.
 ---@field body_height integer
@@ -42,25 +55,12 @@ function M.rows(height)
     header = 1,
     tabs = 2,
     rule = 3,
+    strip = 4,
     body_first = M.CHROME.above + 1,
     body_last = M.CHROME.above + body_height,
     body_height = body_height,
     footer = height,
   }
-end
-
----Turn a cursor line in the chrome buffer into an index into the panel's list.
----
----This is what `local at = row - 5` was. The extra row over `body_first` is
----the panel's own heading, which every list panel draws before its first item
------ so the caller passes how many rows its own header occupies rather than
----folding that into a constant nobody can name.
----@param row integer      1-based cursor line.
----@param heading integer  Rows the panel draws before its first item.
----@return integer|nil     1-based index, or nil when the cursor is off the list.
-function M.item_at(row, heading)
-  local at = row - M.CHROME.above - (heading or 0)
-  return at >= 1 and at or nil
 end
 
 ---The screen row a 1-based BUFFER row of the chrome sits on.
@@ -75,8 +75,13 @@ function M.screen_row(g, row)
 end
 
 ---Screen geometry for the panes floated over the body.
+---
+---`body` is the whole of it, which is what a session with no composer gets --
+---a terminal fills the panel area outright. It shares `col` and `width` with
+---the conversation deliberately: switching between an agent session and a
+---terminal one must not shift the left edge under you.
 ---@param g table  The float's geometry.
----@return { top: integer, col: integer, width: integer, conversation: integer, composer_row: integer, composer: integer }
+---@return { top: integer, col: integer, width: integer, conversation: integer, composer_row: integer, composer: integer, body: { row: integer, col: integer, width: integer, height: integer } }
 function M.panes(g)
   local rows = M.rows(g.height)
   local top = M.screen_row(g, rows.body_first)
@@ -88,14 +93,16 @@ function M.panes(g)
   -- `composer_h` rows above it.
   local composer_row = M.screen_row(g, rows.body_last) - composer_h
 
+  local col, width = g.col + 2, g.width - 4
   return {
     top = top,
-    col = g.col + 2,
-    width = g.width - 4,
+    col = col,
+    width = width,
     -- One row of gap between the conversation and the composer's top border.
     conversation = math.max(5, composer_row - 1 - top),
     composer_row = composer_row,
     composer = composer_h,
+    body = { row = top, col = col, width = width, height = rows.body_height },
   }
 end
 

@@ -173,8 +173,10 @@ local function sections(chat)
       right[#right + 1] = { "finished", "PaseoDim" }
     end
 
+    local here = require("paseo.ui.float").session()
     terminal_rows[#terminal_rows + 1] = {
       id = "terminal." .. item.id,
+      active = here ~= nil and here.kind == "terminal" and here.id == item.id,
       cells = {
         { "    " },
         { KIND.terminal[1] .. " ", KIND.terminal[2] },
@@ -182,15 +184,18 @@ local function sections(chat)
         { terminals.label(item), nil },
       },
       right = right,
+      -- A terminal is a SESSION: opening one points the Chat tab at it, the
+      -- same way opening an agent does. It used to open a surface of its own,
+      -- over the top of this one.
       activate = function()
-        require("paseo.ui.termfloat").open { root = chat.root, id = item.id }
+        require("paseo.ui.float").show_session { kind = "terminal", id = item.id }
       end,
       keys = {
         [KEYS.rename] = function()
-          require("paseo.ui.termfloat").rename(item.id)
+          terminals.rename(item.id)
         end,
         [KEYS.kill] = function()
-          require("paseo.ui.termfloat").kill(item.id)
+          terminals.kill(item.id)
         end,
       },
     }
@@ -235,9 +240,13 @@ local function source(chat)
     -- that question is most annoying.
     verbs = {
       [KEYS.terminal] = function()
-        local termfloat = require "paseo.ui.termfloat"
-        termfloat.open { root = chat.root }
-        termfloat.new()
+        local float = require "paseo.ui.float"
+        local size = float.body_size()
+        require("paseo.ui.newterm").open({ root = chat.root, size = size }, function(id)
+          if id then
+            float.show_session { kind = "terminal", id = id }
+          end
+        end)
       end,
       [KEYS.agent] = function()
         new_agent(chat)
