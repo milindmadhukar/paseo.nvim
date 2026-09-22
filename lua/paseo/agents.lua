@@ -92,21 +92,69 @@ function M.ready()
   return subscribed
 end
 
+---The statuses that mean the agent is DOING something, as the daemon spells
+---them. One table, because two lists of these drift and then two surfaces
+---disagree about whether the same session is busy.
+local WORKING = {
+  running = true,
+  starting = true,
+  initializing = true,
+  queued = true,
+  working = true,
+  busy = true,
+  in_progress = true,
+}
+
 ---Agent sessions whose work is live, or whose work is waiting on the user.
 ---@return table[]
 function M.active()
-  local working = {
-    running = true,
-    starting = true,
-    initializing = true,
-    queued = true,
-    working = true,
-    busy = true,
-    in_progress = true,
-  }
   return vim.tbl_filter(function(agent)
-    return agent.requiresAttention or working[agent.status] == true
+    return agent.requiresAttention or WORKING[agent.status] == true
   end, M.all())
+end
+
+---Is anything the daemon knows about actually WORKING?
+---
+---Narrower than `M.active`, which also counts a session waiting on you: this
+---is the question "does anything on screen need animating", and a permission
+---prompt sitting there does not move.
+---@return boolean
+function M.busy()
+  for _, agent in ipairs(M.all()) do
+    if WORKING[agent.status] == true then
+      return true
+    end
+  end
+  return false
+end
+
+---What the agents under `root` are doing, as ONE word.
+---
+---The question a workspace row asks: it has no room for a list of sessions and
+---you are not reading it for one, you are looking down the column for the one
+---that needs you.
+---
+---`"none"` is "you have never opened an agent here" and is deliberately not
+---`"idle"` -- a workspace with a finished session in it and one you have never
+---touched are different answers, and the glyphs for them differ.
+---@param root string
+---@return "attention"|"working"|"idle"|"none"
+function M.state(root)
+  local list = M.for_root(root)
+  if #list == 0 then
+    return "none"
+  end
+  local working = false
+  for _, agent in ipairs(list) do
+    -- Needing you OUTRANKS being busy, and is checked across the whole list
+    -- before anything else is answered: a workspace with one agent waiting on
+    -- a permission and three running says the permission.
+    if agent.requiresAttention then
+      return "attention"
+    end
+    working = working or WORKING[agent.status] == true
+  end
+  return working and "working" or "idle"
 end
 
 ---Copy an agent id for Paseo's cross-agent prompting workflow.

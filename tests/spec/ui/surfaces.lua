@@ -978,6 +978,26 @@ local function test_buffer_surface()
   eq("buffer: and :Paseo buf swaps back", float.mount(), "buffer")
   float.close()
   settle()
+
+  -- REACHING THE SESSION LIST MUST NOT MOVE YOU OFF THE MOUNT YOU ARE ON.
+  -- `<C-s>` used to write `chat.surface = "float"` and open one, so the key
+  -- that gets you to the list from the buffer dashboard was also the key that
+  -- threw you out of it -- and because its guard was the TAB-AWARE `is_open`,
+  -- it fired even when the dashboard was up, just on another tab page. Nothing
+  -- covered this, which is how it shipped.
+  chat = new_chat()
+  float.open(chat, { mount = "buffer" })
+  require("paseo.ui.chat").sessions(chat)
+  eq("buffer: the session list keeps the buffer mount", float.mount(), "buffer")
+  eq("buffer: and is the tab it says it is", float.tab(), "Agents & terminals")
+  -- And what it recorded as this chat's home is the buffer mount, not the
+  -- float it used to be dragged onto.
+  eq("buffer: and records the buffer as where the chat lives", chat.surface, "buffer")
+  float.close()
+  settle()
+  while #api.nvim_list_tabpages() > tabs_before do
+    vim.cmd "tabclose!"
+  end
   while #api.nvim_list_tabpages() > tabs_before do
     vim.cmd "tabclose!"
   end

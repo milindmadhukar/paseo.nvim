@@ -18,6 +18,7 @@
 local agents = require "paseo.agents"
 local icons = require "paseo.ui.icons"
 local list = require "paseo.ui.list"
+local render = require "paseo.ui.render"
 local widgets = require "paseo.ui.widgets"
 
 local M = {}
@@ -76,6 +77,52 @@ local function shape(ws)
     return ("%d repos"):format(#(ws.members or {}))
   end
   return ws.ownedWorktree and "worktree" or "local"
+end
+
+---What a workspace is DOING, as one cell.
+---
+---Four answers, and the glyphs come from the registry so a running workspace
+---and a running tool card are the same shape. The spinner is the only one that
+---moves, and it is the only one that has to: a filled circle and a hollow one
+---are both finished states and say all they have to say standing still.
+---@param state "attention"|"working"|"idle"|"none"
+---@return table  A single cell.
+local function status_cell(state)
+  if state == "attention" then
+    return { icons.status.permission .. " ", "PaseoDanger" }
+  end
+  if state == "working" then
+    return { widgets.spinner() .. " ", "PaseoToolRunning" }
+  end
+  if state == "idle" then
+    -- OPENED, and nothing running in it. A filled circle, against the hollow
+    -- one below for a workspace you have never started an agent in -- the
+    -- difference the `agents.summary` text could only make by being absent.
+    return { icons.status.completed .. " ", "PaseoToolOk" }
+  end
+  return { icons.status.pending .. " ", "PaseoDim" }
+end
+
+---The row's columns: what it is doing, the name, the badge for what KIND of
+---workspace it is, and what its agents are doing in words.
+---
+---`render.truncate` and `render.pad` rather than `string.format`, because both
+---of them count display columns -- see the widths in `sections`.
+---@param ws table
+---@param mine boolean
+---@param w_name integer
+---@param w_shape integer
+---@return table[]
+local function name_and_badge(ws, mine, w_name, w_shape)
+  local hl = mine and "PaseoAgent" or nil
+  local cells = { status_cell(agents.state(ws.directory or "")) }
+  vim.list_extend(cells, render.pad(render.truncate({ { ws.name or "", hl } }, w_name), w_name, hl))
+  cells[#cells + 1] = { "  ", hl }
+  -- Padded in the badge's own highlight, which is what `%-9s` did by having
+  -- the spaces inside the same cell.
+  vim.list_extend(cells, render.pad({ { shape(ws), "PaseoBadge" } }, w_shape, "PaseoBadge"))
+  cells[#cells + 1] = { "  " .. agents.summary(ws.directory or ""), "PaseoDim" }
+  return cells
 end
 
 ---@param ws table
@@ -148,9 +195,19 @@ local function sections(chat)
   -- Widths from the data, not guessed: names run from `ui` to
   -- `fetch-latest-and-prune`, and a fixed column is either ragged or
   -- truncating.
-  local w_name = 0
+  --
+  -- MEASURED AND APPLIED IN THE SAME UNIT, which is the half that was wrong.
+  -- The widths came from `nvim_strwidth` -- display columns -- and were
+  -- applied with `("%-34s"):format(...)`, which pads to a count of BYTES. Any
+  -- name with a multibyte character in it was padded short and put the badge
+  -- beside it out of line with every other row. `%-Ns` also does not
+  -- truncate, so the clamp below did nothing to a name longer than it and the
+  -- badge was simply shoved right by the overflow -- which is the ragged
+  -- column you see with one long workspace name in the list.
+  local w_name, w_shape = 0, 0
   for _, ws in ipairs(known) do
     w_name = math.max(w_name, vim.api.nvim_strwidth(ws.name or ""))
+    w_shape = math.max(w_shape, vim.api.nvim_strwidth(shape(ws)))
   end
   w_name = math.min(w_name, 34)
 
@@ -181,11 +238,7 @@ local function sections(chat)
       active = mine,
       -- The gutter -- the indent and the "you are in this one" bar -- belongs
       -- to |paseo.ui.list|, which draws it outside the focus band.
-      cells = {
-        { ("%-" .. w_name .. "s  "):format(ws.name or ""), mine and "PaseoAgent" or nil },
-        { ("%-9s"):format(shape(ws)), "PaseoBadge" },
-        { "  " .. agents.summary(ws.directory or ""), "PaseoDim" },
-      },
+      cells = name_and_badge(ws, mine, w_name, w_shape),
       activate = function()
         if not ws.directory or ws.directory == "" then
           return vim.notify("paseo: that workspace has no directory", vim.log.levels.WARN)
@@ -230,6 +283,12 @@ local function sections(chat)
       -- workspaces group by eye before they are read.
       swatch = key,
       title = key ~= "" and key or "Workspaces",
+      -- AND A LINE UNDER IT. The swatch and a blank line were the whole of the
+      -- separation, which reads as one list that happens to have headings in
+      -- it rather than as one group per project -- the complaint was that
+      -- there is no isolation between projects, and the grouping was already
+      -- here. This is what makes it visible.
+      rule = true,
       rows = group.rows,
     }
   end

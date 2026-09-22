@@ -286,14 +286,18 @@ local function test_meter()
   truthy("composer: with a clock", recording:find("0:0", 1, true) ~= nil, recording)
   truthy("composer: and how to stop", recording:find("stop", 1, true) ~= nil, recording)
 
-  -- THE BOX ITSELF BECOMES THE VISUALISER, as virtual text -- never as
-  -- written lines. The composer holds your draft, and a visualiser that typed
-  -- itself into the buffer would be indistinguishable from one that ate it.
+  -- ONE METER, and it is the one on the bar. The box used to carry a
+  -- full-width copy of the same wave, and two rows of blocks answering the
+  -- same voice is the same information twice in the same glance.
   vim.api.nvim_buf_set_lines(chat.composer, 0, -1, false, { "half a question" })
   composer.push_level(chat, 0.4)
   local ns = vim.api.nvim_create_namespace "paseo.composer.voice"
   local marks = vim.api.nvim_buf_get_extmarks(chat.composer, ns, 0, -1, { details = true })
-  truthy("composer: the box carries the wave while recording", #marks == 1, #marks)
+  truthy("composer: the box draws no second wave while recording", #marks == 0, #marks)
+  truthy(
+    "composer: and the bar's meter is drawn from the levels",
+    render.concat(composer.bar(chat, 90)):find(require("paseo.ui.style").WAVE[1], 1, true) ~= nil
+  )
   eq(
     "composer: and the draft is untouched",
     vim.api.nvim_buf_get_lines(chat.composer, 0, -1, false),

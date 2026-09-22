@@ -421,6 +421,21 @@ end
 ---@param levels number[]  Each 0..1, oldest first.
 ---@param opts? { w?: integer, hl?: string, idle?: string, loud?: string }
 ---@return table[]
+---Which spinner frame this moment is on.
+---
+---OFF THE CLOCK rather than off a counter, so every surface drawing the same
+---wait draws the same frame, and a repaint that happens for some other reason
+---does not shunt the animation forward a step. Ten frames at 100ms is a round
+---second a cycle, which is what makes an elapsed counter beside one readable.
+---
+---Here rather than in |paseo.ui.animate|: the spinner is information and not
+---decoration, so it is never disabled with the rest of the motion.
+---@return string
+function M.spinner()
+  local frames = require("paseo.ui.icons").spinner
+  return frames[math.floor(vim.uv.now() / 100) % #frames + 1]
+end
+
 function M.waveform(levels, opts)
   opts = opts or {}
   local width = math.max(1, math.floor(opts.w or #levels))

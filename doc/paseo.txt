@@ -738,8 +738,8 @@ skills.method                                       `"link"`|`"copy"`, default `
 :Paseo buf                                                    *:Paseo-buf*
 :Paseo tab                                                    *:Paseo-tab*
 
-    Toggle the chat on the full-screen surface, in a window of its own. The
-    same dashboard as |:Paseo-dash| in a real buffer you can navigate to --
+    Toggle the dashboard on its BUFFER MOUNT, in a window of its own. The
+    same dashboard as |:Paseo-dash|, in a real buffer you can navigate to --
     see |paseo-chat-buffer|. Two names for one command: some people reach for
     what it IS, some for where it goes.
 
@@ -824,9 +824,8 @@ skills.method                                       `"link"`|`"copy"`, default `
 :Paseo terminals                                        *:Paseo-terminals*
 
     The terminals in this workspace: the dashboard, on its Agents &
-    terminals tab,
-    which lists them beside the agents. Opening one shows it on the Chat tab.
-    See |paseo-terminals|.
+    terminals tab, which lists them beside the agents. Opening one shows it
+    on the Chat tab. See |paseo-terminals|.
 
     It used to open a surface of its own -- a rail of names beside a terminal,
     over the top of everything. `terminals` is the older name still and also
@@ -1044,8 +1043,19 @@ These names follow Paseo's model:
                    module or protocol names.
 
     Tab            A Paseo UI surface presenting an agent session. It is NOT a
-                   Neovim tab page. The dashboard sections are UI tabs too;
+                   Neovim TAB PAGE. The dashboard sections are UI tabs too;
                    neither kind is an isolation boundary.
+
+    Dashboard      paseo.nvim's full-screen surface: six tabs, the session
+                   strip and the panes. One thing, on one of two MOUNTS.
+
+    Mount          Where the dashboard is drawn -- `float`, over your code, or
+                   `buffer`, in a window of its own. Same chrome, same tabs,
+                   same keys; only the window differs. See |paseo-chat-float|
+                   and |paseo-chat-buffer|.
+
+    Sidebar        The narrow surface beside your code. A DIFFERENT surface
+                   from the dashboard, not a third mount of it.
 
     Terminal       A daemon-owned PTY in a workspace. It appears beside agent
                    sessions but is not an agent.
@@ -1161,9 +1171,25 @@ is, and a workspace made in the app lands in the same group as one made here.
                                                        *paseo-workspaces-panel*
 On the Workspaces tab (`6`) ~
 
-Each group is a heading, with its workspaces under it. Two destructive acts,
-deliberately in different places because they are not two strengths of one
-thing:
+Each group is a heading with a hairline under it, and its workspaces below
+that. The rule is there because a swatch and a blank line alone read as one
+list that happens to have headings in it, rather than as one group per
+project.
+
+EVERY ROW SAYS WHAT IT IS DOING, in the first cell, from the same glyph
+registry the timeline's tool cards use: >
+
+     ⠙  something in this workspace is working, right now
+     󰀦  something needs you -- a permission, a question
+     󰗠  opened, and nothing running in it
+     󰄰  you have never started an agent here
+<
+Only the first of those moves, and only while something is actually running --
+a timer that repaints a tab nobody is looking at is a leak, and the two
+finished states say all they have to say standing still.
+
+Two destructive acts, deliberately in different places because they are not
+two strengths of one thing:
 
     <CR>            open a chat on the workspace under the cursor
     d               archive it. Retires that unit of work, and takes its
@@ -1513,16 +1539,16 @@ twitch rather than a warning. |paseo-chat-usage| is where a context window in
 trouble is worth looking at.
 
                                                            *paseo-chat-float*
-The FULL SCREEN surface -- the DEFAULT -- is `:Paseo chat`, `:Paseo dash`, or
-`<C-f>` from the sidebar. The same conversation, under the same header, plus a
-tab for every other thing Paseo knows: >
+The DASHBOARD on its FLOAT MOUNT -- the DEFAULT -- is `:Paseo chat`,
+`:Paseo dash`, or `<C-f>` from the sidebar. The same conversation, under the
+same header, plus a tab for every other thing Paseo knows: >
 
-    1 Chat        the conversation and composer
-    2 Sessions    the agents AND terminals here, live -- open one
-    3 Settings    mode, thinking level, model and feature toggles
-    4 Changes     what is changed on disk -- open one
-    5 Usage       context window, tokens, cost and what is left of the plan
-    6 Workspaces  every workspace, and the repos in this unit of work
+    1 Chat                  the conversation and composer
+    2 Agents & terminals    the agents AND terminals here, live -- open one
+    3 Settings              mode, thinking level, model and feature toggles
+    4 Changes               what is changed on disk -- open one
+    5 Usage                 context window, tokens, cost and what is left
+    6 Workspaces            every workspace, and this unit of work's repos
 <
 `1`-`6` jump, `<M-1>`-`<M-6>` and `<Tab>`/`<S-Tab>` do the same, and
 everything on screen that does something responds to a CLICK as well -- the
@@ -1532,12 +1558,12 @@ cursor in the composer, and a key bound only to a window you are never in is a
 key that does not work.
 
                                                           *paseo-chat-buffer*
-The BUFFER surface is the same dashboard in a real WINDOW -- `:Paseo buf`, or
-`ui.surface = "buffer"`. Same chrome, same six tabs, same panes, same keys;
-the difference is what it is mounted on. It takes over the window you are
-standing in, hides the editor's tabline and statusline, and fills what is
-left, so it gets the whole screen rather than the 94% a centred float leaves
-itself.
+The DASHBOARD on its BUFFER MOUNT is the same dashboard in a real WINDOW --
+`:Paseo buf`, or `ui.surface = "buffer"`. Same chrome, same six tabs, same
+panes, same keys; the difference is only which window it is mounted on. It
+takes over the window you are standing in, hides the editor's tabline and
+statusline, and fills what is left, so it gets the whole screen rather than
+the 94% a centred float leaves itself.
 
 That is nvdash's arrangement, and |:Paseo-buf| is a TOGGLE: press it again and
 the file comes back, on the line you left it on, with that window's own
@@ -1933,15 +1959,19 @@ A second `<C-t>` during the wait is a change of mind: it gives up on the start
 rather than opening a second microphone. `<Esc>` does the same.
 
                                                         *paseo-dictation-meter*
-THEN THE BOX BECOMES A METER. While the microphone is open, the bar over the
-composer is the recorder and a scrolling waveform is drawn INSIDE the box: >
+THEN THE BAR BECOMES A METER. While the microphone is open, the bar over the
+composer is the recorder, and the waveform scrolls along it: >
 
-     󰍬 listening  ▁▁▂▃▅▆▇▅▃▂▁▁▁▁▁▁  0:04   Ctrl + t  stop    󱊷  discard
-     ▁▁▁▂▃▅▇█▇▅▃▂▁▁▁▂▄▆▇▇▅▃▁▁▁▁▂▃▅▆▇▇▆▄▂▁▁▁
+     󰍬 listening  ▁▁▂▃▅▆▇█▇▅▃▂▁▁▂▄▆▇▇▅▃▁▁▂▃▅▆▇▆▄▂▁  0:04   Ctrl + t  stop
 <
-The wave is VIRTUAL TEXT, never written lines: the composer holds your draft,
-and a visualiser that typed itself into the buffer would be indistinguishable
-from one that ate it. It is there because "it is not clear when I am speaking"
+ONE METER, NOT TWO. There was a second copy of the same wave inside the box as
+well, and two rows of blocks answering the same voice is the same information
+twice in the same glance -- so the one you are not looking at went, and the
+one that stayed took the width the other had. The box still speaks up while
+the microphone is OPENING, because a box refusing your keystrokes has to say
+so; it has nothing to add once the wave is running.
+
+It is there because "it is not clear when I am speaking"
 is the whole problem with dictation you cannot see -- a word missed by a muted
 microphone and a word missed by a thinking daemon look identical when the only
 feedback is text that has not arrived yet.
@@ -1967,6 +1997,7 @@ constants are ratios and bounds: >
     gate     the room's own spread over that floor, clamped -- a study
              swings 10 dB on its own, while a clean line swings 2
     top      the loudest thing heard in the last five seconds
+    bottom   the gate, opened downward once the top has cleared it
 <
 The adaptive TOP is what keeps a loud input off the ceiling and a quiet one off
 the floor: how far speech sits over a room floor is a fact about the room, the
@@ -1979,13 +2010,29 @@ Checked against 82 combinations of gain, DC bias and noise character, and
 against real recordings rescaled from x0.05 to x4: silence flat on every one,
 speech proportional on every one.
 
-THREE VERSIONS OF THIS WERE WRONG, and the first two failed the same way, by
-drawing a flat line at a working microphone -- which is the one answer it must
-never give. One crept its floor upward at a fixed rate, so the floor climbed
-over the voice a few seconds into a sentence and the wave died mid-word; the
-next gated on a fraction of that floor, which in a loud room is a bar an
-ordinary voice cannot clear. Both were built on a number that was measuring a
-DC offset, which is why neither could be fixed by tuning it.
+THE GATE IS NOT THE BOTTOM OF THE BAR, and using it as both was the fourth way
+this drew a flat line at a working microphone. The window is cleared each time
+you press the key, so it holds only the seconds since: start talking straight
+away and there is no silence in it anywhere. The floor is then measured from
+your own quietest syllable and the median from your own voice, which puts a
+gate a dozen decibels above the floor most of the way up your actual signal --
+ordinary speech drew one glyph and the odd stressed vowel spiked. On a soft
+voice it was worse: the loudest thing in a ten-second window reached 11.8 dB
+against a gate of 12.0, so the row never moved at all.
+
+So once the TOP has CLEARED the gate -- which a room never does, and that is
+what keeps silence silent -- the range opens downward and puts mid-speech in
+the middle of the bar. In proportion, never as a step: measured on a quiet
+room the gate sits at 9.65 against a top of 9.69, and a step there strobes the
+bar between empty and full twenty times a second.
+
+THREE VERSIONS OF THIS WERE WRONG BEFORE THAT, and the first two failed the
+same way, by drawing a flat line at a working microphone -- which is the one
+answer it must never give. One crept its floor upward at a fixed rate, so the
+floor climbed over the voice a few seconds into a sentence and the wave died
+mid-word; the next gated on a fraction of that floor, which in a loud room is
+a bar an ordinary voice cannot clear. Both were built on a number that was
+measuring a DC offset, which is why neither could be fixed by tuning it.
 
 A RECORDER THAT DIES SAYS SO, with whatever it printed on the way out -- a
 microphone that is busy, or refused. That used to be silent: the indicator

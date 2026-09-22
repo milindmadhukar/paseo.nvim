@@ -230,30 +230,40 @@ commands.agents = {
 commands.sessions = commands.agents
 
 commands.term = {
-  desc = "The terminals in this workspace, on the Sessions tab",
+  desc = "The terminals in this workspace, on the Agents & terminals tab",
   run = function()
     -- A terminal is a SESSION, so there is nowhere else to go: the dashboard's
-    -- Sessions tab lists the agents and the PTYs together, and opening either
-    -- shows it on the Chat tab. This used to open a rail-and-pane window of
-    -- its own, over the top of whatever you were looking at.
+    -- Agents & terminals tab lists the agents and the PTYs together, and
+    -- opening either shows it on the Chat tab. This used to open a
+    -- rail-and-pane window of its own, over the top of whatever you were
+    -- looking at.
     --
     -- Through `open` with a callback rather than `surface` then `select`.
     -- With no chat yet, `surface` defers to an `open` of its own and reaches
-    -- the float only once the daemon has answered -- so a `select` written
+    -- the dashboard only once the daemon has answered -- so a `select` written
     -- after it races that answer and, against a real daemon rather than a
     -- synchronous stub, asks for a tab on a surface that is not up yet.
     -- `select` is a no-op then, and you arrive at Chat.
-    require("paseo.ui.chat").open({ surface = "float" }, function(chat)
+    --
+    -- NO `surface` here. It used to say `"float"`, which `open` then wrote
+    -- onto `chat.surface` -- so asking for the terminals from the buffer
+    -- dashboard moved you to a float and kept you there.
+    require("paseo.ui.chat").open({}, function(chat)
       if chat then
-        require("paseo.ui.float").select "Sessions"
+        -- Through `sessions` rather than a `select` of its own, because
+        -- "get me to that list from wherever I am" is exactly what `<C-s>`
+        -- means and the answer should not differ by which one you pressed.
+        -- It keeps the mount you are on, and knows that the sidebar's answer
+        -- is the dashboard -- the list exists nowhere else.
+        require("paseo.ui.chat").sessions(chat)
       end
     end)
   end,
 }
 
 -- The old name. It used to mean "the tab listing them"; the list is on the
--- Sessions tab and this lands there too. Kept because the help tag is
--- published.
+-- Agents & terminals tab and this lands there too. Kept because the help tag
+-- is published.
 commands.terminals = commands.term
 
 commands.chat = {
