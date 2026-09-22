@@ -34,6 +34,7 @@
 --- focus somewhere without anyone having to remember to do it.
 
 local render = require "paseo.ui.render"
+local style = require "paseo.ui.style"
 local widgets = require "paseo.ui.widgets"
 
 local M = {}
@@ -59,6 +60,8 @@ local RELOAD = "r"
 ---@field swatch string|nil      Name to hash a colour block off, instead of an icon.
 ---@field summary table[]|nil    Cells drawn after the title.
 ---@field empty string|nil       What to say when it has no rows.
+---@field rule boolean|nil       Draw a hairline under the heading, separating
+---                              this section from the one above it.
 ---@field rows paseo.ListRow[]
 
 ---@class paseo.ListSource
@@ -324,6 +327,25 @@ local function heading(section)
   return line
 end
 
+---A hairline under a heading, for lists where the sections are separate THINGS
+---rather than groups of one thing.
+---
+---INSET by two, not by one, and the reason is the same one `widgets.card`
+---gives: at one cell the rule starts exactly where the content starts and ends
+---exactly where it ends, which reads as a table border. Pulling it in past the
+---text on both sides is what makes the same glyph read as a divider.
+---
+---Opt-in per section. A blank line alone is enough separation when the
+---sections are two halves of one list -- agents and terminals -- and is not
+---when they are twenty workspaces belonging to six different projects.
+---@param w integer
+---@return table[]
+local function rule(w)
+  return {
+    { "  " .. string.rep(style.BOX.square.h, math.max(0, w - 4)) .. "  ", "PaseoCardRule" },
+  }
+end
+
 ---Columns every row gives up to the gutter. Four, which is exactly the indent
 ---the panels used to write themselves -- so this costs no width at all.
 local GUTTER = 4
@@ -431,6 +453,9 @@ function View:lines(width, height)
     for _, section in ipairs(sections) do
       if section.title then
         out[#out + 1] = heading(section)
+        if section.rule then
+          out[#out + 1] = rule(w)
+        end
         out[#out + 1] = {}
       end
       if #(section.rows or {}) == 0 and section.empty then

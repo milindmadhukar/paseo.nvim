@@ -214,7 +214,11 @@ local function test_timeline()
   local thought = timeline.card({ kind = "thinking", text = "line one\nline two" }, { width = 60 })
   truthy("ui: reasoning renders", #thought.lines > 0)
   truthy("ui: reasoning is collapsible", thought.collapsible)
-  eq("ui: reasoning collapses to one line", #thought.lines, 1)
+  -- Two, not one: every card leads with the blank line that separates it from
+  -- whatever is above it -- `timeline.card` owns that gap now rather than the
+  -- two arms that used to hand-roll it. The collapsed thought is still ONE
+  -- line of content.
+  eq("ui: reasoning collapses to one line", #thought.lines, 2)
 
   -- A failure you have to expand to notice is a failure you will not notice.
   local failed = timeline.card({
@@ -228,7 +232,7 @@ local function test_timeline()
   }, { width = 60 })
   truthy(
     "ui: a failed tool call shows its error while collapsed",
-    render.concat(failed.lines[1]):find("exit 1", 1, true) ~= nil
+    render.concat(failed.lines[2]):find("exit 1", 1, true) ~= nil
   )
 
   -- The one detail type with no arm, on exactly the operation you most want to

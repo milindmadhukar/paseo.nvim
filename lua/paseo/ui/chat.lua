@@ -11,6 +11,7 @@ local bridge = require "paseo.bridge"
 local config = require "paseo.config"
 local sidebar = require "paseo.ui.sidebar"
 local transcript = require "paseo.ui.transcript"
+local widgets = require "paseo.ui.widgets"
 
 local M = {}
 
@@ -24,7 +25,8 @@ local M = {}
 ---@field win_composer integer|nil
 ---@field streaming boolean
 ---@field spinner uv.uv_timer_t|nil  Ticking only while `streaming`.
----@field frame integer|nil     Index into FRAMES.
+---@field frame integer|nil     Set while a spinner timer is live. Not a frame
+---                            index: the glyph is off the clock.
 ---@field since integer|nil     `vim.uv.now()` when the turn began.
 ---@field pending string[]   Context blocks queued for the next send.
 ---@field images paseo.Image[] Pasted images, in placeholder order.
@@ -196,9 +198,6 @@ end
 
 -- ------------------------------------------------------------------ spinner
 
----@type string[]
-local FRAMES = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
-
 ---@param chat paseo.Chat
 local function stop_spinner(chat)
   if not chat.spinner then
@@ -236,7 +235,11 @@ local function start_spinner(chat)
       if not chat.streaming then
         return stop_spinner(chat)
       end
-      chat.frame = (chat.frame % #FRAMES) + 1
+      -- No frame counter to advance: the glyph comes off the clock in
+      -- `widgets.spinner`, so every surface drawing this same wait draws the
+      -- same one and a repaint for some other reason does not shunt the
+      -- animation forward a step. `chat.frame` survives as the flag saying a
+      -- timer is live, which is all `M.progress` reads it for.
       set_winbar(chat)
     end)
   )
@@ -267,7 +270,7 @@ function M.progress(chat)
   if not (chat.streaming and chat.frame) then
     return nil, nil
   end
-  return FRAMES[chat.frame], math.floor((vim.uv.now() - (chat.since or vim.uv.now())) / 1000)
+  return widgets.spinner(), math.floor((vim.uv.now() - (chat.since or vim.uv.now())) / 1000)
 end
 
 ---A status line in the transcript -- "connecting…", "send failed: …".
@@ -441,12 +444,26 @@ end
 ---`<C-s>`'s one meaning. On the dashboard that is a tab; from the sidebar it
 ---is the dashboard, opened on that tab -- which is the same answer, because
 ---the list only exists there.
+---
+---`mount()` rather than `is_open`, which is TAB-AWARE: with
+---`ui.buffer.open = "tab"`, or simply from another tab page, `is_open` said no
+---about a dashboard that was up, and this then hardcoded a float AND wrote
+---`"float"` onto `chat.surface` -- so the one key that gets you to this list
+---was also the key that moved you off the buffer mount for good.
 ---@param chat paseo.Chat
 function M.sessions(chat)
   local float = require "paseo.ui.float"
-  if not float.is_open(chat) then
-    chat.surface = "float"
-    float.open(chat)
+  local mount = float.mount()
+  if not mount then
+    -- Nothing up at all, so there is no mount to inherit and one has to be
+    -- named. The configured dashboard mount, not a literal `"float"` -- and
+    -- the sidebar's answer is still the dashboard, because that is the only
+    -- place this list exists.
+    mount = require("paseo.config").get().ui.surface == "buffer" and "buffer" or "float"
+    chat.surface = mount
+    float.open(chat, { mount = mount })
+  elseif not float.is_open(chat) then
+    float.open(chat, { mount = mount })
   end
   float.select "Agents & terminals"
 end
@@ -818,14 +835,27 @@ end
 
 ---Put the chat on screen, on whichever surface it belongs to.
 ---
----`chat.surface` is where this chat WAS -- reopening keeps the surface you
----switched it to. With no answer there it is the configured default, which is
----the full-screen dashboard: that is the surface with everything on it, and
----`<C-f>` is how you get the narrow one beside your code.
+---Three answers, in order, and the middle one is the whole of the fix for
+---"I opened a session from the buffer dashboard and got a float":
+---
+---  * `chat.surface` -- where this chat WAS. Reopening keeps the surface you
+---    switched it to.
+---  * THE MOUNT ALREADY ON SCREEN. Opening a different agent keys a brand-new
+---    chat table, so `chat.surface` is nil for it however long you have been
+---    standing in the buffer dashboard -- and falling straight to the default
+---    tore that dashboard down and built a float in its place. The surface you
+---    are looking at belongs to the WINDOW, not to the conversation you are
+---    switching to, which is what every panel row, picker and session strip
+---    was getting wrong by saying nothing at all.
+---  * the configured default, when nothing is up. That is the full-screen
+---    dashboard: the surface with everything on it, and `<C-f>` is how you get
+---    the narrow one beside your code.
 ---@param chat paseo.Chat
 local function layout(chat)
   make_buffers(chat)
-  local surface = chat.surface or require("paseo.config").get().ui.surface
+  local surface = chat.surface
+    or require("paseo.ui.float").mount()
+    or require("paseo.config").get().ui.surface
   -- Two mounts of ONE module. The dashboard is the same surface floating over
   -- your code or sitting in a window of its own -- same chrome, same tabs,
   -- same panes -- so the name goes in as the mount rather than picking
@@ -967,9 +997,12 @@ end
 ---a modal asking which provider to use, unbidden, on a workspace you have not
 ---started an agent in yet, is worse than the empty window it replaces.
 ---
----`surface` overrides where this chat last was. Only `M.follow` passes it: the
----surface you are looking at belongs to the window, not to the conversation
----you are switching to.
+---`surface` overrides where this chat last was, and is for the callers that
+---MOVE a chat -- `M.follow`, `M.surface`. Opening a session does not need it:
+---`layout` inherits the mount already on screen, because the surface you are
+---looking at belongs to the window, not to the conversation you are switching
+---to. Passing a literal here is how `:Paseo term` used to drag you off the
+---buffer dashboard and keep you off it.
 ---@param opts? { root?: string, focus?: boolean, agent_id?: string, title?: string, create?: boolean, surface?: "float"|"sidebar"|"buffer" }
 ---@param callback? fun(chat: paseo.Chat|nil, err: string|nil)
 function M.open(opts, callback)

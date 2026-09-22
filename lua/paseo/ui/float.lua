@@ -53,6 +53,70 @@ end
 ---A repaint is already queued.
 local settling = false
 
+---The tabs whose BODY says something about the agent directory, and so have to
+---be redrawn when it changes.
+local BODY_FOLLOWS_AGENTS = { ["Agents & terminals"] = true, Workspaces = true }
+
+---One spinner frame, matching |paseo.ui.widgets|.spinner's own 100ms.
+local SPINNER_MS = 100
+
+---@type uv.uv_timer_t|nil
+local spinner_timer
+
+local function stop_spinner()
+  if not spinner_timer then
+    return
+  end
+  spinner_timer:stop()
+  if not spinner_timer:is_closing() then
+    spinner_timer:close()
+  end
+  spinner_timer = nil
+end
+
+---Is there a turning glyph on screen right now?
+---@return boolean
+local function spinner_wanted()
+  return state ~= nil
+    and state.tab == "Workspaces"
+    and api.nvim_buf_is_valid(state.buf)
+    and require("paseo.agents").busy()
+end
+
+---A 10Hz repaint while a workspace row is spinning, and NOT A MOMENT LONGER.
+---
+---The push feed is not a clock. Agent updates arrive every few hundred
+---milliseconds and `directory_changed` coalesces them at 120ms on top of that,
+---which is a stutter rather than a spinner -- so the frames need a clock of
+---their own. This is it, and it exists only while something is actually
+---turning: a timer redrawing a tab nobody is looking at is the leak that
+---matters, which is why every caller goes through here rather than starting
+---one.
+---
+---Only the `body` section, and only a glyph swap inside it: volt records each
+---section's start row when the layout is measured and never recomputes it, so
+---a repaint that changed a row COUNT would draw every section below it at the
+---wrong row. See |paseo.ui.animate|'s header.
+local function sync_spinner()
+  if not spinner_wanted() then
+    return stop_spinner()
+  end
+  if spinner_timer then
+    return
+  end
+  spinner_timer = vim.uv.new_timer()
+  spinner_timer:start(
+    SPINNER_MS,
+    SPINNER_MS,
+    vim.schedule_wrap(function()
+      if not spinner_wanted() then
+        return stop_spinner()
+      end
+      pcall(require("volt").redraw, state.buf, { "body" })
+    end)
+  )
+end
+
 ---Redraw what a CHANGE IN THE DIRECTORY changes: the session strip, and the
 ---session list if that is the tab you are on.
 ---
@@ -80,13 +144,18 @@ local function directory_changed()
       return
     end
     local sections = { "strip" }
-    -- Only the list tab draws the directory in its body. Redrawing any other
-    -- would re-run that panel's `lines` -- `git status` per repo, on the
-    -- Changes tab -- for a change it does not show.
-    if state.tab == "Agents & terminals" then
+    -- Only the tabs that DRAW the directory redraw their body. Redrawing any
+    -- other would re-run that panel's `lines` -- `git status` per repo, on the
+    -- Changes tab -- for a change it does not show. Workspaces earns its place
+    -- here because every row carries what its agents are doing; without it the
+    -- status column was a snapshot from whenever the tab was last rebuilt.
+    if BODY_FOLLOWS_AGENTS[state.tab] then
       sections[#sections + 1] = "body"
     end
     pcall(require("volt").redraw, state.buf, sections)
+    -- An agent that just STARTED is the event that makes a spinner necessary,
+    -- and one that just finished is the event that makes it stop.
+    sync_spinner()
   end, 120)
 end
 
@@ -1531,6 +1600,7 @@ function M.select(name)
   end
 
   M.rebuild()
+  sync_spinner()
   if state.win and api.nvim_win_is_valid(state.win) and name ~= "Chat" then
     api.nvim_set_current_win(state.win)
   end
@@ -1650,6 +1720,9 @@ function M.close()
 
   local held = state
   state = nil
+  -- Before anything else that can fail: a timer outliving the buffer it
+  -- redraws is an error every frame, forever.
+  stop_spinner()
 
   -- Before the buffer goes. A tween's timer redraws a named section every
   -- frame, and one left running against a deleted buffer is an error a frame

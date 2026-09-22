@@ -406,27 +406,24 @@ local function tool_card(item, opts)
   return render.card(header, body, { width = opts.width, hl = EDGE_HL[status] })
 end
 
----Build the lines for one item.
+---The lines for one item, WITHOUT the gap above it.
 ---
----Returns the lines plus whether the item can be expanded, so the transcript
----knows which blocks `<Tab>` should act on.
+---Spacing is `M.card`'s, not each arm's -- see there for why.
 ---@param item table
 ---@param opts { width: integer, expanded?: boolean }
 ---@return { lines: table[][], collapsible: boolean }
-function M.card(item, opts)
+local function card_lines(item, opts)
   local width = opts.width
   local kind = item.kind
 
   if kind == "user" then
-    local lines = { { { "", "PaseoDim" } }, { { "▌ you", "PaseoYou" } } }
+    local lines = { { { "▌ you", "PaseoYou" } } }
     vim.list_extend(lines, render.wrap(item.text or "", width, nil, { { "▌ ", "PaseoYou" } }))
     return { lines = lines, collapsible = false }
   end
 
   if kind == "text" then
-    local lines = { { { "", "PaseoDim" } } }
-    vim.list_extend(lines, render.wrap(item.text or "", width, nil))
-    return { lines = lines, collapsible = false }
+    return { lines = render.wrap(item.text or "", width, nil), collapsible = false }
   end
 
   if kind == "thinking" then
@@ -577,6 +574,32 @@ function M.card(item, opts)
   end
 
   return { lines = {}, collapsible = false }
+end
+
+---Build the lines for one item.
+---
+---Returns the lines plus whether the item can be expanded, so the transcript
+---knows which blocks `<Tab>` should act on.
+---
+---ONE PLACE DECIDES SPACING, and it is here rather than in the eight arms of
+---`card_lines`. It used to be theirs, and only two of them -- `user` and
+---`text` -- ever took the offer: so a paragraph from the agent had a blank
+---line above it and the `Read` card that followed had nothing above it at
+---all, which read as the tool output being part of the sentence before it.
+---
+---A LEADING blank rather than a trailing one because the transcript streams:
+---`M.stream` re-renders the open text block on every chunk, and a gap that
+---belongs to the block BELOW cannot be half-drawn by the block above it while
+---that block is still growing. It also means the separator is inside the
+---block's own lines, which is what `transcript.draw` requires -- every block
+---owns exactly its own rows and nothing writes between them.
+---@param item table
+---@param opts { width: integer, expanded?: boolean }
+---@return { lines: table[][], collapsible: boolean }
+function M.card(item, opts)
+  local built = card_lines(item, opts)
+  table.insert(built.lines, 1, { { "", "PaseoDim" } })
+  return built
 end
 
 return M

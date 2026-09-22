@@ -167,6 +167,13 @@ require("paseo").setup {
 
 ## Commands
 
+Three surfaces, and `ui.surface` names which one `:Paseo chat` opens. Two of
+them — `float` and `buffer` — are the same thing, the **dashboard**, on
+different **mounts**: `:Paseo dash` puts it over your code, `:Paseo buf` puts
+it in the window you are standing in, and everything on it is identical either
+way. The third is the **sidebar**, which is a different surface. The rest of
+this document uses those four words and no others for it.
+
 | | |
 |---|---|
 | `:Paseo chat` | Open/close the chat, on whichever surface `ui.surface` names |
@@ -181,15 +188,15 @@ require("paseo").setup {
 | `:Paseo switchmodel` | Change the running agent session's model, or fork it |
 | `:Paseo agent-settings` | What this agent session is set to |
 | `:Paseo session` | Compatibility alias for `agent-settings` |
-| `:Paseo dash` | The chat full screen, with the agent panels |
-| `:Paseo buf` | Toggle the same dashboard in a window of its own (`:Paseo tab`) |
+| `:Paseo dash` | The dashboard on its **float mount**, over your code |
+| `:Paseo buf` | Toggle the dashboard on its **buffer mount**, in a window of its own (`:Paseo tab`) |
 | `:Paseo sidebar` | The chat in the pane beside your code |
 | `:Paseo model [provider/model]` | Set the preference for new agents; no agent is created |
 | `:Paseo workspaces` | Workspace picker — open, inspect agent sessions, create, archive |
 | `:Paseo wcreate` | Create a workspace here — the shape is worked out for you |
 | `:Paseo agents` | Agent sessions in this workspace |
 | `:Paseo sessions` | Compatibility alias for `agents` |
-| `:Paseo term` | Terminals in this workspace, as many as you want |
+| `:Paseo term` | Terminals in this workspace, on the Agents & terminals tab |
 | `:Paseo ws …` | Manifest-level: `init` · `create <name> [repos]` · `rm` · `ls` · `status` |
 | `:Paseo agent [stop]` | Sidecar and agent status |
 | `:Paseo repos` | The repos in the current unit of work |
@@ -300,7 +307,7 @@ Nothing outranks a pending permission, which is never dropped at any width.
 The row at the top of the sidebar is left saying which session you are looking
 at, with the surface's own keys on the end of it.
 
-### The full-screen surface
+### The dashboard, on its float mount
 
 The default. `:Paseo chat` opens it, `:Paseo chat` again closes it, `<C-f>`
 swaps to the sidebar and back. `<C-c>` stops the turn — from the composer or
@@ -334,7 +341,7 @@ composer geometry are both measured against it.
 | `Settings` | mode, thinking level, model, feature toggles — keyboard or click |
 | `Changes` | what is changed on disk, per repo; open one |
 | `Usage` | context window, tokens, cost — and this provider's 5-hour and weekly limits |
-| `Workspaces` | every workspace Paseo knows, grouped by project; archive one, or forget a project |
+| `Workspaces` | every workspace Paseo knows, grouped by project with a rule between groups; each row says what it is doing — `⠙` working, `󰀦` needs you, `󰗠` opened and idle, `󰄰` never opened. Archive one, or forget a project |
 
 `Agents & terminals`, `Workspaces` and `Changes` are one kind of screen and
 take one set of keys — `j`/`k` to move, `h`/`l` by section, `g`/`G` to the
@@ -375,7 +382,7 @@ do — does not take it with it.
 `1`–`6` jump, `<M-1>`–`<M-6>` and `<Tab>`/`<S-Tab>` do the same, and
 everything that does something responds to a click as well.
 
-### The same dashboard, in the window you are in
+### The dashboard, on its buffer mount
 
 `:Paseo buf` — or `ui.surface = "buffer"` — puts everything above in a **real
 window** instead of a float: same chrome, same six tabs, same panes, same
@@ -1196,15 +1203,20 @@ comes *back* to insert mode, at the column you left, the moment the microphone
 opens. A second `<C-t>` during the wait is a change of mind: it gives up on the
 start rather than trying to open a second microphone.
 
-**Then the box becomes a meter.** While the microphone is open the bar over the
-composer is the recorder — a red dot, a level, how long you have been talking,
-and the key that stops it — and a scrolling waveform is drawn *inside* the box,
-as virtual text, so your draft is untouched:
+**Then the bar becomes a meter.** While the microphone is open the bar over the
+composer is the recorder — a red dot, a scrolling waveform, how long you have
+been talking, and the key that stops it:
 
 ```
- 󰍬 listening  ▁▁▂▃▅▆▇▅▃▂▁▁▁▁▁▁  0:04   Ctrl + t  stop    󱊷  discard
- ▁▁▁▂▃▅▇█▇▅▃▂▁▁▁▂▄▆▇▇▅▃▁▁▁▁▂▃▅▆▇▇▆▄▂▁▁▁
+ 󰍬 listening  ▁▁▂▃▅▆▇█▇▅▃▂▁▁▂▄▆▇▇▅▃▁▁▁▂▃▅▆▇▇▆▄▂▁▁  0:04   Ctrl + t  stop    󱊷  discard
 ```
+
+**One meter, not two.** There was a second copy of the same wave inside the box
+as well, and two rows of blocks answering the same voice is the same
+information twice in the same glance — so the one you are not looking at went.
+The box still speaks up while the microphone is *opening*, because a box that
+is refusing your keystrokes has to say so; it just has nothing to add once the
+wave is running.
 
 That is there because *"it is not clear when I am speaking"* is the whole
 problem with dictation you cannot see: a word missed by a muted microphone and
@@ -1232,6 +1244,7 @@ and the only constants are ratios and bounds:
 | floor | the 5th percentile of the last twenty seconds | the room, whatever the room is |
 | gate | the room's own spread over that floor, clamped | a study swings 10 dB on its own; a clean line, 2 |
 | top | the loudest thing heard in the last five seconds | how far speech sits over a room is a fact about the room, the gain and how far away you are sitting |
+| bottom of the bar | the gate, opened downward once the top has cleared it | the gate answers *"room or voice"*; it was never the right place to start drawing |
 
 The adaptive **top** is what keeps a loud input off the ceiling and a quiet one
 off the floor: the bar is full when you are as loud as you have been, which is
@@ -1240,13 +1253,27 @@ gain (over a 120:1 span), DC bias and noise character, plus real recordings
 rescaled from ×0.05 to ×4 — silence flat on every one, speech proportional on
 every one.
 
-Three versions of this were wrong before it worked, and the first two failed
-the same way, by drawing a flat line at a working microphone: one crept its
-floor upwards at a fixed rate, so a few seconds into a sentence the floor had
-climbed over the voice and the wave died mid-word; the next gated on a fraction
-of that floor, which in a loud room is a bar an ordinary voice cannot clear.
-Both were built on a number that was measuring a DC offset, which is why
-neither could be fixed by tuning it.
+**The gate is not the bottom of the bar**, and using it as both is the fourth
+way this drew a flat line at a working microphone. The window is cleared every
+time you press the key, so it holds only the seconds since — start talking
+straight away and there is no silence in it anywhere. The floor is then
+measured from your own quietest syllable and the median from your own voice,
+which puts a gate a dozen decibels above the floor most of the way up your
+actual signal: ordinary speech drew one glyph and the odd stressed vowel
+spiked. On a soft voice it was worse than that — the loudest thing in a
+ten-second window reached 11.8 dB against a gate of 12.0, so the row never
+moved at all. So once the top has *cleared* the gate — which a room never does,
+which is what keeps silence silent — the range opens downward and puts
+mid-speech in the middle of the bar. In proportion, never as a step: measured
+on a quiet room the gate sits at 9.65 against a top of 9.69, and a step there
+strobes the bar between empty and full twenty times a second.
+
+Three versions of this were wrong before that, and the first two failed the
+same way: one crept its floor upwards at a fixed rate, so a few seconds into a
+sentence the floor had climbed over the voice and the wave died mid-word; the
+next gated on a fraction of that floor, which in a loud room is a bar an
+ordinary voice cannot clear. Both were built on a number that was measuring a
+DC offset, which is why neither could be fixed by tuning it.
 
 Neovim cannot record audio, so this shells out to the first of `arecord`,
 `rec` (sox) or `ffmpeg` that is installed. `:checkhealth paseo` says which one
@@ -1384,7 +1411,10 @@ is not a Paseo tab, and a terminal is not an agent session.
 | **Workspace** | One unit of work inside a project, with its own working directory. It contains agent sessions and terminals. |
 | **Agent** | The AI worker identified by an agent ID. In UI text, its ongoing conversation is an **agent session**. |
 | **Agent session** | One agent's state and timeline inside a workspace. Several can share the same workspace and files. Bare “session” is retained only in compatibility command aliases and stable internal module/protocol names. |
-| **Tab** | A Paseo application surface that presents an agent session. It is distinct from a Neovim tab page. paseo.nvim's dashboard sections are also UI tabs, not isolation boundaries. |
+| **Tab** | A Paseo application surface that presents an agent session. It is distinct from a Neovim **tab page**. paseo.nvim's dashboard sections are also UI tabs, not isolation boundaries. |
+| **Dashboard** | paseo.nvim's full-screen surface: the six tabs, the session strip and the panes. One thing, on one of two **mounts**. |
+| **Mount** | Where the dashboard is drawn — `float`, over your code, or `buffer`, in a real window of its own. Same chrome, same tabs, same keys; only the window differs. |
+| **Sidebar** | The narrow surface beside your code. A different surface from the dashboard, not a third mount of it. |
 | **Terminal** | A daemon-owned PTY inside a workspace. It appears beside agent sessions but is not an agent. |
 | **Worktree** | A Git checkout used to isolate a workspace. It is an implementation mechanism, not a synonym for workspace. |
 | **Daemon** | The background Paseo process that owns projects, workspaces, agent sessions, timelines, and terminals. |
@@ -1534,7 +1564,7 @@ is rebuilt on the tab you are standing on, pointed at that workspace's agent.
 
 It re-points an open chat and nothing more: with no chat up, switching
 directory opens nothing, and a workspace you have not started an agent in yet
-says so rather than opening a provider picker at you. The full-screen surface
+says so rather than opening a provider picker at you. The dashboard
 takes focus — it covers the screen, so you need to be able to type into it —
 and the sidebar does not, because your cursor is in your code. `<C-r>` follows
 too but never takes focus; that belongs to whatever your review autocmd opens.

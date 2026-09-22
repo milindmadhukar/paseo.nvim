@@ -110,6 +110,20 @@ local GATE_MAX = 12
 ---scale collapsing onto the gate in a room where nothing has happened yet.
 local SPAN_DB = 8
 
+---How far BELOW the gate the drawn range opens, once the gate has been cleared.
+---
+---The gate answers "is this a room or a voice". It is not, and never was, the
+---right bottom for the drawn range, and using it as both is what made the
+---meter read a working microphone as silence -- see `push_level`. Applied in
+---proportion to how far the peak clears the gate, never as a step.
+local PULL_DB = 8
+
+---What the peak must clear the gate by before the range opens downward at all.
+---
+---Without it the pull is a step function on a comparison that is decided by a
+---fraction of a decibel, and a silent room strobes between empty and full.
+local MARGIN_DB = 3
+
 -- ---------------------------------------------------------------- the meter
 
 ---@param chat table
@@ -183,19 +197,50 @@ function M.push_level(chat, level)
     return 20 * math.log(math.max(value, 1e-4) / floor, 10)
   end
 
+  -- THE PEAK FIRST: what the scale does below depends on whether the gate has
+  -- been cleared at all.
+  local peak = 0
+  for i = math.max(1, #seen - PEAK_WINDOW + 1), #seen do
+    peak = math.max(peak, over(seen[i]))
+  end
+
   local gate = math.max(GATE_MIN, math.min(GATE_MAX, SPREAD_K * over(percentile(0.5))))
 
-  local top = gate + SPAN_DB
-  for i = math.max(1, #seen - PEAK_WINDOW + 1), #seen do
-    top = math.max(top, over(seen[i]))
-  end
+  -- WHERE THE BAR STARTS, and the whole of the fix for "it barely moves when I
+  -- speak".
+  --
+  -- The gate is sized to reject a ROOM -- a floor that wanders, with no voice
+  -- in it -- and at that job it is right. The bug was using it as the bottom
+  -- of the DRAWN RANGE as well. `dictating` clears the window on every
+  -- transition, so it holds only the seconds since you pressed the key: start
+  -- talking straight away and there is no silence in it anywhere. The floor is
+  -- then measured from your own quietest syllable and the median from your own
+  -- voice, which puts a gate a dozen decibels above the floor most of the way
+  -- up your actual signal. Ordinary speech drew one glyph and the odd stressed
+  -- vowel spiked -- measured, on a soft voice the peak of a ten-second window
+  -- landed at 11.8dB against a gate of 12.0, so the row never moved at all.
+  --
+  -- So once the peak has CLEARED the gate -- which a room never does, by
+  -- construction, and that is what keeps silence silent -- the window holds
+  -- signal rather than noise, and the range opens downward to put mid-speech
+  -- in the middle of the bar instead of underneath it.
+  --
+  -- PROPORTIONAL, and that matters more than the size of it. A step -- pull
+  -- the moment `peak > gate` -- swung the whole scale on a hair: measured on a
+  -- quiet room the gate sits at 9.65 against a peak of 9.69, so a single loud
+  -- sample flipped the bar from silent to full and back twenty times a second.
+  -- `MARGIN_DB` is what the peak must clear before any of this starts, and
+  -- `reach` then fades the pull in over `SPAN_DB` rather than switching it.
+  local reach = math.max(0, math.min(1, (peak - gate - MARGIN_DB) / SPAN_DB))
+  local low = math.max(0, gate - PULL_DB * reach)
+  local top = math.max(peak, low + SPAN_DB)
 
   -- Square-rooted, because the question is "can it hear me" and not "how many
   -- decibels". Linear in dB, a voice three decibels over a noisy room is one
   -- glyph tall -- which on a row of one-eighth blocks is indistinguishable
   -- from silence, and silence is the one answer it must not give when the
   -- microphone is working.
-  local ratio = math.max(0, math.min(1, (over(raw) - gate) / (top - gate)))
+  local ratio = math.max(0, math.min(1, (over(raw) - low) / (top - low)))
   local scaled = math.sqrt(ratio)
 
   local history = levels(chat)
@@ -225,8 +270,7 @@ end
 ---does not shunt the animation forward a step.
 ---@return string
 local function spin()
-  local frames = icons.spinner
-  return frames[math.floor(vim.uv.now() / 100) % #frames + 1]
+  return widgets.spinner()
 end
 
 ---And the colour it is drawn in: `PaseoToolRunning`, this UI's "in flight",
@@ -320,11 +364,12 @@ function M.recorder(chat, width)
     { " stop ", "PaseoComposerHint" },
   }
 
-  -- A COMPACT meter here, not the full waveform. The long one is inside the
-  -- box, which is where you are looking and which is the thing that is
-  -- supposed to have turned into a visualiser; a second full-width copy of it
-  -- one row up is the same information twice in the same glance.
-  local MIN_WAVE, MAX_WAVE = 6, 16
+  -- THE meter, now -- there is no longer one in the box for this to be the
+  -- compact echo of, so it takes whatever room the row has rather than the
+  -- sixteen columns it kept while it was the second copy. `HISTORY` is the
+  -- ceiling because that is how many readings there are to draw: asking for
+  -- more pads the left with idle glyphs, which reads as silence that happened.
+  local MIN_WAVE, MAX_WAVE = 6, HISTORY
   local tail
   for _, candidate in ipairs { keys, short_keys, {} } do
     tail = vim.list_extend(vim.deepcopy(clock), candidate)
@@ -474,20 +519,24 @@ end
 
 -- ---------------------------------------------------------------- the box
 
----The visualiser inside the box, and the wait before it.
+---The wait before the microphone opens.
+---
+---ONE thing, and it is not the meter: why the box is not taking your keys.
+---The meter lives one row up, beside the microphone. There used to be a second
+---full-width copy of it in here, and two rows of blocks answering the same
+---voice is the same information twice in the same glance -- so the one you
+---were not looking at went.
 ---
 ---Virtual text rather than written lines, and that is not a detail: the
----composer holds your draft, and a visualiser that TYPED itself into the
----buffer would be indistinguishable from a visualiser that ate it. So the
----wave is an extmark on the last line -- drawn after whatever you have
----written, or filling an empty box outright, and gone the moment recording
----stops without anything having been undone.
+---composer holds your draft, and a notice that TYPED itself into the buffer
+---would be indistinguishable from one that ate it. So it is an extmark on the
+---last line -- drawn after whatever you have written, and gone the moment the
+---microphone opens without anything having been undone.
 ---
----While the microphone is still opening the same extmark carries the reason
----the box is not taking your keys. It is drawn IN THE BOX rather than only on
----the bar because the box is where you are looking and where the keystrokes
----were going to go; a lock explained one row up is a lock you find out about
----by typing into a buffer that ignores you.
+---It is drawn IN THE BOX rather than only on the bar because the box is where
+---you are looking and where the keystrokes were going to go; a lock explained
+---one row up is a lock you find out about by typing into a buffer that
+---ignores you.
 ---@param chat table
 local function draw_overlay(chat)
   local buf = chat.composer
@@ -495,7 +544,7 @@ local function draw_overlay(chat)
     return
   end
   api.nvim_buf_clear_namespace(buf, ns, 0, -1)
-  if not chat.dictating then
+  if chat.dictating ~= "starting" then
     return
   end
 
@@ -509,23 +558,19 @@ local function draw_overlay(chat)
     return
   end
 
-  local virt = { { "  ", "PaseoCard" } }
-  if chat.dictating == "starting" then
-    -- WHY THE BOX IS NOT TAKING KEYS, and only that. What is happening is the
-    -- bar's job one row up; this row has one thing to say and it is the thing
-    -- that is otherwise indistinguishable from a wedged editor -- so it is
-    -- what survives into the short form rather than what gets dropped from it.
-    local said = "typing is off until the microphone opens"
-    if room < api.nvim_strwidth(said) + 2 then
-      said = "typing is off"
-    end
-    virt[#virt + 1] = { spin() .. " ", SPIN_HL }
-    virt[#virt + 1] = { said, "PaseoComposerHint" }
-  else
-    for _, cell in ipairs(widgets.waveform(levels(chat), { w = math.min(HISTORY, room) })) do
-      virt[#virt + 1] = { cell[1], cell[2] }
-    end
+  -- WHY THE BOX IS NOT TAKING KEYS, and only that. What is happening is the
+  -- bar's job one row up; this row has one thing to say and it is the thing
+  -- that is otherwise indistinguishable from a wedged editor -- so it is what
+  -- survives into the short form rather than what gets dropped from it.
+  local said = "typing is off until the microphone opens"
+  if room < api.nvim_strwidth(said) + 2 then
+    said = "typing is off"
   end
+  local virt = {
+    { "  ", "PaseoCard" },
+    { spin() .. " ", SPIN_HL },
+    { said, "PaseoComposerHint" },
+  }
 
   pcall(api.nvim_buf_set_extmark, buf, ns, last, 0, {
     virt_text = virt,
