@@ -53,6 +53,45 @@ local function test_chat_follow()
     -- Nothing open: changing directory is not a request for a chat.
     eq("follow: no chat open, nothing happens", chat.follow(there), false)
 
+    -- `:Paseo buf` FROM A COLD START LANDS ON ONE SURFACE, not two. With no
+    -- chat yet it opened one on `ui.surface` -- the float -- and then tore it
+    -- down and rebuilt the real surface over the top: one flash of the wrong
+    -- thing per session, and a provider picker opened against a window that
+    -- was about to close.
+    --
+    -- Counted rather than merely checked at the end, because "it is on the
+    -- right surface now" is exactly what the two-step version also answered.
+    local mounts = {}
+    local opened = float.open
+    float.open = function(this, opts)
+      mounts[#mounts + 1] = (opts and opts.mount) or "float"
+      return opened(this, opts)
+    end
+    chat.surface "buffer"
+    truthy(
+      "surface: :Paseo buf with no chat opens one",
+      vim.wait(1000, function()
+        return chat.current() ~= nil and float.mount() == "buffer"
+      end)
+    )
+    eq("surface: and mounts the surface exactly once", #mounts, 1)
+    eq("surface: on the one that was asked for", mounts[1], "buffer")
+    float.open = opened
+
+    -- AND IT IS A TOGGLE. This surface takes the window you are standing in,
+    -- so the key that opened it is the way back to the file it covered.
+    chat.surface("buffer", { toggle = true })
+    truthy("surface: pressing it again closes the surface", not float.is_open(chat.current()))
+    chat.surface("buffer", { toggle = true })
+    truthy("surface: and a third press brings it back", float.is_open(chat.current()))
+    -- A toggle only ever answers the surface it names: the float is a
+    -- different one, and asking for it while the buffer surface is up is a
+    -- swap, never a close.
+    chat.surface("float", { toggle = true })
+    eq("surface: asking for the OTHER surface swaps rather than closes", float.mount(), "float")
+    chat.close()
+    chat.forget()
+
     chat.open { root = here }
     truthy(
       "follow: the chat opens on the directory asked for",

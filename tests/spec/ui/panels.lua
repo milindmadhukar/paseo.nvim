@@ -425,9 +425,9 @@ local function test_panels()
   -- another on the dashboard, whose composer has no winbar.
   local bar = vim.wo[surface_chat.win_composer].winbar ~= "" and 1 or 0
   eq(
-    "ui: an empty composer is a single row",
+    "ui: an empty composer rests at ui.sidebar.composer_min",
     vim.api.nvim_win_get_height(surface_chat.win_composer),
-    1 + bar
+    3 + bar
   )
   vim.api.nvim_buf_set_lines(surface_chat.composer, 0, -1, false, { "one", "two", "three", "four" })
   sidebar.fit_composer(surface_chat)
@@ -448,7 +448,7 @@ local function test_panels()
   eq(
     "ui: and shrinks back when it is sent",
     vim.api.nvim_win_get_height(surface_chat.win_composer),
-    1 + bar
+    3 + bar
   )
   truthy(
     "ui: `position = left` puts it on the left",

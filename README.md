@@ -102,20 +102,26 @@ require("paseo").setup {
       height = 86,
       -- row and col are absent: absent means centred
       composer = 7,               -- rows the composer may grow TO
+      composer_min = 3,           -- ...and the fewest it rests at
       zindex = 30,                -- BELOW the 50 a float gets by default
       backdrop = true,
       tab_keys = true,            -- bare 1-6 switch tabs; see below
     },
 
     buffer = {                    -- the same dashboard, in a window of its own
-      open = "tab",               -- a tab page of its own
-      -- composer, zindex and tab_keys are inherited from `float`
+      open = "here",              -- the window you are in; "tab" for its own
+      chrome = false,             -- hide the tabline and statusline while up
+      composer = function(lines)  -- a SHARE of the surface, not a flat 7
+        return math.max(7, math.floor(lines / 3))
+      end,
+      -- composer_min, zindex and tab_keys are inherited from `float`
     },
 
     sidebar = {
       width = 40,                 -- percent of the editor's columns
       min_width = 60,             -- ...but never narrower than this, in cells
       composer = 8,               -- the MOST rows the composer grows to
+      composer_min = 3,           -- ...and the fewest
       position = "right",         -- or "left"
     },
 
@@ -176,7 +182,7 @@ require("paseo").setup {
 | `:Paseo agent-settings` | What this agent session is set to |
 | `:Paseo session` | Compatibility alias for `agent-settings` |
 | `:Paseo dash` | The chat full screen, with the agent panels |
-| `:Paseo buf` | The same dashboard, in a window of its own on its own tab (`:Paseo tab`) |
+| `:Paseo buf` | Toggle the same dashboard in a window of its own (`:Paseo tab`) |
 | `:Paseo sidebar` | The chat in the pane beside your code |
 | `:Paseo model [provider/model]` | Set the preference for new agents; no agent is created |
 | `:Paseo workspaces` | Workspace picker — open, inspect agent sessions, create, archive |
@@ -369,12 +375,32 @@ do — does not take it with it.
 `1`–`6` jump, `<M-1>`–`<M-6>` and `<Tab>`/`<S-Tab>` do the same, and
 everything that does something responds to a click as well.
 
-### The same dashboard, in a tab
+### The same dashboard, in the window you are in
 
 `:Paseo buf` — or `ui.surface = "buffer"` — puts everything above in a **real
 window** instead of a float: same chrome, same six tabs, same panes, same
-keys. It opens on a tab page of its own and fills it, so it gets the whole
-screen rather than the 94% a centred float leaves itself.
+keys. It takes over the window you were standing in, hides the editor's
+tabline and statusline, and fills what is left, so it gets the whole screen
+rather than the 94% a centred float leaves itself. This is nvdash's
+arrangement, and `:Paseo buf` is a **toggle**: press it again and your file
+comes back, on the line you left it on, with that window's own `number`,
+`wrap` and highlights.
+
+It is a toggle because this surface is one window, and the key that took the
+window is the obvious way to give it back — `q` still works, but it is a
+second key for the same thought. The tab page it used to open on bought
+nothing: a tab is an arrangement of *windows*, and this is one of them. It put
+a tabline up over a surface that draws a header of its own, and it made "back
+to my code" a `gt` rather than the key that opened it. `ui.buffer.open =
+"tab"` is still there for the old behaviour, and `ui.buffer.chrome = true`
+keeps your tabline and statusline up.
+
+**Opening a file takes it down.** That is half of what the surface is, and it
+does not happen by itself: the cursor here is in the composer, which is a
+float, and a picker that opens a file in "the window you came from" would put
+somebody's source in a three-row box over a dashboard that is still up. So a
+real file landing in either pane is taken as *leave* and is reseated in the
+window the surface borrowed — which is where it was always going.
 
 The chrome is an ordinary buffer with a filetype of its own, `paseo-dash`, so
 `ftplugin/paseo-dash.lua` works on it the way it would for a file tree. The
@@ -386,7 +412,7 @@ puts them on its tab page rather than on whichever tab you were standing on,
 and what lets `ui/layout.lua`'s row arithmetic serve both mounts without a
 single branch in it.
 
-Two keys differ, both deliberately. `q` closes it and takes the tab with it;
+Two keys differ, both deliberately. `q` closes it and hands the window back;
 `<Esc>` does **not**, because a float is a thing in front of you and this is a
 place you are standing — one stray `<Esc>` after a mistyped `i` should not
 destroy the surface. And `<C-f>` is not bound at all: that key names one swap,
@@ -396,8 +422,8 @@ is separate.
 
 #### The composer
 
-The box you type in **grows with the prompt** — one row when it is empty, up to
-`ui.float.composer` rows as you fill it, and back again when you send:
+The box you type in **grows with the prompt**, between `composer_min` and
+`composer`, and shrinks back when you send:
 
 ```
 ─ claude/claude-opus-5 · Plan Mode · 71% left · ~/Code/paseo.nvim ───── ⠹ 1m 9s ─ 󰌑 / Alt + 󰌑 send ─
@@ -406,9 +432,32 @@ The box you type in **grows with the prompt** — one row when it is empty, up t
 
 Standing at its configured height over an empty buffer made it the largest and
 emptiest shape on the screen: seven rows of flat card colour, nothing saying
-you could type in it. Wrapped lines count towards the height — `wrap` is on, so
-a 300-column paragraph is four rows on screen, and asking the buffer for its
-line count would say one and leave the cursor off the bottom of the box.
+you could type in it. Resting at *one* row is the same mistake the other way
+round — that is the shape of `:e `, not of the place you write a paragraph,
+and it is where every session starts. So the floor is **three**
+(`composer_min`, 1 for the old behaviour).
+
+The ceiling is `composer`, and on the buffer surface it is **a share of the
+screen rather than a flat seven**: that surface is the whole window, a
+fifty-row terminal has forty rows of transcript on it and most of them are
+blank, and the box was still the seven rows it gets in a float over your code.
+`ui.float.composer` and `ui.buffer.composer` both take a function of the
+surface's rows returning cells, which is what the default is.
+
+Wrapped lines count towards the height — `wrap` is on, so a 300-column
+paragraph is four rows on screen, and asking the buffer for its line count
+would say one and leave the cursor off the bottom of the box.
+
+**The text above the cursor stays on screen.** The box is resized from
+`TextChanged`, which fires *after* Neovim has already scrolled: press `<CR>` in
+a one-row box and line 1 goes above the top of the window to keep the cursor
+visible, and only then does the box grow. Neovim never scrolls back —
+`update_topline` scrolls as far as it must to keep the cursor visible, and the
+cursor already is — so the box grew and the line you had just typed stayed the
+only one you could see, with everything above it still in the buffer, still in
+the send, and invisible. Whenever the whole draft fits, the box is scrolled to
+the top of it; past the ceiling it is a viewport onto something longer than
+itself and Neovim's own behaviour is the right one.
 
 **No box drawn around it, under `plate`** — which is the default, and where
 nothing else on the surface has an edge either. A hard rounded rule around the
@@ -471,16 +520,17 @@ composer stop fitting — and to the editor, so no setting can put the border
 off screen.
 
 **The composer is the size of what is in it**, on the sidebar as well as the
-dashboard. One row over an empty buffer, growing as you type up to `composer`,
-shrinking back when you send — measured in *screen* rows rather than buffer
-lines, because it soft-wraps and one pasted sentence is three rows in a narrow
-pane. A fixed eight rows in the sidebar was a third of that pane spent on
-whitespace for the whole of a session.
+dashboard. `composer_min` rows over an empty buffer, growing as you type up to
+`composer`, shrinking back when you send — measured in *screen* rows rather
+than buffer lines, because it soft-wraps and one pasted sentence is three rows
+in a narrow pane. A fixed eight rows in the sidebar was a third of that pane
+spent on whitespace for the whole of a session.
 
 **The sidebar takes the same units**, under `ui.sidebar`: `width` as a
 percentage, `min_width` as a floor in cells (40% of a 100-column terminal is a
 pane too narrow to read a tool card in, and a percentage has no way to know
-that), `composer` in rows, and `position` for which side it opens on. Its
+that), `composer` and `composer_min` in rows, and `position` for which side it
+opens on. Its
 width is also capped at what `'winwidth'` leaves for the window you came back
 from — Neovim claws the difference back the instant focus returns there, so a
 bigger number is not a wider sidebar, it is a number that quietly does not
@@ -1529,7 +1579,7 @@ lua/paseo/          the plugin
     layout.lua      the chrome's row budget, stated once -- and mount-agnostic,
                     which is what lets the dashboard be a float or a window
     float.lua       the dashboard, on either mount: floating over your code,
-                    or a real buffer in a window on a tab page of its own
+                    or a real buffer taking over the window you are in
     sidebar.lua     the narrow pane beside your code, in two real splits
     animate.lua     motion, none of which may change a height
     render.lua      the cell/line alphabet and the three sinks

@@ -569,6 +569,32 @@ local function watch_size(chat)
   })
 end
 
+---How many buffers have wanted a name already taken. See `name_buffer`.
+local named = 0
+
+---Name a chat buffer, and make sure it GETS one.
+---
+---`paseo://chat/<dir>` is not unique: a workspace can hold several agent
+---sessions, they are all in one directory, and the second one's buffer took
+---`E95: Buffer with this name already exists` and stayed UNNAMED. That is not
+---cosmetic. `:e file` typed in an unnamed, unmodified buffer loads the file
+---into THAT buffer rather than displacing it -- so the second session's
+---composer quietly became somebody's source file, with the chat still holding
+---its id and still writing your draft into it.
+---
+---The same counter `ui/float.lua` gives the chrome buffer, for the same
+---reason and with the same shape.
+---@param buf integer
+---@param prefix string
+---@param root string
+local function name_buffer(buf, prefix, root)
+  local base = ("paseo://%s/%s"):format(prefix, vim.fs.basename(root))
+  if not pcall(vim.api.nvim_buf_set_name, buf, base) then
+    named = named + 1
+    pcall(vim.api.nvim_buf_set_name, buf, ("%s-%d"):format(base, named))
+  end
+end
+
 local function make_buffers(chat)
   if not (chat.conversation and vim.api.nvim_buf_is_valid(chat.conversation)) then
     chat.conversation = vim.api.nvim_create_buf(false, true)
@@ -576,11 +602,7 @@ local function make_buffers(chat)
     vim.bo[chat.conversation].bufhidden = "hide"
     vim.bo[chat.conversation].filetype = "markdown"
     vim.bo[chat.conversation].modifiable = false
-    pcall(
-      vim.api.nvim_buf_set_name,
-      chat.conversation,
-      "paseo://chat/" .. vim.fs.basename(chat.root)
-    )
+    name_buffer(chat.conversation, "chat", chat.root)
 
     -- The conversation buffer had no keymaps at all: there was nothing on it
     -- to act on. Now a tool card can be opened to see what the command
@@ -625,11 +647,7 @@ local function make_buffers(chat)
     vim.bo[chat.composer].buftype = "nofile"
     vim.bo[chat.composer].bufhidden = "hide"
     vim.bo[chat.composer].filetype = "markdown"
-    pcall(
-      vim.api.nvim_buf_set_name,
-      chat.composer,
-      "paseo://compose/" .. vim.fs.basename(chat.root)
-    )
+    name_buffer(chat.composer, "compose", chat.root)
 
     -- The box is the size of what is in it: three rows for a question, more
     -- for a paragraph, back to three once it is sent. A fixed eight rows was
@@ -1285,18 +1303,43 @@ end
 ---
 ---Both live on the chat rather than in a window, so this is genuinely just a
 ---matter of closing one set of windows and opening another.
+---
+---`toggle` makes the surface's own key answer twice: press it where you are
+---and the surface comes up, press it again and it goes away. It only ever
+---closes a surface that is BOTH this one and on the tab page you are looking
+---at -- `is_open` asks both -- so the key never answers a dashboard you
+---cannot see by hiding it.
 ---@param name "float"|"sidebar"|"buffer"
-function M.surface(name)
+---@param opts? { toggle?: boolean }
+function M.surface(name, opts)
   local chat = current
   if not chat then
-    return M.open({}, function(opened)
-      if opened then
+    -- ON THE SURFACE THAT WAS ASKED FOR, not on the default one first. Opening
+    -- with no `surface` uses `ui.surface`, so `:Paseo buf` from a cold start
+    -- put a float on the screen, tore it down and built the real surface over
+    -- the top of it -- one flash of the wrong thing per session, and the
+    -- agent picker opened against a window that was about to close.
+    return M.open({ surface = name }, function(opened)
+      if opened and opened.surface ~= name then
         M.surface(name)
       end
     end)
   end
 
   local float = require "paseo.ui.float"
+  if
+    opts
+    and opts.toggle
+    and name ~= "sidebar"
+    and float.is_open(chat)
+    and float.mount() == name
+  then
+    return M.close()
+  end
+  if opts and opts.toggle and name == "sidebar" and sidebar.is_open(chat) then
+    return M.close()
+  end
+
   if name == "sidebar" then
     float.close()
     chat.surface = "sidebar"

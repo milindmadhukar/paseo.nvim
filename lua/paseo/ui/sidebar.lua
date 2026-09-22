@@ -462,14 +462,17 @@ function M.fit_composer(chat)
   local total = api.nvim_win_get_height(win)
     + ((conv and api.nvim_win_is_valid(conv)) and api.nvim_win_get_height(conv) or 0)
 
+  -- Never so tall that the conversation has nothing left. `total` counts the
+  -- conversation's own winbar, so the five here is four lines of transcript.
+  local max = math.max(1, math.min(math.floor(ui.composer or 8), total - 5 - bar))
   local rows = require("paseo.ui.layout").composer_rows {
     buf = chat.composer,
     win = win,
-    -- One row over an empty buffer, as the dashboard's does.
-    min = 1,
-    -- Never so tall that the conversation has nothing left. `total` counts the
-    -- conversation's own winbar, so the five here is four lines of transcript.
-    max = math.max(1, math.min(math.floor(ui.composer or 8), total - 5 - bar)),
+    -- Three rows over an empty buffer, as the dashboard's does. A one-row box
+    -- is the shape of `:e `, not of the place you write a paragraph -- and it
+    -- has to be the second, because it is what every session opens on.
+    min = math.min(math.floor(ui.composer_min or 3), max),
+    max = max,
   }
 
   if api.nvim_win_get_height(win) == rows + bar then
@@ -477,6 +480,10 @@ function M.fit_composer(chat)
   end
   local stick = transcript.at_bottom(chat)
   api.nvim_win_set_height(win, rows + bar)
+  -- The box just grew under a view that had already scrolled to follow the
+  -- cursor, and Neovim does not scroll back on its own. See
+  -- |paseo.ui.composer|.reveal.
+  require("paseo.ui.composer").reveal(win)
   if stick then
     transcript.to_bottom(chat)
   end

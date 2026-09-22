@@ -274,10 +274,13 @@ commands.dash = {
 }
 
 commands.buf = {
-  desc = "Open the chat full screen, in a window of its own, on its own tab",
+  desc = "Toggle the chat full screen, in a window of its own",
   run = function()
-    -- Not a toggle, for the same reason `dash` is not one.
-    require("paseo.ui.chat").surface "buffer"
+    -- A TOGGLE, where `:Paseo dash` is not. This surface takes the window you
+    -- are standing in, so the key that opened it is the obvious way back to
+    -- the file it covered -- nvim-tree, oil and nvdash all work that way, and
+    -- the alternative was `q`, which is a different key for the same thought.
+    require("paseo.ui.chat").surface("buffer", { toggle = true })
   end,
 }
 

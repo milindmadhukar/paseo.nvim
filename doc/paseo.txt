@@ -91,20 +91,26 @@ Defaults: >lua
           height = 86,
           -- row and col are absent: absent means centred
           composer = 7,           -- MOST rows the composer may grow to
+          composer_min = 3,       -- ...and the fewest it rests at
           zindex = 30,            -- below the 50 a float gets by default
           backdrop = true,
           tab_keys = true,
         },
 
         buffer = {
-          open = "tab",           -- a tab page of its own
-          -- composer, zindex and tab_keys are inherited from `float`
+          open = "here",          -- the window you are in; "tab" for its own
+          chrome = false,         -- hide tabline/statusline while it is up
+          composer = function(lines)
+            return math.max(7, math.floor(lines / 3))
+          end,
+          -- composer_min, zindex and tab_keys are inherited from `float`
         },
 
         sidebar = {
           width = 40,             -- percent of the editor's columns
           min_width = 60,         -- ...but never narrower, in cells
           composer = 8,           -- rows the composer gets
+          composer_min = 3,       -- ...and the fewest
           position = "right",     -- or "left"
         },
 
@@ -173,8 +179,8 @@ ui.surface                                        string, default `"float"`
                  glance at rather than the thing you are doing.
       `"buffer"`   the SAME dashboard as `"float"` -- same chrome, same six
                  tabs, same panes -- in a real window with a buffer of its
-                 own, on a tab page of its own, using the whole screen
-                 rather than 94% of it.
+                 own, taking over the window you are standing in and using
+                 the whole screen rather than 94% of it.
 
     `<C-f>` switches between the float and the sidebar at any time, and a chat
     REMEMBERS the surface you last put it on. `<C-f>` does NOT reach the
@@ -329,6 +335,7 @@ ui.animate                                 boolean|table, default on
     is drawn, so a reveal that painted only some of them left the screen
     disagreeing with what a keypress would do for the length of it.
 
+                        *paseo-config.ui.float*
                         *paseo-config.ui.float.width*
                         *paseo-config.ui.float.height*
 ui.float.width                                        number, default `94`
@@ -368,15 +375,30 @@ ui.float.col                                          number, unset
     switching between them does not move the frame under you.
 
                                               *paseo-config.ui.float.composer*
-ui.float.composer                                     number, default `7`
+ui.float.composer                    number or function, default `7`
 
-    The MOST rows the composer may take. It is one row when empty and grows
-    with what you type, up to this; the conversation takes back whatever it is
-    not using. See |paseo-chat-composer|.
+    The MOST rows the composer may take. It rests at
+    |paseo-config.ui.float.composer_min| and grows with what you type, up to
+    this; the conversation takes back whatever it is not using. See
+    |paseo-chat-composer|.
 
     A box standing at its full height over an empty buffer was the largest and
     emptiest shape on the screen, which is why this is a ceiling and not a
     fixed size.
+
+    A FUNCTION is handed the surface's rows and returns cells. That is what
+    |paseo-config.ui.buffer| `composer` defaults to: a ceiling written in cells
+    fits one terminal, and the buffer surface is the whole screen.
+
+                                          *paseo-config.ui.float.composer_min*
+ui.float.composer_min                                 number, default `3`
+
+    And the FEWEST -- the height the box rests at over an empty buffer.
+
+    This was 1, which is the same mistake as a flat seven in the other
+    direction: one row is the shape of `:e `, not of the place you write a
+    paragraph, and it is what every session opens on. Set `1` for the old
+    behaviour.
 
                                                 *paseo-config.ui.float.zindex*
 ui.float.zindex                                       number, default `30`
@@ -411,6 +433,7 @@ ui.sidebar                                                          table
           width = 40,        -- percent of the editor's columns, or a function
           min_width = 60,    -- ...but never narrower than this, in CELLS
           composer = 8,      -- the MOST rows the composer grows to
+          composer_min = 3,  -- ...and the fewest
           position = "right" -- or "left"
         }
 <
@@ -419,10 +442,11 @@ ui.sidebar                                                          table
     columns. The float's equivalent floor is fixed at 60x20 instead, because
     there it is a hard layout requirement rather than a matter of taste.
 
-    `composer` reads exactly as |paseo-config.ui.float.composer| does, and the
-    sidebar's box grows the same way: one row over an empty buffer, up to this
-    as you type, and back again when you send. A fixed eight rows here was a
-    third of a narrow pane spent on whitespace for the whole of a session.
+    `composer` and `composer_min` read exactly as the float's do, and the
+    sidebar's box grows the same way: three rows over an empty buffer, up to
+    the ceiling as you type, and back again when you send. A fixed eight rows
+    here was a third of a narrow pane spent on whitespace for the whole of a
+    session.
 
     The width is also capped at what 'winwidth' leaves for the window you came
     back from. Neovim claws the difference back the instant focus returns
@@ -432,22 +456,45 @@ ui.sidebar                                                          table
                                                   *paseo-config.ui.buffer*
 ui.buffer                                                           table
 
-    The dashboard as a WINDOW rather than as a float -- |paseo-chat-buffer|.
-    Deliberately ONE key: >lua
+    The dashboard as a WINDOW rather than as a float -- |paseo-chat-buffer|. >lua
         buffer = {
-          open = "tab",      -- a tab page of its own
+          open = "here",     -- or "tab", for a tab page of its own
+          chrome = false,    -- keep the editor's tabline and statusline?
+          composer = function(lines)
+            return math.max(7, math.floor(lines / 3))
+          end,
         }
 <
     There is no `width` or `height` here, and that is the point of the
     surface: the host window's size IS the geometry, so the dashboard is
     however big Neovim has made the window.
 
-    `composer`, `zindex` and `tab_keys` are read from |paseo-config.ui.float|
-    unless you set them here. They describe the DASHBOARD -- how tall the
-    prompt box grows, how the panes stack, whether a bare digit switches tab
-    -- rather than where it is mounted, and two copies of one answer is how
-    two surfaces start disagreeing about a question neither of them asks
-    differently.
+    `open = "here"` takes over the WINDOW YOU ARE STANDING IN, which is
+    nvdash's arrangement and the default. The buffer that was there is
+    remembered along with its view and its window options and put back when
+    the dashboard closes, so |:Paseo-buf| is a toggle you can take and leave
+    without losing your place; opening a file from the surface simply opens
+    the file. `open = "tab"` is the old behaviour: a tab page of its own,
+    which costs a tab and leaves the window layout under it intact.
+
+    `chrome` is whether the EDITOR's own tabline and statusline stay up around
+    the surface. False -- the default -- hides both while it is open and puts
+    them back, whatever they were, afterwards: they are two rows of chrome
+    around a surface that has a header and a footer of its own, saying things
+    about the buffer this one replaced. Only ever touched for `open = "here"`;
+    on a tab page of its own the tabline is how you get back.
+
+    `composer` defaults to a SHARE of the host rather than the float's flat
+    seven. This surface is the whole screen -- a fifty-row terminal has forty
+    rows of transcript on it and most of them are blank -- and the box you
+    type in was still the seven rows it gets in a float over your code.
+
+    `composer_min`, `zindex` and `tab_keys` are read from
+    |paseo-config.ui.float| unless you set them here. They describe the
+    DASHBOARD -- how short the prompt box rests, how the panes stack, whether
+    a bare digit switches tab -- rather than where it is mounted, and two
+    copies of one answer is how two surfaces start disagreeing about a
+    question neither of them asks differently.
 
                                                 *paseo-config.ui.terminal*
 ui.terminal                                                         table
@@ -691,12 +738,15 @@ skills.method                                       `"link"`|`"copy"`, default `
 :Paseo buf                                                    *:Paseo-buf*
 :Paseo tab                                                    *:Paseo-tab*
 
-    Put the chat on the full-screen surface, in a window of its own, on a tab
-    page of its own. The same dashboard as |:Paseo-dash| in a real buffer you
-    can navigate to -- see |paseo-chat-buffer|. Two names for one command:
-    some people reach for what it IS, some for where it goes.
+    Toggle the chat on the full-screen surface, in a window of its own. The
+    same dashboard as |:Paseo-dash| in a real buffer you can navigate to --
+    see |paseo-chat-buffer|. Two names for one command: some people reach for
+    what it IS, some for where it goes.
 
-    Not a toggle, for the same reason |:Paseo-dash| is not.
+    A TOGGLE, where |:Paseo-dash| is not. This surface takes the window you
+    are standing in, so the key that opened it is the obvious way back to the
+    file it covered; `q` does the same. Where the dashboard goes is
+    |paseo-config.ui.buffer| `open`.
 
 :Paseo sidebar                                            *:Paseo-sidebar*
 
@@ -1484,9 +1534,28 @@ key that does not work.
                                                           *paseo-chat-buffer*
 The BUFFER surface is the same dashboard in a real WINDOW -- `:Paseo buf`, or
 `ui.surface = "buffer"`. Same chrome, same six tabs, same panes, same keys;
-the difference is what it is mounted on. It opens on a tab page of its own and
-fills it, so it gets the whole screen rather than the 94% a centred float
-leaves itself.
+the difference is what it is mounted on. It takes over the window you are
+standing in, hides the editor's tabline and statusline, and fills what is
+left, so it gets the whole screen rather than the 94% a centred float leaves
+itself.
+
+That is nvdash's arrangement, and |:Paseo-buf| is a TOGGLE: press it again and
+the file comes back, on the line you left it on, with that window's own
+'number', 'wrap' and highlights. The surface is one window, and the key that
+took the window is the obvious way to give it back.
+
+It used to open on a tab page of its own, and the tab bought nothing: a tab is
+an arrangement of WINDOWS and this is one of them. It put a tabline up over a
+surface that draws a header of its own, and it made "back to my code" a `gt`
+rather than the key that opened it. |paseo-config.ui.buffer| `open = "tab"` is
+the old behaviour, and `chrome = true` keeps the tabline and statusline up.
+
+OPENING A FILE TAKES IT DOWN. That is half of what the surface is, and it does
+not happen by itself: the cursor here is in the composer, which is a FLOAT, so
+a picker that opens a file in "the window you came from" would put somebody's
+source in a three-row box over a dashboard that is still up. A real file
+landing in either pane is taken as "leave" and is reseated in the window the
+surface borrowed -- which is where it was always going.
 
 The chrome is an ordinary window holding an ordinary buffer with a filetype of
 its own -- `paseo-dash`, the thing to hang an `ftplugin/paseo-dash.lua` off,
@@ -1495,7 +1564,7 @@ floated over it and ANCHORED to it, which is what makes them follow it when a
 split moves it and what keeps them on its tab page rather than on whichever
 tab you happened to be standing on.
 
-`q` closes it, and closing it closes the tab. `<Esc>` does NOT, unlike on the
+`q` closes it and hands the window back. `<Esc>` does NOT, unlike on the
 float: a float is a thing in front of you and `<Esc>` is how you dismiss it,
 but this is a place you are standing, and one stray `<Esc>` after a mistyped
 `i` should not take the surface down. Closing the window yourself -- `:q`,
@@ -1720,7 +1789,8 @@ In the composer ~
     q         close the chat
 
 The box is the size of what is in it: |paseo-config.ui.sidebar| `composer` is
-a ceiling it grows to, not a fixed height.
+a ceiling it grows to and `composer_min` the floor it rests at, not a fixed
+height.
 
 In the conversation ~
 
@@ -1921,18 +1991,38 @@ abbreviations and undo all work. That is the difference between writing a
 prompt and filling in a text field, and it is why |:Paseo-ask| does not go
 through `vim.ui.input`.
 
-On the full-screen surface it GROWS with the prompt -- one row when empty, up
-to |paseo-config.ui.float.composer| rows as you fill it, and back again when
-you send: >
+On the full-screen surface it GROWS with the prompt, between
+|paseo-config.ui.float.composer_min| and |paseo-config.ui.float.composer|, and
+shrinks back when you send: >
 
     ─ claude/sonnet-5 · acceptEdits · 58% left · ~/Code/kora ─ ⠹ 14s ─ 󰌑 send ─
      why is the ref suite opening a file it then deletes?
 <
 A box standing at its configured height over an empty buffer was the largest
 and emptiest shape on the screen: seven rows of flat card colour with nothing
-saying you could type in it. Wrapped lines count towards the height --
-`wrap` is on, so a 300-column paragraph is four rows on screen, and asking the
-buffer for its line count would say one and leave the cursor off the bottom.
+saying you could type in it. Resting at ONE row is the same mistake the other
+way round -- that is the shape of `:e `, not of the place you write a
+paragraph, and it is where every session starts. So the floor is three.
+
+The ceiling is a SHARE OF THE SCREEN on the buffer surface rather than a flat
+seven: that surface is the whole window, a fifty-row terminal has forty rows
+of transcript on it and most of them are blank, and the box was still the
+seven rows it gets in a float over your code. See |paseo-config.ui.buffer|.
+
+Wrapped lines count towards the height -- `wrap` is on, so a 300-column
+paragraph is four rows on screen, and asking the buffer for its line count
+would say one and leave the cursor off the bottom.
+
+THE TEXT ABOVE THE CURSOR STAYS ON SCREEN. The box is resized from
+`TextChanged`, which fires AFTER Neovim has already scrolled: press `<CR>` in a
+one-row box and line 1 goes above the top of the window to keep the cursor
+visible, and only then does the box grow. Neovim never scrolls back -- it
+scrolls as far as it must to keep the cursor visible, and the cursor already
+is -- so the box grew and the line you had just typed stayed the only one you
+could see, with everything above it still in the buffer, still in the send,
+and invisible. Whenever the whole draft fits, the box is scrolled to the top
+of it; past the ceiling it is a viewport onto something longer than itself and
+Neovim's own behaviour is the right one.
 
                                                      *paseo-chat-keys-send*
 NO BOX IS DRAWN AROUND IT under `plate`, which is the default and where nothing
@@ -1978,9 +2068,10 @@ an earlier session -- goes on running without us, so quitting risks nothing and
 nothing is asked, however busy its agents are. The question is only worth
 asking about the daemon this Neovim started itself.
 
-The buffer surface lives on a tab page of its own, so `:q` in your code with
-it open closes a window rather than Neovim and nothing is asked; `:q` on the
-dashboard's own tab closes that tab.
+Under `open = "here"` the buffer surface is the window you were in, so `:q`
+there closes that window -- and if it was the last one, quitting Neovim is
+exactly what you asked for and the warning below applies. Under `open = "tab"`
+it has a tab page of its own, so `:q` on it closes that tab.
 
 With |paseo-config.quit.warn_active_agents| enabled, normal whole-editor
 routes (`:q`, `:qa`, `:wq`, `:x`, long forms, `ZZ`, and `ZQ`) warn when a
