@@ -1,4 +1,10 @@
-import { need, guarded, emit, type Ops, type Request } from "./bridge-io.ts";
+import {
+  need,
+  guarded,
+  emit,
+  type Ops,
+  type Request,
+} from "./bridge-io.ts";
 import { BridgeConnection } from "./bridge-connection.ts";
 import { pictures, withFallbackActions } from "./bridge-normalize.ts";
 import { workspaceFor } from "./bridge-workspaces.ts";
@@ -21,6 +27,50 @@ function agentProvider(agent: any): string | null {
   return runtime?.provider && runtime?.model
     ? `${runtime.provider}/${runtime.model}`
     : null;
+}
+
+const MAX_PROVISIONAL_AGENT_TITLE_CHARS = 60;
+
+function provisionalAgentTitle(prompt: string): string | null {
+  const firstContentLine = prompt
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+  if (!firstContentLine) return null;
+
+  const normalized = firstContentLine.replace(/\s+/g, " ").trim();
+  if (!normalized) return null;
+
+  const clamped = normalized
+    .slice(0, MAX_PROVISIONAL_AGENT_TITLE_CHARS)
+    .trim();
+  return clamped.length > 0 ? clamped : null;
+}
+
+/**
+ * Paseo 0.8 derives a title only when the first prompt is part of create().
+ * paseo.nvim deliberately creates an idle session first, so mirror the newer
+ * daemon behavior when that session receives its first prompt later.
+ */
+async function nameAgentFromFirstPrompt(
+  ctx: BridgeConnection,
+  agent: any,
+  agentId: string,
+  prompt: string,
+): Promise<void> {
+  const title = provisionalAgentTitle(prompt);
+  if (!title) return;
+
+  try {
+    await agent.refresh();
+    const snapshot = agent.current();
+    if (snapshot && !snapshot.title && !snapshot.lastUserMessageAt) {
+      await ctx.raw().updateAgent(agentId, { name: title });
+    }
+  } catch {
+    // Naming is cosmetic. A transient fetch/update failure must never eat the
+    // prompt the user was trying to send.
+  }
 }
 
 /**
@@ -273,23 +323,22 @@ export function agentOps(ctx: BridgeConnection): Ops {
     },
 
     async "agent.send"(req) {
-      const agent = connected().agents.ref(
-        String(need(req.agentId, "agentId")),
-      );
+      const agentId = String(need(req.agentId, "agentId"));
+      const prompt = String(need(req.prompt, "prompt"));
+      const agent = connected().agents.ref(agentId);
       const images = pictures(req);
-      await agent.send(
-        String(need(req.prompt, "prompt")),
-        images ? { images } : undefined,
-      );
+      await nameAgentFromFirstPrompt(ctx, agent, agentId, prompt);
+      await agent.send(prompt, images ? { images } : undefined);
       return { sent: true, images: images?.length ?? 0 };
     },
 
     async "agent.run"(req) {
-      const agent = connected().agents.ref(
-        String(need(req.agentId, "agentId")),
-      );
+      const agentId = String(need(req.agentId, "agentId"));
+      const prompt = String(need(req.prompt, "prompt"));
+      const agent = connected().agents.ref(agentId);
       const images = pictures(req);
-      const result = await agent.run(String(need(req.prompt, "prompt")), {
+      await nameAgentFromFirstPrompt(ctx, agent, agentId, prompt);
+      const result = await agent.run(prompt, {
         timeoutMs: Number(req.timeoutMs ?? 10 * 60_000),
         ...(images ? { images } : {}),
       });

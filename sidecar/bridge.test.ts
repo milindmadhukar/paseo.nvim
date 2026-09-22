@@ -18,9 +18,12 @@ import { emit } from "./bridge-io.ts";
 function captureStdout(run: () => void): string[] {
   const lines: string[] = [];
   const original = process.stdout.write.bind(process.stdout);
-  (process.stdout as any).write = (chunk: any) => {
-    lines.push(...String(chunk).split("\n").filter(Boolean));
-    return true;
+  (process.stdout as any).write = (chunk: any, ...args: any[]) => {
+    if (typeof chunk === "string" && chunk.startsWith("{")) {
+      lines.push(...chunk.split("\n").filter(Boolean));
+      return true;
+    }
+    return (original as any)(chunk, ...args);
   };
   try {
     run();
@@ -33,9 +36,15 @@ function captureStdout(run: () => void): string[] {
 async function captureStdoutAsync(run: () => Promise<void>): Promise<string[]> {
   const lines: string[] = [];
   const original = process.stdout.write.bind(process.stdout);
-  (process.stdout as any).write = (chunk: any) => {
-    lines.push(...String(chunk).split("\n").filter(Boolean));
-    return true;
+  (process.stdout as any).write = (chunk: any, ...args: any[]) => {
+    // Node's test reporter also writes through stdout while an async capture is
+    // open. Only bridge protocol messages are JSON objects; forwarding every
+    // other chunk keeps reporter traffic out of the assertions.
+    if (typeof chunk === "string" && chunk.startsWith("{")) {
+      lines.push(...chunk.split("\n").filter(Boolean));
+      return true;
+    }
+    return (original as any)(chunk, ...args);
   };
   try {
     await run();
@@ -258,6 +267,116 @@ test("fresh workspace sessions receive initial settings", async () => {
   assert.deepEqual(createdOptions.config, creationConfig(request, request.provider));
   assert.equal(createdOptions.prompt, request.prompt);
   assert.deepEqual(createdOptions.attachments, request.attachments);
+});
+
+function agentSendHarness(
+  snapshot: Record<string, unknown>,
+  options: { updateError?: Error } = {},
+) {
+  const calls: Array<{ kind: string; [key: string]: unknown }> = [];
+  const ctx = new BridgeConnection();
+  ctx.connected = (() => ({
+    agents: {
+      ref(agentId: string) {
+        return {
+          async refresh() {
+            calls.push({ kind: "refresh", agentId });
+          },
+          current() {
+            return snapshot;
+          },
+          async send(prompt: string) {
+            calls.push({ kind: "send", prompt });
+          },
+        };
+      },
+    },
+  })) as any;
+  ctx.raw = (() => ({
+    async updateAgent(agentId: string, updates: Record<string, unknown>) {
+      calls.push({ kind: "update", agentId, updates });
+      if (options.updateError) throw options.updateError;
+    },
+  })) as any;
+  return { calls, send: agentOps(ctx)["agent.send"] };
+}
+
+test("the first prompt gives an unused untitled agent a normalized title", async () => {
+  const { calls, send } = agentSendHarness({
+    title: null,
+    lastUserMessageAt: null,
+  });
+  const firstLine = `Name\t  this ${"session ".repeat(12)}`;
+  const prompt = `\n   \n  ${firstLine}\nignore this later line`;
+  const normalized = firstLine.replace(/\s+/g, " ").trim();
+
+  assert.deepEqual(await send({ op: "agent.send", agentId: "a1", prompt }), {
+    sent: true,
+    images: 0,
+  });
+  assert.deepEqual(calls, [
+    { kind: "refresh", agentId: "a1" },
+    {
+      kind: "update",
+      agentId: "a1",
+      updates: { name: normalized.slice(0, 60).trim() },
+    },
+    { kind: "send", prompt },
+  ]);
+});
+
+test("an explicit agent title is preserved on first send", async () => {
+  const { calls, send } = agentSendHarness({
+    title: "Chosen by the user",
+    lastUserMessageAt: null,
+  });
+  await send({ op: "agent.send", agentId: "a2", prompt: "Do the work" });
+  assert.deepEqual(calls, [
+    { kind: "refresh", agentId: "a2" },
+    { kind: "send", prompt: "Do the work" },
+  ]);
+});
+
+test("an untitled agent with prior activity is not renamed from a follow-up", async () => {
+  const { calls, send } = agentSendHarness({
+    title: null,
+    lastUserMessageAt: "2026-09-22T10:00:00.000Z",
+  });
+  await send({ op: "agent.send", agentId: "a3", prompt: "A later prompt" });
+  assert.deepEqual(calls, [
+    { kind: "refresh", agentId: "a3" },
+    { kind: "send", prompt: "A later prompt" },
+  ]);
+});
+
+test("an empty prompt does not trigger provisional naming", async () => {
+  const { calls, send } = agentSendHarness({
+    title: null,
+    lastUserMessageAt: null,
+  });
+  const prompt = " \n\t \n";
+  await send({ op: "agent.send", agentId: "a4", prompt });
+  assert.deepEqual(calls, [{ kind: "send", prompt }]);
+});
+
+test("a provisional-title failure does not prevent prompt delivery", async () => {
+  const { calls, send } = agentSendHarness(
+    { title: null, lastUserMessageAt: null },
+    { updateError: new Error("rename failed") },
+  );
+  assert.deepEqual(
+    await send({ op: "agent.send", agentId: "a5", prompt: "Still deliver me" }),
+    { sent: true, images: 0 },
+  );
+  assert.deepEqual(calls, [
+    { kind: "refresh", agentId: "a5" },
+    {
+      kind: "update",
+      agentId: "a5",
+      updates: { name: "Still deliver me" },
+    },
+    { kind: "send", prompt: "Still deliver me" },
+  ]);
 });
 
 test("fork context is capability-gated and snapshots the complete conversation", async () => {
