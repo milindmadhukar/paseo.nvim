@@ -582,6 +582,50 @@ function M.style(chat, opts)
   M.refresh(chat)
 end
 
+---Put the top of the draft back on the top row of the box.
+---
+---THE BUG THIS IS. The box is resized from `TextChanged`, which fires AFTER
+---the text changed and therefore after Neovim has already scrolled: press
+---`<CR>` in a one-row box and line 1 goes above the top of the window to keep
+---the cursor on screen, and only then does the box grow to two rows. Neovim
+---does not scroll back -- `update_topline` scrolls only as far as it must to
+---keep the cursor visible, and the cursor is visible -- so the box grew and
+---the line you had just typed stayed the only one you could see. Everything
+---above it was still in the buffer, still in the send, and invisible.
+---
+---ONLY WHEN THE WHOLE DRAFT FITS. Past the ceiling the box is a viewport onto
+---something longer than itself, the cursor is what has to stay on screen, and
+---Neovim's own behaviour is the right one -- so the fix there is to do
+---nothing.
+---
+---Measured rather than passed in: `nvim_win_text_height` counts the rows the
+---content actually occupies in THIS window, wrapping and all, which is the
+---same question "does it fit" asks. A caller handing us its own idea of the
+---row count would be a second copy of |paseo.ui.layout|.composer_rows.
+---@param win integer|nil
+function M.reveal(win)
+  if not (win and api.nvim_win_is_valid(win)) then
+    return
+  end
+  local ok, measured = pcall(api.nvim_win_text_height, win, {})
+  if not (ok and measured and measured.all) then
+    return
+  end
+  -- `nvim_win_get_height` INCLUDES the winbar row, and the composer always
+  -- carries one -- the session's model, mode and directory are drawn on it.
+  local bar = (vim.wo[win].winbar or "") ~= "" and 1 or 0
+  if measured.all > api.nvim_win_get_height(win) - bar then
+    return
+  end
+
+  api.nvim_win_call(win, function()
+    local view = vim.fn.winsaveview()
+    if view.topline > 1 or (view.skipcol or 0) > 0 then
+      vim.fn.winrestview { topline = 1, skipcol = 0 }
+    end
+  end)
+end
+
 -- ---------------------------------------------------------------- dictation
 
 ---Typing, while the microphone is still opening.

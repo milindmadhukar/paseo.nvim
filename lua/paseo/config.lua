@@ -117,11 +117,19 @@ local M = {}
 ---@field col integer?    not sizes. Absent means CENTRED, with the same
 ---                       `(total - size) / 2` floaterm centres with -- so the
 ---                       two at one size land in one place.
----@field composer integer  The MOST rows the composer grows to. It stands at
----                       one row over an empty buffer and grows with what you
----                       type, so this is a ceiling rather than a size. The
----                       rest of the box, less the header, tab bar and footer,
----                       is the conversation.
+---@field composer integer|fun(lines: integer): integer  The MOST rows the
+---                       composer grows to -- a ceiling, not a size: the box
+---                       grows with what you type and shrinks back. The rest
+---                       of the box, less the header, tab bar and footer, is
+---                       the conversation. A function is handed the SURFACE's
+---                       rows and returns cells, which is what lets a ceiling
+---                       be a share of the space there actually is rather
+---                       than a number that fits one terminal.
+---@field composer_min integer  And the FEWEST. A one-row box reads as a
+---                       filename prompt rather than as the place you write
+---                       a paragraph, and the row you type on is the one row
+---                       on the surface that is never wasted -- so the floor
+---                       is three. Set 1 for the old behaviour.
 ---@field zindex integer  Base z-index of the surface. DELIBERATELY BELOW 50,
 ---                       which is what floating windows and plenary popups get
 ---                       by default: a dashboard that outranks them hides the
@@ -148,7 +156,34 @@ local M = {}
 ---not the mount, so they are read from |paseo-config.ui.float| unless you set
 ---them here. The size is not a setting at all -- the host window's size IS the
 ---geometry, which is the whole point of the surface.
----@field open "tab"  Where it goes. A tab page of its own today.
+---@field open "here"|"tab"  Where it goes.
+---
+---                       `"here"` -- THE WINDOW YOU ARE STANDING IN, nvdash's
+---                       arrangement. The buffer that was there is remembered
+---                       along with its view and put back when the dashboard
+---                       closes, so the surface is a toggle you can take and
+---                       leave without losing your place. Opening a file from
+---                       it simply opens the file: the dashboard's buffer is
+---                       displaced, notices, and tears itself down.
+---
+---                       `"tab"` -- a tab page of its own, which costs a tab
+---                       and keeps the window layout underneath it intact.
+---@field chrome boolean  Whether the EDITOR's own tabline and statusline stay
+---                       up around the surface. False -- the default -- hides
+---                       both while it is open and puts them back, whatever
+---                       they were, when it closes.
+---
+---                       They are two rows of chrome around a surface that
+---                       has a header and a footer of its own, and what they
+---                       say -- the file you are not looking at, the line you
+---                       are not on -- is about the buffer this one replaced.
+---                       Set true to keep them.
+---
+---                       Only ever touched for `open = "here"`: on a tab page
+---                       of its own the tabline is how you get back, and
+---                       hiding it strands you.
+---@field composer integer|fun(lines: integer): integer
+---@field composer_min integer
 
 ---@class paseo.Config.UI.Sidebar
 ---@field width number|fun(columns: integer): integer  PERCENT of the editor's
@@ -316,6 +351,12 @@ local defaults = {
       height = 86,
       -- row and col are deliberately absent: absent means centred.
       composer = 7,
+      -- A floor as well as a ceiling. One row over an empty buffer was the
+      -- answer to "do not stand a flat seven-row card there whether or not
+      -- anyone is typing into it", and it overshot: a single row is the shape
+      -- of `:e ` and not the shape of the thing you write a paragraph in, and
+      -- it is where every session starts. Three rows is a field.
+      composer_min = 3,
       zindex = 30,
       backdrop = true,
       tab_keys = true,
@@ -327,15 +368,31 @@ local defaults = {
     -- it is mounted, and two copies of one answer is how the two surfaces
     -- start disagreeing.
     buffer = {
-      open = "tab",
+      -- The window you are standing in, not a tab page of its own. A tab is
+      -- an arrangement of windows and this surface is one window -- so it
+      -- spent a whole tab to say nothing, put a tabline up on a screen that
+      -- has a header of its own, and made "go back to my code" a `gt` rather
+      -- than the key that opened it.
+      open = "here",
+      chrome = false,
+
+      -- A SHARE OF THE HOST, where the float takes a flat seven. This surface
+      -- is the whole screen: a fifty-row terminal has forty rows of
+      -- transcript on it and most of them are blank, and the box you type in
+      -- was still the same seven rows it gets in a float over your code. The
+      -- floor keeps it honest on a small terminal, where a third is three.
+      composer = function(lines)
+        return math.max(7, math.floor(lines / 3))
+      end,
     },
 
     sidebar = {
       width = 40,
       min_width = 60,
-      -- A CEILING, read exactly as the float's is: the box is one row over an
-      -- empty buffer and grows with what you type.
+      -- A CEILING, read exactly as the float's is: the box grows with what
+      -- you type and shrinks back between `composer_min` and this.
       composer = 8,
+      composer_min = 3,
       position = "right",
     },
 
@@ -420,8 +477,8 @@ function M.setup(opts)
     return v == "float" or v == "sidebar" or v == "buffer"
   end, '"float", "sidebar" or "buffer"')
   vim.validate("ui.buffer.open", config.ui.buffer.open, function(v)
-    return v == "tab"
-  end, '"tab"')
+    return v == "here" or v == "tab"
+  end, '"here" or "tab"')
   vim.validate("ui.sidebar.position", config.ui.sidebar.position, function(v)
     return v == "right" or v == "left"
   end, '"right" or "left"')

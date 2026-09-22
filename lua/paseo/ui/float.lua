@@ -143,10 +143,18 @@ local HOST = {
   -- -- and would cost the chrome the row it measured itself against.
   winbar = "",
   winblend = 0,
-  -- Not a window other buffers open in. `:e file` from here would leave volt
-  -- drawing extmarks over somebody's source.
-  winfixbuf = true,
 }
+
+---The one `HOST` entry that is not the same on both mounts.
+---
+---On a tab page of its own the dashboard is the only thing there and `:e
+---file` from it is a mistake -- there is no window for the file to go to that
+---is not this one. Taking over the window you were standing in is the
+---opposite: the file goes exactly where it was always going to go, and the
+---dashboard getting out of the way is the point. `bufhidden = "wipe"` and the
+---`BufWipeout` handler are what make that safe -- volt's extmarks are on a
+---buffer that no longer exists by the time the file is loaded.
+local FIXBUF = { tab = true, here = false }
 
 ---The filetype the buffer surface carries.
 ---
@@ -158,13 +166,54 @@ M.FILETYPE = "paseo-dash"
 ---How many dashboards have wanted the name. See `host_buf`.
 local named = 0
 
+---The window options `style_host` overwrites, so a window HANDED BACK is the
+---window it was. `winhl` is in the list because the host is repainted into
+---the surface's own background and a file buffer left in it would keep that.
 ---@param win integer
-local function style_host(win)
+---@return table<string, any>
+local function capture_host(win)
+  local saved = {}
+  local function keep(option)
+    local ok, value = pcall(function()
+      return vim.wo[win][option]
+    end)
+    if ok then
+      saved[option] = value
+    end
+  end
+  for option in pairs(HOST) do
+    keep(option)
+  end
+  keep "winhl"
+  keep "winfixbuf"
+  return saved
+end
+
+---Put them back. Nothing else may be in `saved`: it is `capture_host`'s.
+---@param win integer
+---@param saved table<string, any>
+local function restore_host(win, saved)
+  if not (win and api.nvim_win_is_valid(win) and saved) then
+    return
+  end
+  for option, value in pairs(saved) do
+    pcall(function()
+      vim.wo[win][option] = value
+    end)
+  end
+end
+
+---@param win integer
+---@param how "tab"|"here"
+local function style_host(win, how)
   for option, value in pairs(HOST) do
     pcall(function()
       vim.wo[win][option] = value
     end)
   end
+  pcall(function()
+    vim.wo[win].winfixbuf = FIXBUF[how]
+  end)
 
   -- `NormalNC` is the entry the float never needed and this mount cannot do
   -- without: the cursor lives in the composer PANE, so the host is a
@@ -239,6 +288,155 @@ local function mount_tab(buf)
   return api.nvim_get_current_win(), api.nvim_get_current_tabpage()
 end
 
+---@class paseo.Float.Displaced
+---@field win integer      The window we took.
+---@field buf integer|nil  What it held.
+---@field view table|nil   And where it was scrolled to.
+---@field options table    `capture_host`'s.
+---@field showtabline integer|nil  The editor chrome we turned off, if we did.
+---@field laststatus integer|nil
+
+---Whether the editor's own tabline and statusline come down with the surface.
+---@return boolean
+local function bare()
+  local ui = require("paseo.config").get().ui
+  return (ui.buffer or {}).chrome ~= true
+end
+
+---Take the two global rows off, and remember what they were.
+---
+---BEFORE the geometry is measured, not after: 'laststatus' is a row out of
+---the host window itself, so hiding it after measuring leaves the chrome one
+---row short of the box it is drawn in for as long as nothing forces a re-fit.
+---@param displaced paseo.Float.Displaced
+local function hide_chrome(displaced)
+  if not bare() then
+    return
+  end
+  displaced.showtabline, displaced.laststatus = vim.o.showtabline, vim.o.laststatus
+  vim.o.showtabline, vim.o.laststatus = 0, 0
+end
+
+---@param displaced paseo.Float.Displaced|nil
+local function show_chrome(displaced)
+  if not displaced then
+    return
+  end
+  if displaced.showtabline ~= nil then
+    vim.o.showtabline = displaced.showtabline
+  end
+  if displaced.laststatus ~= nil then
+    vim.o.laststatus = displaced.laststatus
+  end
+end
+
+---Take over the window you are standing in.
+---
+---nvdash's arrangement, and the default, because this surface is ONE window
+---and a tab page is an arrangement of windows. The tab bought nothing: it put
+---a tabline up over a surface that draws a header of its own, and it made
+---"back to my code" a `gt` rather than the key that opened it.
+---
+---What the window held is remembered HERE rather than left to Neovim's
+---alternate file. `bufhidden = "wipe"` means our own buffer is gone before
+---anyone could ask `#` what it replaced, `#` is per window and any `:b` in
+---between rewrites it, and the view -- the line you were on, where the window
+---was scrolled to -- is not in the alternate file at all. Coming back to the
+---right file on the wrong line is the half of "goes back to where I was" that
+---gets noticed.
+---
+---A FLOAT IS NOT A WINDOW TO TAKE OVER. Opening the dashboard from inside
+---somebody else's float -- a picker, its preview, a terminal popup -- would
+---mount it on a window that is about to close itself and take the surface
+---with it, so the search is for a normal window on this tab page and
+---`mount_tab` is the fallback when there is none.
+---@param buf integer
+---@return integer win, integer|nil tabpage, paseo.Float.Displaced|nil
+local function mount_here(buf)
+  local win = api.nvim_get_current_win()
+  if api.nvim_win_get_config(win).relative ~= "" then
+    win = nil
+    for _, candidate in ipairs(api.nvim_tabpage_list_wins(0)) do
+      if api.nvim_win_get_config(candidate).relative == "" then
+        win = candidate
+        break
+      end
+    end
+  end
+  if not win then
+    local fallback, tabpage = mount_tab(buf)
+    return fallback, tabpage, nil
+  end
+
+  local displaced = {
+    win = win,
+    buf = api.nvim_win_get_buf(win),
+    view = api.nvim_win_call(win, vim.fn.winsaveview),
+    options = capture_host(win),
+  }
+  hide_chrome(displaced)
+  -- 'winfixbuf' is somebody else's, on a window we did not open -- nvim-tree
+  -- and oil both set it -- and `nvim_win_set_buf` fails outright against it.
+  pcall(function()
+    vim.wo[win].winfixbuf = false
+  end)
+  api.nvim_win_set_buf(win, buf)
+  api.nvim_set_current_win(win)
+  return win, nil, displaced
+end
+
+---Hand the window back the way it was found.
+---
+---Three cases, and the middle one is the one worth stating: the window is
+---STILL OURS, so put the buffer and the view back; the window is gone --
+---`:q`, `:only`, `:tabclose` -- so there is nothing to give back; or the
+---window holds something else already, which is `:e file` from the dashboard
+---doing exactly what it should, and touching it now would close the file the
+---user just opened.
+---@param held table  The dead `state`.
+---@return boolean  Did this leave the host window standing?
+local function restore_here(held)
+  local displaced = held.displaced
+  show_chrome(displaced)
+  if not displaced then
+    return false
+  end
+
+  local win = displaced.win
+  if not (win and api.nvim_win_is_valid(win)) then
+    return false
+  end
+
+  local ours = api.nvim_win_get_buf(win) == held.buf
+  if ours then
+    if displaced.buf and api.nvim_buf_is_valid(displaced.buf) then
+      pcall(api.nvim_win_set_buf, win, displaced.buf)
+    else
+      -- The buffer we displaced was deleted while the dashboard was up. An
+      -- empty one rather than closing the window: the window is the user's,
+      -- we only borrowed it.
+      pcall(api.nvim_win_call, win, function()
+        vim.cmd "enew"
+      end)
+    end
+  end
+
+  -- THE OPTIONS GO BACK EITHER WAY, and the case where it is not obvious is
+  -- the one that matters: `:e file` from the dashboard leaves the window
+  -- holding somebody's source with 'wrap' off, no gutter and `Normal` linked
+  -- to the surface's own background. The buffer is not ours any more; the
+  -- window still is.
+  restore_host(win, displaced.options)
+  -- The view is, though. It is where the buffer we just put back was scrolled
+  -- to, and against anything else it is a line number from another file.
+  if ours and displaced.view then
+    pcall(api.nvim_win_call, win, function()
+      vim.fn.winrestview(displaced.view)
+    end)
+  end
+  return true
+end
+
 -- ------------------------------------------------------------------ geometry
 
 ---Where the surface sits, how big it is, and how it stacks.
@@ -274,8 +472,13 @@ local function float_geometry()
   -- The composer is measured from the bottom, so the conversation gets what is
   -- left. A CEILING it grows to rather than a height it stands at -- see
   -- `M.resize_composer`. Clamped to leave the conversation at least five rows.
-  local composer = type(ui.composer) == "number" and math.floor(ui.composer) or 7
+  local composer = ui.composer
+  if type(composer) == "function" then
+    composer = composer(h)
+  end
+  composer = type(composer) == "number" and math.floor(composer) or 7
   composer = math.max(1, math.min(composer, h - 10))
+  local composer_min = type(ui.composer_min) == "number" and math.floor(ui.composer_min) or 3
 
   local z = ui.zindex or 30
   return {
@@ -295,6 +498,7 @@ local function float_geometry()
     row = math.max(0, math.min(row, lines - h)),
     col = math.max(0, math.min(col, columns - w)),
     composer = composer,
+    composer_min = math.max(1, math.min(composer_min, composer)),
     backdrop = ui.backdrop ~= false,
     -- The panes are ABOVE the chrome they sit on and below anything opened
     -- over the whole surface.
@@ -349,9 +553,19 @@ local function host_geometry(win)
   local h = math.max(1, info.height or api.nvim_win_get_height(win))
   local w = math.max(1, api.nvim_win_get_width(win) - textoff)
 
+  -- A FUNCTION OF THE SURFACE'S ROWS, not just a number. This mount's default
+  -- is a share of the host rather than the float's flat seven, which is the
+  -- whole reason the option grew a function form: a ceiling written in cells
+  -- fits one terminal.
   local composer = dash_option "composer"
+  if type(composer) == "function" then
+    composer = composer(h)
+  end
   composer = type(composer) == "number" and math.floor(composer) or 7
   composer = math.max(1, math.min(composer, h - 10))
+  local composer_min = dash_option "composer_min"
+  composer_min = type(composer_min) == "number" and math.floor(composer_min) or 3
+  composer_min = math.max(1, math.min(composer_min, composer))
 
   local z = math.floor(dash_option "zindex" or 30)
   return {
@@ -365,6 +579,7 @@ local function host_geometry(win)
     row = (vim.wo[win].winbar or "") ~= "" and 1 or 0,
     col = textoff,
     composer = composer,
+    composer_min = composer_min,
     -- Nothing behind a tab page to dim.
     backdrop = false,
     z_backdrop = 1,
@@ -929,28 +1144,32 @@ end
 ---An input that stands at its full configured height over an empty buffer is
 ---the "opaque rectangle" complaint in one line: seven rows of flat card colour
 ---is the largest and emptiest shape on the screen, and none of it is telling
----you anything. So the box GROWS with the prompt, from one row up to the
----configured maximum, which is what every chat composer does and what makes it
+---you anything. So the box GROWS with the prompt, between the configured
+---floor and ceiling, which is what every chat composer does and what makes it
 ---read as a field rather than as a panel.
 ---
----Wrapped lines count. `wrap` is on, so one 300-column paragraph is four rows
----on screen and asking the buffer for its line count would say one -- and the
----box would stay a single row with the cursor off the bottom of it.
+---THE FLOOR IS NOT 1. It was, and one row is a different mistake with the
+---same shape: the box you write a paragraph into looked like `:e `, and it
+---looked like that at the start of every session, which is the moment it has
+---to say what it is for.
+---
+---|paseo.ui.layout|.composer_rows does the counting for both surfaces -- the
+---sidebar has always called it, the dashboard carried a second copy, and the
+---copy was the worse one: it divided a display width by a column count, which
+---knows nothing about 'linebreak' or double-width characters. Passing the
+---window when there is one gets Neovim's own answer instead; the width is
+---what `show_agent_panes` uses to size a pane it has not opened yet.
 ---@param chat table
 ---@param g table
 ---@return integer
 local function composer_rows(chat, g)
-  if not (chat.composer and api.nvim_buf_is_valid(chat.composer)) then
-    return 1
-  end
-
-  local width = math.max(1, layout.panes(g).width)
-  local rows = 0
-  for _, line in ipairs(api.nvim_buf_get_lines(chat.composer, 0, -1, false)) do
-    rows = rows + math.max(1, math.ceil(api.nvim_strwidth(line) / width))
-  end
-
-  return math.max(1, math.min(rows, g.composer))
+  return layout.composer_rows {
+    buf = chat.composer,
+    win = chat.win_composer,
+    width = layout.panes(g).width,
+    min = g.composer_min,
+    max = g.composer,
+  }
 end
 
 ---Re-seat the two panes for the composer's current height.
@@ -976,19 +1195,28 @@ function M.resize_composer(chat)
     return
   end
 
-  pcall(api.nvim_win_set_config, win, placed(g, {
-    row = panes.composer_row,
-    col = panes.col,
-    width = panes.width,
-    height = panes.composer + 1,
-  }))
-  if conversation and api.nvim_win_is_valid(conversation) then
-    pcall(api.nvim_win_set_config, conversation, placed(g, {
-      row = panes.top,
+  pcall(
+    api.nvim_win_set_config,
+    win,
+    placed(g, {
+      row = panes.composer_row,
       col = panes.col,
       width = panes.width,
-      height = panes.conversation,
-    }))
+      height = panes.composer + 1,
+    })
+  )
+  require("paseo.ui.composer").reveal(win)
+  if conversation and api.nvim_win_is_valid(conversation) then
+    pcall(
+      api.nvim_win_set_config,
+      conversation,
+      placed(g, {
+        row = panes.top,
+        col = panes.col,
+        width = panes.width,
+        height = panes.conversation,
+      })
+    )
     -- The conversation follows the agent, and it just got taller. Without this
     -- the extra rows open up BELOW the last line and the transcript stops
     -- looking like it reached the bottom.
@@ -1020,31 +1248,39 @@ local function show_agent_panes()
   local border, border_hl = require("paseo.ui.style").composer_border()
   local panes = layout.panes(g, composer_rows(chat, g), { framed = border ~= "none" })
 
-  chat.win_conversation = api.nvim_open_win(chat.conversation, false, placed(g, {
-    row = panes.top,
-    col = panes.col,
-    width = panes.width,
-    height = panes.conversation,
-    style = "minimal",
-    border = "none",
-    zindex = g.z_panes,
-  }))
-  chat.win_composer = api.nvim_open_win(chat.composer, true, placed(g, {
-    row = panes.composer_row,
-    col = panes.col,
-    width = panes.width,
-    -- The bar is a winbar, so it comes out of the window's own height.
-    height = panes.composer + 1,
-    style = "minimal",
-    -- WHATEVER `ui.style` SAYS, which under the default `plate` is nothing at
-    -- all. A drawn box here was the one thing on the surface that ignored the
-    -- style: a hard rounded rule around the composer, inside a window whose
-    -- own edge is invisible, with cards below it that have no frame either.
-    -- What separates the box from the transcript now is what separates every
-    -- other card from it -- one tier of elevation, and a title row.
-    border = border,
-    zindex = g.z_panes,
-  }))
+  chat.win_conversation = api.nvim_open_win(
+    chat.conversation,
+    false,
+    placed(g, {
+      row = panes.top,
+      col = panes.col,
+      width = panes.width,
+      height = panes.conversation,
+      style = "minimal",
+      border = "none",
+      zindex = g.z_panes,
+    })
+  )
+  chat.win_composer = api.nvim_open_win(
+    chat.composer,
+    true,
+    placed(g, {
+      row = panes.composer_row,
+      col = panes.col,
+      width = panes.width,
+      -- The bar is a winbar, so it comes out of the window's own height.
+      height = panes.composer + 1,
+      style = "minimal",
+      -- WHATEVER `ui.style` SAYS, which under the default `plate` is nothing at
+      -- all. A drawn box here was the one thing on the surface that ignored the
+      -- style: a hard rounded rule around the composer, inside a window whose
+      -- own edge is invisible, with cards below it that have no frame either.
+      -- What separates the box from the transcript now is what separates every
+      -- other card from it -- one tier of elevation, and a title row.
+      border = border,
+      zindex = g.z_panes,
+    })
+  )
 
   -- The surface reads as ONE sheet: the conversation shares the chrome's
   -- background, and the composer is a raised card -- the same tier the Agent
@@ -1164,15 +1400,19 @@ local function show_terminal_pane()
 
   local g = state.geometry
   local pane = layout.panes(g).body
-  state.term_win = api.nvim_open_win(api.nvim_create_buf(false, true), true, placed(g, {
-    row = pane.row,
-    col = pane.col,
-    width = pane.width,
-    height = pane.height,
-    style = "minimal",
-    border = "none",
-    zindex = g.z_panes,
-  }))
+  state.term_win = api.nvim_open_win(
+    api.nvim_create_buf(false, true),
+    true,
+    placed(g, {
+      row = pane.row,
+      col = pane.col,
+      width = pane.width,
+      height = pane.height,
+      style = "minimal",
+      border = "none",
+      zindex = g.z_panes,
+    })
+  )
   pcall(function()
     vim.wo[state.term_win].winhl = "Normal:PaseoNormal,NormalFloat:PaseoNormal"
   end)
@@ -1373,18 +1613,35 @@ function M.close()
   if not state then
     return
   end
-  reseat {
-    state.win,
-    state.backdrop_win,
-    state.chat.win_conversation,
-    state.chat.win_composer,
-    -- THE PTY WINDOW BELONGS IN HERE. It is a float on this tab page and it is
-    -- routinely the tab's current window -- you were typing in it. Left out,
-    -- closing the dashboard from another tab leaves this one pointing at a
-    -- window that no longer exists, and the next `:tabclose` dies with `E315:
-    -- ml_get: Invalid lnum` or takes the process down outright.
-    state.term_win,
-  }
+  -- APPENDED, NOT A LIST LITERAL. Every one of these is optional -- there is
+  -- no backdrop on the buffer mount, no PTY window unless a terminal is up --
+  -- and a `nil` in the middle of a table constructor is where `ipairs` stops.
+  -- Written `{ state.win, state.backdrop_win, … }` this reseated the first
+  -- window and silently skipped the other four on every mount that has no
+  -- backdrop, which is the mount whose host window is routinely another tab
+  -- page's current one.
+  local doomed = {}
+  local function doom(win)
+    if win then
+      table.insert(doomed, win)
+    end
+  end
+  -- The `"here"` mount's host is NOT doomed: `restore_here` hands that window
+  -- back rather than closing it, and reseating a tab page off a window that is
+  -- about to survive moves somebody's cursor for nothing.
+  if not state.displaced then
+    doom(state.win)
+  end
+  doom(state.backdrop_win)
+  doom(state.chat.win_conversation)
+  doom(state.chat.win_composer)
+  -- THE PTY WINDOW BELONGS IN HERE. It is a float on this tab page and it is
+  -- routinely the tab's current window -- you were typing in it. Left out,
+  -- closing the dashboard from another tab leaves this one pointing at a
+  -- window that no longer exists, and the next `:tabclose` dies with `E315:
+  -- ml_get: Invalid lnum` or takes the process down outright.
+  doom(state.term_win)
+  reseat(doomed)
   -- Before `state` goes: `panel_keys` reads it, and a panel left attached
   -- would have its mappings outlive the buffer they were bound to. So does
   -- `hide_panes`, which is why the windows go here rather than below.
@@ -1412,8 +1669,14 @@ function M.close()
 
   unbind_tabs(held.chat.conversation, false)
   unbind_tabs(held.chat.composer, true)
+
+  -- BEFORE THE WINDOWS GO, and it is what decides whether one of them goes at
+  -- all. The `"here"` mount borrowed a window the user opened; closing it
+  -- would answer "put my code back" by taking a split away.
+  local kept = restore_here(held)
+
   for _, win in ipairs { held.win, held.backdrop_win } do
-    if win and api.nvim_win_is_valid(win) then
+    if win and api.nvim_win_is_valid(win) and not (kept and win == held.win) then
       pcall(api.nvim_win_close, win, true)
     end
   end
@@ -1510,14 +1773,19 @@ function M.open(chat, opts)
   -- closed: `directory_changed` returns on a nil `state`.
   watch_directories()
 
-  local buf, win, g, backdrop, backdrop_win, tabpage
+  local buf, win, g, backdrop, backdrop_win, tabpage, displaced
 
   if mount == "buffer" then
     -- The window FIRST, the geometry second: this mount's box is the host
     -- window's own text area, so there is nothing to measure until it exists.
     buf = host_buf()
-    win, tabpage = mount_tab(buf)
-    style_host(win)
+    local how = require("paseo.config").get().ui.buffer.open
+    if how == "tab" then
+      win, tabpage = mount_tab(buf)
+    else
+      win, tabpage, displaced = mount_here(buf)
+    end
+    style_host(win, displaced and "here" or "tab")
     g = host_geometry(win)
   else
     g = float_geometry()
@@ -1558,8 +1826,9 @@ function M.open(chat, opts)
     -- That is the single change that stops the dashboard looking like a framed
     -- rectangle and starts it looking like a card. The other border settings
     -- paint the same glyphs in `PaseoBorder` and you get a visible edge.
-    vim.wo[win].winhl =
-      ("Normal:PaseoNormal,NormalFloat:PaseoNormal,FloatBorder:%s"):format(edge_hl)
+    vim.wo[win].winhl = ("Normal:PaseoNormal,NormalFloat:PaseoNormal,FloatBorder:%s"):format(
+      edge_hl
+    )
   end
 
   state = {
@@ -1576,6 +1845,9 @@ function M.open(chat, opts)
     mount = g.mount,
     host = g.host,
     tabpage = tabpage,
+    -- What this mount owes the window it took, and nil on every other one.
+    -- See `mount_here`.
+    displaced = displaced,
     tab = "Chat",
     -- What the Chat tab is showing. A sibling of `chat` rather than something
     -- folded into it: `state.chat` is identity-compared by `is_open`,
@@ -1718,6 +1990,57 @@ function M.open(chat, opts)
       end,
       desc = "paseo: the dashboard's buffer went away",
     })
+
+    -- THE FILE YOU OPEN GOES IN THE WINDOW, NOT IN THE BOX YOU TYPE IN.
+    --
+    -- "It goes away when I open a file" is half of what this surface is, and
+    -- the half that does not happen by itself. The chrome buffer is displaced
+    -- and wiped by an `:e` typed at it, which the handler above catches -- but
+    -- the cursor on this surface is almost never on the chrome. It is in the
+    -- composer, which is a FLOAT, and a picker that opens a file in "the
+    -- window you came from" opens it there: a source file in a three-row box
+    -- over a dashboard that is still up.
+    --
+    -- So a real file landing in either pane is taken as "leave", and it is
+    -- reseated in the window this surface borrowed -- which is where it was
+    -- always going.
+    --
+    -- Only `"here"`, and only a real file. On a tab page of its own there is
+    -- no borrowed window to hand it to, and `buftype` keeps the panes' own
+    -- traffic -- a PTY, a help page, a quickfix list -- out of it.
+    if displaced then
+      api.nvim_create_autocmd("BufWinEnter", {
+        group = state.augroup,
+        callback = function(args)
+          if not (state and state.displaced) then
+            return
+          end
+          local into = api.nvim_get_current_win()
+          if into ~= chat.win_composer and into ~= chat.win_conversation then
+            return
+          end
+          local landed = args.buf
+          if landed == chat.composer or landed == chat.conversation or landed == state.buf then
+            return
+          end
+          if vim.bo[landed].buftype ~= "" then
+            return
+          end
+          local host = state.displaced.win
+          -- Scheduled for the same reason the `WinClosed` handler is: `M.close`
+          -- closes three windows and deletes a buffer, and we are inside the
+          -- event that put a buffer in one of them.
+          vim.schedule(function()
+            M.close()
+            if host and api.nvim_win_is_valid(host) and api.nvim_buf_is_valid(landed) then
+              pcall(api.nvim_win_set_buf, host, landed)
+              pcall(api.nvim_set_current_win, host)
+            end
+          end)
+        end,
+        desc = "paseo: a file opened on the dashboard belongs in the window under it",
+      })
+    end
 
     -- LAST, once the surface is finished. This is the name a user hangs an
     -- `ftplugin/paseo-dash.lua` off, and it should not fire at a half-built
@@ -1923,6 +2246,16 @@ function M.is_open(chat)
   -- state outlives the window, `is_open` lies, and `open` then takes its
   -- "already up, just focus it" branch and puts nothing on screen.
   if not (state.win and api.nvim_win_is_valid(state.win)) then
+    M.close()
+    return false
+  end
+  -- AND STILL SHOWING OUR BUFFER. The `"here"` mount borrowed a window the
+  -- user already had, so the window outliving the surface is the ORDINARY
+  -- case: `:e file` from the dashboard displaces the chrome buffer and leaves
+  -- a perfectly valid window holding somebody's source. The `BufWipeout`
+  -- handler closes us a tick later; until it runs, this is what stops
+  -- `is_open` claiming a dashboard that is not on screen.
+  if api.nvim_win_get_buf(state.win) ~= state.buf then
     M.close()
     return false
   end

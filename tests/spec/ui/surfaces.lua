@@ -236,12 +236,19 @@ local function test_surfaces()
       float.resize_composer(surface_chat)
     end
 
+    -- AND IT HAS A FLOOR. One row was the other mistake with the same shape:
+    -- the box you write a paragraph into looked like `:e `, and it looked like
+    -- that at the start of every session.
     typed { "" }
     local empty, roomy = composer(), conversation()
-    eq("ui: an empty composer is one row", empty, 1)
+    eq("ui: an empty composer rests at ui.float.composer_min", empty, 3)
 
     typed { "a", "b", "c" }
-    eq("ui: three lines make it three", composer(), 3)
+    eq("ui: which three lines fill exactly", composer(), 3)
+    eq("ui: so the conversation has not moved", conversation(), roomy)
+
+    typed { "a", "b", "c", "d", "e" }
+    eq("ui: five lines make it five", composer(), 5)
     eq("ui: and the conversation gives up exactly those rows", conversation(), roomy - 2)
 
     -- `wrap` is on, so asking the buffer for its line count says one and the
@@ -256,6 +263,25 @@ local function test_surfaces()
     typed { "" }
     eq("ui: sending shrinks it back", composer(), empty)
     eq("ui: and the conversation gets its rows back", conversation(), roomy)
+
+    -- THE TEXT ABOVE THE CURSOR STAYS ON SCREEN. The box is resized from
+    -- `TextChanged`, which fires after Neovim has already scrolled to keep the
+    -- cursor visible -- so `<CR>` in a one-row box put line 1 above the top of
+    -- the window, the box then grew, and Neovim did not scroll back. The line
+    -- you had just typed was the only one you could see. See
+    -- |paseo.ui.composer|.reveal.
+    vim.api.nvim_set_current_win(surface_chat.win_composer)
+    vim.api.nvim_win_set_height(surface_chat.win_composer, 2)
+    typed { "first", "second", "third", "fourth" }
+    vim.api.nvim_win_set_cursor(surface_chat.win_composer, { 4, 0 })
+    float.resize_composer(surface_chat)
+    eq(
+      "ui: a box that fits its draft is scrolled to the top of it",
+      vim.api.nvim_win_call(surface_chat.win_composer, vim.fn.winsaveview).topline,
+      1
+    )
+
+    typed { "" }
     float.close()
   end
 
@@ -709,7 +735,13 @@ local function test_terminal_session()
   truthy("terminal: the session cases ran", ok, err)
 end
 
---- The buffer mount: the same dashboard in a real window, on its own tab.
+--- The buffer mount under `ui.buffer.open = "tab"`: a tab page of its own.
+---
+--- NOT THE DEFAULT ANY MORE -- see `test_buffer_here` -- so the option is set
+--- for the length of this suite. Everything below it is about the surface
+--- rather than about where it is mounted, which is why it is worth keeping
+--- both: the chrome, the panes, the keys and the teardown are one code path
+--- and only the window it hangs off differs.
 ---
 --- ASSERT ON `nvim_win_get_config`, NEVER ON SCREEN POSITION. Headless Neovim
 --- does not re-anchor a win-relative float until something forces a full
@@ -720,6 +752,8 @@ local function test_buffer_surface()
   local api = vim.api
   local float = require "paseo.ui.float"
   local layout = require "paseo.ui.layout"
+  local config = require "paseo.config"
+  config.setup { ui = { buffer = { open = "tab" } } }
 
   ---@return table
   local function new_chat()
@@ -823,7 +857,8 @@ local function test_buffer_surface()
   local panes = layout.panes(g, api.nvim_win_get_height(chat.win_composer))
   truthy(
     "buffer: and land exactly where layout.panes puts them",
-    conversation.row == panes.top and conversation.col == panes.col
+    conversation.row == panes.top
+      and conversation.col == panes.col
       and conversation.width == panes.width
   )
 
@@ -838,16 +873,14 @@ local function test_buffer_surface()
   -- A hint bar is the only place the surface says what its keys are, so one
   -- naming a key that does nothing is worse than a shorter bar.
   local footer = {}
-  for _, mark in
-    ipairs(api.nvim_buf_get_extmarks(chrome, -1, 0, -1, { details = true }))
-  do
+  for _, mark in ipairs(api.nvim_buf_get_extmarks(chrome, -1, 0, -1, { details = true })) do
     for _, cell in ipairs(mark[4].virt_text or {}) do
       footer[#footer + 1] = cell[1]
     end
   end
   truthy(
     "buffer: and the footer does not advertise a swap it does not have",
-    not table.concat(footer):find("<C%-f>")
+    not table.concat(footer):find "<C%-f>"
   )
 
   float.select "Usage"
@@ -868,10 +901,7 @@ local function test_buffer_surface()
   vim.cmd "q"
   settle()
   truthy("buffer: :q on the host takes the surface with it", float.chrome_buf() == nil)
-  truthy(
-    "buffer: panes and all",
-    chat.win_composer == nil and chat.win_conversation == nil
-  )
+  truthy("buffer: panes and all", chat.win_composer == nil and chat.win_conversation == nil)
   eq("buffer: and the volt click handler stops dispatching at it", #require("volt.events").bufs, 0)
   eq("buffer: with the tab page gone too", #api.nvim_list_tabpages(), tabs_before)
 
@@ -969,10 +999,122 @@ local function test_buffer_surface()
   while #api.nvim_list_tabpages() > tabs_before do
     vim.cmd "tabclose!"
   end
+  config.setup {}
+end
+
+--- The same surface under the default, `ui.buffer.open = "here"`: nvdash's
+--- arrangement, in the window you were standing in.
+---
+--- The three things this has to get right are all about a window the plugin
+--- does not own: it borrows one, it hands it back the way it was found, and it
+--- gets out of the way of a file opened on top of it. Everything else -- the
+--- chrome, the panes, the keys -- is `test_buffer_surface`'s, and is the same
+--- code.
+local here_chats = 0
+
+local function test_buffer_here()
+  local api = vim.api
+  local float = require "paseo.ui.float"
+
+  local function settle()
+    for _ = 1, 20 do
+      vim.wait(10)
+    end
+  end
+
+  ---@return table
+  local function new_chat()
+    local chat = {
+      root = vim.uv.cwd(),
+      agent_id = "here-agent",
+      provider = "test",
+      streaming = false,
+      pending = {},
+      conversation = api.nvim_create_buf(false, true),
+      composer = api.nvim_create_buf(false, true),
+    }
+    -- NAMED AND `nofile`, as |paseo.ui.chat|'s `make_buffers` makes them. An
+    -- unnamed scratch buffer is one `:e` reuses IN PLACE rather than
+    -- displacing, so a suite built on bare `nvim_create_buf` tests a composer
+    -- that cannot exist and misses the case below entirely.
+    here_chats = here_chats + 1
+    for name, buf in pairs { chat = chat.conversation, compose = chat.composer } do
+      vim.bo[buf].buftype = "nofile"
+      vim.bo[buf].bufhidden = "hide"
+      pcall(api.nvim_buf_set_name, buf, ("paseo://%s/here-%d"):format(name, here_chats))
+    end
+    transcript.reset(chat)
+    transcript.upsert(chat, { kind = "user", text = "hello" })
+    return chat
+  end
+
+  local tabs_before = #api.nvim_list_tabpages()
+  local wins_before = #api.nvim_list_wins()
+
+  -- A window with a file in it, scrolled somewhere, with options of its own.
+  vim.cmd("edit " .. vim.fs.joinpath(t.repo_root, "README.md"))
+  local mine = api.nvim_get_current_win()
+  local file = api.nvim_get_current_buf()
+  vim.wo[mine].number = true
+  api.nvim_win_set_cursor(mine, { math.min(80, api.nvim_buf_line_count(file)), 0 })
+  local view = api.nvim_win_call(mine, vim.fn.winsaveview)
+
+  local chat = new_chat()
+  float.open(chat, { mount = "buffer" })
+
+  eq("here: it costs no tab page", #api.nvim_list_tabpages(), tabs_before)
+  eq(
+    "here: and no window -- it took the one you were in",
+    api.nvim_win_get_config(chat.win_conversation).win,
+    mine
+  )
+  eq("here: which is now the dashboard", api.nvim_win_get_buf(mine), float.chrome_buf())
+  eq("here: the editor's tabline comes down with it", vim.o.showtabline, 0)
+  eq("here: and its statusline", vim.o.laststatus, 0)
+
+  float.close()
+  settle()
+  eq("here: closing gives the window back", api.nvim_win_get_buf(mine), file)
+  eq(
+    "here: on the line you left",
+    api.nvim_win_call(mine, vim.fn.winsaveview).topline,
+    view.topline
+  )
+  eq("here: with its own options", vim.wo[mine].number, true)
+  eq("here: and 'wrap', which volt had to turn off", vim.wo[mine].wrap, true)
+  truthy("here: the chrome is back", vim.o.showtabline ~= 0 and vim.o.laststatus ~= 0)
+  eq("here: and no window was spent or lost", #api.nvim_list_wins(), wins_before)
+
+  -- THE OTHER HALF OF "IT GOES AWAY WHEN I OPEN A FILE". The cursor on this
+  -- surface is in the composer, which is a FLOAT, so a picker that opens a
+  -- file in "the window you came from" opens it THERE: somebody's source in a
+  -- three-row box over a dashboard that is still up.
+  chat = new_chat()
+  float.open(chat, { mount = "buffer" })
+  eq("here: the cursor starts in the composer", api.nvim_get_current_win(), chat.win_composer)
+  vim.cmd("edit " .. vim.fs.joinpath(t.repo_root, "stylua.toml"))
+  settle()
+  truthy("here: opening a file there takes the surface down", float.chrome_buf() == nil)
+  eq(
+    "here: and the file lands in the window, not in the box",
+    api.nvim_win_get_buf(mine),
+    api.nvim_get_current_buf()
+  )
+  eq(
+    "here: which is the file you asked for",
+    vim.fs.basename(api.nvim_buf_get_name(api.nvim_win_get_buf(mine))),
+    "stylua.toml"
+  )
+  truthy("here: with the editor's chrome back", vim.o.showtabline ~= 0 and vim.o.laststatus ~= 0)
+  eq("here: and still one window", #api.nvim_list_wins(), wins_before)
+  truthy("here: and the window styled for a file again", vim.wo[mine].wrap)
+
+  vim.cmd "enew"
 end
 
 return {
   { "ui.surfaces", test_surfaces },
   { "ui.terminal-session", test_terminal_session },
   { "ui.buffer-surface", test_buffer_surface },
+  { "ui.buffer-here", test_buffer_here },
 }
