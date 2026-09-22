@@ -178,6 +178,75 @@ local function test_terminals()
       "terminal.t1"
     )
 
+    -- THE WAY BACK TO THE AGENT, from a terminal. The agent row asked
+    -- `agent.id == chat.agent_id` -- true whatever the Chat tab is actually
+    -- showing -- and the row you are "already in" is deliberately not an
+    -- action, so while a PTY was on screen the conversation was the one thing
+    -- in the session list you could not open.
+    local float = require "paseo.ui.float"
+    local old_session = float.session
+    float.session = function()
+      return { kind = "terminal", id = "t2" }
+    end
+    local chat_on_agent = { root = root, agent_id = "a1" }
+    ---@param id string
+    ---@return table|nil
+    local function row_for(id)
+      for _, section in ipairs(panel._view(chat_on_agent).source:sections()) do
+        for _, row in ipairs(section.rows or {}) do
+          if row.id == id then
+            return row
+          end
+        end
+      end
+    end
+    local from_terminal = row_for "agent.a1"
+    truthy(
+      "sessions: in a terminal, the agent row is not the active one",
+      from_terminal.active == false
+    )
+    truthy("sessions: and it opens", type(from_terminal.activate) == "function")
+
+    float.session = function()
+      return { kind = "agent", id = "a1" }
+    end
+    local on_agent = row_for "agent.a1"
+    truthy("sessions: standing on the agent, its row is the active one", on_agent.active == true)
+    eq("sessions: and opening what you are in is not an action", on_agent.activate, nil)
+    float.session = old_session
+
+    -- FUZZY, ACROSS BOTH HALVES. The search is |paseo.ui.list|'s, over the
+    -- title rather than over the drawn row: the cells lead with two glyphs,
+    -- and a query ranked against a console icon is worse than no search.
+    local search_view = panel._view(chat_on_agent)
+    search_view:set_query "rev"
+    local kept = {}
+    for _, section in ipairs(search_view:sections()) do
+      for _, row in ipairs(section.rows or {}) do
+        kept[#kept + 1] = row.id
+      end
+    end
+    eq("sessions: a search narrows to what matches", kept, { "agent.a1" })
+    truthy(
+      "sessions: and focus lands inside the narrowed list",
+      (search_view:resolve()).id == "agent.a1"
+    )
+    search_view:set_query "aaa"
+    local terminals_left = {}
+    for _, section in ipairs(search_view:sections()) do
+      for _, row in ipairs(section.rows or {}) do
+        terminals_left[#terminals_left + 1] = row.id
+      end
+    end
+    eq("sessions: and it reaches the terminals too", terminals_left, { "terminal.t2" })
+    search_view:set_query "qqqqq"
+    eq("sessions: a search that matches nothing drops every section", search_view:sections(), {})
+    search_view:set_query ""
+    truthy(
+      "sessions: and clearing it gives the whole list back",
+      #(search_view:sections())[1].rows == 1
+    )
+
     -- And a row that DIES hands focus on rather than dropping it.
     apply { kind = "snapshot", cwd = root, entries = { { id = "t2", name = "aaa" } } }
     panel.lines(chat, 80)

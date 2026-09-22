@@ -2,17 +2,24 @@
 ---
 --- ONE LIST, because that is what Paseo has. A workspace holds agent sessions
 --- and PTYs side by side, they show up in the app together, and splitting them
---- across two tabs here meant the Agents & terminals tab was quietly a lie about what was
+--- across two tabs here meant the Sessions tab was quietly a lie about what was
 --- running -- it could say "no agents here yet" on a workspace with three
 --- `claude` terminals in it. The kind glyph is what tells them apart.
+---
+--- THE NAVIGATION, not a readout of it. There used to be a strip of session
+--- chips under the tab bar doing the same job in a worse shape: a second row
+--- of things to click, directly under the first, which could not hold more
+--- than about four names before it started dropping them for a `+3`. Moving
+--- between sessions happens here, where there is room for every session, a
+--- status column, and a search over the lot -- `/`, fuzzy, against the titles.
 ---
 --- Both halves are fed by push -- |paseo.agents| and |paseo.terminals| -- so
 --- the status column is current rather than polled, which matters because a CLI
 --- call to get an agent's status costs ~2.4s.
 ---
 --- A row is an ACTION, not a label: opening one points this surface at it.
---- Everything else about sessions -- searching, archiving in bulk -- still
---- hands off to the telescope picker rather than being reimplemented here.
+--- Archiving in bulk still hands off to the telescope picker rather than being
+--- reimplemented here.
 ---
 --- Drawn by |paseo.ui.list|, which owns the focus ring, `j`/`k`, `<CR>` and
 --- the hint bar. This panel used to hold selection on the CURSOR through a
@@ -28,7 +35,7 @@ local widgets = require "paseo.ui.widgets"
 
 local M = {}
 
-M.title = "Agents & terminals"
+M.title = "Sessions"
 
 ---Status glyphs, from the registry -- the timeline says the same four things
 ---about a tool call, and the two had spelled them differently.
@@ -58,7 +65,24 @@ local KIND = {
 ---the Settings tab and on every list, and one key meaning "ask the daemon
 ---again" on five tabs and "rename this terminal" on the sixth is exactly the
 ---kind of near-miss that makes a surface feel like several.
+---
+---`/` is NOT in here: search belongs to |paseo.ui.list|, which owns the focus
+---model the filter has to keep in step with.
 local KEYS = { terminal = "c", agent = "a", copy = "y", rename = "R", kill = "d" }
+
+---Which session the dashboard is showing right now.
+---
+---THE FLOAT'S ANSWER, not `chat.agent_id`. They are the same thing right up
+---until the Chat tab is pointed at a terminal, and then they are not: the
+---agent row went on drawing itself as the one you were in -- and, because the
+---one you are in is not an action, went on refusing to open. That is the
+---"cannot get back to my agent from the session list" bug, and it was a row
+---that had no `activate` rather than a key that did not fire.
+---@param chat table
+---@return { kind: string, id: string|nil }
+local function here(chat)
+  return require("paseo.ui.float").session() or { kind = "agent", id = chat.agent_id }
+end
 
 ---Start an agent in this workspace, through |paseo-new-session|.
 ---@param chat table
@@ -112,12 +136,15 @@ local function sections(chat)
   agents.watch()
   terminals.watch(chat.root)
 
+  local at = here(chat)
   local agent_rows = {}
   for _, agent in ipairs(agents.for_root(chat.root)) do
     local glyph = agent.requiresAttention and GLYPH.permission
       or GLYPH[agent.status or "idle"]
       or GLYPH.idle
-    local mine = agent.id == chat.agent_id
+    -- `mine` is "the session on screen RIGHT NOW", which while the Chat tab is
+    -- showing a terminal is none of these rows -- see `here`.
+    local mine = at.kind == "agent" and at.id == agent.id
 
     -- Metadata is RIGHT-ALIGNED into one column rather than trailing the
     -- title. A provider written three spaces after a title of whatever length
@@ -147,10 +174,20 @@ local function sections(chat)
         { agent.title or agent.id, mine and "PaseoAgent" or nil },
       },
       right = right,
-      -- The one you are ALREADY IN is not an action. Opening any other is:
-      -- the chat subscribes and fetches its timeline, so you land in the
-      -- conversation as it stands rather than in a blank window.
+      -- Matched on the TITLE and the provider, not on the drawn row: the cells
+      -- lead with two glyphs, and a search for `c` that ranked every row by
+      -- how well it matched a console icon would be worse than no search.
+      text = (agent.title or agent.id) .. " " .. (agent.provider or ""),
+      -- The one you are ALREADY IN is not an action. Opening any other is --
+      -- INCLUDING this chat's own agent when the Chat tab is pointed at a
+      -- terminal, which is the way back to the conversation and was the one
+      -- row in the list that did nothing.
       activate = not mine and function()
+        if agent.id == chat.agent_id then
+          -- Ours already: a repaint, not a new chat. `chat.open` would
+          -- subscribe and re-fetch a timeline we are holding.
+          return require("paseo.ui.float").show_session { kind = "agent", id = agent.id }
+        end
         require("paseo.ui.chat").open {
           root = agent.cwd or chat.root,
           agent_id = agent.id,
@@ -179,16 +216,16 @@ local function sections(chat)
       right[#right + 1] = { "finished", "PaseoDim" }
     end
 
-    local here = require("paseo.ui.float").session()
     terminal_rows[#terminal_rows + 1] = {
       id = "terminal." .. item.id,
-      active = here ~= nil and here.kind == "terminal" and here.id == item.id,
+      active = at.kind == "terminal" and at.id == item.id,
       cells = {
         { KIND.terminal[1] .. " ", KIND.terminal[2] },
         { glyph[1] .. " ", glyph[2] },
         { terminals.label(item), nil },
       },
       right = right,
+      text = terminals.label(item),
       -- A terminal is a SESSION: opening one points the Chat tab at it, the
       -- same way opening an agent does. It used to open a surface of its own,
       -- over the top of this one.
@@ -210,7 +247,10 @@ local function sections(chat)
     {
       id = "agents",
       icon = icons.panel.Sessions,
-      title = "Sessions in " .. vim.fn.fnamemodify(chat.root, ":~"),
+      -- "Agents", not "Sessions": the TAB is Sessions, and both blocks under
+      -- it are sessions. A heading repeating the tab's name over half of what
+      -- the tab holds is the row that made the old split read as a lie.
+      title = "Agents in " .. vim.fn.fnamemodify(chat.root, ":~"),
       empty = terminals.ready(chat.root) and "nothing running here yet" or "loading…",
       rows = agent_rows,
     },
@@ -233,6 +273,13 @@ local function source(chat)
   return {
     chat = chat,
     keys = KEYS,
+    -- FUZZY, over the titles, through |paseo.ui.list|. This is the list that
+    -- most needs it: one workspace routinely holds a dozen sessions with names
+    -- that share a prefix, and the strip it replaces could show about four.
+    search = "sessions",
+    anchor = function()
+      return require("paseo.ui.float").body_area()
+    end,
     hints = {
       { KEYS.terminal, "terminal" },
       { KEYS.agent, "agent" },
@@ -320,6 +367,9 @@ end
 function M.detach(_chat, buf)
   if view then
     view:unbind(buf)
+    -- The search goes with the visit. Coming back to a tab still narrowed by a
+    -- word typed ten minutes ago reads as sessions having vanished.
+    view:reset()
   end
 end
 

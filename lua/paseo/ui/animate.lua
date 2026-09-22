@@ -17,7 +17,7 @@
 --- There WAS a third effect, staggering a panel's rows in on a tab switch, and
 --- it is gone for a reason worth recording. It drew fewer rows into a block
 --- padded to its final height, which respects the constraint above -- but the
---- Agents & terminals maps cursor rows to entities, and that map still named every
+--- Sessions maps cursor rows to entities, and that map still named every
 --- row while only some were painted. For the length of the reveal the screen
 --- disagreed with what a keypress would do. A decorative effect is not worth a
 --- window in which the surface lies about itself, least of all in a plugin

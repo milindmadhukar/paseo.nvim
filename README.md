@@ -127,6 +127,7 @@ require("paseo").setup {
 
     terminal = {                  -- terminals are sessions; see below
       keys = { next = "<C-j>", prev = "<C-k>",
+               chrome = "<C-g>",  -- out of the PTY, onto the tab bar
                sessions = "<C-s>", terminal = "<C-l>" },
       presets = {},               -- extra entries for `c`
     },
@@ -196,7 +197,7 @@ this document uses those four words and no others for it.
 | `:Paseo wcreate` | Create a workspace here — the shape is worked out for you |
 | `:Paseo agents` | Agent sessions in this workspace |
 | `:Paseo sessions` | Compatibility alias for `agents` |
-| `:Paseo term` | Terminals in this workspace, on the Agents & terminals tab |
+| `:Paseo term` | Terminals in this workspace, on the Sessions tab |
 | `:Paseo ws …` | Manifest-level: `init` · `create <name> [repos]` · `rm` · `ls` · `status` |
 | `:Paseo agent [stop]` | Sidecar and agent status |
 | `:Paseo repos` | The repos in the current unit of work |
@@ -279,9 +280,9 @@ is what lets the box drop its drawn border and be a plate like everything else
 
 **It is only ever this row.** The dashboard used to repeat it in the chrome
 above the tab bar on every tab but `Chat` — saying what the bar over the box
-already says, and costing those five tabs a row: the tab bar, the session strip
-and the whole panel under them sat one row lower than on `Chat`, so changing tab
-shifted the layout under you. The panel that can change any of these facts is
+already says, and costing those five tabs a row: the tab bar and the whole
+panel under it sat one row lower than on `Chat`, so changing tab shifted the
+layout under you. The panel that can change any of these facts is
 [Settings](#the-settings-tab), which is tab `3`.
 
 **The row is also the box's top edge.** Without a frame the composer was a slab
@@ -315,9 +316,18 @@ swaps to the sidebar and back. `<C-c>` stops the turn — from the composer or
 the conversation, normal mode or insert.
 
 ```
-   1 󰀄 Chat   2 󱙺 Agents & terminals   3 󱕂 Settings   4 󰘬 Changes   5 󰄨 Usage   6 󰙅 Workspaces
-   󱙺 main   󱙺 reviewer   󰆍 lazygit                                    Ctrl + s  sessions
+   1 󰀄 Chat   2 󱙺 Sessions   3 󱕂 Settings   4 󰘬 Changes   5 󰄨 Usage   6 󰙅 Workspaces      󰆍 lazygit
 ```
+
+**One navigation bar.** There used to be two: the tabs, and a strip of session
+chips on the row directly under them — two rows of things to click, stacked,
+disagreeing about which of them you navigate with, and the lower one could hold
+about four names before it started dropping them for a `+3`. Moving between
+sessions happens on the `Sessions` tab now, where there is room for all of them
+and a search over them. What the strip alone could say — **which** session the
+`Chat` tab is showing, which for a terminal nothing else says — is the label at
+the right-hand end of the tab bar. It takes whatever the pills leave and is cut
+to fit, because the pills are the navigation and it is a readout.
 
 The tab bar **degrades rather than truncates**, because the tab that would
 fall off the end is always the last one — which is the one you had not
@@ -338,16 +348,20 @@ composer geometry are both measured against it.
 | | |
 |---|---|
 | `Chat` | the conversation and the composer, real buffers floated on top |
-| `Agents & terminals` | the agent sessions **and terminals** here, live; open one, or `y` to copy an agent ID |
+| `Sessions` | the agent sessions **and terminals** here, live; open one, `/` to fuzzy-search them, or `y` to copy an agent ID |
 | `Settings` | mode, thinking level, model, feature toggles — keyboard or click |
 | `Changes` | what is changed on disk, per repo; open one |
 | `Usage` | context window, tokens, cost — and this provider's 5-hour and weekly limits |
 | `Workspaces` | every workspace Paseo knows, grouped by project with a rule between groups; each row says what it is doing — `⠙` working, `󰀦` needs you, `󰗠` opened and idle, `󰄰` never opened. Archive one, or forget a project |
 
-`Agents & terminals`, `Workspaces` and `Changes` are one kind of screen and
+`Sessions`, `Workspaces` and `Changes` are one kind of screen and
 take one set of keys — `j`/`k` to move, `h`/`l` by section, `g`/`G` to the
 ends, `<CR>` to open, `r` to re-fetch — plus their own verbs:
-`c`/`a`/`y`/`R`/`d` on `Agents & terminals`, `n`/`o`/`d` on Workspaces. **The focused row is painted**, in the colour hover
+`c`/`a`/`y`/`R`/`d` on `Sessions`, `n`/`o`/`d` on Workspaces. On `Sessions`,
+`/` opens a one-row box at the foot of the list and **filters it as you type** —
+`matchfuzzy`, against the titles rather than the drawn row, across the agents
+and the terminals together; `<CR>` keeps the filter, `<Esc>` in the box cancels
+it and `<Esc>` on the narrowed list clears it. **The focused row is painted**, in the colour hover
 uses, and arriving at a tab puts focus on a row so the first `<CR>` does
 something.
 
@@ -370,8 +384,9 @@ than polled, and nothing used to ask the screen to draw them again — so
 archiving a session left its row up until the next `j`, and an agent that
 started working did not change colour until you moved. One archive produces
 three `remove` events from a live daemon, so the repaint is coalesced, and it
-redraws the session strip plus the list itself and nothing else: the Changes
-panel shells out to `git status` per repo, and it is not what changed.
+redraws the tab bar — whose right-hand end names the session — plus the list
+itself and nothing else: the Changes panel shells out to `git status` per repo,
+and it is not what changed.
 
 None of that was true before. Selection lived on the **cursor**, which volt
 resets to line 1 after every click, nothing was drawn to say where it was, and
@@ -481,9 +496,8 @@ and opens a line from insert mode, so the one that works while you are still
 typing is `<M-CR>` — Alt and Enter. (`<C-CR>` is bound beside it for terminals
 that speak the kitty keyboard protocol; the ones that do not simply never send
 it.) **`<C-s>` is not either of them.** It means *the session list* on the
-chrome, in every terminal, and in the session strip drawn four rows above the
-box — so a composer that quietly sent on it was one key with two meanings, both
-advertised on screen at once. From the composer it now does what it does
+chrome and in every terminal — so a composer that quietly sent on it was one
+key with two meanings, both advertised on screen at once. From the composer it now does what it does
 everywhere else: takes you to the session list.
 
 A bare digit is also a **count**, and the two panes these are bound on are
@@ -552,7 +566,7 @@ permission dialog is the one exception and sits above everything, because it
 is the one window that must not be covered.
 
 The chrome is four volt sections rather than one, which is not tidiness: the
-session strip and the footer repaint ten times a second while a turn runs, and a
+footer repaints ten times a second while a turn runs, and a
 single section would drag the `Changes` panel — one `git status` per repo —
 through every frame.
 
@@ -585,7 +599,7 @@ lands on the next one, so there is one traversal rather than one per card.
 `m` `t` `f` `s` jump to a group, and the letter is printed **on the card** so
 the key is where you are already looking. `<CR>` applies.
 
-On **Agents & terminals**, `y` copies the selected agent's complete ID to the
+On **Sessions**, `y` copies the selected agent's complete ID to the
 unnamed register and, when available, the system clipboard. The agent picker
 uses `<C-y>`. Terminal rows deliberately have no copy-agent-ID action. To ask
 one agent to contact another, copy the receiving agent's ID, paste it into the
@@ -677,20 +691,19 @@ applied, which is what two quick mode changes used to produce.
 
 Paseo runs terminals as well as agents — the `claude` and `codex` sessions you
 started in the app are PTYs on the daemon — and **a terminal is a session.** It
-lists on the `Agents & terminals` tab beside the agent sessions, and opening
+lists on the `Sessions` tab beside the agent sessions, and opening
 one shows it **on the Chat tab**, where the conversation would be:
 
 ```
  ╭──────────────────────────────────────────────────────────────────────╮
- │  claude/opus-5 · acceptEdits · 58% left               ~/Code/kora     │
- │  1 󰀄 Chat   2 󱙺 Agents & terminals   3 󱕂   4 󰘬   5 󰄨   6 󰙅           │
- │ ──────────────────────────────────────────────────────────────────── │
- │  󱙺 main   󱙺 reviewer   󰆍 lazygit   󰆍 shell      Ctrl + s  sessions   │
+ │  1 󰀄 Chat   2 󱙺 Sessions   3 󱕂   4 󰘬   5 󰄨   6 󰙅       󰆍 lazygit    │
  │                                                                      │
  │  ▐▛███▜▌ Claude Code v2.1.263                                        │
  │  ▝▜█████▛▘ Opus 5 (1M context)                                       │
  │                                                                      │
  │  > _                                                                 │
+ │                                                                      │
+ │  Ctrl + g  tab bar   Ctrl + s  sessions   Ctrl + l  terminal   1-6 … │
  ╰──────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -704,30 +717,48 @@ it is a place you get stuck, and the way back out was `q`.
 Now there is **one surface**, and what changes is what fills the panel area — a
 conversation and its composer for an agent, the PTY outright for a terminal.
 
-**The session strip** under the tab bar is what makes that legible: one chip per
-session in this workspace, agents then terminals, the one you are in lit. It is
-on **every** tab, because "which session am I in" does not stop
-being worth answering when you look at Usage — and a terminal has no transcript
-and no composer, so without it the dashboard could be showing a PTY with nothing
-on screen naming it. A chip is a click; `<C-s>` is the keyboard.
+**Which session that is** is the label at the right-hand end of the tab bar,
+on **every** tab — because "which session am I in" does not stop being worth
+answering when you look at Usage, and a terminal has no transcript and no
+composer, so without it the dashboard could be showing a PTY with nothing on
+screen naming it. Moving *between* sessions is the `Sessions` tab's job.
 
-In a terminal: `<C-s>` to the session list, `<C-j>`/`<C-k>` to the next and
-previous session here, `<M-1>`–`<M-6>` for the tabs, `q` (normal mode) to close.
-**And a chat picked out of that list opens the chat** — which session the Chat
-tab is on survives a trip through the panels, so `<C-s>` out of a terminal and
-an agent chosen from the list used to land back on the same PTY, a keystroke
-that visibly did nothing.
-**All of them are bound in terminal mode too**, which is the only way any of
-them is worth having — otherwise each starts with `<C-\><C-n>`. That does take
-them from whatever is running inside, which is right for `claude` and wrong for
-`tmux`, so `ui.terminal.keys` renames or disables any of them.
+**A terminal takes every key, and that is what it is for** — so the handful it
+does not take are your whole way out, and they have to be enough to reach the
+tab bar:
 
-The **digits are deliberately not bound**: a bare `5` in a terminal costs you
-`50k` to scroll back, and `<M-5>` reaches the same tab. `<C-c>` is not bound
-either — it is SIGINT and belongs to the program. `<Esc>` is never bound at all:
-it belongs to the PTY, so vim running inside one can still leave insert mode.
+| | |
+|---|---|
+| `<C-g>` | out of the PTY and **onto the tab bar**, without leaving the Chat tab or closing anything: the terminal stays on screen, the keystrokes stop going to it, and `1`–`6`, `<Tab>` and `q` work |
+| `<C-l>` | from the chrome back **into** the PTY — the other direction |
+| `<C-s>` | the `Sessions` tab: everything running here, and `/` to search it |
+| `<C-j>` / `<C-k>` | the next and previous session in this workspace |
+| `<M-1>`–`<M-6>` | the tabs, for the terminals that deliver an Alt chord |
 
-On the `Agents & terminals` tab, `c` starts a terminal, `R` renames one and `d` kills it
+`<C-g>` is the answer to *"I can only switch tabs with the mouse"*. `<M-3>` is
+one key, and a great many terminal emulators, multiplexers and ssh sessions
+never deliver an Alt chord at all — and when that is true of yours, those six
+bindings are not a way out, they are six keys that do nothing.
+**Everything but the digits is bound in terminal mode too**, which is the only
+way any of it is worth having — otherwise each starts with `<C-\><C-n>`. That
+does take them from whatever is running inside, which is right for `claude` and
+wrong for `tmux`, so `ui.terminal.keys` renames or disables any of them.
+
+**And a chat picked out of the session list opens the chat** — which session
+the Chat tab is on survives a trip through the panels, so `<C-s>` out of a
+terminal and an agent chosen from the list used to land back on the same PTY, a
+keystroke that visibly did nothing. For the same reason the agent row in that
+list is openable *while a terminal is up*: it asked whether the row was this
+chat's agent rather than whether it was the session on screen, so the one row
+in the list that took you back to the conversation was the one that did nothing.
+
+The **digits are bound in the PTY's normal mode** — after `<C-\><C-n>`, where
+they cost a count and the surface behaving differently in one buffer is worse
+— and **not in terminal mode**, where a bare `5` is a `5` the program wanted.
+`<C-c>` is not bound either: it is SIGINT and belongs to the program. `<Esc>`
+is never bound at all, so vim running inside one can still leave insert mode.
+
+On the `Sessions` tab, `c` starts a terminal, `R` renames one and `d` kills it
 (asked first — something is usually running in there). `c` opens a **screen, not
 a prompt**: a shell, then one entry per provider the daemon has — read live, so
 enabling one in Paseo makes it appear without a config change — then anything in
@@ -924,7 +955,7 @@ bytes.
 The codepoints are the point. Twice the bytes of a Private Use Area glyph have
 been lost out of a source file: `check_on`/`check_off` went first, and a test
 was added covering exactly those four names — while six slots in
-`render.icons`, the `permission` marker in the Agents & terminals panel, two group icons
+`render.icons`, the `permission` marker in the Sessions panel, two group icons
 and five inline glyphs elsewhere were empty the whole time and the suite stayed
 green. An empty icon is not a visible failure; the line still draws, and "off"
 and "broken" look identical.
@@ -947,7 +978,7 @@ wrong row — as `Invalid 'line': out of range`, thrown from inside `vim.on_key`
 
 There was a **third** effect, staggering a panel's rows in on a tab switch, and
 it is gone for a reason worth recording. It respected that constraint — it drew
-fewer rows into a block already padded to its final height. But the Agents & terminals
+fewer rows into a block already padded to its final height. But the Sessions
 panel maps cursor rows to entities, and that map still named every row while
 only some were painted, so for the length of the reveal the screen disagreed
 with what a keypress would do. A decorative effect is not worth a window in
@@ -1413,7 +1444,7 @@ is not a Paseo tab, and a terminal is not an agent session.
 | **Agent** | The AI worker identified by an agent ID. In UI text, its ongoing conversation is an **agent session**. |
 | **Agent session** | One agent's state and timeline inside a workspace. Several can share the same workspace and files. Bare “session” is retained only in compatibility command aliases and stable internal module/protocol names. |
 | **Tab** | A Paseo application surface that presents an agent session. It is distinct from a Neovim **tab page**. paseo.nvim's dashboard sections are also UI tabs, not isolation boundaries. |
-| **Dashboard** | paseo.nvim's full-screen surface: the six tabs, the session strip and the panes. One thing, on one of two **mounts**. |
+| **Dashboard** | paseo.nvim's full-screen surface: the six tabs, the panels and the panes. One thing, on one of two **mounts**. |
 | **Mount** | Where the dashboard is drawn — `float`, over your code, or `buffer`, in a real window of its own. Same chrome, same tabs, same keys; only the window differs. |
 | **Sidebar** | The narrow surface beside your code. A different surface from the dashboard, not a third mount of it. |
 | **Terminal** | A daemon-owned PTY inside a workspace. It appears beside agent sessions but is not an agent. |

@@ -598,7 +598,7 @@ M.sessions = M.agent_sessions
 ---
 ---A workspace's `directory` is its working directory, and anything under it is
 ---in it -- which is how a member worktree resolves to the workspace that
----assembled it. One walk, in one place: the agent picker and the Agents & terminals
+---assembled it. One walk, in one place: the agent picker and the Sessions
 ---panel both need the answer and had no business each writing it.
 ---@param root string
 ---@param callback fun(ws: paseo.PaseoWorkspace|nil, err: string|nil)

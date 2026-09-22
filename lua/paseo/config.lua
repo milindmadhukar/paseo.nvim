@@ -139,14 +139,16 @@ local M = {}
 ---                       everything, because it is the one window that must not
 ---                       be covered.
 ---@field backdrop boolean  Dim the editor behind the surface.
----@field tab_keys boolean  Bind bare `1`-`6` to the tabs in the conversation
----                       and composer as well as in the chrome. They have to be
----                       bound there or they do nothing: the Chat tab puts your
----                       cursor in the composer. The cost is that a bare digit
----                       is also a COUNT, so `3p` and `5j` in those two buffers
----                       go to the tab bar instead while the dashboard is open.
----                       Set false to keep the counts; `<M-1>`-`<M-6>` and
----                       `<Tab>` still switch tabs.
+---@field tab_keys boolean  Bind bare `1`-`6` to the tabs in the conversation,
+---                       the composer and a terminal's NORMAL mode, as well as
+---                       in the chrome. They have to be bound there or they do
+---                       nothing: the Chat tab puts your cursor in the
+---                       composer, or in the PTY. The cost is that a bare
+---                       digit is also a COUNT, so `3p` and `5j` in those
+---                       buffers go to the tab bar instead while the dashboard
+---                       is open. Set false to keep the counts; `<M-1>`-`<M-6>`
+---                       and `<Tab>` still switch tabs. In TERMINAL mode a
+---                       digit is never taken: it belongs to what is running.
 
 ---@class paseo.Config.UI.Buffer
 ---
@@ -240,10 +242,20 @@ local M = {}
 ---be `false`.
 ---@field next string|false   The next session in this workspace, agent or
 ---@field prev string|false   terminal. Stays on the Chat tab.
----@field sessions string|false  To the Sessions tab -- the way OUT of a
----                      terminal, and the reason it is not a place you get
----                      stuck. Was `keys.list`, which meant the rail.
----@field terminal string|false  From the chrome back into the PTY.
+---@field sessions string|false  To the Sessions tab -- the list of everything
+---                      running here and the search over it. Was `keys.list`,
+---                      which meant the rail.
+---@field chrome string|false  OUT OF THE PTY AND ONTO THE TAB BAR, without
+---                      leaving the Chat tab or closing anything: the terminal
+---                      stays on screen and the keystrokes stop going to it,
+---                      so `1`-`6` and `<Tab>` reach the tabs. This is the key
+---                      to rebind if tab navigation from a terminal is only
+---                      working with the mouse -- `<M-1>`-`<M-6>` are bound in
+---                      terminal mode too, but plenty of terminal emulators,
+---                      multiplexers and ssh sessions never deliver an Alt
+---                      chord, and then they are six keys that do nothing.
+---@field terminal string|false  From the chrome back into the PTY -- the other
+---                      direction, bound on the dashboard's own buffer.
 
 ---@class paseo.Config.Workspaces
 ---@field dir string      Directory, relative to a project root, holding the
@@ -414,6 +426,12 @@ local defaults = {
         next = "<C-j>",
         prev = "<C-k>",
         sessions = "<C-s>",
+        -- `<C-g>` rather than anything more obvious, because every obvious
+        -- chord is one a shell already uses: `<C-a>`/`<C-e>` are line ends,
+        -- `<C-w>` deletes a word, `<C-l>` clears the screen. In readline
+        -- `<C-g>` is an abort you have already got `<C-c>` for, so it is the
+        -- cheapest key in the terminal to take.
+        chrome = "<C-g>",
         terminal = "<C-l>",
       },
       presets = {},

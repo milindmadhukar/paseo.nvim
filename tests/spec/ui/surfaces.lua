@@ -15,7 +15,11 @@ local function test_surfaces()
   local float = require "paseo.ui.float"
   local surface_chat = {
     root = vim.uv.cwd(),
-    agent_id = "test-agent",
+    -- NOT `test-…`: the tab bar names the session at its right-hand end, and
+    -- the probe below is that the PROVIDER -- `test` -- never reaches this
+    -- row. An id that starts with the same four letters makes that probe pass
+    -- or fail for the wrong reason.
+    agent_id = "probe-agent",
     provider = "test",
     streaming = false,
     pending = {},
@@ -356,7 +360,7 @@ local function test_surfaces()
         { id = "row-other", title = "row-other", status = "idle" },
       }
     end
-    float.select "Agents & terminals"
+    float.select "Sessions"
 
     local chrome
     for _, win in ipairs(vim.api.nvim_list_wins()) do
@@ -403,6 +407,26 @@ local function test_surfaces()
     end
     truthy("ui: the list takes the movement keys", chrome and bound "j")
     truthy("ui: and its per-row verbs", chrome and bound "d")
+    truthy("ui: and the search key", chrome and bound "/")
+
+    -- `<Esc>` IS ONLY OURS WHILE THERE IS A FILTER TO DROP. On the float it
+    -- dismisses the dashboard, so a panel that held the key for the whole
+    -- visit would turn the surface's own way out into a no-op on this tab.
+    ---@return string
+    local function esc_desc()
+      local found
+      vim.api.nvim_buf_call(chrome, function()
+        found = vim.fn.maparg("<Esc>", "n", false, true)
+      end)
+      return (type(found) == "table" and found.desc) or ""
+    end
+    local CLEAR = "paseo: clear the search"
+    truthy("ui: <Esc> belongs to the surface with no search running", esc_desc() ~= CLEAR)
+    local sessions_view = require("paseo.ui.panels.sessions")._view(surface_chat)
+    sessions_view:set_query "row-probe"
+    eq("ui: a search takes it", esc_desc(), CLEAR)
+    sessions_view:set_query ""
+    truthy("ui: and clearing gives it straight back", esc_desc() ~= CLEAR)
 
     -- THE ROW YOU ARCHIVED IS GONE BEFORE YOU MOVE. Both directories are
     -- push-fed, and the surface used to redraw for none of it: archiving a
@@ -445,6 +469,16 @@ local function test_surfaces()
 
   float.select "Usage"
   eq("ui: the panels do not keep a conversation window", surface_chat.win_conversation, nil)
+
+  -- WIDE ENOUGH TO SAY EVERYTHING. The tab bar degrades -- pills first, then
+  -- what room is left goes to the session's name -- and the suite's editor is
+  -- 80 columns, where the name is cut to its glyph. That degradation is
+  -- checked at the bottom of this file; here the row has to be able to say
+  -- everything it can say, or "does it draw X" answers "no" for the width.
+  local saved_columns = vim.o.columns
+  vim.o.columns = 160
+  float.relayout()
+
   local chrome_buf
   for _, win in ipairs(vim.api.nvim_list_wins()) do
     local buf = vim.api.nvim_win_get_buf(win)
@@ -477,11 +511,22 @@ local function test_surfaces()
     -- pushed the whole of those five tabs' bodies down a row relative to
     -- Chat's, so switching tabs shifted the layout under you. `provider` is
     -- "test" on this session, which is what the header would have put there.
+    --
+    -- The session's NAME is on this row, at the right-hand end -- that is what
+    -- replaced the strip -- and it is the only thing about the session that
+    -- is: not the model, not the mode, not the working directory.
     truthy(
       "ui: the chrome does not repeat the header above the tabs",
       drawn:find("test", 1, true) == nil,
       drawn
     )
+    truthy(
+      "ui: but it does name the session you are in",
+      drawn:find("probe-ag", 1, true) ~= nil,
+      drawn
+    )
+    vim.o.columns = saved_columns
+    float.relayout()
     -- Every tab's NUMBER, at every width. The bar degrades from name+icon to
     -- name, to icon, to bare number as the terminal narrows, and the number is
     -- the one thing it must never drop -- it is the only place that says which
@@ -574,6 +619,7 @@ local function test_terminal_session()
     summary = terminals.summary,
     awatch = agents.watch,
     afor_root = agents.for_root,
+    aget = agents.get,
   }
 
   bridge.ensure = function(done)
@@ -599,6 +645,11 @@ local function test_terminal_session()
   agents.watch = function() end
   agents.for_root = function()
     return { { id = "a1", title = "main", status = "idle" } }
+  end
+  -- The tab bar names the session by ID rather than by filtering the whole
+  -- directory on a path -- it repaints at 10Hz while a turn runs.
+  agents.get = function(id)
+    return id == "a1" and { id = "a1", title = "main", status = "idle" } or nil
   end
 
   local chat = {
@@ -637,8 +688,7 @@ local function test_terminal_session()
 
     -- The keys, in the PTY buffer. Bound in TERMINAL mode as well as normal,
     -- because a key you must press `<C-\><C-n>` to reach first is a key you
-    -- do not reach -- and a bare digit is NOT bound, because `5` in a terminal
-    -- costs you `50k` to scroll back.
+    -- do not reach.
     local function bound(lhs, mode)
       local found
       vim.api.nvim_buf_call(view.buf, function()
@@ -649,8 +699,64 @@ local function test_terminal_session()
     truthy("terminal: <M-2> reaches a tab from normal mode", bound("<M-2>", "n"))
     truthy("terminal: and from inside the terminal", bound("<M-2>", "t"))
     truthy("terminal: <C-s> is the way out, in both", bound("<C-s>", "n") and bound("<C-s>", "t"))
-    eq("terminal: a bare digit is left to the PTY", bound("2", "n"), false)
-    eq("terminal: and so is <Esc>", bound("<Esc>", "t"), false)
+
+    -- THE ANSWER TO "I CAN ONLY SWITCH TABS WITH THE MOUSE". `<M-2>` is one
+    -- key, and a great many terminals, multiplexers and ssh sessions never
+    -- deliver an Alt chord at all -- so there is a plain chord out to the tab
+    -- bar, bound from inside the terminal, and the digits and `<Tab>` work in
+    -- the PTY's own normal mode the way they do on every other buffer here.
+    truthy(
+      "terminal: <C-g> reaches the tab bar from inside the PTY",
+      bound("<C-g>", "t") and bound("<C-g>", "n")
+    )
+    truthy("terminal: a bare digit switches tab from normal mode", bound("2", "n"))
+    eq("terminal: and is left to the PTY in terminal mode", bound("2", "t"), false)
+    truthy("terminal: <Tab> cycles from normal mode", bound("<Tab>", "n"))
+    eq("terminal: and is a tab character inside the terminal", bound("<Tab>", "t"), false)
+    eq("terminal: <Esc> belongs to the PTY in both", bound("<Esc>", "t"), false)
+
+    -- And the chrome has the way back down into it, which is the half that
+    -- makes the trip out worth taking.
+    truthy(
+      "terminal: the chrome binds the way back into the PTY",
+      (function()
+        local found
+        vim.api.nvim_buf_call(float.chrome_buf(), function()
+          found = vim.fn.maparg("<C-l>", "n", false, true)
+        end)
+        return type(found) == "table" and found.buffer == 1
+      end)()
+    )
+
+    -- FOCUS, NOT A TAB CHANGE. `<C-g>` hands the keyboard to the chrome and
+    -- leaves the terminal drawn where it was: you are still on the Chat tab,
+    -- still in the same session, and the tab bar now takes your keys.
+    float.focus_chrome()
+    eq(
+      "terminal: the tab bar has the keyboard",
+      vim.api.nvim_get_current_win(),
+      (function()
+        for _, win in ipairs(vim.api.nvim_list_wins()) do
+          if vim.api.nvim_win_get_buf(win) == float.chrome_buf() then
+            return win
+          end
+        end
+      end)()
+    )
+    eq("terminal: without leaving the Chat tab", float.tab(), "Chat")
+    eq("terminal: or the session", float.session().id, "t1")
+    float.focus_terminal()
+    eq(
+      "terminal: and <C-l> puts it back in the PTY",
+      vim.api.nvim_get_current_win(),
+      (function()
+        for _, win in ipairs(vim.api.nvim_list_wins()) do
+          if vim.api.nvim_win_get_buf(win) == view.buf then
+            return win
+          end
+        end
+      end)()
+    )
 
     -- Back to the agent, and the composer comes back with it.
     float.show_session { kind = "agent", id = "a1" }
@@ -663,7 +769,7 @@ local function test_terminal_session()
     -- to the Chat tab still pointed at the PTY: the screen did not change, and
     -- the key read as broken.
     float.show_session { kind = "terminal", id = "t1" }
-    float.select "Agents & terminals"
+    float.select "Sessions"
     float.open(chat)
     eq("terminal: the session list is the way back to the chat", float.tab(), "Chat")
     eq("terminal: which is the agent, not the terminal", float.session().kind, "agent")
@@ -686,45 +792,84 @@ local function test_terminal_session()
       chat.win_composer ~= nil and vim.api.nvim_win_is_valid(chat.win_composer)
     )
 
-    -- THE ROW THAT SAYS WHERE YOU ARE, on every tab -- a terminal session has
-    -- no header of its own and no transcript, so without it the dashboard
-    -- could show a PTY with nothing naming it.
+    -- WHAT SAYS WHERE YOU ARE, on every tab -- a terminal session has no
+    -- header of its own and no transcript, so without it the dashboard could
+    -- show a PTY with nothing naming it. It is the right-hand end of the TAB
+    -- BAR now: the strip that used to say it was a second row of navigation
+    -- directly under the first, and the Sessions tab is where you move
+    -- between sessions.
     float.show_session { kind = "terminal", id = "t1" }
     float.select "Usage"
-    eq("terminal: the strip survives a tab change", float.session().id, "t1")
+    eq("terminal: the session survives a tab change", float.session().id, "t1")
 
-    ---The session strip, as `{ text = highlight }`. The tab bar, the rule,
-    ---then this -- the same rows on every tab, because the chrome has no
-    ---header row on any of them.
-    local function strip()
+    -- Wide enough for the bar to say everything: the pills come first and the
+    -- name takes what is left, which at the suite's 80 columns is a glyph.
+    local saved_columns = vim.o.columns
+    vim.o.columns = 160
+    float.relayout()
+
+    ---The tab bar's text, as one string. The first row of the chrome, on every
+    ---tab, because the chrome has no header row on any of them.
+    local function tab_bar()
       local out = {}
       local buf = float.chrome_buf()
       local rows = require("paseo.ui.layout").rows(0)
       for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, -1, 0, -1, { details = true })) do
-        if mark[2] + 1 == rows.strip then
+        if mark[2] + 1 == rows.tabs then
           for _, cell in ipairs(mark[4].virt_text or {}) do
-            local text = vim.trim(cell[1])
-            if text ~= "" then
-              out[text] = cell[2]
-            end
+            out[#out + 1] = cell[1]
           end
         end
       end
-      return out
+      return table.concat(out)
     end
 
-    local on_terminal = strip()
-    eq(
-      "terminal: the strip lights the session you are in",
-      on_terminal["󰆍 lazygit"],
-      "PaseoChipFocus"
+    local on_terminal = tab_bar()
+    truthy(
+      "terminal: the tab bar names the session you are in",
+      on_terminal:find("lazygit", 1, true) ~= nil,
+      on_terminal
     )
-    eq("terminal: and not the one you are not", on_terminal["󱙺 main"], "PaseoChipOff")
+    -- And never at the cost of a tab's NUMBER, which is what the keys are.
+    local unnumbered = {}
+    for i = 1, #float.TABS do
+      if not on_terminal:find(" " .. i .. " ", 1, true) then
+        unnumbered[#unnumbered + 1] = i
+      end
+    end
+    eq("terminal: without losing a tab number to it", unnumbered, {}, on_terminal)
 
     float.show_session { kind = "agent", id = "a1" }
-    local on_agent = strip()
-    eq("terminal: and it follows you back", on_agent["󱙺 main"], "PaseoChipFocus")
-    eq("terminal: leaving the terminal unlit", on_agent["󰆍 lazygit"], "PaseoChipOff")
+    local on_agent = tab_bar()
+    truthy(
+      "terminal: and it follows you back to the agent",
+      on_agent:find("main", 1, true) ~= nil,
+      on_agent
+    )
+    truthy(
+      "terminal: leaving the terminal unnamed",
+      on_agent:find("lazygit", 1, true) == nil,
+      on_agent
+    )
+
+    -- NARROW, and the pills win. The name is what gets cut -- to a few letters
+    -- and then to its glyph -- because the numbers and names in the bar are
+    -- how you move around and the label is a readout of where you already are.
+    vim.o.columns = 84
+    float.relayout()
+    local tight = tab_bar()
+    truthy(
+      "terminal: a narrow bar keeps every tab name",
+      tight:find("Workspaces", 1, true) ~= nil,
+      tight
+    )
+    truthy(
+      "terminal: and gives up the session name for them",
+      tight:find("main", 1, true) == nil,
+      tight
+    )
+    vim.o.columns = saved_columns
+    float.relayout()
   end)
 
   float.close()
@@ -733,7 +878,7 @@ local function test_terminal_session()
   bridge.ensure, bridge.request, bridge.on = saved.ensure, saved.request, saved.on
   terminals.watch, terminals.ready = saved.watch, saved.ready
   terminals.for_root, terminals.get, terminals.summary = saved.for_root, saved.get, saved.summary
-  agents.watch, agents.for_root = saved.awatch, saved.afor_root
+  agents.watch, agents.for_root, agents.get = saved.awatch, saved.afor_root, saved.aget
   truthy("terminal: the session cases ran", ok, err)
 end
 
@@ -991,7 +1136,7 @@ local function test_buffer_surface()
   float.open(chat, { mount = "buffer" })
   require("paseo.ui.chat").sessions(chat)
   eq("buffer: the session list keeps the buffer mount", float.mount(), "buffer")
-  eq("buffer: and is the tab it says it is", float.tab(), "Agents & terminals")
+  eq("buffer: and is the tab it says it is", float.tab(), "Sessions")
   -- And what it recorded as this chat's home is the buffer mount, not the
   -- float it used to be dragged onto.
   eq("buffer: and records the buffer as where the chat lives", chat.surface, "buffer")

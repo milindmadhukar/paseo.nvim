@@ -247,25 +247,23 @@ local function test_layout()
     -- composer, which pushed those five down a row relative to Chat; switching
     -- tabs moved the whole body under you.
     local chat = layout.rows(height)
-    eq("ui: the body gets height - 4 rows at " .. height, chat.body_height, height - 4)
+    eq("ui: the body gets height - 3 rows at " .. height, chat.body_height, height - 3)
     eq("ui: the tab bar is the first row at " .. height, chat.tabs, 1)
-    eq("ui: the session strip is the third at " .. height, chat.strip, 3)
+    eq("ui: the rule under it is the second at " .. height, chat.rule, 2)
+    eq("ui: the body starts on the third at " .. height, chat.body_first, 3)
     eq("ui: the footer owns the last row at " .. height, chat.footer, height)
     eq("ui: the body ends above it at " .. height, chat.body_last, height - 1)
 
     -- BORDERED, which every `ui.style` but `border = "none"` is. That matters
     -- and is where an off-by-one lived: `nvim_open_win` is handed the BORDER's
-    -- row, not the content's, so chrome buffer line 1 is at `g.row + 1`. The
-    -- panes were floated a row too high for as long as the row they covered
-    -- was blank; the session strip put content there and it became visible as
-    -- a strip you could see the last three columns of.
+    -- row, not the content's, so chrome buffer line 1 is at `g.row + 1`.
     local g = { row = 2, col = 3, width = 100, height = height, composer = 7, border = true }
     -- The panes only ever cover the Chat tab, and every tab has the same rows.
     local panes = layout.panes(g)
-    eq("ui: the panes start below the strip at " .. height, panes.top, g.row + 4)
+    eq("ui: the panes start below the tab bar at " .. height, panes.top, g.row + 3)
     eq(
-      "ui: and the strip is the row above them at " .. height,
-      layout.screen_row(g, chat.strip),
+      "ui: and the rule is the row above them at " .. height,
+      layout.screen_row(g, chat.rule),
       panes.top - 1
     )
 
@@ -274,7 +272,7 @@ local function test_layout()
     eq(
       "ui: without a border there is no row to skip at " .. height,
       layout.panes(flat).top,
-      g.row + 3
+      g.row + 2
     )
 
     -- A terminal session has no composer and gets the body outright. Same
@@ -316,14 +314,12 @@ local function test_layout()
   end
 
   -- The chrome's height is the sum of its named parts, not a literal. That is
-  -- the file's whole argument, and adding the session strip is what made the
-  -- difference matter: with a literal it is "find every 3 and hope".
+  -- the file's whole argument, and the session strip is what made the
+  -- difference matter -- twice: with a literal, adding a row to the chrome and
+  -- then taking it away again are both "find every 3 and hope".
   local parts = layout.PARTS
-  eq(
-    "ui: the chrome above the body is its parts",
-    layout.CHROME.above,
-    parts.tabs + parts.rule + parts.strip
-  )
+  eq("ui: the strip is not a row of the chrome any more", parts.strip, nil)
+  eq("ui: the chrome above the body is its parts", layout.CHROME.above, parts.tabs + parts.rule)
   eq("ui: and below it is the footer", layout.CHROME.below, parts.footer)
 end
 

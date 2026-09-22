@@ -465,7 +465,7 @@ function M.sessions(chat)
   elseif not float.is_open(chat) then
     float.open(chat, { mount = mount })
   end
-  float.select "Agents & terminals"
+  float.select "Sessions"
 end
 
 -- ------------------------------------------------------------------- images

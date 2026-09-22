@@ -30,7 +30,7 @@ end
 -- ------------------------------------------------------------------ status
 --
 -- What a unit of work is doing. Used by the timeline's tool cards, the
--- Agents & terminals panel and the terminal surface -- one vocabulary, so a running tool
+-- Sessions panel and the terminal surface -- one vocabulary, so a running tool
 -- and a running agent are the same shape.
 
 M.status = {
@@ -119,9 +119,6 @@ M.panel = {
   Workspaces = g(0xf0645), -- md-file_tree
   Terminals = g(0xf018d), -- md-console
 }
--- The list tab is spelled for what it holds; the icon is the same glyph.
-M.panel["Agents & terminals"] = M.panel.Sessions
-
 -- --------------------------------------------------------------------- misc
 
 M.ui = {
@@ -142,6 +139,7 @@ M.ui = {
   switch = g(0xf04e1), -- md-swap_horizontal
   limits = g(0xf04c5), -- md-speedometer -- plan quota
   clock = g(0xf0954), -- md-clock_outline -- when a window resets
+  search = g(0xf0349), -- md-magnify
   archive = g(0xf00b7), -- md-archive
   remove = g(0xf0156), -- md-close
   stop = g(0xf04db), -- md-stop

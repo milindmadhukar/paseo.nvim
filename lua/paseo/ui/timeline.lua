@@ -18,7 +18,7 @@ local M = {}
 
 ---Status glyphs for a tool call. A running card is visibly unfinished.
 ---
----From the registry rather than written out here, because the Agents & terminals panel
+---From the registry rather than written out here, because the Sessions panel
 ---and the Terminals panel say the same four things about their own rows and
 ---had each spelled them differently.
 local GLYPH = {

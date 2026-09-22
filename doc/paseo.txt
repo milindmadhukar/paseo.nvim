@@ -416,14 +416,16 @@ ui.float.backdrop                                 boolean, default true
                                               *paseo-config.ui.float.tab_keys*
 ui.float.tab_keys                                 boolean, default true
 
-    Bind bare `1`-`6` to the dashboard's tabs in the conversation and the
-    composer as well as in the chrome. They have to be bound there or they do
-    nothing, because the Chat tab puts your cursor in the composer.
+    Bind bare `1`-`6` to the dashboard's tabs in the conversation, the
+    composer and a terminal's NORMAL mode, as well as in the chrome. They have
+    to be bound there or they do nothing, because the Chat tab puts your
+    cursor in the composer -- or, for a terminal session, in the PTY.
 
-    The cost is that a bare digit is also a COUNT: while the dashboard is open,
-    `3p` and `5j` in those two buffers go to the tab bar. Set this false to
+    The cost is that a bare digit is also a COUNT: while the dashboard is
+    open, `3p` and `5j` in those buffers go to the tab bar. Set this false to
     keep the counts -- `<M-1>`-`<M-6>` and `<Tab>` still switch tabs, and
-    collide with nothing.
+    collide with nothing. Inside a terminal, in TERMINAL mode, a digit is
+    never taken at all: it belongs to whatever is running.
 
                                                  *paseo-config.ui.sidebar*
 ui.sidebar                                                          table
@@ -511,9 +513,16 @@ ui.terminal                                                         table
         terminal = { keys = { next = false, prev = false } }
 <
         next      the next session here, prev the previous
-        sessions  to the Agents & terminals tab -- the way OUT of a terminal.
-                  This was `list`, which meant the rail
-        terminal  from the chrome back into the PTY
+        chrome    OUT OF THE PTY AND ONTO THE TAB BAR, without leaving the
+                  Chat tab: the terminal stays on screen, the keystrokes stop
+                  going to it, and `1`-`6` and `<Tab>` reach the tabs.
+                  `<C-g>`. REBIND THIS ONE if tab navigation out of a
+                  terminal only works with the mouse -- `<M-1>`-`<M-6>` are
+                  bound in terminal mode too, but plenty of emulators,
+                  multiplexers and ssh sessions never deliver an Alt chord
+        sessions  to the |paseo-chat-sessions| tab -- everything running
+                  here, and `/` to search it. This was `list`, the rail
+        terminal  from the chrome back into the PTY: the other direction
 
     All are bound in TERMINAL mode as well as normal, which is what makes
     them worth having and also what takes them from whatever is running
@@ -1046,8 +1055,8 @@ These names follow Paseo's model:
                    Neovim TAB PAGE. The dashboard sections are UI tabs too;
                    neither kind is an isolation boundary.
 
-    Dashboard      paseo.nvim's full-screen surface: six tabs, the session
-                   strip and the panes. One thing, on one of two MOUNTS.
+    Dashboard      paseo.nvim's full-screen surface: six tabs, the panels
+                   and the panes. One thing, on one of two MOUNTS.
 
     Mount          Where the dashboard is drawn -- `float`, over your code, or
                    `buffer`, in a window of its own. Same chrome, same tabs,
@@ -1463,9 +1472,9 @@ its drawn border and become a plate like every other card; see
 
 IT IS ONLY EVER THIS ROW. The dashboard used to repeat it in the chrome above
 the tab bar on every tab but `Chat`, which said what the bar over the box
-already says and cost those five tabs a row: the tab bar, the strip and the
-whole panel below them all sat one row lower than on `Chat`, so changing tab
-shifted the layout under you. The panel that can change any of these facts is
+already says and cost those five tabs a row: the tab bar and the whole panel
+below it sat one row lower than on `Chat`, so changing tab shifted the layout
+under you. The panel that can change any of these facts is
 |paseo-chat-settings|, which is tab `3`.
 
 IT DEGRADES BY DROPPING WHOLE FACTS rather than by cutting the row. A sixty
@@ -1545,7 +1554,8 @@ The DASHBOARD on its FLOAT MOUNT -- the DEFAULT -- is `:Paseo chat`,
 same header, plus a tab for every other thing Paseo knows: >
 
     1 Chat                  the conversation and composer
-    2 Agents & terminals    the agents AND terminals here, live -- open one
+    2 Sessions              the agents AND terminals here, live -- open one,
+                            or `/` to fuzzy-search them
     3 Settings              mode, thinking level, model and feature toggles
     4 Changes               what is changed on disk -- open one
     5 Usage                 context window, tokens, cost and what is left
@@ -1778,7 +1788,7 @@ decided.
                                                     *paseo-cross-agent-prompt*
 Cross-agent communication ~
 
-On `Agents & terminals`, `y` copies the selected agent's complete ID to the
+On `Sessions`, `y` copies the selected agent's complete ID to the
 unnamed register and the system clipboard when available. In the agent picker,
 use `<C-y>`. Paste that receiving ID into the sending agent's chat and ask it
 to use Paseo's cross-agent prompt tool. Terminal rows do not offer this action.
@@ -1854,6 +1864,7 @@ Plus, per tab: >
     Sessions     c  new terminal     a  new agent
                  R  rename a terminal
                  d  kill a terminal, or archive an agent -- asked first
+                 /  search -- see |paseo-chat-sessions|
     Workspaces   n  new here         o  the full picker
                  d  archive -- asked first, and by name
                  x  forget the project this row is in -- see below
@@ -1868,6 +1879,24 @@ is wrong about the first of them.
 THE FOCUSED ROW IS PAINTED, in the same colour hover uses: pointing at a row
 and moving to it are the same state. Arriving at a tab puts focus on a row --
 the one you are in, else the first -- so the first `<CR>` does something.
+
+                                                      *paseo-chat-sessions*
+THE SESSIONS TAB IS THE NAVIGATION, not a readout of it. Everything running in
+this workspace, agents then terminals, in one list -- the kind glyph tells
+them apart -- with the one on screen marked in the gutter. `<CR>` points the
+Chat tab at it: a terminal fills the panel area, an agent brings back its
+conversation and composer.
+
+`/` SEARCHES IT, fuzzily. A one-row box opens at the foot of the list -- where
+it covers the hint bar rather than the best matches -- and narrows it as you
+type -- `matchfuzzy`, the same ranking Vim's own filters use, matched
+against the session's title and provider rather than against the drawn row,
+which leads with two glyphs. Sections with no match are dropped whole. `<CR>`
+keeps the filter and gives the keys back to the list, `<Esc>` in the box
+cancels the edit, and `<Esc>` on a narrowed list clears the search -- which is
+the only time that key is taken from the surface. Leaving the tab clears it
+too: a list that opens already narrowed by a word typed ten minutes ago reads
+as sessions having vanished.
 
                                                         *paseo-chat-gutter*
 WHERE THE CURSOR IS AND WHICH ONE IS OPEN ARE TWO DIFFERENT MARKS. The focus
@@ -1891,8 +1920,9 @@ a session left its row up until the next `j`, and an agent that started
 working did not change colour until you moved. The data was right and the
 picture was a second-hand copy of it. One archive produces three `remove`
 events from a live daemon, so the repaint is coalesced -- and it redraws the
-session strip and the list, not the Changes panel, which shells out to
-`git status` per repo and is not what changed.
+tab bar -- whose right-hand end names the session -- and the list, not the
+Changes panel, which shells out to `git status` per repo and is not what
+changed.
 
 None of that was true before. Selection lived on the CURSOR, which volt resets
 to line 1 after every click; nothing was drawn to say where it was; and the
@@ -2130,10 +2160,9 @@ line from insert mode, so the one that works while you are still typing is
 `<M-CR>` -- Alt and Enter. `<C-CR>` is bound beside it for terminals that speak
 the kitty keyboard protocol; the ones that do not never deliver it.
 
-`<C-s>` IS NOT EITHER OF THEM. It means THE SESSION LIST on the chrome, in
-every terminal, and on the session strip drawn four rows above the box -- so a
-composer that quietly sent on it was one key with two meanings, both advertised
-on screen at once. From the composer it now does what it does everywhere else.
+`<C-s>` IS NOT EITHER OF THEM. It means THE SESSION LIST on the chrome and in
+every terminal -- so a composer that quietly sent on it was one key with two
+meanings, both advertised on screen at once. From the composer it now does what it does everywhere else.
 
 Its groups are `PaseoComposerBar` (the title row, and the base every cell on
 it is combined with), `PaseoComposerBorder`, `PaseoComposerLabel`,
@@ -2286,7 +2315,7 @@ toggled by hand is yours from then on and is never folded back under you.
                           *paseo-terminals* *paseo-chat-terminals*
 Paseo runs TERMINALS as well as agents -- the `claude` or `codex` sessions you
 started in the app are PTYs on the daemon -- and A TERMINAL IS A SESSION. It
-lists on the Agents & terminals tab beside the agent sessions, and opening one shows it on the
+lists on the Sessions tab beside the agent sessions, and opening one shows it on the
 CHAT TAB, where the conversation would be. |:Paseo-term| goes to that list.
 
 It used to be a surface of its own: a rail of names, a title bar, the terminal
@@ -2299,48 +2328,69 @@ the way back out was `q`.
 Now there is one surface, and what changes is what fills the panel area: a
 conversation and its composer for an agent, the PTY outright for a terminal.
 
-                                                       *paseo-session-strip*
-THE SESSION STRIP, under the tab bar, is what makes that legible. One chip per
-session in this workspace, agents then terminals, the one you are in lit: >
+                                                       *paseo-session-label*
+WHICH SESSION THAT IS is the label at the right-hand end of the TAB BAR, on
+every tab: >
 
-    󱙺 main   󱙺 reviewer   󰆍 lazygit   󰆍 shell        Ctrl + s  sessions
+    1 󰀄 Chat   2 󱙺 Sessions   3 󱕂   4 󰘬   5 󰄨   6 󰙅        󰆍 lazygit
 <
-It is on EVERY tab, because "which session am I in" does not
-stop being worth answering when you look at Usage -- and a terminal has no
-transcript and no composer, so without it the dashboard could be showing a PTY
-with nothing on screen naming it. A chip is a click; `<C-s>` is the keyboard.
+It is on every tab because "which session am I in" does not stop being worth
+answering when you look at Usage -- and a terminal has no transcript and no
+composer, so without it the dashboard could be showing a PTY with nothing on
+screen naming it. It takes whatever the pills leave and is cut to fit, down to
+its glyph: the pills are the navigation, the label is a readout.
 
-Exactly one row, always. It degrades the way the tab bar does -- names, then
-glyphs, then a `+N` -- because volt records each section's row once and a
-strip that grew by a chip on hover would draw past the end of the buffer.
+THERE USED TO BE A STRIP OF SESSION CHIPS on the row under the tabs doing
+both jobs. Two rows of things to click, stacked, disagreeing about which of
+them you navigate with -- and the lower one could hold about four names before
+it began dropping them for a `+3`. Moving between sessions is
+|paseo-chat-sessions|'s job now, where there is room for all of them and a
+search over them.
 
 In a terminal ~
 
-    <C-s>     the Agents & terminals tab -- the way out
+A terminal takes EVERY key, and that is what it is for -- so the handful it
+does not take are the whole of your way out, and they have to be enough to
+reach the tab bar: >
+
+    <C-g>     out of the PTY and ONTO THE TAB BAR, without leaving the Chat
+              tab or closing anything. `1`-`6`, <Tab> and `q` work from there
+    <C-l>     from the chrome back INTO the PTY -- the other direction
+    <C-s>     the Sessions tab -- everything running here, and `/` to search
     <C-j>     the next session here, <C-k> the previous
     <M-1>..6  jump to a tab
     q         close the dashboard, from normal mode
 <
+`<C-g>` IS THE ANSWER TO "I CAN ONLY SWITCH TABS WITH THE MOUSE". `<M-3>` is
+one key, and a great many terminal emulators, multiplexers and ssh sessions
+never deliver an Alt chord at all -- and when that is true of yours, those six
+bindings are not a way out, they are six keys that do nothing.
+
 AND A CHAT PICKED OUT OF THAT LIST OPENS THE CHAT. Which session the Chat tab
 is on outlives a trip through the panels, so `<C-s>` out of a terminal and an
 agent chosen from the list used to come back to the Chat tab still showing the
 same PTY: the screen did not change, and the key read as broken. Opening a
-chat moves the session pointer as well as the tab.
+chat moves the session pointer as well as the tab. For the same reason the
+agent row is openable WHILE A TERMINAL IS UP: it asked whether the row was
+this chat's agent rather than whether it was the session on screen, so the one
+row in the list that took you back to the conversation was the one that did
+nothing.
 
-ALL OF THESE ARE BOUND IN TERMINAL MODE as well as normal, which is the only
-way any of them is worth having: a key you must press `<C-\><C-n>` to reach
-first is a key you do not reach. That does take them from whatever is running
-inside -- right for `claude`, wrong for `tmux` -- so any of them can be set
-`false` in |paseo-config.ui.terminal|.
+EVERYTHING BUT THE DIGITS IS BOUND IN TERMINAL MODE as well as normal, which
+is the only way any of it is worth having: a key you must press `<C-\><C-n>`
+to reach first is a key you do not reach. That does take them from whatever is
+running inside -- right for `claude`, wrong for `tmux` -- so any of them can be
+set `false` in |paseo-config.ui.terminal|.
 
-The DIGITS are deliberately not bound: a bare `5` in a terminal costs you
-`50k` to scroll back, and `<M-5>` reaches the same tab. `<C-c>` is not bound
-either -- it is SIGINT, and belongs to the program.
+The DIGITS are bound in the PTY's NORMAL mode -- after `<C-\><C-n>`, where
+they cost a count and the surface behaving differently in one buffer is worse
+-- and not in terminal mode, where a bare `5` is a `5` the program wanted.
+`<C-c>` is not bound either: it is SIGINT, and belongs to the program.
 
 `<Esc>` is never bound. It belongs to the PTY, so vim running inside one can
 still leave insert mode, and `<C-\><C-n>` is Neovim's own way out.
 
-On the Agents & terminals tab, `c` starts a terminal, `R` renames one and `d` kills it
+On the Sessions tab, `c` starts a terminal, `R` renames one and `d` kills it
 (asked first -- something is usually running in there). See |paseo-chat-lists|.
 
                                                      *paseo-terminals-presets*

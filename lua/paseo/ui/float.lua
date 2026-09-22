@@ -8,15 +8,23 @@
 --- the thing you are reading.
 ---
 --- Structure, from the bottom up: a dimmed backdrop, a volt-drawn chrome window
---- carrying the tab bar, the session strip and the active panel, and -- on the
---- conversation tab only -- the real conversation and composer buffers floated
---- on top. The chrome is volt's; the conversation is never volt's, because
---- virtual text cannot be yanked.
+--- carrying the tab bar and the active panel, and -- on the conversation tab
+--- only -- the real conversation and composer buffers floated on top. The
+--- chrome is volt's; the conversation is never volt's, because virtual text
+--- cannot be yanked.
 ---
---- The chrome is FOUR volt sections rather than one, and that is not tidiness:
---- the strip and the footer repaint ten times a second while a turn runs, and a
---- single section would drag the Changes panel -- which shells out to `git
---- status` per repo -- through every one of those frames.
+--- ONE NAVIGATION BAR. There used to be two: the tabs, and a strip of session
+--- chips on the row directly under them. Two rows of things to click, stacked,
+--- disagreeing about which of them you navigate with -- so the strip is gone
+--- and the Sessions tab is where you move between sessions, with a search over
+--- them. What the strip alone could say -- WHICH session the Chat tab is
+--- showing, which a terminal has nothing else to say it -- is drawn at the
+--- right-hand end of the tab bar, as a label rather than as a control.
+---
+--- The chrome is THREE volt sections rather than one, and that is not tidiness:
+--- the footer repaints ten times a second while a turn runs, and a single
+--- section would drag the Changes panel -- which shells out to `git status` per
+--- repo -- through every one of those frames.
 
 local icons = require "paseo.ui.icons"
 local layout = require "paseo.ui.layout"
@@ -35,17 +43,18 @@ local ns = api.nvim_create_namespace "paseo.float"
 ---@type table|nil
 local state
 
-M.TABS = { "Chat", "Agents & terminals", "Settings", "Changes", "Usage", "Workspaces" }
+M.TABS = { "Chat", "Sessions", "Settings", "Changes", "Usage", "Workspaces" }
 
---- Tab name -> the module under `paseo.ui.panels` that draws it. Only the tabs
---- whose name is not simply the module name capitalised need an entry; the
---- list tab is spelled for what it holds, which is both kinds of session.
-local PANEL_MODULE = { ["Agents & terminals"] = "sessions" }
-
+--- Tab name -> the module under `paseo.ui.panels` that draws it: the name,
+--- lowercased. The list tab was spelled `Agents & terminals` -- for what it
+--- holds, at the cost of a per-tab exception table here, a name too long to
+--- say in a sentence, and a bar whose second pill was three times the width of
+--- the rest. It holds SESSIONS. That agents and terminals are both sessions is
+--- the whole point of the list, and the kind glyph on each row says which.
 ---@param name string
 ---@return string
 local function panel_module(name)
-  return PANEL_MODULE[name] or name:lower()
+  return name:lower()
 end
 
 -- --------------------------------------------------------------- push feeds
@@ -55,7 +64,7 @@ local settling = false
 
 ---The tabs whose BODY says something about the agent directory, and so have to
 ---be redrawn when it changes.
-local BODY_FOLLOWS_AGENTS = { ["Agents & terminals"] = true, Workspaces = true }
+local BODY_FOLLOWS_AGENTS = { Sessions = true, Workspaces = true }
 
 ---One spinner frame, matching |paseo.ui.widgets|.spinner's own 100ms.
 local SPINNER_MS = 100
@@ -117,8 +126,9 @@ local function sync_spinner()
   )
 end
 
----Redraw what a CHANGE IN THE DIRECTORY changes: the session strip, and the
----session list if that is the tab you are on.
+---Redraw what a CHANGE IN THE DIRECTORY changes: the tab bar -- whose
+---right-hand end names the session you are in -- and the session list if that
+---is the tab you are on.
 ---
 ---THIS IS WHY ARCHIVING A SESSION DID NOTHING until you moved. Both
 ---directories are push-fed -- that is the entire point of the sidecar -- and
@@ -143,7 +153,7 @@ local function directory_changed()
     if not (state and api.nvim_buf_is_valid(state.buf)) then
       return
     end
-    local sections = { "strip" }
+    local sections = { "tabs" }
     -- Only the tabs that DRAW the directory redraw their body. Redrawing any
     -- other would re-run that panel's `lines` -- `git status` per repo, on the
     -- Changes tab -- for a change it does not show. Workspaces earns its place
@@ -709,11 +719,53 @@ local function goto_tab(name)
   end
 end
 
+---Which session the Chat tab is showing, as `icon, label`.
+---
+---WHAT THE STRIP WAS FOR, and all of it that was worth a row of its own. A
+---terminal session has no composer bar and no transcript, so without this the
+---dashboard could be showing a PTY with nothing on screen saying which one.
+---The rest of what the strip did -- moving between sessions -- is the Sessions
+---tab's job, and doing it in two places is what made the strip a second
+---navigation bar under the first.
+---@return string|nil icon, string|nil label
+local function session_label()
+  local chat = state.chat
+  local here = state.session or { kind = "agent", id = chat.agent_id }
+
+  if here.kind == "terminal" then
+    local terminals = require "paseo.terminals"
+    local item = here.id and terminals.get(here.id)
+    if not item then
+      return nil
+    end
+    return icons.panel.Terminals, terminals.label(item)
+  end
+
+  -- BY ID, not by filtering the directory on the root: this row repaints ten
+  -- times a second while a turn runs, and `for_root` resolves a symlink per
+  -- agent to compare paths.
+  local agent = here.id and require("paseo.agents").get(here.id)
+  if agent then
+    return icons.panel.Sessions, agent.title or agent.id
+  end
+  -- Before the directory has landed -- a cold open is a repaint or two ahead
+  -- of the daemon -- there is still a session on screen, so it is named from
+  -- what we have rather than left blank and then appearing.
+  if here.id then
+    return icons.panel.Sessions, chat.title or here.id:sub(1, 8)
+  end
+  return nil
+end
+
 ---The tab bar and the rule under it.
 ---
 ---Each tab is numbered in the bar itself. The footer used to advertise "1-5
 ---jump" and nothing on screen said which number was which, so the hint was
 ---unusable even where the keys worked.
+---
+---The right-hand end carries the session label -- see `session_label`. It is
+---the LAST thing on the row to get any width: the pills say which key goes
+---where, which is the one thing this row cannot do without.
 ---@return table[][]
 local function tab_lines()
   if not state then
@@ -781,30 +833,69 @@ local function tab_lines()
   --
   -- The row count never changes at any level, because the body height and the
   -- composer geometry are both measured against it.
-  local level = "number"
-  for _, candidate in ipairs { "full", "named", "icon" } do
+  ---The bar at one level of detail.
+  ---@param level "full"|"named"|"icon"|"number"
+  ---@return table[]
+  local function bar(level)
+    local tabs = {}
+    for i, name in ipairs(M.TABS) do
+      local active = name == state.tab
+      local id = "paseo:tab:" .. name
+      local hovered = vim.g.nvmark_hovered == id
+      -- Gap BEFORE each pill but the first, never after the last.
+      if i > 1 then
+        tabs[#tabs + 1] = { " ", nil }
+      end
+      tabs[#tabs + 1] = {
+        pill(i, name, (level == "number" and active) and "named" or level),
+        (active or hovered) and "PaseoChipFocus" or "PaseoChipOff",
+        -- Hover paints a tab exactly as focus does, so pointing at one and
+        -- being on one look like the same state, because they are.
+        { click = goto_tab(name), hover = { id = id, redraw = "tabs" } },
+      }
+    end
+    return tabs
+  end
+
+  -- THE LABEL TAKES WHAT THE PILLS LEAVE, and never a column more. It is the
+  -- only thing on screen naming the session a terminal is showing, which is
+  -- why it is on this row at all -- but the pills are the navigation, and a
+  -- bar that gave up six tab names to spell out one session title would have
+  -- traded the thing you steer with for the thing you are looking at. So it
+  -- is cut to fit, down to a glyph and a few letters, and dropped below that.
+  local icon, label = session_label()
+  local label_cells
+  if icon then
+    local hl = (state.session and state.session.kind == "terminal") and "PaseoYellow1"
+      or "PaseoBlue1"
+    label_cells = { { icon .. " ", hl }, { label, "PaseoDim" }, { " " } }
+  end
+  -- Enough to be worth drawing: the glyph, and enough of a name to recognise.
+  local floor = icon and (vim.fn.strwidth(icon) + 5) or 0
+
+  local levels = { "full", "named", "icon", "number" }
+  local at = #levels
+  for i, candidate in ipairs(levels) do
     if measure(candidate) <= inner then
-      level = candidate
+      at = i
       break
     end
   end
+  local level = levels[at]
 
-  local tabs = {}
-  for i, name in ipairs(M.TABS) do
-    local active = name == state.tab
-    local id = "paseo:tab:" .. name
-    local hovered = vim.g.nvmark_hovered == id
-    -- Gap BEFORE each pill but the first, never after the last.
-    if i > 1 then
-      tabs[#tabs + 1] = { " ", nil }
+  local line = render.truncate(bar(level), inner)
+  if label_cells then
+    local room = inner - render.width(line) - 2
+    local width = render.width(label_cells)
+    if room >= width then
+      line = widgets.row(line, label_cells, inner)
+    elseif room >= floor then
+      -- Cut the NAME, never the glyph: `󰆍 lazyg…` still says which kind of
+      -- session this is and roughly which one.
+      line = widgets.row(line, render.truncate(label_cells, room), inner)
+    elseif room >= vim.fn.strwidth(icon) + 1 then
+      line = widgets.row(line, { { icon .. " ", label_cells[1][2] } }, inner)
     end
-    tabs[#tabs + 1] = {
-      pill(i, name, (level == "number" and active) and "named" or level),
-      (active or hovered) and "PaseoChipFocus" or "PaseoChipOff",
-      -- Hover paints a tab exactly as focus does, so pointing at one and
-      -- being on one look like the same state, because they are.
-      { click = goto_tab(name), hover = { id = id, redraw = "tabs" } },
-    }
   end
 
   -- NO rule under the tabs, in any style. It used to be drawn for the framed
@@ -817,103 +908,7 @@ local function tab_lines()
   -- The ROW stays. Dropping it would shift every section below, and volt
   -- records each section's start row when the layout is measured and never
   -- recomputes it on redraw.
-  return { render.truncate(tabs, inner), {} }
-end
-
----Which session the Chat tab is showing, and the others you could be in.
----
----THE ROW THAT SAYS WHERE YOU ARE. A terminal session has no composer to type
----into and no transcript to read, so without this the dashboard could be
----showing a PTY with nothing on screen saying which one, and no visible way
----back. Drawn on EVERY tab, because "which session am I in" is not a question
----that stops being worth answering when you look at Usage.
----
----EXACTLY ONE ROW, ALWAYS. volt records each section's start row once, in
----`gen_data`, and `redraw` writes extmarks at those rows without clearing
----anything -- so a strip that grew by a chip on hover would draw past the end
----of the buffer and `handle_hover` would raise "Invalid 'line': out of range"
----from inside `vim.on_key`. It degrades instead, the way the tab bar does.
----@return table[][]
-local function strip_lines()
-  if not state then
-    return { {} }
-  end
-  local chat = state.chat
-  local here = state.session or { kind = "agent", id = chat.agent_id }
-
-  local items = {}
-  for _, agent in ipairs(require("paseo.agents").for_root(chat.root)) do
-    items[#items + 1] = {
-      kind = "agent",
-      id = agent.id,
-      label = agent.title or agent.id,
-      icon = icons.panel.Sessions,
-    }
-  end
-  for _, item in ipairs(require("paseo.terminals").for_root(chat.root)) do
-    items[#items + 1] = {
-      kind = "terminal",
-      id = item.id,
-      label = require("paseo.terminals").label(item),
-      icon = icons.panel.Terminals,
-    }
-  end
-
-  local line = { { "  " } }
-  if #items == 0 then
-    line[#line + 1] = { "no sessions here yet", "PaseoDim" }
-    line[#line + 1] = { "   " }
-  end
-
-  -- Named, then glyph-and-nothing, then dropped for a count. Same ladder as
-  -- the tab bar, and for the same reason: the row has to keep saying where you
-  -- are even when it cannot say where everything else is.
-  local inner = state.geometry.width - 2
-  local function build(level)
-    local out = { { "  " } }
-    local dropped = 0
-    for _, item in ipairs(items) do
-      local mine = item.kind == here.kind and item.id == here.id
-      local text
-      if level == "full" or mine then
-        text = (" %s %s "):format(item.icon, item.label)
-      elseif level == "icon" then
-        text = (" %s "):format(item.icon)
-      else
-        dropped = dropped + 1
-        text = nil
-      end
-      if text then
-        local id = "float.strip." .. item.kind .. "." .. item.id
-        out[#out + 1] = {
-          text,
-          mine and "PaseoChipFocus" or (widgets.hovered(id) and "PaseoChipFocus" or "PaseoChipOff"),
-          widgets.hover(id, "strip", function()
-            M.show_session { kind = item.kind, id = item.id }
-          end),
-        }
-        out[#out + 1] = { " " }
-      end
-    end
-    if dropped > 0 then
-      out[#out + 1] = { (" +%d "):format(dropped), "PaseoChipOff" }
-    end
-    return out
-  end
-
-  for _, level in ipairs { "full", "icon", "count" } do
-    local built = build(level)
-    if render.width(built) <= inner - 14 or level == "count" then
-      line = built
-      break
-    end
-  end
-
-  -- The way out, at the far end, always. `<C-s>` is bound in TERMINAL mode as
-  -- well as normal, which is the only way it is worth having: a key you must
-  -- first press `<C-\><C-n>` to reach is a key you do not reach.
-  local keys = require("paseo.config").get().ui.terminal.keys
-  return { widgets.row(line, widgets.hints { { keys.sessions, "sessions" } }, inner) }
+  return { line, {} }
 end
 
 ---The active panel, padded to the space between the tabs and the footer.
@@ -966,6 +961,28 @@ local function footer_lines()
     { "1-" .. #M.TABS, "tabs" },
     { "<Tab>", "cycle" },
   }
+
+  -- IN A TERMINAL THE FIRST TWO ARE A LIE unless you have left terminal mode
+  -- first, so the keys that work from inside one come first while one is up.
+  -- A hint bar that names keys the buffer you are standing in has not bound is
+  -- worse than a short one: it is the only place the surface says what its
+  -- keys are, which is why this row exists at all.
+  if state and state.session and state.session.kind == "terminal" then
+    local keys = require("paseo.config").get().ui.terminal.keys
+    local first = {}
+    if keys.chrome then
+      first[#first + 1] = { keys.chrome, "tab bar" }
+    end
+    if keys.sessions then
+      first[#first + 1] = { keys.sessions, "sessions" }
+    end
+    if keys.terminal then
+      first[#first + 1] = { keys.terminal, "terminal" }
+    end
+    for i = #first, 1, -1 do
+      table.insert(pairs_, 1, first[i])
+    end
+  end
   -- Not on the buffer mount, where `<C-f>` is deliberately not bound. A hint
   -- bar is the only place the surface says what its keys are, so one that
   -- names a key doing nothing is worse than a shorter bar -- and
@@ -1058,12 +1075,6 @@ function M.rebuild()
           end,
         },
         {
-          name = "strip",
-          lines = function()
-            return render.to_volt(strip_lines())
-          end,
-        },
-        {
           name = "body",
           lines = function()
             return render.to_volt(body_lines())
@@ -1085,8 +1096,7 @@ function M.rebuild()
   volt.redraw(state.buf, "all")
 end
 
----Repaint only what changes while a turn runs: the session strip and the
----footer.
+---Repaint only what changes while a turn runs: the tab bar and the footer.
 ---
 ---Called from `sidebar.refresh`, which the spinner drives at 10 Hz. Going
 ---through `rebuild` here would rebuild the Changes panel -- one `git status`
@@ -1094,13 +1104,16 @@ end
 ---
 ---The FOOTER is in the list because that is where the spinner and the elapsed
 ---count live. Leaving it out is how the status would tick once and then sit
----frozen at `0s` for the rest of the turn.
+---frozen at `0s` for the rest of the turn. The TAB BAR is in it because its
+---right-hand end names the session, and a session renamed by the daemon --
+---which is what a title arriving from the provider is -- must not sit at
+---`a1b2c3d4` until the next tab change.
 ---@param chat table
 function M.refresh_live(chat)
   if not state or state.chat ~= chat or not api.nvim_buf_is_valid(state.buf) then
     return
   end
-  local sections = { "strip", "footer" }
+  local sections = { "tabs", "footer" }
   -- Usage is the other thing a running turn changes, and it is pure Lua -- no
   -- subprocess -- so it can afford to ride along.
   if state.tab == "Usage" then
@@ -1355,9 +1368,8 @@ local function show_agent_panes()
       end)
     end
   end
-  -- The transcript has no bar of its own: the session strip is two rows above
-  -- it saying which session this is, and the composer's bar is under it saying
-  -- what that session is set to.
+  -- The transcript has no bar of its own: the tab bar above it names the
+  -- session, and the composer's bar under it says what that session is set to.
   pcall(function()
     vim.wo[chat.win_conversation].winbar = ""
   end)
@@ -1371,15 +1383,36 @@ end
 
 ---The keys a PTY buffer gets while it is the Chat tab.
 ---
----DIGITS ARE DELIBERATELY NOT AMONG THEM. A bare `5` in a terminal costs you
----`50k` to scroll back, and `<M-5>` reaches the same tab. `<Esc>` is never
----bound at all: it belongs to the PTY, so vim running inside one can still
----leave insert mode.
+---A TERMINAL TAKES EVERY KEY, and that is what it is for -- so the handful it
+---does not take are the whole of your way out, and they have to be enough to
+---reach the tab bar. They are:
 ---
----Bound in TERMINAL mode as well as normal, which is the only way any of it is
----worth having -- a key you must press `<C-\><C-n>` to reach first is a key
----you do not reach, and the whole point of this surface is that a terminal is
----a session like any other rather than a place you get stuck in.
+---  * `keys.chrome` -- OUT OF THE PTY AND ONTO THE TAB BAR, without leaving
+---    the Chat tab. The terminal stays on screen; the keystrokes stop going to
+---    it, so `1`-`6`, `<Tab>` and everything else the chrome binds work from
+---    there. This is the answer to "I can only switch tabs with the mouse":
+---    `<M-3>` is one key, but a great many terminal emulators, multiplexers
+---    and remote sessions never deliver an Alt chord at all, and when that is
+---    true of yours the Alt bindings below are not a way out, they are six
+---    keys that do nothing.
+---  * `keys.sessions` -- straight to the Sessions tab, which is the list of
+---    everything running and the search over it.
+---  * `keys.next`/`keys.prev` -- the session either side of this one.
+---  * `<M-1>`-`<M-6>` -- the tabs, for the terminals that do deliver them.
+---
+---DIGITS IN TERMINAL MODE ARE DELIBERATELY NOT AMONG THEM: a bare `2` inside a
+---PTY is a `2` the program running in it wanted. In the PTY's NORMAL mode --
+---which you are in after `<C-\><C-n>`, and which is a Neovim buffer like any
+---other -- they are bound, along with `<Tab>`, because there they cost only a
+---count and the surface behaving differently in one buffer is worse. `<Esc>`
+---is never bound in either: it belongs to the PTY, so vim running inside one
+---can still leave insert mode.
+---
+---Everything but the digits is bound in TERMINAL mode as well as normal, which
+---is the only way any of it is worth having -- a key you must press
+---`<C-\><C-n>` to reach first is a key you do not reach, and the whole point
+---of this surface is that a terminal is a session like any other rather than a
+---place you get stuck in.
 ---@param buf integer
 local function bind_terminal(buf)
   if not api.nvim_buf_is_valid(buf) then
@@ -1397,9 +1430,24 @@ local function bind_terminal(buf)
     map({ "n", "t" }, ("<M-%d>"):format(i), function()
       M.select(name)
     end, "paseo: tab " .. name)
+    -- The same tab, from the PTY's normal mode, spelled the way it is spelled
+    -- on every other buffer this surface owns.
+    if dash_option "tab_keys" ~= false then
+      map("n", tostring(i), function()
+        M.select(name)
+      end, "paseo: tab " .. name)
+    end
   end
+  map("n", "<Tab>", function()
+    M.cycle(1)
+  end, "paseo: next tab")
+  map("n", "<S-Tab>", function()
+    M.cycle(-1)
+  end, "paseo: previous tab")
+
+  map({ "n", "t" }, keys.chrome, M.focus_chrome, "paseo: out to the tab bar")
   map({ "n", "t" }, keys.sessions, function()
-    M.select "Agents & terminals"
+    M.select "Sessions"
   end, "paseo: the session list")
   map({ "n", "t" }, keys.next, function()
     M.cycle_session(1)
@@ -1690,6 +1738,13 @@ function M.close()
   -- redraws is an error every frame, forever.
   stop_spinner()
 
+  -- A list's search box is a window of OURS floated over the body, and the
+  -- ordinary way it closes is losing focus -- which does not happen when the
+  -- dashboard is torn down from somewhere else, `:Paseo chat` toggling it
+  -- shut while you were typing in it. Left alone it is a box floating over
+  -- your code with nothing underneath it.
+  require("paseo.ui.filter").close()
+
   -- Before the buffer goes. A tween's timer redraws a named section every
   -- frame, and one left running against a deleted buffer is an error a frame
   -- forever rather than once.
@@ -1958,9 +2013,18 @@ function M.open(chat, opts)
       sidebar.open(chat)
     end)
   end
-  map(require("paseo.config").get().ui.terminal.keys.sessions, function()
-    M.select "Agents & terminals"
-  end)
+  local term_keys = require("paseo.config").get().ui.terminal.keys
+  if term_keys.sessions then
+    map(term_keys.sessions, function()
+      M.select "Sessions"
+    end)
+  end
+  -- BACK INTO THE PTY, and the pair of `focus_chrome`. Without it the way out
+  -- of a terminal is one-way: you reach the tab bar, pick the Chat tab you are
+  -- already on, and nothing takes you back down into the session.
+  if term_keys.terminal then
+    map(term_keys.terminal, M.focus_terminal)
+  end
 
   -- THE DASHBOARD DID NOT FOLLOW A RESIZE. It registered no autocmds at all,
   -- so making the terminal bigger left a float at its old size with the panes
@@ -2104,10 +2168,68 @@ function M.body_size()
   return { rows = pane.height, cols = pane.width }
 end
 
+---Where the panel body IS, in editor cells, for a window floated over it.
+---
+---The same rectangle `body_size` measures, with its corner: a search box
+---belongs over the list it narrows, not centred on an editor whose middle is
+---somewhere else entirely.
+---@return { row: integer, col: integer, width: integer, height: integer }|nil
+function M.body_area()
+  if not state then
+    return nil
+  end
+  local pane = layout.panes(state.geometry).body
+  return { row = pane.row, col = pane.col, width = pane.width, height = pane.height }
+end
+
 ---The session the Chat tab is showing.
 ---@return { kind: "agent"|"terminal", id: string|nil }|nil
 function M.session()
   return state and state.session
+end
+
+---Put the keyboard on the CHROME, leaving what is on screen where it is.
+---
+---The way out of a PTY that changes nothing you can see. A terminal session
+---takes every keystroke -- that is what a terminal is -- so with the panes up
+---the tab bar is a row you can only reach with the mouse. This hands the
+---cursor back to the chrome window underneath, where `1`-`6`, `<Tab>` and `q`
+---are bound; the terminal stays drawn over the body, because a way out that
+---also closed what you were looking at is a way out you would think twice
+---about taking.
+---
+---`ui.terminal.keys.terminal` is the other direction, on the chrome.
+function M.focus_chrome()
+  if not state or not (state.win and api.nvim_win_is_valid(state.win)) then
+    return
+  end
+  -- Out of terminal mode FIRST. Switching window from terminal mode leaves it
+  -- anyway, but not before Neovim has decided what to do with a pending
+  -- keystroke -- and `stopinsert` is also what takes the cursor out of the
+  -- composer when the Chat tab is showing an agent.
+  if api.nvim_get_mode().mode ~= "n" then
+    pcall(vim.cmd.stopinsert)
+  end
+  pcall(api.nvim_set_current_win, state.win)
+end
+
+---Back into the PTY from the chrome -- the other half of `focus_chrome`.
+---
+---Only when the session on the Chat tab IS a terminal. Bound on the chrome to
+---`ui.terminal.keys.terminal`, which the config has documented as exactly this
+---for as long as it has existed without anything binding it.
+function M.focus_terminal()
+  if not state or not (state.session and state.session.kind == "terminal") then
+    return
+  end
+  if state.tab ~= "Chat" then
+    -- `select` opens the panes and lands in the terminal itself.
+    return M.select "Chat"
+  end
+  if state.term_win and api.nvim_win_is_valid(state.term_win) then
+    api.nvim_set_current_win(state.term_win)
+    vim.cmd.startinsert()
+  end
 end
 
 ---Show a session on the Chat tab.
@@ -2138,9 +2260,8 @@ end
 
 ---Step to the next or previous session in this workspace.
 ---
----Agents first, then terminals, which is the order the strip and the Sessions
----list both draw them in -- three orderings of one list is how they start
----disagreeing.
+---Agents first, then terminals, which is the order the Sessions list draws
+---them in -- two orderings of one list is how they start disagreeing.
 ---@param step integer
 function M.cycle_session(step)
   if not state then

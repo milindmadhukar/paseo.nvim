@@ -33,6 +33,7 @@
 --- very first draw, so a list that arrives AFTER you switched tabs still lands
 --- focus somewhere without anyone having to remember to do it.
 
+local icons = require "paseo.ui.icons"
 local render = require "paseo.ui.render"
 local style = require "paseo.ui.style"
 local widgets = require "paseo.ui.widgets"
@@ -51,6 +52,10 @@ local RELOAD = "r"
 ---@field activate fun()|nil     `<CR>`, and a click.
 ---@field keys table<string, fun()>|nil  Per-row verbs, by the source's alphabet.
 ---@field skip boolean|nil       Drawn, but `j`/`k` step over it.
+---@field text string|nil        What a search matches against. Absent means
+---                              the row's own cells, glyphs and all -- fine
+---                              for a list whose rows read as words, and not
+---                              for one whose right-hand column is a chip.
 
 ---@class paseo.ListSection
 ---@field id string
@@ -73,6 +78,14 @@ local RELOAD = "r"
 ---                             `keys` entry wins over one of these.
 ---@field hints table[]|nil      Extra `{ lhs, label }` pairs for the footer.
 ---@field loading string|nil     What to say while the first fetch is out.
+---@field search string|nil      Turn `/` on, with this as the box's title --
+---                              "sessions", "workspaces". Absent means the
+---                              list has no search and `/` is left alone.
+---@field anchor fun(): { row: integer, col: integer, width: integer, height: integer }|nil
+---                              The AREA the search box floats over -- it sits
+---                              at the bottom of it. Absent centres the box,
+---                              which is right for a list that is not on the
+---                              dashboard and wrong for one that is.
 
 ---@class paseo.ListView
 ---@field source paseo.ListSource
@@ -80,6 +93,7 @@ local RELOAD = "r"
 ---@field focus { section: string|nil, row: string|nil }
 ---@field at { si: integer, ri: integer }  Where focus last RESOLVED to.
 ---@field offset integer         First visible row, for lists taller than the body.
+---@field query string           The live search. `""` means no filter at all.
 ---@field redraw fun()
 local View = {}
 View.__index = View
@@ -97,6 +111,7 @@ function M.new(source, opts)
     -- standing on has gone -- see `resolve`.
     at = { si = 1, ri = 1 },
     offset = 0,
+    query = "",
     loading = false,
     redraw = opts.redraw or function() end,
   }, View)
@@ -104,9 +119,92 @@ end
 
 -- --------------------------------------------------------------------- data
 
+---What a row matches on.
+---@param row paseo.ListRow
+---@return string
+local function row_text(row)
+  if row.text then
+    return row.text
+  end
+  local parts = {}
+  for _, cell in ipairs(row.cells or {}) do
+    parts[#parts + 1] = cell[1]
+  end
+  for _, cell in ipairs(row.right or {}) do
+    parts[#parts + 1] = cell[1]
+  end
+  return table.concat(parts, " ")
+end
+
+---The rows of one section that match `query`, best first.
+---
+---`matchfuzzy` is Vim's own, which is the point: it is the same ranking the
+---quickfix filter and `vim.ui.select`'s fuzzy pickers use, so `wsb` finding
+---`ws/bugs` behaves here the way it behaves everywhere else you have typed a
+---few letters at a list. The substring fallback is not paranoia about the
+---function existing -- it is there for the case that it throws on an input we
+---did not expect, which would otherwise take the whole panel's draw down.
+---@param rows paseo.ListRow[]
+---@param query string
+---@return paseo.ListRow[]
+local function matching(rows, query)
+  local items = {}
+  for i, row in ipairs(rows) do
+    items[#items + 1] = { text = row_text(row), i = i }
+  end
+
+  local ok, hits = pcall(vim.fn.matchfuzzy, items, query, { key = "text" })
+  local out = {}
+  if ok and type(hits) == "table" then
+    for _, hit in ipairs(hits) do
+      out[#out + 1] = rows[hit.i]
+    end
+    return out
+  end
+
+  local needle = query:lower()
+  for _, item in ipairs(items) do
+    if item.text:lower():find(needle, 1, true) then
+      out[#out + 1] = rows[item.i]
+    end
+  end
+  return out
+end
+
+---The sections as drawn -- the source's, narrowed by the search if there is
+---one.
+---
+---FILTERED HERE AND NOWHERE ELSE, because everything else in this file reads
+---the list through this one function: focus resolves against it, `j` steps
+---through it, `<CR>` activates out of it. A filter applied only at draw time
+---is a filter the keyboard cannot see, which is a list where `j` moves the
+---focus ring onto a row that is not on screen.
+---
+---A section with no matches is DROPPED rather than drawn empty. Its heading
+---says nothing about what you searched for, and three headings with nothing
+---under them push the matches you wanted off the top of the panel.
 ---@return paseo.ListSection[]|nil
 function View:sections()
-  return self.source:sections()
+  local sections = self.source:sections()
+  if not sections or self.query == "" then
+    return sections
+  end
+
+  local out = {}
+  for _, section in ipairs(sections) do
+    local rows = matching(section.rows or {}, self.query)
+    if #rows > 0 then
+      local copy = vim.tbl_extend("force", {}, section)
+      copy.rows = rows
+      -- The summary counts what the section HAS, not what is left of it after
+      -- a search -- "3 running" over one row is the panel contradicting
+      -- itself on the same line.
+      copy.summary = nil
+      copy.empty = nil
+      out[#out + 1] = copy
+    end
+  end
+  return out
 end
 
 ---Every row of every section, in order, with where it came from.
@@ -304,6 +402,49 @@ function View:reload()
   end)
 end
 
+---Narrow the list. `""` widens it again.
+---
+---REBINDS when the search goes from off to on or back, because `<Esc>` is only
+---ours while there is something to clear. On the float mount `<Esc>` closes the
+---dashboard, and a panel that held on to it would turn the surface's dismiss
+---key into a no-op for as long as you were on this tab.
+---@param query string
+function View:set_query(query)
+  query = query or ""
+  local was = self.query ~= ""
+  self.query = query
+  -- The window the list scrolled to was a window into a longer list.
+  self.offset = 0
+  if was ~= (query ~= "") and self.buf then
+    self:bind(self.buf)
+  end
+  self.redraw()
+end
+
+---`/`: the search box, floated over the list it filters.
+function View:search()
+  if not self.source.search then
+    return
+  end
+  local anchor = self.source.anchor and self.source.anchor() or nil
+  local before = self.query
+  require("paseo.ui.filter").open({
+    title = self.source.search,
+    anchor = anchor,
+    initial = self.query,
+  }, {
+    on_change = function(text)
+      self:set_query(text)
+    end,
+    -- `nil` is `<Esc>`, and it puts the list back the way it WAS -- which is
+    -- not the same as unfiltered: `/` opens on the query already in force, so
+    -- cancelling an edit of it must not throw the search away as well.
+    done = function(text)
+      self:set_query(text or before)
+    end,
+  })
+end
+
 -- ------------------------------------------------------------------- drawing
 
 ---@param section paseo.ListSection
@@ -450,6 +591,26 @@ function View:lines(width, height)
   ---if it did not land anywhere.
   local function body(w)
     local out, focus_line = {}, 0
+    -- WHAT YOU SEARCHED FOR, over what it left. A filtered list that does not
+    -- say it is filtered is a list that has silently lost rows -- and the
+    -- count is the half that tells you whether to type another letter or to
+    -- delete the last one.
+    --
+    -- NOT WHILE THE BOX IS OPEN, because the box is floated over the top of
+    -- these rows and says the same thing: two rows spent repeating what is
+    -- covering them are two rows of matches pushed underneath it.
+    if self.query ~= "" and not require("paseo.ui.filter").active() then
+      local found = 0
+      for _, section in ipairs(sections) do
+        found = found + #(section.rows or {})
+      end
+      out[#out + 1] = {
+        { "  " .. icons.ui.search .. " ", "PaseoBlue1" },
+        { self.query, "PaseoHeader" },
+        { ("   %d match%s"):format(found, found == 1 and "" or "es"), "PaseoDim" },
+      }
+      out[#out + 1] = {}
+    end
     for _, section in ipairs(sections) do
       if section.title then
         out[#out + 1] = heading(section)
@@ -469,6 +630,12 @@ function View:lines(width, height)
         end
       end
       out[#out + 1] = {}
+    end
+    -- Every section dropped: the search matched nothing at all. Said once,
+    -- here, rather than as an `empty` line under each heading -- the headings
+    -- are gone, which is the point.
+    if #sections == 0 and self.query ~= "" then
+      out[#out + 1] = { { "    nothing here matches", "PaseoDim" } }
     end
     return out, focus_line
   end
@@ -535,6 +702,11 @@ end
 ---@return table[]
 function View:hints()
   local pairs_ = { { "j k", "move" }, { "<CR>", "open" } }
+  if self.source.search then
+    -- `<Esc>` only while there is something to clear, because that is the only
+    -- time it is bound -- see `set_query`.
+    pairs_[#pairs_ + 1] = self.query ~= "" and { "<Esc>", "clear" } or { "/", "search" }
+  end
   local taken = {}
   for _, hint in ipairs(self.source.hints or {}) do
     pairs_[#pairs_ + 1] = hint
@@ -601,6 +773,20 @@ function View:mappings()
     self:reload()
   end, "paseo: reload")
 
+  if self.source.search then
+    bind("/", function()
+      self:search()
+    end, "paseo: search this list")
+    -- Taken ONLY while a search is in force. `View:set_query` rebinds on the
+    -- transition, so the chrome's own `<Esc>` -- which dismisses the dashboard
+    -- -- is displaced for exactly as long as there is a filter to drop.
+    if self.query ~= "" then
+      bind("<Esc>", function()
+        self:set_query ""
+      end, "paseo: clear the search")
+    end
+  end
+
   -- Bound from the source's ALPHABET, never from the rows it happens to have
   -- right now. Keys are taken the moment you arrive at the tab, which on a
   -- cold open is before the daemon has answered -- a key derived from data
@@ -628,6 +814,9 @@ function View:bind(buf)
   if self.bound then
     self:unbind(buf)
   end
+  -- Held so a search can rebind itself: `<Esc>` is only taken while there is a
+  -- filter to clear, which is a change of mappings rather than of state.
+  self.buf = buf
   self.bound = require("paseo.ui.keys").take(buf, self:mappings(), "paseo: list")
 end
 
@@ -641,6 +830,16 @@ function View:unbind(buf)
   local saved = self.bound
   self.bound = nil
   require("paseo.ui.keys").release(buf, saved)
+end
+
+---Drop the search when the panel goes away.
+---
+---A query that outlived a visit to the tab is a list that opens ALREADY
+---narrowed, by a word you typed once and have no reason to remember -- which
+---reads as sessions having disappeared.
+function View:reset()
+  self.query = ""
+  self.offset = 0
 end
 
 return M

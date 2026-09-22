@@ -643,7 +643,7 @@ end
 ---Actions for something that lights up under the pointer.
 ---
 ---volt's hover is four lines per widget and nothing in this plugin used it
----except the tab bar -- so every row in Agents & terminals, Changes, Workspaces and
+---except the tab bar -- so every row in Sessions, Changes, Workspaces and
 ---Terminals was clickable but dead under the mouse, which reads as "not a
 ---button" right up until you click it and something happens.
 ---@param id string      Unique; volt stores it in `vim.g.nvmark_hovered`.

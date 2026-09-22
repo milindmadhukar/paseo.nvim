@@ -1,7 +1,7 @@
 --- The dashboard's row budget, in one place.
 ---
---- The chrome is a fixed stack -- a tab bar, a rule, the session strip, the
---- body, a footer -- and three separate files were each doing the arithmetic for it
+--- The chrome is a fixed stack -- a tab bar, a rule, the body, a footer -- and
+--- three separate files were each doing the arithmetic for it
 --- from first principles. `float.body_lines` knew the body was `height - 4`,
 --- `float.panes` knew the first body row was `row + 3` and that the footer
 --- owned the last row, and `panels/terminals.lua` knew both AND carried a bare
@@ -23,29 +23,29 @@ local M = {}
 ---
 ---Named rather than summed into a literal, which is what `above = 3` was --
 ---in the file whose whole argument is that the number should be derived from
----parts rather than written down. Adding the session strip was the change that
----made that difference real: with a literal it is "find every 3 and hope".
+---parts rather than written down. The session strip is what made that
+---difference real, twice: adding a row to the chrome and then taking it away
+---again were both a change to this table and to nothing else.
 ---
----There is no header among them. The session's model, mode, usage and
----directory are drawn on the bar over the composer, and the dashboard used to
----repeat them on a row of its own on every tab but Chat -- which meant the
----five other tabs each began one row lower than the Chat tab, for a row that
----said what the bar above the box already said.
-M.PARTS = { tabs = 1, rule = 1, strip = 1, footer = 1 }
+---There is no header among them, and no strip either. The session's model,
+---mode, usage and directory are drawn on the bar over the composer; WHICH
+---session that is, is drawn at the right-hand end of the tab bar. A row of
+---chips under the tabs was a second navigation bar directly beneath the first
+---one, and the two disagreed about what they were for.
+M.PARTS = { tabs = 1, rule = 1, footer = 1 }
 
 ---Rows the chrome spends on itself, above and below the body.
 ---
----Above: the tab bar, the rule under it, the session strip.
+---Above: the tab bar and the rule under it.
 ---Below: the footer.
 M.CHROME = {
-  above = M.PARTS.tabs + M.PARTS.rule + M.PARTS.strip,
+  above = M.PARTS.tabs + M.PARTS.rule,
   below = M.PARTS.footer,
 }
 
 ---@class paseo.Layout.Rows
 ---@field tabs integer      Buffer row of the tab bar.
 ---@field rule integer      Buffer row of the rule under the tabs.
----@field strip integer     Buffer row of the session strip.
 ---@field body_first integer  First buffer row the active panel gets.
 ---@field body_last integer   Last one.
 ---@field body_height integer
@@ -64,7 +64,6 @@ function M.rows(height)
   return {
     tabs = 1,
     rule = 2,
-    strip = 3,
     body_first = above + 1,
     body_last = above + body_height,
     body_height = body_height,
@@ -82,9 +81,9 @@ end
 ---This was off by one, and invisible for as long as the first row the panes
 ---covered was a row with nothing on it. `body_first` was 4, this answered
 ---`g.row + 3`, and the conversation was floated one row too high -- over the
----first line of the body, which on the Chat tab is blank by construction. The
----session strip put real content there and the bug became a strip you could
----only see the last three columns of.
+---first line of the body, which on the Chat tab is blank by construction. A
+---panel drawing real content there is what turns that into a row you can only
+---see the last three columns of.
 ---
 ---`g.border` says which: the caller knows what it opened the window with.
 ---@param g table
