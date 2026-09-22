@@ -466,10 +466,7 @@ local function test_transcript()
   -- its sibling.
   local pair = { conversation = vim.api.nvim_create_buf(false, true) }
   transcript.reset(pair)
-  -- A message first, as a real transcript has. It matters: a scratch buffer
-  -- starts with one empty line that the first block inserts ABOVE rather than
-  -- replacing, and that stray row puts a gap between the first card's end and
-  -- the second card's anchor -- so the boundary the bug needs never lines up.
+  -- A message first, as a real transcript has.
   transcript.upsert(pair, { kind = "user", text = "go" })
   transcript.upsert(pair, {
     kind = "tool",
@@ -513,6 +510,58 @@ local function test_transcript()
     anchor_of "b" > anchor_of "a",
     ("a@%s b@%s"):format(tostring(anchor_of "a"), tostring(anchor_of "b"))
   )
+
+  -- SPACING IS ABOUT WHAT IS ABOVE YOU. What the agent SAYS gets a blank line
+  -- on both sides; what it DOES stacks against the next thing it does. A turn
+  -- is a run of one-line cards -- Shell, Shell, Read, Edit -- and a blank
+  -- between each of them spent nine rows on four events and read as four
+  -- unrelated things rather than as one agent working through a list.
+  local spaced = { conversation = vim.api.nvim_create_buf(false, true) }
+  transcript.reset(spaced)
+  transcript.upsert(spaced, { kind = "user", text = "go" })
+  transcript.upsert(spaced, { kind = "text", text = "Looking now." })
+  for i, summary in ipairs { "first", "second", "third" } do
+    transcript.upsert(spaced, {
+      kind = "tool",
+      callId = "stack-" .. i,
+      name = "Bash",
+      status = "completed",
+      display = { displayName = "Shell", summary = summary },
+      detail = { type = "shell", command = summary, exitCode = 0 },
+    })
+  end
+  transcript.upsert(spaced, { kind = "text", text = "All green." })
+
+  local lines = vim.api.nvim_buf_get_lines(spaced.conversation, 0, -1, false)
+  local at = {}
+  for i, line in ipairs(lines) do
+    for _, name in ipairs { "first", "second", "third", "All green." } do
+      if line:find(name, 1, true) then
+        at[name] = i
+      end
+    end
+  end
+  eq(
+    "ui: a run of tool cards stacks with no gap between them",
+    { at.second - at.first, at.third - at.second },
+    { 1, 1 },
+    table.concat(lines, "\n")
+  )
+  eq("ui: but the run is set off from what was said above it", lines[at.first - 1], "")
+  eq("ui: and what is said after it gets its air back", lines[at["All green."] - 1], "")
+
+  -- NOTHING IS SPACED TWICE OVER, which is the other half of it: a scratch
+  -- buffer reports one empty line, and the first block used to be inserted
+  -- ABOVE it rather than over it -- so a row belonging to no block survived
+  -- directly under the first one and every transcript opened with a doubled
+  -- gap between the opening message and the reply to it.
+  local doubled
+  for i = 2, #lines do
+    if lines[i] == "" and lines[i - 1] == "" then
+      doubled = i
+    end
+  end
+  eq("ui: and no two blank rows ever meet", doubled, nil, table.concat(lines, "\n"))
 
   -- THE BUG THAT MADE EVERY TOOL CARD INVISIBLE, at the only place it was
   -- observable: the shape of the line the sidecar actually writes.

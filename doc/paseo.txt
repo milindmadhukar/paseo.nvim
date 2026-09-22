@@ -2261,6 +2261,13 @@ sub-agent's own log of the work it delegated, and for a tool nothing here has
 a schema for -- an MCP tool, mostly -- its arguments by name and what it
 answered. A failed call shows its error without being expanded.
 
+WHAT IT SAYS GETS AIR; WHAT IT DOES STACKS. A message -- yours or the
+agent's -- has a blank row above it and below it, and a run of tool cards has
+none between them: `Shell`, `Shell`, `Read`, `Edit` sit on four consecutive
+rows and read as one agent working through a list, which is what they are. A
+permission card is the same shape and stacks in the same run. Spaced out, four
+one-line events took nine rows and read as four unrelated things.
+
 A card is updated IN PLACE when the call finishes; it does not appear twice.
 It is also MERGED rather than replaced. The live subscription is not the
 projected timeline the app renders: a sub-agent's terminal event arrives in its

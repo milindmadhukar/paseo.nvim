@@ -213,11 +213,15 @@ end
 ---@return { key: string, lines: table[][], collapsible: boolean }
 local function card_for(block, width)
   local flashing = require("paseo.ui.animate").flash_stop(timeline.flash_key(block.item)) ~= nil
-  local key = ("%d|%s|%d|%s"):format(
+  -- `stacked` is in the key because it changes the card's FIRST LINE -- it is
+  -- the leading blank, present or not -- and a key that ignored it would serve
+  -- a stale rendering to the one block whose spacing had just been decided.
+  local key = ("%d|%s|%d|%s|%s"):format(
     width,
     tostring(block.expanded),
     block.rev or 0,
-    tostring(flashing)
+    tostring(flashing),
+    tostring(block.stacked)
   )
 
   local cache = block.cards
@@ -235,7 +239,11 @@ local function card_for(block, width)
     end
   end
 
-  local card = timeline.card(block.item, { width = width, expanded = block.expanded })
+  local card = timeline.card(block.item, {
+    width = width,
+    expanded = block.expanded,
+    gap = not block.stacked,
+  })
   local entry = { key = key, lines = card.lines, collapsible = card.collapsible }
   -- Safe to hold on to: `render.to_buffer` flattens its input into fresh
   -- tables and never writes back into the cells it was handed, unlike volt's
@@ -320,25 +328,37 @@ function M.append(chat, item)
   local stick = at_bottom(chat)
 
   local row = api.nvim_buf_line_count(buf)
-  -- A brand-new scratch buffer reports one line that is actually empty;
-  -- appending after it would leave a blank first row forever.
+  -- A brand-new scratch buffer -- and one `reset` has just emptied -- reports
+  -- one line that is actually empty. The first block OVERWRITES it rather
+  -- than being inserted above it: inserted, the empty line survives as a row
+  -- belonging to no block, directly under the first one, and the transcript
+  -- opened with a doubled gap between the first message and the reply to it
+  -- for the rest of the session.
+  local over = 0
   if row == 1 and api.nvim_buf_get_lines(buf, 0, 1, false)[1] == "" then
-    row = 0
+    row, over = 0, 1
   end
 
+  -- WHETHER THIS ONE HUGS THE ONE ABOVE IT, decided once, here, because here
+  -- is the only place that knows what is above it -- a block renders from its
+  -- own item and nothing else. Safe to decide once: blocks are only ever
+  -- appended to the end, and a block's KIND never changes after it is made --
+  -- a tool call goes running -> completed under one kind.
+  local above = chat.blocks[chat.order[#chat.order]]
   local block = {
     id = chat.next_id,
     kind = item.kind,
     call_id = item.callId,
     item = item,
     expanded = default_expanded(item),
+    stacked = timeline.stacks(above and above.kind, item.kind),
     height = 0,
   }
   chat.next_id = chat.next_id + 1
 
   -- The anchor is `draw`'s to place, and it places it AFTER the lines exist --
   -- see there for why neither gravity does the job on its own.
-  draw(chat, block, row, 0)
+  draw(chat, block, row, over)
 
   chat.blocks[block.id] = block
   chat.order[#chat.order + 1] = block.id

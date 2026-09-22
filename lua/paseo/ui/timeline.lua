@@ -576,6 +576,32 @@ local function card_lines(item, opts)
   return { lines = {}, collapsible = false }
 end
 
+---The kinds that STACK, with no blank line between them.
+---
+---A tool card is one line while it is folded -- an accent bar, a name, a
+---summary -- and a turn is a run of them: `Shell`, `Shell`, `Read`, `Edit`.
+---Spaced out, four one-line cards took nine rows and read as four unrelated
+---events; stacked, they read as what they are, which is one agent working
+---through a list. A permission card is the same shape and belongs in the same
+---run -- it is a tool call that stopped to ask.
+---
+---Prose is not in the set, and that is the whole of the rule: what the agent
+---SAYS gets air on both sides, and anything it DOES stacks against the next
+---thing it does.
+local STACKS = { tool = true, permission = true }
+
+---Does an item of `kind` sit directly under one of `prev`, with no gap?
+---
+---Asked by the transcript when a block is appended, and false for the first
+---block of all -- `prev` is nil there, and the top of the transcript keeps
+---its row of air.
+---@param prev string|nil  The kind of the block above.
+---@param kind string  The kind of the block being placed.
+---@return boolean
+function M.stacks(prev, kind)
+  return STACKS[prev] == true and STACKS[kind] == true
+end
+
 ---Build the lines for one item.
 ---
 ---Returns the lines plus whether the item can be expanded, so the transcript
@@ -593,12 +619,17 @@ end
 ---that block is still growing. It also means the separator is inside the
 ---block's own lines, which is what `transcript.draw` requires -- every block
 ---owns exactly its own rows and nothing writes between them.
+---
+---`opts.gap = false` is what `M.stacks` buys: the caller knows what is above
+---this card, and this does not.
 ---@param item table
----@param opts { width: integer, expanded?: boolean }
+---@param opts { width: integer, expanded?: boolean, gap?: boolean }
 ---@return { lines: table[][], collapsible: boolean }
 function M.card(item, opts)
   local built = card_lines(item, opts)
-  table.insert(built.lines, 1, { { "", "PaseoDim" } })
+  if opts.gap ~= false then
+    table.insert(built.lines, 1, { { "", "PaseoDim" } })
+  end
   return built
 end
 
