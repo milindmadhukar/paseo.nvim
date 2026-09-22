@@ -300,9 +300,8 @@ end
 
 ---Repaint the header of whichever windows this chat currently has.
 ---
----On the full-screen surface the header is not a winbar at all -- it is a volt
----section in the chrome, so that it is drawn on every tab rather than only on
----the one that has a conversation window. Route to it rather than writing a
+---On the full-screen surface the header is the bar over the composer, and the
+---chrome around it is volt's. Route to the volt redraw rather than writing a
 ---winbar nobody would see.
 ---@param chat table
 function M.refresh(chat)
@@ -316,15 +315,15 @@ function M.refresh(chat)
   -- drawing this chat", not "can you see it from where you are standing" --
   -- and `is_open` is tab-aware, so with the dashboard on another tab page it
   -- answered no and the fallback below wrote a winbar onto the dashboard's
-  -- OWN conversation pane. That pane's winbar is emptied deliberately (the
-  -- header is a volt section in the chrome), so the result was the header
-  -- drawn twice, one row apart, and a row stolen from the conversation --
-  -- ten times a second for the length of every turn.
+  -- OWN conversation pane. That pane's winbar is emptied deliberately -- the
+  -- dashboard draws the header on the bar over its composer -- so the result
+  -- was the header drawn twice, one row apart, and a row stolen from the
+  -- conversation, ten times a second for the length of every turn.
   --
   -- Latent while the dashboard floated, because living on another tab page
   -- was the exception. On the buffer mount it is the point.
   if float.showing(chat) then
-    return float.refresh_header(chat)
+    return float.refresh_live(chat)
   end
 
   -- What is left for the top of the sidebar: WHICH session this is, and

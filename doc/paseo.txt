@@ -1461,11 +1461,12 @@ composer. It doubles as the box's title row, which is what lets the box drop
 its drawn border and become a plate like every other card; see
 |paseo-chat-composer|.
 
-Where there is no box there is still a header: on every dashboard tab but
-`Chat` it is a volt section in the chrome above the tab bar, so "which model is
-this" does not stop being answerable on the Usage panel, and clicking it opens
-the panel that can change what it says. On the `Chat` tab that row goes back to
-the transcript.
+IT IS ONLY EVER THIS ROW. The dashboard used to repeat it in the chrome above
+the tab bar on every tab but `Chat`, which said what the bar over the box
+already says and cost those five tabs a row: the tab bar, the strip and the
+whole panel below them all sat one row lower than on `Chat`, so changing tab
+shifted the layout under you. The panel that can change any of these facts is
+|paseo-chat-settings|, which is tab `3`.
 
 IT DEGRADES BY DROPPING WHOLE FACTS rather than by cutting the row. A sixty
 column sidebar cannot say all of it, and truncation takes the RIGHT -- which is
@@ -2142,7 +2143,7 @@ microphone meter adds `PaseoVoiceOn` for the recording dot and
 `PaseoVoiceIdle` / `PaseoVoiceLive` / `PaseoVoiceLoud` for the wave.
 
 The conversation is an ordinary buffer too, on purpose: `y`, `/` and soft-wrap
-work on an agent's reply. Volt draws the chrome around it -- the header, the
+work on an agent's reply. Volt draws the chrome around it -- the tab bar, the
 panels, the permission dialog -- because virtual text cannot be yanked.
 
                                                                *paseo-quit*
@@ -2297,7 +2298,7 @@ session in this workspace, agents then terminals, the one you are in lit: >
 
     󱙺 main   󱙺 reviewer   󰆍 lazygit   󰆍 shell        Ctrl + s  sessions
 <
-It is on EVERY tab, like the header, because "which session am I in" does not
+It is on EVERY tab, because "which session am I in" does not
 stop being worth answering when you look at Usage -- and a terminal has no
 transcript and no composer, so without it the dashboard could be showing a PTY
 with nothing on screen naming it. A chip is a click; `<C-s>` is the keyboard.

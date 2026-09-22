@@ -240,21 +240,18 @@ local function test_layout()
   -- that got missed would not error; it would put the click targets a row off.
   local layout = require "paseo.ui.layout"
   for _, height in ipairs { 24, 40, 60 } do
-    local rows = layout.rows(height)
-    eq("ui: the body gets height - 5 rows at " .. height, rows.body_height, height - 5)
-    eq("ui: the footer owns the last row at " .. height, rows.footer, height)
-    eq("ui: the body ends above it at " .. height, rows.body_last, height - 1)
-
-    -- THE CHAT TAB HAS NO HEADER ROW. The session's model, mode and directory
-    -- are drawn on the bar over the composer there -- against the box you are
-    -- typing in rather than at the far top of the screen -- so that row goes
-    -- back to the transcript and everything under it moves up one. Every
-    -- other tab keeps it: none of them has a composer to put it over.
-    local chat = layout.rows(height, { header = false })
-    eq("ui: the Chat tab gets that row back at " .. height, chat.body_height, height - 4)
-    eq("ui: the tab bar moves up into it at " .. height, chat.tabs, 1)
-    eq("ui: and so does the session strip at " .. height, chat.strip, 3)
-    eq("ui: the footer does not move at " .. height, chat.footer, height)
+    -- NO HEADER ROW, ON ANY TAB. The session's model, mode, usage and
+    -- directory are drawn on the bar over the composer -- against the box you
+    -- are typing in rather than at the far top of the screen. The dashboard
+    -- used to repeat them on a row of its own on the five tabs with no
+    -- composer, which pushed those five down a row relative to Chat; switching
+    -- tabs moved the whole body under you.
+    local chat = layout.rows(height)
+    eq("ui: the body gets height - 4 rows at " .. height, chat.body_height, height - 4)
+    eq("ui: the tab bar is the first row at " .. height, chat.tabs, 1)
+    eq("ui: the session strip is the third at " .. height, chat.strip, 3)
+    eq("ui: the footer owns the last row at " .. height, chat.footer, height)
+    eq("ui: the body ends above it at " .. height, chat.body_last, height - 1)
 
     -- BORDERED, which every `ui.style` but `border = "none"` is. That matters
     -- and is where an off-by-one lived: `nvim_open_win` is handed the BORDER's
@@ -263,8 +260,7 @@ local function test_layout()
     -- was blank; the session strip put content there and it became visible as
     -- a strip you could see the last three columns of.
     local g = { row = 2, col = 3, width = 100, height = height, composer = 7, border = true }
-    -- The panes only ever cover the Chat tab, so they are laid out against the
-    -- headerless chrome: one row higher than the rest of the tabs.
+    -- The panes only ever cover the Chat tab, and every tab has the same rows.
     local panes = layout.panes(g)
     eq("ui: the panes start below the strip at " .. height, panes.top, g.row + 4)
     eq(
@@ -326,7 +322,7 @@ local function test_layout()
   eq(
     "ui: the chrome above the body is its parts",
     layout.CHROME.above,
-    parts.header + parts.tabs + parts.rule + parts.strip
+    parts.tabs + parts.rule + parts.strip
   )
   eq("ui: and below it is the footer", layout.CHROME.below, parts.footer)
 end

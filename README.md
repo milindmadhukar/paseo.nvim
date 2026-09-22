@@ -277,11 +277,12 @@ composer, so they belong there. It doubles as the composer's title row, which
 is what lets the box drop its drawn border and be a plate like everything else
 ([below](#the-composer)).
 
-Where there is no box there is still a header: on every dashboard tab but
-`Chat` it is a volt section in the chrome above the tab bar, so "which model is
-this" does not stop being answerable when you look at Usage — and clicking it
-takes you to the panel that can change what it says. On the `Chat` tab that
-row is given back to the transcript.
+**It is only ever this row.** The dashboard used to repeat it in the chrome
+above the tab bar on every tab but `Chat` — saying what the bar over the box
+already says, and costing those five tabs a row: the tab bar, the session strip
+and the whole panel under them sat one row lower than on `Chat`, so changing tab
+shifted the layout under you. The panel that can change any of these facts is
+[Settings](#the-settings-tab), which is tab `3`.
 
 **The row is also the box's top edge.** Without a frame the composer was a slab
 of card colour with a row of text on it, and on a theme whose elevation tiers
@@ -551,9 +552,9 @@ permission dialog is the one exception and sits above everything, because it
 is the one window that must not be covered.
 
 The chrome is four volt sections rather than one, which is not tidiness: the
-header repaints ten times a second while a turn runs, and a single section
-would drag the `Changes` panel — one `git status` per repo — through every
-frame.
+session strip and the footer repaint ten times a second while a turn runs, and a
+single section would drag the `Changes` panel — one `git status` per repo —
+through every frame.
 
 ### The Settings tab
 
@@ -705,7 +706,7 @@ conversation and its composer for an agent, the PTY outright for a terminal.
 
 **The session strip** under the tab bar is what makes that legible: one chip per
 session in this workspace, agents then terminals, the one you are in lit. It is
-on **every** tab, like the header, because "which session am I in" does not stop
+on **every** tab, because "which session am I in" does not stop
 being worth answering when you look at Usage — and a terminal has no transcript
 and no composer, so without it the dashboard could be showing a PTY with nothing
 on screen naming it. A chip is a click; `<C-s>` is the keyboard.

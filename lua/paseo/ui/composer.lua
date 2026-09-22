@@ -782,8 +782,8 @@ function M.dictating(chat, state)
   end
 
   M.refresh(chat)
-  -- The header is drawn on every tab of the dashboard, not only over the box,
-  -- so it gets the news too.
+  -- Away from the Chat tab there is no box to draw a meter over: the
+  -- dashboard's footer says "listening" instead, so it gets the news too.
   require("paseo.ui.sidebar").refresh(chat)
 end
 

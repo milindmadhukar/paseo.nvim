@@ -1,14 +1,14 @@
 --- The dashboard's row budget, in one place.
 ---
---- The chrome is a fixed stack -- a header, a tab bar, a rule, the body, a
---- footer -- and three separate files were each doing the arithmetic for it
+--- The chrome is a fixed stack -- a tab bar, a rule, the session strip, the
+--- body, a footer -- and three separate files were each doing the arithmetic for it
 --- from first principles. `float.body_lines` knew the body was `height - 4`,
 --- `float.panes` knew the first body row was `row + 3` and that the footer
 --- owned the last row, and `panels/terminals.lua` knew both AND carried a bare
 --- `local at = row - 5` to turn a cursor line back into a list index.
 ---
 --- Three copies of one number that must agree, none of which mentions the
---- others. Adding a row to the header meant finding all three, and the one
+--- others. Adding a row to the chrome meant finding all three, and the one
 --- that got missed would not error -- it would simply put the terminal list's
 --- click targets one row off, which reads as "clicking does nothing" rather
 --- than as a layout bug.
@@ -25,19 +25,24 @@ local M = {}
 ---in the file whose whole argument is that the number should be derived from
 ---parts rather than written down. Adding the session strip was the change that
 ---made that difference real: with a literal it is "find every 3 and hope".
-M.PARTS = { header = 1, tabs = 1, rule = 1, strip = 1, footer = 1 }
+---
+---There is no header among them. The session's model, mode, usage and
+---directory are drawn on the bar over the composer, and the dashboard used to
+---repeat them on a row of its own on every tab but Chat -- which meant the
+---five other tabs each began one row lower than the Chat tab, for a row that
+---said what the bar above the box already said.
+M.PARTS = { tabs = 1, rule = 1, strip = 1, footer = 1 }
 
 ---Rows the chrome spends on itself, above and below the body.
 ---
----Above: the header, the tab bar, the rule under it, the session strip.
+---Above: the tab bar, the rule under it, the session strip.
 ---Below: the footer.
 M.CHROME = {
-  above = M.PARTS.header + M.PARTS.tabs + M.PARTS.rule + M.PARTS.strip,
+  above = M.PARTS.tabs + M.PARTS.rule + M.PARTS.strip,
   below = M.PARTS.footer,
 }
 
 ---@class paseo.Layout.Rows
----@field header integer    Buffer row of the header.
 ---@field tabs integer      Buffer row of the tab bar.
 ---@field rule integer      Buffer row of the rule under the tabs.
 ---@field strip integer     Buffer row of the session strip.
@@ -48,24 +53,18 @@ M.CHROME = {
 
 ---Where each part of the chrome lives, in 1-based BUFFER rows.
 ---
----`opts.header = false` takes the header row out, which is what the Chat tab
----does: there the session's model, mode and directory are drawn on the bar
----over the composer instead -- against the box you are typing in, rather than
----at the far top of the screen -- so a second copy at the top would be one row
----of the transcript spent saying the same thing twice. Every other tab keeps
----it, because those have no composer to put it over.
+---The same on every tab. The tab bar is the first row of the dashboard, and
+---the body starts at the same place whichever tab you are on -- so switching
+---tabs moves nothing under you.
 ---@param height integer  The chrome window's height, in cells.
----@param opts? { header?: boolean }
 ---@return paseo.Layout.Rows
-function M.rows(height, opts)
-  local header = not (opts and opts.header == false)
-  local above = M.CHROME.above - (header and 0 or M.PARTS.header)
+function M.rows(height)
+  local above = M.CHROME.above
   local body_height = math.max(0, height - above - M.CHROME.below)
   return {
-    header = header and 1 or 0,
-    tabs = header and 2 or 1,
-    rule = header and 3 or 2,
-    strip = header and 4 or 3,
+    tabs = 1,
+    rule = 2,
+    strip = 3,
     body_first = above + 1,
     body_last = above + body_height,
     body_height = body_height,
@@ -113,9 +112,9 @@ end
 ---                   it, which is a `winbar` and therefore inside the window.
 ---@return { top: integer, col: integer, width: integer, conversation: integer, composer_row: integer, composer: integer, frame: integer, body: { row: integer, col: integer, width: integer, height: integer } }
 function M.panes(g, composer_h, opts)
-  -- The panes only ever cover the Chat tab, and the Chat tab is the one with
-  -- no header row: the header is drawn on the composer's bar instead.
-  local rows = M.rows(g.height, { header = false })
+  -- The panes only ever cover the Chat tab, and the chrome's rows are the
+  -- same on every tab.
+  local rows = M.rows(g.height)
   local top = M.screen_row(g, rows.body_first)
   composer_h = math.max(1, math.min(composer_h or g.composer, g.composer))
 

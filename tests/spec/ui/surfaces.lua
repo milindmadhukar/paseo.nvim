@@ -341,10 +341,6 @@ local function test_surfaces()
 
   float.open(surface_chat)
 
-  -- FEATURE PARITY. The header used to be the conversation window's winbar,
-  -- and the conversation window only exists on the Chat tab -- so every other
-  -- tab had no header at all and the dashboard could not tell you which model
-  -- it was on. It is a volt section in the chrome now.
   -- The agent-session list used to map CURSOR ROWS to sessions, and the only thing
   -- between a panel's own line numbering and the buffer's was a constant it
   -- had to agree with. It holds focus by ID now, so the thing worth checking
@@ -474,9 +470,16 @@ local function test_surfaces()
       end
     end
     drawn = table.concat(drawn)
+    -- NO HEADER ROW, AND THE TAB BAR IS THE FIRST ONE. The session's model,
+    -- mode, usage and directory are drawn on the bar over the composer, and
+    -- the chrome used to repeat them above the tabs on every tab but Chat --
+    -- a row spent saying what the bar over the box already says, and one that
+    -- pushed the whole of those five tabs' bodies down a row relative to
+    -- Chat's, so switching tabs shifted the layout under you. `provider` is
+    -- "test" on this session, which is what the header would have put there.
     truthy(
-      "ui: the header is drawn in the chrome, so it survives leaving the Chat tab",
-      drawn:find("test", 1, true) ~= nil,
+      "ui: the chrome does not repeat the header above the tabs",
+      drawn:find("test", 1, true) == nil,
       drawn
     )
     -- Every tab's NUMBER, at every width. The bar degrades from name+icon to
@@ -500,7 +503,7 @@ local function test_surfaces()
     for _, row in pairs(require("volt.state")[chrome_buf].clickables) do
       targets = targets + #row
     end
-    truthy("ui: the tab bar and header carry click targets", targets >= #float.TABS, targets)
+    truthy("ui: the tab bar carries click targets", targets >= #float.TABS, targets)
     truthy("ui: and volt's mouse dispatch is switched on", vim.g.extmarks_events == true)
 
     -- The six panels SHARE the chrome buffer, so a panel that binds keys has
@@ -690,14 +693,13 @@ local function test_terminal_session()
     float.select "Usage"
     eq("terminal: the strip survives a tab change", float.session().id, "t1")
 
-    ---The session strip, as `{ text = highlight }`. The header, the tab bar,
-    ---the rule, then this -- except on the Chat tab, which has no header row:
-    ---there the session's model, mode and directory are drawn on the bar over
-    ---the composer instead, and everything below moves up a row.
+    ---The session strip, as `{ text = highlight }`. The tab bar, the rule,
+    ---then this -- the same rows on every tab, because the chrome has no
+    ---header row on any of them.
     local function strip()
       local out = {}
       local buf = float.chrome_buf()
-      local rows = require("paseo.ui.layout").rows(0, { header = float.tab() ~= "Chat" })
+      local rows = require("paseo.ui.layout").rows(0)
       for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, -1, 0, -1, { details = true })) do
         if mark[2] + 1 == rows.strip then
           for _, cell in ipairs(mark[4].virt_text or {}) do

@@ -8,15 +8,15 @@
 --- the thing you are reading.
 ---
 --- Structure, from the bottom up: a dimmed backdrop, a volt-drawn chrome window
---- carrying the header, the tab bar and the active panel, and -- on the
+--- carrying the tab bar, the session strip and the active panel, and -- on the
 --- conversation tab only -- the real conversation and composer buffers floated
 --- on top. The chrome is volt's; the conversation is never volt's, because
 --- virtual text cannot be yanked.
 ---
 --- The chrome is FOUR volt sections rather than one, and that is not tidiness:
---- the header repaints ten times a second while a turn runs, and a single
---- section would drag the Changes panel -- which shells out to `git status` per
---- repo -- through every one of those frames.
+--- the strip and the footer repaint ten times a second while a turn runs, and a
+--- single section would drag the Changes panel -- which shells out to `git
+--- status` per repo -- through every one of those frames.
 
 local icons = require "paseo.ui.icons"
 local layout = require "paseo.ui.layout"
@@ -208,8 +208,8 @@ local HOST = {
   spell = false,
   scrolloff = 0,
   sidescrolloff = 0,
-  -- The header is a volt section. A winbar would draw it twice, one row apart
-  -- -- and would cost the chrome the row it measured itself against.
+  -- The chrome draws its own rows as volt sections. A winbar would sit above
+  -- them and cost the chrome the row it measured itself against.
   winbar = "",
   winblend = 0,
 }
@@ -709,40 +709,6 @@ local function goto_tab(name)
   end
 end
 
----The agent-session header: the same cells the sidebar puts in its winbar.
----
----It lives in the CHROME rather than on the conversation window's winbar, and
----that is the fix for "the dashboard does not say which model it is on": a
----winbar belongs to a window, the conversation window only exists on the Chat
----tab, and every other tab therefore had no header at all. Here it is drawn
----once, above the tabs, and is true on all six of them.
----@return table[][]
-local function header_lines()
-  if not state then
-    return { {} }
-  end
-
-  -- NOT ON THE CHAT TAB. There the same cells are drawn on the bar over the
-  -- composer -- see |paseo.ui.composer| -- which is where you are looking when
-  -- they matter, and drawing them here as well would be the same row twice,
-  -- twenty lines apart. `layout.rows` is told the same thing, so the tab bar
-  -- moves up into the row this gives back rather than leaving a blank one.
-  if state.tab == "Chat" then
-    return {}
-  end
-
-  local line = sidebar.header(state.chat, { width = state.geometry.width - 2 })
-
-  -- Everything the header names is a thing the Settings panel can change, so
-  -- the header is the shortest route to it. Cells carry volt's third element;
-  -- `volt.events.add` on this buffer is what turns that into a click.
-  for _, cell in ipairs(line) do
-    cell[3] = goto_tab "Settings"
-  end
-
-  return { render.truncate(line, state.geometry.width - 2) }
-end
-
 ---The tab bar and the rule under it.
 ---
 ---Each tab is numbered in the bar itself. The footer used to advertise "1-5
@@ -859,8 +825,8 @@ end
 ---THE ROW THAT SAYS WHERE YOU ARE. A terminal session has no composer to type
 ---into and no transcript to read, so without this the dashboard could be
 ---showing a PTY with nothing on screen saying which one, and no visible way
----back. Drawn on EVERY tab, like the header, because "which session am I in"
----is not a question that stops being worth answering when you look at Usage.
+---back. Drawn on EVERY tab, because "which session am I in" is not a question
+---that stops being worth answering when you look at Usage.
 ---
 ---EXACTLY ONE ROW, ALWAYS. volt records each section's start row once, in
 ---`gen_data`, and `redraw` writes extmarks at those rows without clearing
@@ -957,11 +923,7 @@ local function body_lines()
     return { {} }
   end
   local g = state.geometry
-  -- The Chat tab has no header row -- the header is over the composer there --
-  -- so its body is one row taller. `header_lines` is where that is decided;
-  -- this has to agree with it or the panel is padded to the wrong height and
-  -- the footer is drawn over.
-  local height = layout.rows(g.height, { header = state.tab ~= "Chat" }).body_height
+  local height = layout.rows(g.height).body_height
   local lines = {}
 
   if state.tab ~= "Chat" then
@@ -1033,6 +995,15 @@ local function footer_lines()
   local status = {}
   if state.tab ~= "Chat" or (state.session and state.session.kind == "terminal") then
     status = sidebar.status(state.chat)
+
+    -- THE MICROPHONE, for the same reason. The bar over the box draws a live
+    -- meter while you dictate, and away from the Chat tab there is no box --
+    -- so "am I still recording" would have nothing on screen answering it.
+    local chat = state.chat
+    if chat and chat.dictating then
+      local said = chat.dictating == "starting" and "opening" or "listening"
+      table.insert(status, 1, { icons.ui.mic .. " " .. said .. " ", "PaseoToolFail" })
+    end
   end
 
   -- Sized to what is left after it, and DEGRADING rather than truncating: the
@@ -1081,12 +1052,6 @@ function M.rebuild()
         -- from every cell it is handed, so a cached line list loses its
         -- click targets after the first draw.
         {
-          name = "header",
-          lines = function()
-            return render.to_volt(header_lines())
-          end,
-        },
-        {
           name = "tabs",
           lines = function()
             return render.to_volt(tab_lines())
@@ -1120,7 +1085,8 @@ function M.rebuild()
   volt.redraw(state.buf, "all")
 end
 
----Repaint only what changes while a turn runs.
+---Repaint only what changes while a turn runs: the session strip and the
+---footer.
 ---
 ---Called from `sidebar.refresh`, which the spinner drives at 10 Hz. Going
 ---through `rebuild` here would rebuild the Changes panel -- one `git status`
@@ -1130,11 +1096,11 @@ end
 ---count live. Leaving it out is how the status would tick once and then sit
 ---frozen at `0s` for the rest of the turn.
 ---@param chat table
-function M.refresh_header(chat)
+function M.refresh_live(chat)
   if not state or state.chat ~= chat or not api.nvim_buf_is_valid(state.buf) then
     return
   end
-  local sections = { "header", "strip", "footer" }
+  local sections = { "strip", "footer" }
   -- Usage is the other thing a running turn changes, and it is pure Lua -- no
   -- subprocess -- so it can afford to ride along.
   if state.tab == "Usage" then
@@ -1399,7 +1365,7 @@ local function show_agent_panes()
   bind_tabs(chat.conversation, false)
   bind_tabs(chat.composer, true)
 
-  M.refresh_header(chat)
+  M.refresh_live(chat)
   transcript.redraw(chat)
 end
 
@@ -1490,7 +1456,7 @@ local function show_terminal_pane()
   terminal.show(view, state.term_win)
   bind_terminal(view.buf)
 
-  M.refresh_header(state.chat)
+  M.refresh_live(state.chat)
   -- Entered, and in insert. Landing on the chrome instead would send every
   -- keystroke to the tab bar.
   api.nvim_set_current_win(state.term_win)
@@ -1924,7 +1890,7 @@ function M.open(chat, opts)
     tab = "Chat",
     -- What the Chat tab is showing. A sibling of `chat` rather than something
     -- folded into it: `state.chat` is identity-compared by `is_open`,
-    -- `refresh_header` and every panel, and none of them should have to learn
+    -- `refresh_live` and every panel, and none of them should have to learn
     -- that a session might be a PTY.
     session = { kind = "agent", id = chat.agent_id },
   }
