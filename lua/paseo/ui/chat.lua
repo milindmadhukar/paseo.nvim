@@ -645,7 +645,7 @@ local function make_buffers(chat)
     end, vim.tbl_extend("force", conv, { desc = "paseo: reopen permission prompt" }))
     vim.keymap.set("n", "f", function()
       require("paseo.fork").start(chat)
-    end, vim.tbl_extend("force", conv, { desc = "paseo: fork into a new workspace" }))
+    end, vim.tbl_extend("force", conv, { desc = "paseo: fork this conversation" }))
     vim.keymap.set(
       "n",
       "<C-f>",
@@ -823,7 +823,7 @@ local function make_buffers(chat)
     end, vim.tbl_extend("force", opts, { desc = "paseo: close chat" }))
     vim.keymap.set("n", "f", function()
       require("paseo.fork").start(chat)
-    end, vim.tbl_extend("force", opts, { desc = "paseo: fork into a new workspace" }))
+    end, vim.tbl_extend("force", opts, { desc = "paseo: fork this conversation" }))
     for _, mode in ipairs { "n", "i" } do
       vim.keymap.set(mode, "<C-f>", function()
         vim.cmd.stopinsert()
@@ -1109,38 +1109,65 @@ function M.open(opts, callback)
         notice(chat, "no agent in this workspace yet — :Paseo chat starts one")
         return callback(nil, nil)
       end
-      notice(chat, "choose agent settings…")
-      require("paseo.ui.create").review(
-        { cwd = root, preferred = preferred },
-        function(draft, review_err)
-          if review_err then
-            notice(chat, review_err, "error")
-            return callback(nil, review_err)
-          end
-          if not draft then
-            chats[root] = nil
-            if current == chat then
-              M.close()
-            end
-            return callback(nil, "cancelled")
-          end
-          bridge.request("agent.ensure", {
-            cwd = root,
-            provider = draft.provider,
-            modeId = draft.modeId,
-            thinkingOptionId = draft.thinkingOptionId,
-            featureValues = draft.featureValues,
-            title = "paseo.nvim · " .. vim.fs.basename(root),
-          }, function(agent_err, result)
-            if agent_err then
-              notice(chat, agent_err, "error")
-              return callback(nil, agent_err)
-            end
-            config.get().paseo.provider = draft.provider
-            adopt(result)
-          end)
+      -- WHAT, THEN WHERE, THEN THE SETTINGS -- see |paseo.start|. This used to
+      -- open the model picker outright, which asks four questions about an
+      -- agent before anything has established that an agent is the thing you
+      -- came here for, and left a terminal reachable only from a tab of a
+      -- surface you had to create an agent in order to see.
+      notice(chat, "nothing running here yet…")
+      require("paseo.start").open({ root = root, preferred = preferred }, function(result, err)
+        if err then
+          notice(chat, err, "error")
+          return callback(nil, err)
         end
-      )
+
+        ---Give this empty chat up. Nothing was ever attached to it.
+        local function stand_down(reason)
+          chats[root] = nil
+          if current == chat then
+            M.close()
+          end
+          return callback(nil, reason)
+        end
+
+        if not result then
+          return stand_down "cancelled"
+        end
+
+        -- A TERMINAL IS A SESSION, not an agent, and this chat never becomes
+        -- one. The surface is already pointed at the PTY -- `start` did that
+        -- -- so the chat stays keyed on the directory, with no agent, and
+        -- says so. Asking again next time is correct: there is still no
+        -- agent here.
+        if result.kind == "terminal" then
+          notice(chat, "a terminal is running here — the Sessions tab lists it")
+          return callback(nil, nil)
+        end
+
+        -- The agent went somewhere else, and the editor is already looking at
+        -- it. This chat is an empty window onto a directory nobody is working
+        -- in any more.
+        if result.moved then
+          return stand_down(nil)
+        end
+
+        local draft = result.draft
+        bridge.request("agent.ensure", {
+          cwd = root,
+          provider = draft.provider,
+          modeId = draft.modeId,
+          thinkingOptionId = draft.thinkingOptionId,
+          featureValues = draft.featureValues,
+          title = "paseo.nvim · " .. vim.fs.basename(root),
+        }, function(agent_err, agent)
+          if agent_err then
+            notice(chat, agent_err, "error")
+            return callback(nil, agent_err)
+          end
+          config.get().paseo.provider = draft.provider
+          adopt(agent)
+        end)
+      end)
     end)
   end)
 end

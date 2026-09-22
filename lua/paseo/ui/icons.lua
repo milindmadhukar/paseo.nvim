@@ -138,6 +138,12 @@ M.ui = {
   more = g(0xf01d9), -- md-dots_vertical
   switch = g(0xf04e1), -- md-swap_horizontal
   limits = g(0xf04c5), -- md-speedometer -- plan quota
+  -- The two halves of a pull request's life. `merged` is a DIFFERENT glyph
+  -- rather than the same one in a different colour: merged is the one state
+  -- on that row you want to recognise without reading it, and colour alone
+  -- does not carry to anyone who cannot tell green from amber.
+  pull_request = g(0xf04c2), -- md-source_pull
+  merged = g(0xf062d), -- md-source_merge
   clock = g(0xf0954), -- md-clock_outline -- when a window resets
   search = g(0xf0349), -- md-magnify
   archive = g(0xf00b7), -- md-archive

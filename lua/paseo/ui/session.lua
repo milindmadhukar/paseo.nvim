@@ -249,11 +249,27 @@ function M.apply(chat, group, entry, done)
     return done()
   end
 
-  local choices = {
-    { id = "fork", label = "Fork into a new workspace" },
-    { id = "future", label = "Use for this agent's future turns" },
-    { id = "cancel", label = "Cancel" },
-  }
+  -- BUILT FROM |paseo.fork|.DESTINATIONS, never spelled again here. This
+  -- dialog offered one fork and the `f` key offered another, under two
+  -- different names, for two different places -- which is how a fork became
+  -- something you had to try in order to find out where it went.
+  --
+  -- It asks IN FULL rather than asking twice: picking a destination here goes
+  -- straight through, because a second menu after this one is the same
+  -- question asked again.
+  local choices = {}
+  for _, destination in ipairs(require("paseo.fork").DESTINATIONS) do
+    if destination.id ~= "cancel" then
+      choices[#choices + 1] = {
+        id = destination.id,
+        fork = true,
+        label = ("Fork into a %s  (%s)"):format(destination.label, destination.note),
+      }
+    end
+  end
+  choices[#choices + 1] = { id = "future", label = "Use for this agent's future turns" }
+  choices[#choices + 1] = { id = "cancel", label = "Cancel" }
+
   vim.ui.select(choices, {
     prompt = "Change model to " .. (entry.label or entry.id) .. "?",
     format_item = function(choice)
@@ -263,8 +279,8 @@ function M.apply(chat, group, entry, done)
     if not choice or choice.id == "cancel" then
       return done()
     end
-    if choice.id == "fork" then
-      require("paseo.fork").start(chat, { model_id = entry.id })
+    if choice.fork then
+      require("paseo.fork").start(chat, { model_id = entry.id, destination = choice.id })
       return done()
     end
     apply_direct(chat, group, entry, done)

@@ -77,6 +77,7 @@ local M = {}
 ---@field sidebar paseo.Config.UI.Sidebar
 ---@field ask paseo.Config.UI.Answer
 ---@field terminal paseo.Config.UI.Terminal
+---@field pr paseo.Config.UI.PR
 
 ---@class paseo.Config.UI.Palette
 ---@field red string?     Failure, and a destructive permission.
@@ -297,6 +298,24 @@ local M = {}
 ---                      truth, so `:Lazy update` updates the skills. Defaults
 ---                      to "copy" on Windows, where symlinks need privileges.
 
+---@class paseo.Config.UI.PR
+---
+---What GitHub thinks of the branch you are on, on the composer's bar and in
+---the workspace list. See |paseo.pr|.
+---@field enabled boolean  Ask `gh` at all. The only thing in this plugin that
+---                       touches the network on its own, and the only status
+---                       column that is not push-fed -- so it is the one with
+---                       an off switch. Off means the pull request column is
+---                       not drawn rather than drawn empty. Absent `gh` is
+---                       the same as off, and says nothing about it: a plugin
+---                       that nags about an optional tool you have chosen not
+---                       to install is worse than one that quietly does less.
+---@field ttl integer      Seconds an answer is reused before `gh` is asked
+---                       again, per repo. The branch itself is re-read far
+---                       more often than this -- it is a local file read --
+---                       so switching branch updates the column promptly
+---                       whatever this is set to.
+
 ---@class paseo.Config.Review
 ---@field agents boolean  Whether `:Paseo explain` and `:Paseo ask` list the
 ---                       other Paseo agents working in this tree, so the review
@@ -436,6 +455,11 @@ local defaults = {
       },
       presets = {},
     },
+
+    pr = {
+      enabled = true,
+      ttl = 60,
+    },
   },
 
   -- Speaking into the composer. Speech-to-TEXT only -- the daemon also has a
@@ -489,6 +513,8 @@ local config = vim.deepcopy(defaults)
 function M.setup(opts)
   config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts or {})
 
+  vim.validate("ui.pr.enabled", config.ui.pr.enabled, "boolean")
+  vim.validate("ui.pr.ttl", config.ui.pr.ttl, "number")
   vim.validate("review.agents", config.review.agents, "boolean")
   vim.validate("quit.warn_active_agents", config.quit.warn_active_agents, "boolean")
   vim.validate("ui.surface", config.ui.surface, function(v)

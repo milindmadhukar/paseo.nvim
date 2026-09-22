@@ -98,11 +98,17 @@ local function test_settings()
   local old_fork = package.loaded["paseo.fork"]
   local old_chat = package.loaded["paseo.ui.chat"]
   local prompts, forks, mutations = 0, 0, 0
-  local choice
+  local choice, forked
+  -- The destinations are the REAL ones. This dialog builds its fork entries
+  -- from that table, so a stub with its own list would let the two drift
+  -- apart -- which is the drift this dialog was changed to remove.
+  local destinations = require("paseo.fork").DESTINATIONS
   package.loaded["paseo.fork"] = {
+    DESTINATIONS = destinations,
     start = function(fork_chat, opts)
       eq("settings: a model fork targets this agent", fork_chat.agent_id, chat.agent_id)
       eq("settings: a model fork carries the selected model", opts.model_id, "new")
+      forked = opts.destination
       forks = forks + 1
     end,
   }
@@ -134,9 +140,38 @@ local function test_settings()
   choice = { id = "cancel" }
   session.apply(chat, model_group, { id = "new" })
   eq("settings: cancelling a model change mutates nothing", { forks, mutations }, { 0, 0 })
-  choice = { id = "fork" }
+  -- BOTH FORKS ARE OFFERED HERE, under the same names the `f` key uses. The
+  -- dialog used to have one "fork into a new workspace" and `f` had another,
+  -- and a model change could only ever branch into a directory of its own.
+  local offered = {}
+  vim.ui.select = function(items, _, done)
+    prompts = prompts + 1
+    offered = vim.tbl_map(function(item)
+      return item.id
+    end, items)
+    for _, item in ipairs(items) do
+      if item.id == (choice or {}).id then
+        return done(item)
+      end
+    end
+    done(nil)
+  end
+
+  choice = { id = "session" }
   session.apply(chat, model_group, { id = "new" })
-  eq("settings: the fork outcome leaves the source untouched", { forks, mutations }, { 1, 0 })
+  eq("settings: the model dialog offers both forks", offered, {
+    "session",
+    "workspace",
+    "future",
+    "cancel",
+  })
+  eq("settings: a session fork leaves the source untouched", { forks, mutations }, { 1, 0 })
+  eq("settings: and goes where the dialog said", forked, "session")
+
+  choice = { id = "workspace" }
+  session.apply(chat, model_group, { id = "new" })
+  eq("settings: a workspace fork leaves the source untouched too", { forks, mutations }, { 2, 0 })
+  eq("settings: and goes to a workspace", forked, "workspace")
   choice = { id = "future" }
   local completed = false
   session.apply(chat, model_group, { id = "new" }, function()

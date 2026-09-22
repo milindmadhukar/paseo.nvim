@@ -66,11 +66,34 @@ local function test_surfaces()
     "ui: and on the conversation, which is the other pane you read from",
     mapping(surface_chat.conversation, "5") ~= nil
   )
+  -- COUNTED IN THE SOURCE, because these two buffers are the suite's own and
+  -- never went through `make_buffers` -- `mapping` would answer nil for a key
+  -- that is bound on every real one.
   local chat_file = assert(io.open(vim.fs.joinpath(t.repo_root, "lua", "paseo", "ui", "chat.lua")))
   local chat_source = chat_file:read "*a"
   chat_file:close()
-  local _, fork_maps = chat_source:gsub('desc = "paseo: fork into a new workspace"', "")
+  local _, fork_maps = chat_source:gsub('desc = "paseo: fork this conversation"', "")
   eq("ui: f is mapped in both main chat buffers", fork_maps, 2)
+
+  -- AND THE FOOTER SAYS SO, which is the whole of how anyone finds it: `f`
+  -- was bound on both buffers and advertised on neither, so the only way to
+  -- discover a key that snapshots your entire conversation was to read this
+  -- file. The keycap is matched EXACTLY -- every chord on this row spells out
+  -- as `Ctrl + f`, so a substring test for `f` passes on a bar that never
+  -- mentions forking at all.
+  ---@return string[]
+  local function chrome_cells()
+    local out = {}
+    local marks =
+      vim.api.nvim_buf_get_extmarks(float.chrome_buf(), -1, 0, -1, { details = true })
+    for _, mark in ipairs(marks) do
+      for _, cell in ipairs(mark[4].virt_text or {}) do
+        out[#out + 1] = cell[1]
+      end
+    end
+    return out
+  end
+  truthy("ui: and the hint bar advertises it", vim.tbl_contains(chrome_cells(), " f "))
   -- Pressed where the cursor actually is.
   vim.api.nvim_feedkeys("5", "x", false)
   eq("ui: pressing 5 in the composer jumps to the fifth tab", float.tab(), float.TABS[5])

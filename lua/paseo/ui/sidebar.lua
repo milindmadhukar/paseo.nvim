@@ -139,9 +139,27 @@ end
 ---`rank` is what it is worth, lowest first: nothing outranks something waiting
 ---on you, then the mode you are in, then where you are, then which model, and
 ---the three readouts after that are the ones that go when the pane is narrow.
+---Whether the pull request listener has been attached. See `parts`.
+---
+---A TURN REDRAWS THIS ROW TEN TIMES A SECOND and an idle session does not
+---redraw it at all -- so without this the chip appears the moment you next
+---type and not the moment the answer arrives, which for a check that just
+---went red is the wrong moment by minutes.
+local pr_hooked = false
+
 ---@param chat table
 ---@return { rank: integer, cells: table[], shrink?: fun(): table[] }[]
 local function parts(chat)
+  if not pr_hooked then
+    pr_hooked = true
+    require("paseo.pr").on_change(function()
+      local live = require("paseo.ui.chat").current()
+      if live then
+        require("paseo.ui.chat").refresh(live)
+      end
+    end)
+  end
+
   local out = {}
 
   ---@param rank integer
@@ -165,6 +183,27 @@ local function parts(chat)
     if feature.type == "toggle" and chat.features and chat.features[feature.id] then
       part(7, { { feature.label or feature.id, "PaseoKey" } })
     end
+  end
+
+  -- WHAT GITHUB THINKS, beside what the agent is doing. An agent that tells
+  -- you it opened a pull request leaves you with a question this surface
+  -- could not answer -- did it pass, did anyone approve it, did it land --
+  -- and the answer was a browser away for a fact that fits in eight columns.
+  --
+  -- Ranked with the provider rather than with the readouts below it: which
+  -- model you are on is a setting you chose, while a red check is news. It
+  -- SHRINKS before it drops, down to the glyph and the number, which is still
+  -- enough to know something is wrong and which PR is wrong.
+  --
+  -- Nothing here is synchronous. `rollup` is a table read; `watch` is what
+  -- refreshes that table, throttled per repo -- see |paseo.pr|.
+  local pr = require "paseo.pr"
+  pr.watch(chat.root)
+  local rollup = pr.rollup(chat.root)
+  if rollup then
+    part(4, pr.cells(rollup), function()
+      return pr.short(rollup)
+    end)
   end
 
   local context = M.context(chat)
@@ -348,7 +387,17 @@ function M.refresh(chat)
   -- -- because the thing you are waiting on is the answer to what you typed
   -- in it, and a readout at the top of a pane you are not looking at is a
   -- readout you check by moving your eyes off the work.
+  --
+  -- `f` IS ON THIS ROW because it was on no row at all. Forking is bound on
+  -- both of this surface's buffers and was advertised nowhere, so the only
+  -- way to find it was to read the source -- and a key that takes a snapshot
+  -- of your whole conversation is not one to discover by pressing letters.
+  --
+  -- Ahead of `speak` and `close` deliberately: `widgets.hints` degrades off
+  -- the END, and `q` closes things in every plugin ever written while this
+  -- one is new.
   local right = widgets.hints({
+    { "f", "fork" },
     { "<C-f>", "screen" },
     { "<C-t>", "speak" },
     { "q", "close" },

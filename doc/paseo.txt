@@ -556,6 +556,30 @@ ui.answer                                                           table
     is a turn that never finishes. The card sits 10 above this value and the
     answer box 15.
 
+                                                         *paseo-config.ui.pr*
+ui.pr                                                               table
+
+    Pull request status, read from `gh`. See |paseo-pr|. >lua
+        pr = {
+          enabled = true, -- ask at all
+          ttl = 60        -- seconds an answer is reused
+        }
+<
+    The one readout in this plugin that is not the daemon's. Everything else
+    arrives pushed over the WebSocket at about a millisecond; this is a
+    subprocess and a round trip to github.com, so it is cached and the
+    surfaces read the cache.
+
+    `enabled = false` leaves the column out entirely rather than drawing an
+    empty one -- which is also what happens with no `gh` on `$PATH`, so this
+    is for a machine that HAS `gh` and an author who would rather it stayed
+    off the wire.
+
+    `ttl` is per repo AND per branch. Switching branch invalidates the answer
+    immediately, because the question is about the branch and not about the
+    directory; the branch itself is re-read every two seconds, which is a
+    local file read.
+
                                                  *paseo-config.paseo.password*
 paseo.password                                            string, unset
 
@@ -780,9 +804,10 @@ skills.method                                       `"link"`|`"copy"`, default `
 :Paseo switchmodel                                    *:Paseo-switchmodel*
 
     Choose a model for the live agent session. When it actually changes,
-    choose one of: fork into a new workspace, use it for this agent's future
-    turns, or cancel. A fork leaves the source agent untouched and recalculates
-    model-specific thinking and feature values safely.
+    choose one of: fork into a new session, fork into a new workspace, use it
+    for this agent's future turns, or cancel. Either fork leaves the source
+    agent untouched and recalculates model-specific thinking and feature
+    values safely. See |paseo-fork|.
 
 :Paseo agent-settings                              *:Paseo-agent-settings*
 :Paseo session                                            *:Paseo-session*
@@ -1220,6 +1245,55 @@ key for both is the shape of a mistake. Both confirm first.
 With the pointer, the same two are offered on the row and on the heading --
 under the pointer only, because a column of destructive glyphs down the side
 of a list is a column of mistakes.
+
+                                                                 *paseo-pr*
+Pull request status ~
+
+The half of a unit of work that is not on disk. `git status` says what you
+changed; this says whether what you already pushed passed, whether anyone
+reviewed it, and whether it landed -- which is the question you have when an
+agent tells you it opened a pull request and you are sitting in Neovim with no
+browser open.
+
+It is read from `gh pr view`, which already knows which pull request belongs
+to the branch you are on, which remote is GitHub, and how you are
+authenticated. Nothing here owns a token.
+
+It shows up in two places:
+
+    * on the composer's bar, beside the model and the working directory, so
+      it is on screen the whole time you are working. It shrinks to the glyph
+      and the number before it drops. See |paseo-chat-header|
+    * as a right-hand column on the Workspaces tab, so you can scan eleven
+      units of work for the one with a red check in it without opening any
+
+ONE WORD FOR N REPOS. A unit of work spanning six repos has six pull
+requests, and the question is still singular -- is this landable -- so the
+worst state wins: >
+
+    󰅙  #412 checks failing        a check has failed, errored or timed out
+    󰀦  #412 changes requested     a reviewer has asked for something
+    󰦖  #412 checks running        still going
+    󰓂  #412 draft                 a draft, and nothing is wrong with it
+    󰓂  #412 in review             waiting on a reviewer
+    󰗠  #412 approved
+    󰘭  #412 merged                it landed
+<
+Above one pull request there is no single number to give, so the row says
+`3 PRs` instead -- or `1/2 merged` while a unit of work is landing repo by
+repo, which is the status when it is true.
+
+A repo with no pull request, no GitHub remote, or no `gh` says NOTHING: the
+column is absent rather than drawing "none" on every row. Most branches most
+of the time have no pull request, and a column that is always there to say so
+has made every row wider in order to say nothing.
+
+Everything else in this plugin is pushed from the daemon at about a
+millisecond. This is a subprocess and a round trip, so it is cached per repo
+and per branch and refreshed at most once per |paseo-config.ui.pr| `ttl`. The
+branch underneath it is re-read every two seconds, which is local, so
+switching branch is noticed straight away. Turn the whole thing off with
+`ui.pr.enabled = false`.
 
                                                           *paseo-workspaces-keys*
 In the workspace picker (|:Paseo-workspaces|) ~
@@ -1714,10 +1788,40 @@ tabs in it offered to start a third. Preference order: ours on that model,
 ours on any model, anyone's on that model, anyone's -- and within each,
 whichever was touched most recently.
 
-The screen below is what you get when the answer really is nothing. It TAKES
-THE CURSOR when it opens, and keeps it: it is asking you a question, and the
-surface underneath re-fitting itself used to pull the cursor back into the
-composer and leave you clicking the modal to answer it.
+                                                              *paseo-start*
+WHAT, THEN WHERE, THEN THE SETTINGS. When the answer really is nothing, the
+first thing you are asked is what to start: >
+
+    new agent                       here, in this directory
+    new agent in a new workspace    a directory of its own
+    new terminal                    a shell here, in this directory
+    cancel
+<
+This used to be the model picker outright -- four questions about an agent,
+asked before anything had established that an agent was what you came for,
+and with a terminal reachable only from a tab of a surface you had to create
+an agent in order to see.
+
+`new agent` goes on to the settings screen below and creates the agent in
+this directory. `new agent in a new workspace` asks for a name, creates the
+appropriate assembled/worktree/local workspace (|paseo-workspace-kinds|),
+starts the agent in it and moves the editor there. `new terminal` opens the
+terminal picker (|paseo-terminals|) and points the Chat tab at the PTY; the
+directory still has no agent, so asking again later asks again.
+
+`a` on the Sessions tab has already answered the first question, so it asks
+only the second -- `here` or `a new workspace`. It could not ask it at all
+before, which meant every agent you started from that panel shared a checkout
+with the one already in it. Switching between them is the same panel: see
+|paseo-chat-lists|.
+
+An AUTOMATIC open never reaches any of this. |paseo-chat-follows| passes
+`create = false`, so a workspace with no agent says so rather than putting a
+modal in front of someone who only changed directory.
+
+The settings screen TAKES THE CURSOR when it opens, and keeps it: it is asking
+you a question, and the surface underneath re-fitting itself used to pull the
+cursor back into the composer and leave you clicking the modal to answer it.
 
 Starting an agent where there is none opens the SAME renderer over an agent session
 that does not exist yet -- two more cards, because provider and model are
@@ -1763,27 +1867,38 @@ to toggle.
                                                                *paseo-fork*
 Forking an agent session ~
 
-Press `f` in normal mode in either chat buffer. The daemon snapshots the
-COMPLETE conversation available at that moment; no cursor or message boundary
-is sent. After a workspace name and multiline first prompt are entered, the
-plugin creates the appropriate assembled/worktree/local workspace and creates
-the new agent with the first prompt and `chat_history` attachment in one
-request. Provider, model, permission mode, thinking level, and supported
-features come from the source.
+Press `f` in normal mode in either chat buffer. Both chat surfaces advertise
+it on their hint bar; it is not a key you are expected to find by pressing
+letters. The daemon snapshots the COMPLETE conversation available at that
+moment; no cursor or message boundary is sent.
 
-Nothing is created if either prompt is cancelled. A daemon without the
+WHERE THE FORK GOES is the first question, because it is the only one whose
+answer changes anything on disk: >
+
+    new session     here, beside this one
+    new workspace   a directory of its own
+    cancel
+<
+Both carry the same conversation. `new session` creates a second agent in the
+workspace the source agent is already in -- it starts instantly, and the two
+agents share the checkout, so they can edit the same files. `new workspace`
+asks for a name and creates the appropriate assembled/worktree/local
+workspace first, so the fork gets files of its own.
+
+Either way the new agent is created with the first prompt and the
+`chat_history` attachment in one request, and provider, model, permission
+mode, thinking level and supported features come from the source.
+
+Nothing is created if any prompt is cancelled. A daemon without the
 `agentForkContext` capability is rejected before creation. If agent creation
-fails after workspace creation, the empty workspace is retained and named in
-the error rather than being deleted automatically.
+fails after a workspace was created for it, that empty workspace is retained
+and named in the error rather than being deleted automatically.
 
-Changing a live model asks whether to `Fork into a new workspace`, `Use for
-this agent's future turns`, or `Cancel`. A model fork leaves the source
-untouched and keeps only settings supported by the target model, using target
-defaults for the rest.
-
-Same-workspace “Fork in a new tab” is intentionally deferred: Paseo tab and
-Neovim tab page are different concepts and that presentation is not yet
-decided.
+Changing a live model offers the same two forks by name -- `Fork into a new
+session`, `Fork into a new workspace` -- alongside `Use for this agent's
+future turns` and `Cancel`, and goes straight through rather than asking
+where a second time. A model fork leaves the source untouched and keeps only
+settings supported by the target model, using target defaults for the rest.
 
                                                     *paseo-cross-agent-prompt*
 Cross-agent communication ~
@@ -1823,6 +1938,7 @@ In the composer ~
               surface; see |paseo-chat-buffer|
     <C-c>     stop the turn -- normal or insert. See |paseo-chat-stop|
     <C-t>     speak instead of typing. See |paseo-dictation|
+    f         fork the complete conversation. See |paseo-fork|
     q         close the chat
 
 The box is the size of what is in it: |paseo-config.ui.sidebar| `composer` is
@@ -1836,7 +1952,7 @@ In the conversation ~
     1-6       jump to a tab (full screen; see ui.float.tab_keys)
     <M-1>..6  the same, without taking the count keys
     gp        reopen a pending permission prompt
-    f         fork the complete conversation into a new workspace
+    f         fork the complete conversation. See |paseo-fork|
     <C-f>     switch surface
     <C-c>     stop the turn. See |paseo-chat-stop|
     q         close the chat

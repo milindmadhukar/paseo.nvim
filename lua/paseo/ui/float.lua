@@ -994,6 +994,27 @@ local function footer_lines()
   if not state or state.mount ~= "buffer" then
     pairs_[#pairs_ + 1] = { "<C-f>", "sidebar" }
   end
+
+  -- `f` IS BOUND ON THE CONVERSATION AND THE COMPOSER, and nowhere else. On
+  -- the Settings tab it is the Features card's key, on the Sessions tab the
+  -- chrome has its own alphabet, and in a terminal it is a letter you are
+  -- typing -- so advertising it everywhere would name a key that does four
+  -- different things depending on where you are standing, which is exactly
+  -- what the rule above exists to prevent.
+  --
+  -- The Chat tab with an AGENT on it is the one place all three are true at
+  -- once: the buffers are on screen, `f` is theirs, and there is a
+  -- conversation to fork.
+  if
+    state
+    and state.tab == "Chat"
+    and not (state.session and state.session.kind == "terminal")
+    and state.chat
+    and state.chat.agent_id
+  then
+    pairs_[#pairs_ + 1] = { "f", "fork" }
+  end
+
   vim.list_extend(pairs_, {
     { "<C-c>", "stop" },
     { "<C-t>", "speak" },

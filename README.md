@@ -138,6 +138,11 @@ require("paseo").setup {
       backdrop = true,            -- dim the conversation behind it
       zindex = 190,               -- above everything; see below
     },
+
+    pr = {                        -- pull request status, from `gh`; see below
+      enabled = true,             -- false leaves the column out entirely
+      ttl = 60,                   -- seconds an answer is reused, per branch
+    },
   },
 
   voice = {                       -- dictation; see below
@@ -221,26 +226,44 @@ Claude reports Plan as a mode. Reasoning and creation-time feature choices come
 from the selected model.
 
 Changing a live agent's model asks what the change means. **Fork into a new
-workspace** leaves the source untouched and starts a branch on the selected
-model; **Use for this agent's future turns** changes the existing agent; Cancel
-does neither. Values that the target model does not support are replaced with
-that model's defaults.
+session** and **Fork into a new workspace** both leave the source untouched and
+start a branch on the selected model — they differ only in where it runs; **Use
+for this agent's future turns** changes the existing agent; Cancel does neither.
+Values that the target model does not support are replaced with that model's
+defaults.
 
-In either chat buffer, press `f` in normal mode to fork the complete
-conversation available at that moment into a new workspace. Paseo supplies a
-chat-history attachment; the plugin asks for the workspace name and the fork's
-first prompt, creates the appropriate local/worktree/assembled workspace, and
-creates the agent with that prompt and attachment atomically. A host without
-the `agentForkContext` capability is rejected before anything is created. If
-agent creation fails after workspace creation, the empty workspace is retained
-and named in the error.
+### Forking
+
+In either chat buffer, press `f` in normal mode — both surfaces advertise it on
+their hint bar — to fork the complete conversation available at that moment.
+The first question is where it goes, because it is the only one whose answer
+changes anything on disk:
+
+```
+Fork "otp rate limit" into…
+  new session     here, beside this one
+  new workspace   a directory of its own
+  cancel
+```
+
+Both carry the same conversation. A **new session** is a second agent in the
+workspace the source is already in: it starts immediately, and the two share
+the checkout, so they can edit the same files. A **new workspace** asks for a
+name and creates the appropriate local/worktree/assembled workspace first, so
+the fork gets files of its own.
+
+Either way Paseo supplies the chat-history attachment, the plugin asks for the
+fork's first prompt, and the agent is created with that prompt and attachment
+atomically. A host without the `agentForkContext` capability is rejected before
+anything is created. If agent creation fails after a workspace was created for
+it, that empty workspace is retained and named in the error.
 
 ### The header
 
 The header says what the session *is*:
 
 ```
-─ codex/gpt-5.6-sol · Auto-review · 󰧑 high · Fast · 58% left · ~/Code/paseo.nvim ──── ⠹ 28m 49s ─ ⏎ send ─
+─ codex/gpt-5.6-sol · Auto-review · 󰅙 #412 checks failing · 󰧑 high · 58% left · ~/Code/paseo.nvim ──── ⠹ 28m 49s ─ ⏎ send ─
 ```
 
 While a turn runs, a spinner and an elapsed count say what it is *doing*, on
@@ -296,9 +319,10 @@ ends on a hairline and the words sit on it, the way a title sits on a frame.
 sidebar cannot say all of it, and `truncate` cuts from the right, which is
 where the working directory is. So it gives up what it can spare, cheapest
 first — the feature toggles, then the thinking level, then the context figure,
-then the model. Shortening is tried only once there is nothing cheaper left to
-drop: `~/Code/paseo.nvim` beats `paseo.nvim`, and `paseo.nvim` beats no
-directory at all.
+then the model and the [pull request](#pull-request-status). Shortening is
+tried only once there is nothing cheaper left to drop: `~/Code/paseo.nvim`
+beats `paseo.nvim`, `#412` beats `#412 checks failing`, and `paseo.nvim` beats
+no directory at all.
 
 ```
 ─ Plan Mode · paseo.nvim   ⠹ 1m 12s ─ 󰌑 / Alt + 󰌑 send ─
@@ -308,6 +332,53 @@ Nothing outranks a pending permission, which is never dropped at any width.
 
 The row at the top of the sidebar is left saying which session you are looking
 at, with the surface's own keys on the end of it.
+
+### Pull request status
+
+`git status` says what you changed. This says whether what you already pushed
+passed, whether anyone reviewed it, and whether it landed — the question you
+have when an agent tells you it opened a PR and you are sitting in Neovim with
+no browser open.
+
+It comes from `gh pr view`, which already knows which pull request belongs to
+the branch you are on, which remote is GitHub, and how you are authenticated.
+Nothing here owns a token.
+
+It shows up in two places: on the composer's bar, beside the model and the
+working directory, so it is on screen the whole time you are working; and as a
+right-hand column on the `Workspaces` tab, so you can scan eleven units of work
+for the one with a red check in it without opening any of them.
+
+**One word for N repos.** A unit of work spanning six repos has six pull
+requests and the question is still singular — *is this landable* — so the worst
+state wins:
+
+```
+󰅙  #412 checks failing      a check has failed, errored or timed out
+󰀦  #412 changes requested   a reviewer has asked for something
+󰦖  #412 checks running      still going
+󰓂  #412 draft               a draft, and nothing is wrong with it
+󰓂  #412 in review           waiting on a reviewer
+󰗠  #412 approved
+󰘭  #412 merged              it landed
+```
+
+Above one pull request there is no single number to give, so the row says
+`3 PRs` — or `1/2 merged` while a unit of work is landing repo by repo, which
+*is* the status when it is true. Merged gets a glyph of its own rather than
+only a colour, because colour alone does not reach a reader who cannot tell
+green from amber.
+
+A repo with no pull request, no GitHub remote, or no `gh` says **nothing** —
+the column is absent rather than drawing `none` on every row. Most branches
+most of the time have no pull request, and a column that is always there to say
+so has made every row wider in order to say nothing.
+
+Everything else in this plugin is pushed from the daemon at about a
+millisecond. This is a subprocess and a round trip, so it is cached per repo
+*and per branch* and refreshed at most once a minute (`ui.pr.ttl`); the branch
+underneath it is re-read every two seconds, which is local, so switching branch
+is noticed straight away. `ui.pr.enabled = false` turns the whole thing off.
 
 ### The dashboard, on its float mount
 
@@ -644,11 +715,38 @@ the chat in a workspace with two live tabs in it offered to start a third. A
 session of this plugin's own is still preferred over the app's, and the model
 you are set to over one you are not; beyond that, whichever was touched last.
 
-The new-agent screen is what you get when the answer is genuinely nothing, and
-it **takes the cursor when it opens** — it is a question, and a question you
-have to click before you can answer is a worse question.
+**What, then where, then the settings.** When the answer is genuinely nothing,
+the first thing you are asked is what to start:
 
-Starting an agent where there is none opens **that same renderer** over a
+```
+Nothing is running in ~/Code/openfin. Start…
+  new agent                     here, in this directory
+  new agent in a new workspace  a directory of its own
+  new terminal                  a shell here, in this directory
+  cancel
+```
+
+This used to be the model picker outright — four questions about an agent,
+asked before anything had established that an agent is what you came for, and
+with a terminal reachable only from a tab of a surface you had to create an
+agent in order to see.
+
+**new agent in a new workspace** asks for a name, creates the appropriate
+local/worktree/assembled workspace, starts the agent in it and moves the editor
+there. **new terminal** opens the [terminal picker](#terminals) and points the
+Chat tab at the PTY. `a` on the `Sessions` tab has already answered the first
+question and asks only the second — *here* or *a new workspace* — which it
+could not ask at all before, so every agent started from that panel shared a
+checkout with the one already in it.
+
+An *automatic* open never reaches any of this: following a workspace switch
+passes `create = false`, so a workspace with no agent says so rather than
+putting a modal in front of someone who only changed directory.
+
+The new-agent screen **takes the cursor when it opens** — it is a question, and
+a question you have to click before you can answer is a worse question.
+
+Starting an agent where there is none opens **that same renderer** over an
 agent session that does not exist yet. Two more cards, because provider and model are
 settings here and are not settings on a running agent:
 
@@ -1728,6 +1826,9 @@ lua/paseo/          the plugin
     panels/         one per dashboard tab
   workspace/        assembling N worktrees into one unit of work
   pickers/          workspaces, sessions
+  fork.lua          a second agent that starts where this one has got to
+  start.lua         what to do in a directory with nothing running in it
+  pr.lua            what GitHub thinks of the branch each repo is on
   plugin.lua        where this plugin's own files are, asked once
   skills.lua        installing the bundled skills where an agent can see them
 sidecar/            paseo-bridge.ts entry point, bridge-*.ts modules, SDK deps

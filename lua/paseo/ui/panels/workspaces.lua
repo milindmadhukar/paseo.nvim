@@ -41,6 +41,9 @@ local KEYS = { new = "n", picker = "o", archive = "d", forget = "x" }
 local cache
 local loading = false
 
+---Whether the pull request listener has been attached. See `M.load`.
+local pr_hooked = false
+
 ---Ask the daemon, then redraw.
 ---@param _chat? table  Unused: the list is the daemon's, not a chat's.
 ---@param done? fun()
@@ -52,6 +55,15 @@ function M.load(_chat, done)
   -- The status column is push-fed; without a subscription every row reads "…"
   -- forever. Idempotent, so calling it on every panel open is free.
   agents.watch()
+  -- And the pull request column is PULLED, which is the difference -- see
+  -- |paseo.pr|. One listener, once, so an answer arriving after the list has
+  -- been drawn redraws it instead of waiting for the next thing to happen.
+  if not pr_hooked then
+    pr_hooked = true
+    require("paseo.pr").on_change(function()
+      require("paseo.ui.float").rebuild()
+    end)
+  end
   require("paseo.workspaces").list(function(result, err)
     loading = false
     cache = { list = result, err = err }
@@ -123,6 +135,33 @@ local function name_and_badge(ws, mine, w_name, w_shape)
   vim.list_extend(cells, render.pad({ { shape(ws), "PaseoBadge" } }, w_shape, "PaseoBadge"))
   cells[#cells + 1] = { "  " .. agents.summary(ws.directory or ""), "PaseoDim" }
   return cells
+end
+
+---What GitHub says about this workspace's branches, as a right-hand cell.
+---
+---ASKED HERE and not in `M.load`: the daemon's workspace list is one call for
+---every row, while this is a subprocess per REPO, so it is started from the
+---rows that are actually being drawn and throttled per repo underneath -- see
+---|paseo.pr|. A workspace whose directory has gone is skipped rather than
+---probed, because `repos.list` on a path that is not there walks to the root.
+---@param ws table
+---@return table[]
+local function pr_cells(ws)
+  local dir = ws.directory
+  if not dir or dir == "" or vim.fn.isdirectory(dir) ~= 1 then
+    return {}
+  end
+  local pr = require "paseo.pr"
+  pr.watch(dir)
+  local rollup = pr.rollup(dir)
+  if not rollup then
+    return {}
+  end
+  -- The SHORT form. This row already carries a status glyph, a name, a badge
+  -- and a sentence about its agents; spelling out "changes requested" here
+  -- would be the longest thing on it, and the glyph plus `#412` is what you
+  -- scan a column of eleven for.
+  return pr.short(rollup)
 end
 
 ---@param ws table
@@ -239,6 +278,14 @@ local function sections(chat)
       -- The gutter -- the indent and the "you are in this one" bar -- belongs
       -- to |paseo.ui.list|, which draws it outside the focus band.
       cells = name_and_badge(ws, mine, w_name, w_shape),
+      -- WHETHER IT LANDED, right-aligned. This is the column that makes the
+      -- list a dashboard rather than a directory listing for the half of the
+      -- work that is not on disk: which of eleven units of work are merged,
+      -- which are waiting on a review, and which have a red check in them --
+      -- without opening any of them. Absent, and therefore costing no width
+      -- at all, for the workspaces with no pull request, which is most of
+      -- them most of the time.
+      right = pr_cells(ws),
       activate = function()
         if not ws.directory or ws.directory == "" then
           return vim.notify("paseo: that workspace has no directory", vim.log.levels.WARN)

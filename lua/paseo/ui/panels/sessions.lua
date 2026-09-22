@@ -84,7 +84,14 @@ local function here(chat)
   return require("paseo.ui.float").session() or { kind = "agent", id = chat.agent_id }
 end
 
----Start an agent in this workspace, through |paseo-new-session|.
+---Start an agent, here or in a workspace of its own.
+---
+---ASKS WHERE, which it never used to. `a` on this panel could only ever put
+---an agent in the workspace you were already standing in -- which is the
+---right default and the wrong only option, because two agents in one
+---directory edit the same files, and "give this one a worktree of its own"
+---was reachable only from the Workspaces tab by creating the workspace first
+---and then finding your way back. See |paseo.start|.
 ---@param chat table
 local function new_agent(chat)
   -- Through the workspace, because `agent.create` is addressed by workspace
@@ -94,16 +101,10 @@ local function new_agent(chat)
       if not ws then
         return vim.notify("paseo: " .. tostring(err), vim.log.levels.WARN)
       end
-      require("paseo.workspaces").new_session(ws, {}, function(id, create_err)
-        if create_err and create_err ~= "cancelled" then
-          return vim.notify("paseo: " .. create_err, vim.log.levels.ERROR)
+      require("paseo.start").agent({ root = chat.root, workspace = ws }, function(_, start_err)
+        if start_err then
+          vim.notify("paseo: " .. start_err, vim.log.levels.ERROR)
         end
-        if not id then
-          return
-        end
-        vim.schedule(function()
-          require("paseo.ui.chat").open { root = ws.directory, agent_id = id }
-        end)
       end)
     end)
   end)
@@ -251,7 +252,17 @@ local function sections(chat)
       -- it are sessions. A heading repeating the tab's name over half of what
       -- the tab holds is the row that made the old split read as a lie.
       title = "Agents in " .. vim.fn.fnamemodify(chat.root, ":~"),
-      empty = terminals.ready(chat.root) and "nothing running here yet" or "loading…",
+      -- NAMES THE TWO KEYS. This is the one row on the surface someone with
+      -- an empty workspace will be looking at, and "nothing running here yet"
+      -- on its own is a dead end -- the hint bar carries `a` and `c` but it
+      -- is at the other end of the screen from the sentence saying there is
+      -- nothing here.
+      empty = terminals.ready(chat.root)
+          and ("nothing running here yet — %s for an agent, %s for a terminal"):format(
+            KEYS.agent,
+            KEYS.terminal
+          )
+        or "loading…",
       rows = agent_rows,
     },
     {
