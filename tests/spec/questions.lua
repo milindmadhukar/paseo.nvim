@@ -228,11 +228,14 @@ local function test_questions()
   }
   local folded = timeline.card(answered, { width = 60 })
   truthy("questions: an answered question folds", folded.collapsible, "not collapsible")
-  eq("questions: and folds to one line", #folded.lines, 1)
+  -- Two, not one: every card leads with the blank line that separates it from
+  -- whatever is above it -- `timeline.card` owns that gap rather than the two
+  -- arms that used to hand-roll it. The folded question is still ONE line.
+  eq("questions: and folds to one line", #folded.lines, 2)
   truthy(
     "questions: with the answer on it",
-    render.concat(folded.lines[1]):find("Rebase", 1, true) ~= nil,
-    render.concat(folded.lines[1])
+    render.concat(folded.lines[2]):find("Rebase", 1, true) ~= nil,
+    render.concat(folded.lines[2])
   )
 
   -- Still waiting is the one state that must NOT fold: the options are the ask.
