@@ -150,9 +150,9 @@ local function test_voice()
   end
   truthy("voice: with no gap in the numbering", contiguous, vim.inspect(all))
 
-  -- THE METER IS RAW RMS, deliberately unscaled -- see `paseo.voice`. Silence
-  -- is silence on any microphone; how loud a quiet ROOM reads is a property
-  -- of the microphone, which is why the scaling lives with the history in
+  -- THE METER IS UNSCALED RMS ABOUT THE MEAN -- see `paseo.voice`. Silence is
+  -- silence on any microphone; how loud a quiet ROOM reads is a property of
+  -- the microphone, which is why the scaling lives with the history in
   -- |paseo.ui.composer| and not here.
   local silence = voice._level_of(("\0\0"):rep(800))
   eq("voice: digital silence reads as nothing", silence, 0)
@@ -161,6 +161,150 @@ local function test_voice()
   truthy("voice: and a loud signal reads as loud", loud > 0.2, loud)
   truthy("voice: never over one", loud <= 1, loud)
   eq("voice: an empty read is not an error", voice._level_of "", 0)
+
+  -- OPENING THE MICROPHONE IS A STATE, not an instant. Two round trips stand
+  -- between the key and the first sample -- the sidecar, then the daemon
+  -- accepting the stream, which on a cold one is where the speech models load
+  -- -- and none of it used to be visible: the key looked dead, the obvious
+  -- response was to press it again, and what you typed in the meantime was
+  -- still in the box when the transcript landed on top of it.
+  --
+  -- Held open here rather than timed, so the assertions are about the sequence
+  -- and not about how fast this machine is.
+  local release
+  bridge.request = function(op, args, callback)
+    sent[#sent + 1] = { op = op, args = args }
+    if op == "dictation.start" then
+      release = function(err)
+        callback(err)
+      end
+    elseif op == "dictation.finish" and callback then
+      callback(nil, { text = "hello there" })
+    elseif callback then
+      callback(nil, {})
+    end
+  end
+
+  config.setup { voice = { recorder = { "sleep", "60" } } }
+  sent = {}
+  local states = {}
+  voice.start {
+    on_state = function(state)
+      states[#states + 1] = state
+    end,
+  }
+  eq("voice: the wait is announced before anything can block", states, { "starting" })
+  truthy("voice: and the module knows it is starting", voice.starting())
+  eq("voice: which is not yet recording", voice.recording(), false)
+  truthy("voice: though it is busy either way", voice.busy())
+
+  release(nil)
+  vim.wait(1000, function()
+    return voice.recording()
+  end)
+  eq("voice: and listening is only said once there is a microphone", states, {
+    "starting",
+    "listening",
+  })
+  eq("voice: which ends the wait", voice.starting(), false)
+  voice.cancel()
+
+  -- A START THAT FAILS TAKES THE WAIT DOWN WITH IT. The composer shuts the box
+  -- on `starting` and reopens it on anything else, so a failure that forgot to
+  -- say so would leave you with a box that will not take keys and nothing on
+  -- screen explaining why.
+  sent, states = {}, {}
+  local failure
+  voice.start({
+    on_state = function(state)
+      states[#states + 1] = state
+    end,
+  }, function(err)
+    failure = err
+  end)
+  release "speech models are not downloaded"
+  vim.wait(1000, function()
+    return failure ~= nil
+  end)
+  eq(
+    "voice: a refused stream is reported in the daemon's own words",
+    failure,
+    "speech models are not downloaded"
+  )
+  eq("voice: and the wait comes down with it", states, { "starting", false })
+  eq("voice: leaving nothing busy", voice.busy(), false)
+
+  -- PRESSING THE KEY AGAIN WHILE IT OPENS IS A CHANGE OF MIND. It used to be a
+  -- second START: the guard refused it as "already recording" over a bar that
+  -- did not say anything was recording, so the key you pressed to stop waiting
+  -- put an error on the screen instead.
+  sent, states = {}, {}
+  voice.toggle {
+    insert = function() end,
+    on_state = function(state)
+      states[#states + 1] = state
+    end,
+  }
+  truthy("voice: a press opens the microphone", voice.starting())
+  voice.toggle {
+    insert = function() end,
+    on_state = function(state)
+      states[#states + 1] = state
+    end,
+  }
+  eq("voice: a second press while it opens gives up on it", voice.busy(), false)
+  eq("voice: and says so", states, { "starting", false })
+  eq("voice: telling the daemon to forget the stream", sent[#sent].op, "dictation.cancel")
+  -- The reply the daemon was always going to send, arriving after nobody is
+  -- listening for it any more. It must not start a microphone.
+  release(nil)
+  vim.wait(200, function()
+    return voice.recording()
+  end)
+  eq("voice: and a reply that lands afterwards starts nothing", voice.recording(), false)
+
+  -- A BIAS IS NOT A SOUND, and this is the bug that made the waveform a flat
+  -- line rather than a meter. A microphone is not obliged to centre its
+  -- samples on zero -- the default source on the machine this was fixed on
+  -- sits at a constant +5642, a sixth of full scale -- and RMS taken about
+  -- zero reports that bias instead of the sound riding on it. The room read
+  -- 0.1693 to 0.1776 across eleven seconds, four tenths of a decibel of swing,
+  -- against a gate of several; and speech could not rescue it either, because
+  -- energy adds in quadrature and an ordinary voice over that bias moves the
+  -- total by a third of a decibel. Measured about the mean, the same silence
+  -- swings ten and a half.
+  ---@param dc integer  Sample value everything is offset by.
+  ---@param amplitude integer  Zero for a dead-steady line.
+  ---@return string
+  local function biased(dc, amplitude)
+    local out = {}
+    for i = 1, 800 do
+      local sample = dc + (i % 2 == 0 and amplitude or -amplitude)
+      if sample < 0 then
+        sample = sample + 65536
+      end
+      out[#out + 1] = string.char(sample % 256, math.floor(sample / 256) % 256)
+    end
+    return table.concat(out)
+  end
+
+  eq(
+    "voice: a steady bias with no sound on it reads as nothing",
+    voice._level_of(biased(5642, 0)),
+    0
+  )
+  local biased_quiet = voice._level_of(biased(5642, 256))
+  local centred_quiet = voice._level_of(biased(0, 256))
+  truthy(
+    "voice: and the same quiet sound reads the same whether it is biased or not",
+    math.abs(biased_quiet - centred_quiet) < 1e-9,
+    ("%s vs %s"):format(biased_quiet, centred_quiet)
+  )
+  truthy(
+    "voice: which a meter about zero could not say",
+    voice._level_of(biased(5642, 0)) < biased_quiet,
+    biased_quiet
+  )
 
   bridge.ensure, bridge.request = old_ensure, old_request
   config.setup {}

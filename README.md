@@ -1087,7 +1087,26 @@ what you said in at the cursor; `<Esc>` throws the recording away. One key for
 both halves, and not hold-to-talk, because Neovim delivers a keypress and never
 a key *release* — "while held" cannot be expressed.
 
-**The box becomes a meter.** While the microphone is open the bar over the
+**Opening it is a state of its own.** Two round trips stand between the key and
+the first sample: the sidecar has to be up, and then the daemon has to accept
+the stream — which on a cold daemon is where the speech models load, and is
+seconds rather than milliseconds. So there is a spinner, a count, and a way
+out, and *the box will not take keys until the microphone is open*:
+
+```
+ ⠙ opening the microphone ───────────────────────────────  0:03   󱊷  cancel
+ what does this function do   ⠙ typing is off until the microphone opens
+```
+
+Typing is off for the length of it because anything typed in there is racing
+the transcript that is about to land on top of it. The composer leaves insert
+mode rather than merely going read-only — a buffer you are still inserting into
+with `'modifiable'` off rejects every keystroke with its own `E21` — and it
+comes *back* to insert mode, at the column you left, the moment the microphone
+opens. A second `<C-t>` during the wait is a change of mind: it gives up on the
+start rather than trying to open a second microphone.
+
+**Then the box becomes a meter.** While the microphone is open the bar over the
 composer is the recorder — a red dot, a level, how long you have been talking,
 and the key that stops it — and a scrolling waveform is drawn *inside* the box,
 as virtual text, so your draft is untouched:
@@ -1102,23 +1121,42 @@ problem with dictation you cannot see: a word missed by a muted microphone and
 a word missed by a thinking daemon look identical if the only feedback is text
 that has not arrived yet.
 
-**The meter is a ratio against the room, in decibels.** Raw loudness means
-nothing on its own — the laptop this was written on reads 0.16 RMS with nobody
-in the room, while a headset a foot away reads a hundredth of that — so the
-floor is the quietest reading of the last twenty seconds and the wave is how
-far over it you are, with four times the room as full scale. A *difference*
-would not do: on a microphone whose room reads 0.16, genuinely doubling the
-input moves the number by 0.16 and the same doubling on a quiet headset moves
-it by 0.002, so a meter built on subtraction is calibrated for exactly one
-microphone. As a ratio both are the same event — which is what your ear says
-too.
+**The level is measured about the signal's own mean**, and that one word is the
+difference between a meter and a flat line. A microphone is not obliged to hand
+you a waveform centred on zero: the default source on the machine this was
+fixed on sits at a constant +5642, a sixth of full scale, with the sound riding
+on top of it. RMS taken about *zero* therefore reports that bias and not the
+sound — an empty room read 0.1693 to 0.1776 across eleven seconds, four tenths
+of a decibel of swing — and speech cannot rescue it either, because energy adds
+in quadrature and an ordinary voice over that bias moves the total by a third
+of a decibel. Nothing downstream can recover from that. The same eleven seconds
+measured about the mean swing 10.5 dB.
 
-Two versions of this were wrong before it worked, and both failed the same
-way, by drawing a flat line at a working microphone: one crept its floor
-upwards at a fixed rate, so a few seconds into a sentence the floor had climbed
-over the voice and the wave died mid-word; the next gated on a fraction of that
-floor, which in a loud room is a bar an ordinary voice cannot clear. A twenty
-second window and a decibel ratio have neither failure mode.
+**And nothing in the meter is calibrated to a microphone.** A headset an inch
+from your mouth and a laptop across the desk are fifty times apart on the same
+sentence, so every number the scale needs is measured from the signal instead,
+and the only constants are ratios and bounds:
+
+| | what it is | why not a constant |
+|---|---|---|
+| floor | the 5th percentile of the last twenty seconds | the room, whatever the room is |
+| gate | the room's own spread over that floor, clamped | a study swings 10 dB on its own; a clean line, 2 |
+| top | the loudest thing heard in the last five seconds | how far speech sits over a room is a fact about the room, the gain and how far away you are sitting |
+
+The adaptive **top** is what keeps a loud input off the ceiling and a quiet one
+off the floor: the bar is full when you are as loud as you have been, which is
+the question it is actually being asked. Checked against 82 combinations of
+gain (over a 120:1 span), DC bias and noise character, plus real recordings
+rescaled from ×0.05 to ×4 — silence flat on every one, speech proportional on
+every one.
+
+Three versions of this were wrong before it worked, and the first two failed
+the same way, by drawing a flat line at a working microphone: one crept its
+floor upwards at a fixed rate, so a few seconds into a sentence the floor had
+climbed over the voice and the wave died mid-word; the next gated on a fraction
+of that floor, which in a loud room is a bar an ordinary voice cannot clear.
+Both were built on a number that was measuring a DC offset, which is why
+neither could be fixed by tuning it.
 
 Neovim cannot record audio, so this shells out to the first of `arecord`,
 `rec` (sox) or `ffmpeg` that is installed. `:checkhealth paseo` says which one

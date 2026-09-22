@@ -217,7 +217,11 @@ function M.header(chat, opts)
   -- dashboard puts this row on every tab, and the box is only on one of them.
   if chat.dictating and not opts.bar then
     lead[#lead + 1] = { icons.ui.mic .. " ", "PaseoToolFail" }
-    lead[#lead + 1] = { "listening · ", "PaseoDim" }
+    -- Opening the microphone is a state of its own and is named as one. The
+    -- word `listening` over a stream the daemon has not accepted yet is the
+    -- indicator lying, which is the thing this row is for.
+    local said = chat.dictating == "starting" and "opening · " or "listening · "
+    lead[#lead + 1] = { said, "PaseoDim" }
   end
 
   local chosen = parts(chat)
