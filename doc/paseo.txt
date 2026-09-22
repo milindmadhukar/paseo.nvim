@@ -1843,8 +1843,27 @@ what you said in at the cursor; `<Esc>` throws the recording away.
 One key for both halves, and not a hold-to-talk one, because Neovim delivers a
 keypress and never a key RELEASE -- "while held" cannot be expressed.
 
+                                                      *paseo-dictation-opening*
+OPENING IT IS A STATE OF ITS OWN. Two round trips stand between the key and the
+first sample: the sidecar has to be up, and then the daemon has to accept the
+stream -- which on a cold daemon is where the speech models load, and is
+seconds rather than milliseconds. So there is a spinner, a count and a way out,
+and THE BOX WILL NOT TAKE KEYS until the microphone is open: >
+
+     ⠙ opening the microphone ──────────────────────────  0:03   󱊷  cancel
+     what does this function do   ⠙ typing is off until the microphone opens
+<
+Typing is off for the length of it because anything typed there is racing the
+transcript about to land on top of it. The composer LEAVES INSERT MODE rather
+than merely going read-only -- a buffer you are still inserting into with
+'modifiable' off rejects every keystroke with its own |E21| -- and it comes
+back to insert mode, at the column you left, the moment the microphone opens.
+
+A second `<C-t>` during the wait is a change of mind: it gives up on the start
+rather than opening a second microphone. `<Esc>` does the same.
+
                                                         *paseo-dictation-meter*
-THE BOX BECOMES A METER. While the microphone is open, the bar over the
+THEN THE BOX BECOMES A METER. While the microphone is open, the bar over the
 composer is the recorder and a scrolling waveform is drawn INSIDE the box: >
 
      󰍬 listening  ▁▁▂▃▅▆▇▅▃▂▁▁▁▁▁▁  0:04   Ctrl + t  stop    󱊷  discard
@@ -1857,22 +1876,46 @@ is the whole problem with dictation you cannot see -- a word missed by a muted
 microphone and a word missed by a thinking daemon look identical when the only
 feedback is text that has not arrived yet.
 
-IT IS A RATIO AGAINST THE ROOM, IN DECIBELS. Raw loudness means nothing on its
-own: the laptop this was written on reads 0.16 RMS with nobody in the room,
-while a headset a foot away reads a hundredth of that. So the floor is the
-quietest reading of the last twenty seconds, and the wave is how far over it
-you are -- four times the room being full scale.
+THE LEVEL IS MEASURED ABOUT THE SIGNAL'S OWN MEAN, and that one word is the
+difference between a meter and a flat line. A microphone is not obliged to hand
+you a waveform centred on zero: the default source on the machine this was
+fixed on sits at a constant +5642, a sixth of full scale, with the sound riding
+on top of it. RMS taken about ZERO therefore reports that bias and not the
+sound -- an empty room read 0.1693 to 0.1776 across eleven seconds, four tenths
+of a decibel of swing, against a gate of several -- and speech cannot rescue it
+either, because energy adds in quadrature and an ordinary voice over that bias
+moves the total by a third of a decibel. The same eleven seconds measured about
+the mean swing 10.5 dB.
 
-A DIFFERENCE WOULD NOT DO, and this is the part that failed twice. On a
-microphone whose room reads 0.16, a sound that genuinely doubles the input
-moves the number by 0.16; the same doubling on a quiet headset moves it by
-0.002. Subtracting, and then gating on a fraction of the floor, is a test a
-loud room can never pass -- and an earlier version that crept the floor upward
-at a fixed rate instead had the floor climb over the voice a few seconds into
-a sentence, so the wave died mid-word. Both drew a flat line at a working
-microphone, which is the one answer it must never give. A ratio has neither
-failure mode: it is the same event on every microphone, which is what your ear
-says too.
+NOTHING IN THE SCALE IS CALIBRATED TO A MICROPHONE. A headset an inch from your
+mouth and a laptop across the desk are fifty times apart on the same sentence,
+so every number the scale needs is measured from the signal, and the only
+constants are ratios and bounds: >
+
+    floor    the 5th percentile of the last twenty seconds -- the room,
+             whatever the room is
+    gate     the room's own spread over that floor, clamped -- a study
+             swings 10 dB on its own, while a clean line swings 2
+    top      the loudest thing heard in the last five seconds
+<
+The adaptive TOP is what keeps a loud input off the ceiling and a quiet one off
+the floor: how far speech sits over a room floor is a fact about the room, the
+gain and how far away you are sitting, so any fixed full scale is reached on
+every syllable by one microphone and never by the next. Following the loudest
+recent reading makes the bar full when you are as loud as you have been, which
+is the question it is actually being asked.
+
+Checked against 82 combinations of gain, DC bias and noise character, and
+against real recordings rescaled from x0.05 to x4: silence flat on every one,
+speech proportional on every one.
+
+THREE VERSIONS OF THIS WERE WRONG, and the first two failed the same way, by
+drawing a flat line at a working microphone -- which is the one answer it must
+never give. One crept its floor upward at a fixed rate, so the floor climbed
+over the voice a few seconds into a sentence and the wave died mid-word; the
+next gated on a fraction of that floor, which in a loud room is a bar an
+ordinary voice cannot clear. Both were built on a number that was measuring a
+DC offset, which is why neither could be fixed by tuning it.
 
 A RECORDER THAT DIES SAYS SO, with whatever it printed on the way out -- a
 microphone that is busy, or refused. That used to be silent: the indicator

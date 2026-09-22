@@ -35,7 +35,9 @@ local M = {}
 ---@field resize_group integer|nil    Augroup holding the debounced resize watch.
 ---@field resize_pending boolean|nil  A redraw is already scheduled.
 ---@field last_turn_usage table|nil   Tokens and cost from the last completed turn.
----@field dictating boolean|nil      The microphone is open. Drawn on the header.
+---@field dictating paseo.VoiceState|nil  `"starting"` while the microphone is
+---              being opened, `"listening"` once it is. Drawn on the header,
+---              and `"starting"` also shuts the box -- see |paseo.ui.composer|.
 ---@field config_snapshot table|nil  Last `agent.config`; the Session panel draws it.
 ---@field available_modes table[]|nil  `{id, label}`, per provider. Ids to labels.
 ---@field answer_state table<string, table>|nil  Half-answered question sets, by
@@ -414,13 +416,18 @@ end
 ---In insert mode `<Esc>` is how you leave insert, and taking that over to add
 ---a discard key would be the worst trade in this file; in normal mode it does
 ---nothing, which is exactly the key a discard wants.
+---
+---Bound while the microphone is still OPENING too, which is the state that can
+---last seconds and is therefore the one you are most likely to want out of.
+---The composer leaves insert mode for the length of that wait -- see
+---|paseo.ui.composer| -- so the normal-mode binding is the one in force.
 ---@param chat paseo.Chat
----@param recording boolean
-local function dictation_keys(chat, recording)
+---@param state paseo.VoiceState  Truthy for either half of a recording.
+local function dictation_keys(chat, state)
   if not (chat.composer and vim.api.nvim_buf_is_valid(chat.composer)) then
     return
   end
-  if recording then
+  if state then
     vim.keymap.set("n", "<Esc>", function()
       require("paseo.voice").cancel()
     end, { buffer = chat.composer, nowait = true, desc = "paseo: discard the recording" })
@@ -701,9 +708,9 @@ local function make_buffers(chat)
             -- The visible half of dictation is |paseo.ui.composer|'s: the
             -- meter over the box, the clock, and taking the indicator down
             -- again however the recording ends.
-            on_state = function(recording)
-              require("paseo.ui.composer").dictating(chat, recording)
-              dictation_keys(chat, recording)
+            on_state = function(state)
+              require("paseo.ui.composer").dictating(chat, state)
+              dictation_keys(chat, state)
             end,
             on_level = function(level)
               require("paseo.ui.composer").push_level(chat, level)

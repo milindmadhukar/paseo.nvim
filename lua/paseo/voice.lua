@@ -129,10 +129,27 @@ function M.recorder()
     )
 end
 
+---@alias paseo.VoiceState "starting"|"listening"|false
+
 ---@type { id: string, proc: vim.SystemObj, seq: integer, held: string, format: string,
----        on_state: fun(recording: boolean)|nil, on_level: fun(level: number)|nil,
+---        on_state: fun(state: paseo.VoiceState)|nil, on_level: fun(level: number)|nil,
 ---        finishing: boolean, stderr: string }|nil
 local live
+
+---Opening the microphone, which is NOT instant and is not always quick.
+---
+---Two round trips stand between the key and the first sample: the sidecar has
+---to be running and connected, and then the daemon has to accept the stream --
+---which on a cold daemon is where the speech models are loaded, and is seconds
+---rather than milliseconds. None of that used to be visible. The key looked
+---dead, the obvious response was to press it again, and anything typed in the
+---meantime was still in the box when the transcript landed on top of it.
+---
+---So it is a state of its own, with a spinner of its own on the bar and the
+---composer locked while it lasts -- see |paseo.ui.composer| -- and a second
+---press of the key is a change of mind rather than a second microphone.
+---@type { id: string, cancelled: boolean, on_state: fun(state: paseo.VoiceState)|nil }|nil
+local starting
 
 ---How loud the last few hundred samples were, as 0..1.
 ---
@@ -140,35 +157,49 @@ local live
 ---UI because this is the only place the audio exists -- the bytes are handed
 ---to `vim.base64.encode` and forgotten a line later.
 ---
----Decimated: `step` takes every eighth sample, which at 16kHz is still 2kHz of
----envelope and is plenty for a bar that moves twenty times a second. Reading
----all 800 samples of every chunk would be 16,000 `string.byte` calls a second
----for a readout whose whole job is to twitch.
+---MEASURED ABOUT THE SIGNAL'S OWN MEAN, and that is the whole of why the
+---meter used to be a flat line. A microphone is not obliged to hand you a
+---waveform centred on zero: the default source on the machine this was fixed
+---on sits at a constant +5642, a sixth of full scale, and the AC signal rides
+---on top of that. Plain RMS about zero therefore reports the BIAS and not the
+---sound -- 0.1693 to 0.1776 across eleven seconds of an empty room, four
+---tenths of a decibel of swing, on a meter whose gate is two and a half --
+---and speech cannot rescue it either, because energy adds in quadrature:
+---an ordinary voice at 0.05 over a 0.172 bias moves the total by 0.35 dB.
+---The same eleven seconds measured about the mean swing 10.5 dB. So the mean
+---of each chunk comes out first -- the meter is AC-coupled, in other words --
+---and what is left is the sound.
+---
+---EVERY SAMPLE, not one in eight. Decimating is what the first version did,
+---on the grounds that 16,000 `string.byte` calls a second is a lot for a
+---readout whose whole job is to twitch. It is not: measured, the whole chunk
+---costs 1.7us against 0.2us, which at twenty chunks a second is three
+---hundredths of one per cent of a core either way. And it is not free --
+---sampling every eighth one is sampling at 1kHz, so anything at a multiple of
+---1kHz aliases to a constant and reads as silence. That band is the middle of
+---a human voice.
 ---
 ---RMS rather than peak. A peak meter is pinned by one click of the desk and
 ---reads the same for a whisper as for a sentence; RMS is the one that tracks
 ---your voice.
 ---
----RAW, and deliberately not scaled to anything. There is no useful constant to
----scale it BY: this laptop's microphone sits at 91% gain and reads 0.17 in a
----silent room, which any fixed gain that makes a quiet mic visible turns into
----a meter pinned at full before anyone has said a word -- measured, on the
----machine this was written on. What a bar has to show is the difference
----between the room and your voice, and only something watching the last few
----seconds can know where that line is. So the scaling lives with the history,
----in |paseo.ui.composer|, and this reports what it heard.
+---UNSCALED past that. There is no useful constant to scale it BY -- a headset
+---an inch from your mouth and a laptop across the desk differ by a factor of
+---fifty -- so what a bar has to show is the difference between the room and
+---your voice, and only something watching the last few seconds can know where
+---that line is. The scaling lives with the history, in |paseo.ui.composer|,
+---and this reports what it heard.
 ---@param pcm string  Raw little-endian signed 16-bit mono.
----@return number  RMS, 0..1. A quiet room is whatever this microphone's quiet
----        room is; it is not necessarily near zero.
+---@return number  RMS about the mean, 0..1. Silence is near zero on any
+---        microphone, however far from zero its samples sit.
 local function level_of(pcm)
   local n = #pcm
   if n < 2 then
     return 0
   end
 
-  local step = 16 -- every eighth sample: two bytes each
-  local sum, count = 0, 0
-  for i = 1, n - 1, step do
+  local sum, squares, count = 0, 0, 0
+  for i = 1, n - 1, 2 do
     local lo, hi = pcm:byte(i, i + 1)
     if not hi then
       break
@@ -178,14 +209,21 @@ local function level_of(pcm)
       sample = sample - 65536
     end
     local scaled = sample / 32768
-    sum = sum + scaled * scaled
+    sum = sum + scaled
+    squares = squares + scaled * scaled
     count = count + 1
   end
   if count == 0 then
     return 0
   end
 
-  return math.min(1, math.sqrt(sum / count))
+  -- Variance as the mean of the squares less the square of the mean: the DC
+  -- component is exactly the mean, so subtracting it here is subtracting the
+  -- bias, in one pass rather than two. Clamped at zero because floating point
+  -- can land a hair below it on a chunk that really is constant.
+  local mean = sum / count
+  local variance = math.max(0, squares / count - mean * mean)
+  return math.min(1, math.sqrt(variance))
 end
 
 ---Exposed for the suite: the meter is the feature, so it is worth asserting
@@ -195,6 +233,18 @@ M._level_of = level_of
 ---@return boolean
 function M.recording()
   return live ~= nil
+end
+
+---The microphone has been asked for and has not opened yet.
+---@return boolean
+function M.starting()
+  return starting ~= nil
+end
+
+---Either: the key is busy and nothing else may drive it.
+---@return boolean
+function M.busy()
+  return live ~= nil or starting ~= nil
 end
 
 ---Stop the recorder, keeping whatever it has already given us.
@@ -284,7 +334,27 @@ function M.finish(on_text)
 end
 
 ---Throw the recording away. Nothing is transcribed and nothing is inserted.
+---
+---Also the way out of a start that has not finished starting -- which is a
+---real thing to want, because that is the state that can take seconds, and it
+---is the state you are in when you decide you did not mean to press the key.
+---The daemon is told to forget the stream either way: `dictation.start` may
+---already have been accepted, and a stream nobody ever sends a chunk to is a
+---stream the daemon holds open waiting.
 function M.cancel()
+  local pending = starting
+  if pending then
+    -- Flagged as well as dropped: the callbacks still in flight hold their own
+    -- reference to it and check this before doing anything at all.
+    pending.cancelled = true
+    starting = nil
+    bridge.request("dictation.cancel", { dictationId = pending.id })
+    if pending.on_state then
+      pending.on_state(false)
+    end
+    return
+  end
+
   local session = live
   if not session then
     return
@@ -299,11 +369,18 @@ end
 
 ---Start recording.
 ---
----`on_state` is called with `true` once the daemon has accepted the stream --
----NOT when the process starts. A recording indicator that appears before the
+---`on_state` is called with `"starting"` straight away and with `"listening"`
+---once the daemon has accepted the stream AND the recorder is running -- not
+---when the key was pressed. A recording indicator that appears before the
 ---daemon has agreed to listen is an indicator that lies for as long as it
----takes to find out the speech models are not installed.
----@param opts? { on_state?: fun(recording: boolean), on_level?: fun(level: number) }
+---takes to find out the speech models are not installed, and that is why the
+---two are different states rather than one: the wait is real, so it is shown
+---as a wait, and `"listening"` keeps meaning what it says.
+---
+---Every way out of here ends in `on_state(false)`. That is the whole contract
+---the composer relies on to unlock the box it locked -- a start that fails
+---silently would leave it locked with nothing on screen saying why.
+---@param opts? { on_state?: fun(state: paseo.VoiceState), on_level?: fun(level: number) }
 ---@param on_error? fun(err: string)
 function M.start(opts, on_error)
   opts = opts or {}
@@ -311,7 +388,7 @@ function M.start(opts, on_error)
     vim.notify("paseo: " .. err, vim.log.levels.ERROR)
   end
 
-  if live then
+  if M.busy() then
     return on_error "already recording"
   end
 
@@ -338,10 +415,38 @@ function M.start(opts, on_error)
     stderr = "",
   }
 
+  -- UP FIRST, before anything that can block. Everything below is a round trip
+  -- to something that may not be running yet, and the point of the state is
+  -- that it covers those round trips.
+  local pending = { id = session.id, cancelled = false, on_state = opts.on_state }
+  starting = pending
+  if opts.on_state then
+    opts.on_state "starting"
+  end
+
+  ---The start is over, one way or another.
+  local function settle()
+    if starting == pending then
+      starting = nil
+    end
+  end
+
+  ---@param err string
+  local function fail(err)
+    settle()
+    if opts.on_state then
+      opts.on_state(false)
+    end
+    on_error(err)
+  end
+
   bridge.ensure(function(err)
+    if pending.cancelled then
+      return
+    end
     if err then
       return vim.schedule(function()
-        on_error(err)
+        fail(err)
       end)
     end
 
@@ -349,17 +454,21 @@ function M.start(opts, on_error)
       dictationId = session.id,
       format = session.format,
     }, function(start_err)
+      if pending.cancelled then
+        return
+      end
       if start_err then
         return vim.schedule(function()
           -- The daemon's own sentence, not ours: "speech models are not
           -- downloaded" is an answer, and "dictation failed" is not.
-          on_error(start_err)
+          fail(start_err)
         end)
       end
 
       vim.schedule(function()
-        -- Raced by a cancel while the start was in flight.
-        if live ~= nil then
+        -- Given up on while the start was in flight. `cancel` has already told
+        -- the daemon to forget the stream and taken the indicator down.
+        if pending.cancelled then
           return
         end
         local ok, proc = pcall(vim.system, recorder.cmd, {
@@ -418,12 +527,13 @@ function M.start(opts, on_error)
         end)
         if not ok then
           bridge.request("dictation.cancel", { dictationId = session.id })
-          return on_error(("could not start %s: %s"):format(recorder.name, tostring(proc)))
+          return fail(("could not start %s: %s"):format(recorder.name, tostring(proc)))
         end
         session.proc = proc
         live = session
+        settle()
         if opts.on_state then
-          opts.on_state(true)
+          opts.on_state "listening"
         end
       end)
     end)
@@ -431,8 +541,18 @@ function M.start(opts, on_error)
 end
 
 ---`<C-t>`: start, or stop and insert what was said.
----@param opts { insert: fun(text: string), on_state?: fun(recording: boolean), on_level?: fun(level: number) }
+---
+---Three states, not two. A press while the microphone is still coming up is a
+---change of mind -- the one thing it must not be is a SECOND start, which is
+---what it was when the only question asked here was `recording()`: the guard
+---in `start` refused it, the refusal was notified as "already recording" over
+---a bar that did not yet say anything was recording, and the key you pressed
+---to stop the wait instead put an error on the screen.
+---@param opts { insert: fun(text: string), on_state?: fun(state: paseo.VoiceState), on_level?: fun(level: number) }
 function M.toggle(opts)
+  if M.starting() then
+    return M.cancel()
+  end
   if M.recording() then
     return M.finish(function(text, err)
       if err then

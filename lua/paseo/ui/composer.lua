@@ -46,16 +46,69 @@ local STATUS_W = 10
 ---header has squeezed down to two cells is not a divider, it is a typo.
 local RULE_MIN = 10
 
----Readings the room's floor is measured over, at one every 50ms: twenty
----seconds, which outlives any one sentence. See `push_level`.
+---Readings the room is measured over, at one every 50ms: twenty seconds, which
+---outlives any one sentence. See `push_level`.
 local FLOOR_WINDOW = 400
 
----Full scale, and the room's own wobble, in dB over that floor. Four times the
----room is an ordinary voice at arm's length; two and a half decibels is what a
----room does on its own -- measured on a laptop microphone at 91% gain, where
----an empty study drifts between 0.143 and 0.197 RMS all by itself.
-local RANGE_DB = 12
-local GATE_DB = 2.5
+---And the window full scale follows, at five seconds. Short, because it tracks
+---the voice rather than the room: it should be over within a sentence or two
+---of your moving closer to the microphone, and one cough should not flatten
+---the meter for the rest of the minute.
+local PEAK_WINDOW = 100
+
+---What the room's own wobble is worth, as a multiple of the part of it that
+---can be measured while someone is talking.
+---
+---A room is not one level, it is a spread: a fan, a fridge, a road, the
+---microphone's own hiss. The gate has to clear the WHOLE of that spread or an
+---empty room draws a wave, and no single number does that on every machine --
+---an empty study on the laptop this was fixed on swings ten decibels from its
+---quietest 50ms to its loudest, while a clean line is steady to two. So the
+---spread is measured, and this is the constant that turns the part which can
+---be measured into the part which cannot: the distance from the 5th percentile
+---of the window to the 50th, times this, is where the gate sits.
+---
+---It is a fact about the SHAPE of a distribution and not about any microphone,
+---which is the whole reason it is allowed to be a constant when nothing else
+---here is. A level in dB is the log of a mean of squares over hundreds of
+---samples, so chunk to chunk a steady room is near enough normal, where p5 to
+---p50 is 1.65 standard deviations and the full range of a few hundred draws is
+---about 5.15 -- a ratio of 3.1. Rooms that WANDER are flatter than normal and
+---want less, which is why the number that holds across every input this was
+---checked against is 2.5 rather than the 3.1 the theory alone would give.
+local SPREAD_K = 2.5
+
+---And the ends of it, because a measured number still needs a bound.
+---
+---`GATE_MIN` is the margin even a dead-steady input gets. Something has to
+---separate "the quietest thing this microphone has heard" from "a sound", or
+---the last digit of a silent line draws a wave.
+---
+---`GATE_MAX` is the point past which a gate stops protecting the meter and
+---starts eating the speech, and it is also what makes a MEDIAN safe to measure
+---the spread from. Half a window of solid talking is half a window the median
+---sits inside, and with no ceiling the gate would climb after your voice and
+---the wave would die while you were still using it -- a complaint this meter
+---has already had once. With one, the worst a talkative window can do is pin
+---the gate here, and speech runs twenty to thirty decibels over a room floor,
+---so it still clears it. The clamp errs LOW for the same reason: this fails as
+---a noisy room drawing a little, which is true, rather than as a voice drawing
+---nothing, which is the bug.
+local GATE_MIN = 6
+local GATE_MAX = 12
+
+---The narrowest the scale above the gate is ever allowed to get.
+---
+---Above the gate the top of the meter is whatever the LOUDEST thing recently
+---heard was, rather than a fixed number of decibels -- and that is the half
+---that stops it pinning on one machine and crawling on another. How far speech
+---sits over a room floor is a fact about the room, the gain and how far away
+---you are sitting, and any fixed full scale is reached on every syllable by
+---one microphone and never by the next. Following the loudest recent reading
+---makes the bar full when you are as loud as you have been, which is the
+---question it is actually being asked, on any input. `SPAN_DB` only stops the
+---scale collapsing onto the gate in a room where nothing has happened yet.
+local SPAN_DB = 8
 
 -- ---------------------------------------------------------------- the meter
 
@@ -68,34 +121,36 @@ end
 
 ---A new reading from the microphone, scaled against the room it is in.
 ---
----THE ROOM IS NOT SILENT AND THE GAIN IS NOT KNOWN. |paseo.voice| reports raw
----RMS, and what that means depends entirely on the microphone: the laptop this
----was written on reads 0.16 with nobody in the room, while a headset a foot
----away reads a hundredth of that. Any fixed scaling is therefore wrong for one
----of them -- pinned at full, or flat at nothing -- and a meter that is wrong
----in either direction answers "is it hearing me" with the same picture
----whatever the answer is.
+---NOTHING HERE IS CALIBRATED TO A MICROPHONE, and that is the requirement
+---rather than a nicety. |paseo.voice| reports the sound it heard and nothing
+---more, because what a number means depends entirely on the input: a headset
+---an inch from your mouth and a laptop across the desk are fifty times apart
+---on the same sentence, and the same room is twenty times apart on two sound
+---cards. Any constant with a level in it is therefore right on one machine and
+---wrong on the next -- pinned at full before you speak, or flat while you do
+---- and a meter that is wrong in either direction answers "is it hearing me"
+---with the same picture whichever the answer is.
 ---
----SO IT IS A RATIO, IN DECIBELS, AGAINST THE ROOM. That is the fix for a meter
----that would not move: measuring the DIFFERENCE between this reading and the
----floor, and then gating on a fraction of the floor, is a test a loud room can
----never pass -- on a microphone whose room reads 0.16, a sound that genuinely
----doubles the input moves the number by 0.16, while the same doubling on a
----quiet headset moves it by 0.002. As a ratio both are the same event, which
----is what your ear says too: loudness is logarithmic, and a meter built on
----subtraction is a meter calibrated for exactly one microphone.
+---So all three of the numbers this needs are measured from the signal, every
+---reading, and the only constants are ratios and bounds:
 ---
----`RANGE_DB` is what counts as full scale -- four times the room, which is an
----ordinary speaking voice at an arm's length -- and `GATE_DB` is the wobble a
----room makes on its own.
+---THE FLOOR is the 5th percentile of the last `FLOOR_WINDOW`. A percentile
+---rather than the minimum, which one glitched 50ms drags down, and a WINDOW
+---rather than a decay: an early version crept the floor upwards at a fixed
+---rate and a few seconds into a sentence it had climbed over the voice, so the
+---wave flattened while you were still talking. Twenty seconds outlives any one
+---phrase, and speech has gaps, so the floor stays the room's.
 ---
----The floor is the quietest reading in the last `FLOOR_WINDOW`. A WINDOW
----rather than a decay, because the first version crept the floor upwards at a
----fixed rate and a few seconds into a sentence it had climbed over the voice:
----the wave flattened while you were still talking. Twenty seconds of window
----outlives any one phrase, and speech has gaps, so the floor stays the room's.
+---THE GATE is the room's own spread over that floor, measured from the median
+---of the same window and clamped -- see `SPREAD_K` and `GATE_MAX`. Under it is
+---the room, and is drawn as silence.
+---
+---THE TOP is the loudest thing heard in the last `PEAK_WINDOW`, never less
+---than `SPAN_DB` over the gate -- see `SPAN_DB`. This is what keeps a loud
+---input off the ceiling and a quiet one off the floor: the scale is the range
+---this microphone is actually working over, not one chosen for some other.
 ---@param chat table
----@param level number  Raw RMS, 0..1.
+---@param level number  RMS about the mean, 0..1, from |paseo.voice|.
 function M.push_level(chat, level)
   local raw = math.max(0, math.min(1, level or 0))
 
@@ -106,21 +161,41 @@ function M.push_level(chat, level)
   end
   chat.voice_raw = seen
 
-  local floor = math.huge
-  for _, value in ipairs(seen) do
-    floor = math.min(floor, value)
+  -- Sorted, for the two order statistics below. Sorting the whole window on
+  -- every reading is 56us of the 50ms it has -- about a thousandth of a core,
+  -- measured -- which is worth not having to keep two running estimators
+  -- correct against a window that slides out from under both of them.
+  local ranked = vim.deepcopy(seen)
+  table.sort(ranked)
+  ---@param p number  0..1
+  ---@return number
+  local function percentile(p)
+    return ranked[math.max(1, math.min(#ranked, math.floor(p * (#ranked - 1)) + 1))]
   end
+
   -- A digitally silent input has no ratio to take. Anything at all over the
   -- noise floor of a 16-bit sample is a signal there.
-  floor = math.max(floor, 1e-4)
+  local floor = math.max(percentile(0.05), 1e-4)
 
-  local over = 20 * math.log(math.max(raw, 1e-4) / floor, 10)
+  ---@param value number
+  ---@return number  dB of `value` over the floor.
+  local function over(value)
+    return 20 * math.log(math.max(value, 1e-4) / floor, 10)
+  end
+
+  local gate = math.max(GATE_MIN, math.min(GATE_MAX, SPREAD_K * over(percentile(0.5))))
+
+  local top = gate + SPAN_DB
+  for i = math.max(1, #seen - PEAK_WINDOW + 1), #seen do
+    top = math.max(top, over(seen[i]))
+  end
+
   -- Square-rooted, because the question is "can it hear me" and not "how many
   -- decibels". Linear in dB, a voice three decibels over a noisy room is one
   -- glyph tall -- which on a row of one-eighth blocks is indistinguishable
   -- from silence, and silence is the one answer it must not give when the
   -- microphone is working.
-  local ratio = math.max(0, math.min(1, (over - GATE_DB) / (RANGE_DB - GATE_DB)))
+  local ratio = math.max(0, math.min(1, (over(raw) - gate) / (top - gate)))
   local scaled = math.sqrt(ratio)
 
   local history = levels(chat)
@@ -141,6 +216,71 @@ local function elapsed(chat)
   end
   local seconds = math.floor((vim.uv.now() - since) / 1000)
   return ("%d:%02d"):format(math.floor(seconds / 60), seconds % 60)
+end
+
+---Which spinner frame this moment is on.
+---
+---Off the clock rather than off a counter, so every surface drawing the same
+---wait draws the same frame, and a repaint that happens for some other reason
+---does not shunt the animation forward a step.
+---@return string
+local function spin()
+  local frames = icons.spinner
+  return frames[math.floor(vim.uv.now() / 100) % #frames + 1]
+end
+
+---And the colour it is drawn in: `PaseoToolRunning`, this UI's "in flight",
+---and pointedly NOT `PaseoVoiceOn`. That red means the microphone is open, and
+---it means it nowhere else -- a red glyph on a row that exists to say the
+---microphone is NOT open yet would be the indicator lying, which is the thing
+---the separate state was added to stop.
+local SPIN_HL = "PaseoToolRunning"
+
+---The bar while the microphone is opening.
+---
+---SAYS WHAT IS HAPPENING AND THAT THE BOX IS SHUT, because those are the two
+---things you cannot otherwise tell. This wait is two round trips -- the
+---sidecar, then the daemon accepting the stream, which on a cold daemon is
+---where the speech models load -- and it used to be drawn as nothing at all:
+---the bar still said which model the session was on, the box still took
+---keystrokes, and the only evidence the key had done anything was that some
+---seconds later a recorder appeared.
+---
+---Degrades the same way `recorder` does, and gives up the same things in the
+---same order: the sentence first, then the way out, and the spinner last. A
+---spinner alone still says "something is happening", which is most of the job.
+---@param chat table
+---@param width integer
+---@return table[]
+function M.waking(chat, width)
+  local head = { { " " .. spin() .. " ", SPIN_HL } }
+  if width >= 52 then
+    head[#head + 1] = { "opening the microphone  ", "PaseoComposerHint" }
+  elseif width >= 34 then
+    head[#head + 1] = { "opening  ", "PaseoComposerHint" }
+  end
+
+  -- THE COUNT, on a row whose whole subject is a wait. A spinner says the
+  -- editor has not hung; it does not say whether this is the ordinary two
+  -- seconds or the daemon fetching a speech model, and that is the difference
+  -- between waiting and giving up on it. Same `dictating_since` the recorder's
+  -- clock uses, restarted when the microphone actually opens.
+  local clock = { { "  " .. elapsed(chat) .. "  ", "PaseoComposerHint" } }
+  local keys = {
+    { icons.spell "<Esc>", "PaseoComposerKey" },
+    { " cancel ", "PaseoComposerHint" },
+  }
+  local tail
+  for _, candidate in ipairs { { clock, keys }, { keys }, { clock }, {} } do
+    tail = {}
+    for _, part in ipairs(candidate) do
+      vim.list_extend(tail, vim.deepcopy(part))
+    end
+    if width - render.width(head) - render.width(tail) - 2 >= 0 then
+      break
+    end
+  end
+  return render.truncate(M.rule(head, tail, width), width)
 end
 
 ---The recording readout: a dot, the wave, the clock, and the way out.
@@ -281,6 +421,9 @@ end
 function M.bar(chat, width)
   width = math.max(10, width)
 
+  if chat.dictating == "starting" then
+    return M.waking(chat, width)
+  end
   if chat.dictating then
     return M.recorder(chat, width)
   end
@@ -331,7 +474,7 @@ end
 
 -- ---------------------------------------------------------------- the box
 
----The visualiser inside the box.
+---The visualiser inside the box, and the wait before it.
 ---
 ---Virtual text rather than written lines, and that is not a detail: the
 ---composer holds your draft, and a visualiser that TYPED itself into the
@@ -339,6 +482,12 @@ end
 ---wave is an extmark on the last line -- drawn after whatever you have
 ---written, or filling an empty box outright, and gone the moment recording
 ---stops without anything having been undone.
+---
+---While the microphone is still opening the same extmark carries the reason
+---the box is not taking your keys. It is drawn IN THE BOX rather than only on
+---the bar because the box is where you are looking and where the keystrokes
+---were going to go; a lock explained one row up is a lock you find out about
+---by typing into a buffer that ignores you.
 ---@param chat table
 local function draw_overlay(chat)
   local buf = chat.composer
@@ -360,10 +509,22 @@ local function draw_overlay(chat)
     return
   end
 
-  local wave = widgets.waveform(levels(chat), { w = math.min(HISTORY, room) })
   local virt = { { "  ", "PaseoCard" } }
-  for _, cell in ipairs(wave) do
-    virt[#virt + 1] = { cell[1], cell[2] }
+  if chat.dictating == "starting" then
+    -- WHY THE BOX IS NOT TAKING KEYS, and only that. What is happening is the
+    -- bar's job one row up; this row has one thing to say and it is the thing
+    -- that is otherwise indistinguishable from a wedged editor -- so it is
+    -- what survives into the short form rather than what gets dropped from it.
+    local said = "typing is off until the microphone opens"
+    if room < api.nvim_strwidth(said) + 2 then
+      said = "typing is off"
+    end
+    virt[#virt + 1] = { spin() .. " ", SPIN_HL }
+    virt[#virt + 1] = { said, "PaseoComposerHint" }
+  else
+    for _, cell in ipairs(widgets.waveform(levels(chat), { w = math.min(HISTORY, room) })) do
+      virt[#virt + 1] = { cell[1], cell[2] }
+    end
   end
 
   pcall(api.nvim_buf_set_extmark, buf, ns, last, 0, {
@@ -423,37 +584,106 @@ end
 
 -- ---------------------------------------------------------------- dictation
 
----The microphone opened, or closed.
+---Typing, while the microphone is still opening.
 ---
----Owns the whole visible side of it: the state flag the header reads, the
----clock the bar counts, the level history, and the overlay. The one place
----`chat.dictating` is written, so a recording that ends -- by finishing, by
----being cancelled, or because the recorder died -- cannot leave the indicator
----lit.
+---OFF, and that is the answer to a box that silently took keys it was about to
+---have a transcript dropped into. The wait is real -- the sidecar has to be up
+---and the daemon has to accept the stream -- and for the length of it anything
+---typed is a race between what you wrote and what you said.
+---
+---`stopinsert` FIRST, not `modifiable` alone. A buffer left in insert mode with
+---'modifiable' off rejects every keystroke one at a time, each with its own
+---`E21`, which is a worse answer than a box that simply is not taking them --
+---and it is a stream of errors over the row explaining why. Out of insert, the
+---same lock is one message the first time you ask for it, and the mode comes
+---back when the microphone does: a key pressed from insert mode returns you to
+---insert mode, where you were, so the wait costs you nothing but the wait.
 ---@param chat table
----@param recording boolean
-function M.dictating(chat, recording)
-  chat.dictating = recording or nil
-  chat.dictating_since = recording and vim.uv.now() or nil
+---@param allowed boolean
+local function typing(chat, allowed)
+  local buf = chat.composer
+  if not (buf and api.nvim_buf_is_valid(buf)) then
+    return
+  end
+
+  if not allowed then
+    if chat.dictating_locked ~= nil then
+      return
+    end
+    chat.dictating_locked = vim.bo[buf].modifiable
+    chat.dictating_insert = api.nvim_get_current_buf() == buf and vim.fn.mode():sub(1, 1) == "i"
+    if chat.dictating_insert then
+      chat.dictating_col = api.nvim_win_get_cursor(0)
+      vim.cmd.stopinsert()
+    end
+    vim.bo[buf].modifiable = false
+    return
+  end
+
+  if chat.dictating_locked == nil then
+    return
+  end
+  vim.bo[buf].modifiable = chat.dictating_locked
+  local resume, at = chat.dictating_insert, chat.dictating_col
+  chat.dictating_locked, chat.dictating_insert, chat.dictating_col = nil, nil, nil
+  if not (resume and api.nvim_get_current_buf() == buf) then
+    return
+  end
+  -- Back to the column it was in, which `startinsert` alone cannot promise:
+  -- bare, it puts the cursor BEFORE the character under it, which is right
+  -- everywhere except the end of a line -- and the end of a line is where the
+  -- cursor is whenever you have just finished typing the draft.
+  local row = at and at[1] or api.nvim_buf_line_count(buf)
+  local line = api.nvim_buf_get_lines(buf, row - 1, row, false)[1] or ""
+  if at and at[2] < #line then
+    pcall(api.nvim_win_set_cursor, 0, at)
+    vim.cmd.startinsert()
+  else
+    pcall(api.nvim_win_set_cursor, 0, { row, math.max(0, #line) })
+    vim.cmd "startinsert!"
+  end
+end
+
+---The microphone opened, is opening, or closed.
+---
+---Owns the whole visible side of it: the state the header reads, the clock the
+---bar counts, the level history, the overlay and the lock on the box. The one
+---place `chat.dictating` is written, so a recording that ends -- by finishing,
+---by being cancelled, because the recorder died, or because it never started
+---at all -- cannot leave the indicator lit or the box shut.
+---@param chat table
+---@param state paseo.VoiceState|boolean  `true` is still `"listening"`, which
+---              is what the suites and any older caller pass.
+function M.dictating(chat, state)
+  if state == true then
+    state = "listening"
+  end
+  chat.dictating = state or nil
+  chat.dictating_since = chat.dictating and vim.uv.now() or nil
   chat.voice_levels = {}
   -- The room is measured fresh each time. A floor learned in a quiet study is
   -- wrong on a train, and the first thing you do on the train is press the key.
   chat.voice_raw = nil
 
-  -- The clock has to tick on its own: the microphone only speaks when it has
+  typing(chat, chat.dictating ~= "starting")
+
+  -- The bar has to tick on its own: the microphone only speaks when it has
   -- audio, and a silent room produces a reading every 50ms but an unchanging
-  -- one, so nothing would move.
+  -- one, so nothing would move. A spinner is the whole of what is moving while
+  -- the microphone opens, so that half runs ten times as often -- and stops
+  -- being a timer at all once the wave is what the row is drawing.
   if chat.dictating_timer then
     chat.dictating_timer:stop()
     chat.dictating_timer:close()
     chat.dictating_timer = nil
   end
-  if recording then
+  if chat.dictating then
+    local every = chat.dictating == "starting" and 100 or 1000
     local timer = vim.uv.new_timer()
     chat.dictating_timer = timer
     timer:start(
-      1000,
-      1000,
+      every,
+      every,
       vim.schedule_wrap(function()
         if chat.dictating then
           M.refresh(chat)
