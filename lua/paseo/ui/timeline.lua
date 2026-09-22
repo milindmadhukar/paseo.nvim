@@ -497,36 +497,83 @@ function M.card(item, opts)
     -- dialog: the agent is proposing, not reaching for the filesystem.
     local planned = plan.parse(request)
     local group = planned and "PaseoQuestion" or "PaseoDanger"
+    local asked = questions.parse(request)
+    local inner = render.card_inner(width)
+
+    -- A question's own header -- "Box shape" -- over the question text, which
+    -- is a sentence and is the body's first line anyway. `title` is the FIRST
+    -- question and `description` its labels, so a request carrying four
+    -- questions had one of them standing for all four on the header.
+    local heading = planned and "plan" or (request.title or request.name or "permission")
+    if asked then
+      local named = asked[1] and asked[1].header
+      heading = #asked > 1 and ("%d questions"):format(#asked) or (named or heading)
+    end
     local header = {
       { "", group },
-      { " " .. (planned and "plan" or (request.title or request.name or "permission")), group },
+      { " " .. render.plain(heading), group },
     }
     if item.resolution then
-      header[#header + 1] = { "  " .. item.resolution, "PaseoDim" }
+      header[#header + 1] = { "  " .. render.plain(item.resolution), "PaseoToolOk" }
     else
       header[#header + 1] = { "  awaiting", "PaseoBadge" }
     end
+
+    -- ANSWERED IS THE RESTING STATE, and the header already says what was
+    -- answered, so the rest folds. An answered question was a dozen lines of
+    -- grey in the middle of the transcript -- the question, every option, and
+    -- every option's description -- for a decision whose whole outcome fits in
+    -- the badge two columns to the right of the name.
+    if not opts.expanded and item.resolution then
+      return {
+        lines = render.card(header, {}, { width = width, hl = group }),
+        collapsible = true,
+      }
+    end
+
     local body = {}
-    -- A question's `title` is its FIRST question and `description` its labels,
-    -- so a request carrying four rendered here as one. Render the questions
-    -- themselves when there are any.
-    local asked = questions.parse(request)
     if asked then
-      for _, line in ipairs(questions.render(asked)) do
-        vim.list_extend(body, render.wrap(line, render.card_inner(width), "PaseoDim"))
+      -- Structured, not prose. Which option was taken is the one thing this
+      -- card exists to record, and it is drawn rather than left to be found by
+      -- reading four wrapped lines of identical dim text.
+      for _, row in ipairs(questions.rows(asked, item.answers, item.resolution)) do
+        local text = render.plain(row.text)
+        if row.kind == "gap" then
+          body[#body + 1] = {}
+        elseif row.kind == "question" then
+          vim.list_extend(body, render.wrap(text, inner, "PaseoHeader"))
+        elseif row.kind == "option" then
+          -- An option you did NOT take is ordinary text, not dim: dim is the
+          -- description's job, and drawing both in the same grey is what made
+          -- this card a wall in the first place. The one you took is the only
+          -- coloured thing in the body.
+          local mark = row.chosen and icons.status.completed or "·"
+          local hl = row.chosen and "PaseoToolOk" or nil
+          vim.list_extend(body, render.wrap(text, inner, hl, { { mark .. " ", hl or "PaseoDim" } }))
+        elseif row.kind == "description" then
+          vim.list_extend(body, render.wrap(text, inner, "PaseoDim", { { "    ", "PaseoDim" } }))
+        elseif row.kind == "note" then
+          vim.list_extend(body, render.wrap(text, inner, "PaseoDim", { { "  ", "PaseoDim" } }))
+        end
       end
     elseif planned then
       -- The plan lives in `input.plan` and the request has no `detail` at all,
       -- so `description` -- a summary line, at best -- was the whole record of
       -- what was approved.
       for _, line in ipairs(plan.render(request)) do
-        vim.list_extend(body, render.wrap(line, render.card_inner(width), "PaseoDim"))
+        vim.list_extend(body, render.wrap(render.plain(line), inner, "PaseoDim"))
       end
     elseif request.description and request.description ~= "" then
-      vim.list_extend(body, render.wrap(request.description, render.card_inner(width), "PaseoDim"))
+      vim.list_extend(body, render.wrap(render.plain(request.description), inner, "PaseoDim"))
     end
     vim.list_extend(body, detail_body(request.detail, width))
-    return { lines = render.card(header, body, { width = width, hl = group }), collapsible = false }
+    return {
+      lines = render.card(header, body, { width = width, hl = group }),
+      -- Collapsible only once it is answered: a question still waiting on you
+      -- is not a card to tidy away, and `<Tab>` on one would hide the options
+      -- you are being asked to choose between.
+      collapsible = item.resolution ~= nil,
+    }
   end
 
   return { lines = {}, collapsible = false }

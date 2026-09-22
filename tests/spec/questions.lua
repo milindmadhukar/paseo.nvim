@@ -209,6 +209,65 @@ local function test_questions()
     text
   )
   truthy("questions: and the options under it", text:find("A", 1, true) ~= nil, text)
+
+  -- ANSWERED, WHICH IS WHERE IT SPENDS ITS LIFE. The card was a dozen lines of
+  -- grey for a decision whose outcome fits in the badge, and no key folded it.
+  local function drawn(item, opts)
+    local out = {}
+    for _, line in ipairs(timeline.card(item, opts).lines) do
+      out[#out + 1] = render.concat(line)
+    end
+    return table.concat(out, "\n")
+  end
+
+  local answered = {
+    kind = "permission",
+    request = claude,
+    resolution = "Rebase",
+    answers = { ["How should I reconcile your local work?"] = "Rebase" },
+  }
+  local folded = timeline.card(answered, { width = 60 })
+  truthy("questions: an answered question folds", folded.collapsible, "not collapsible")
+  eq("questions: and folds to one line", #folded.lines, 1)
+  truthy(
+    "questions: with the answer on it",
+    render.concat(folded.lines[1]):find("Rebase", 1, true) ~= nil,
+    render.concat(folded.lines[1])
+  )
+
+  -- Still waiting is the one state that must NOT fold: the options are the ask.
+  local waiting = timeline.card({ kind = "permission", request = claude }, { width = 60 })
+  eq("questions: an unanswered one does not fold", waiting.collapsible, false)
+
+  -- Expanded, the option taken is marked rather than left to be found by
+  -- reading four wrapped lines of the same grey.
+  local open_text = drawn(answered, { width = 60, expanded = true })
+  truthy(
+    "questions: the chosen option is ticked",
+    open_text:find(require("paseo.ui.icons").status.completed .. " Rebase", 1, true) ~= nil,
+    open_text
+  )
+  truthy(
+    "questions: and the one not taken is not",
+    open_text:find("· Merge", 1, true) ~= nil,
+    open_text
+  )
+
+  -- A description the agent wrote is TEXT, and the transcript is a markdown
+  -- buffer. Two tildes in one paragraph -- "~a third", "~15 rows" -- is a GFM
+  -- strikethrough, and it was drawn struck through across four wrapped lines.
+  eq(
+    "questions: a tilde is approximately, not strikethrough",
+    render.plain "a share (~a third) so a prompt gets ~15 rows",
+    "a share (≈a third) so a prompt gets ≈15 rows"
+  )
+  eq("questions: bold markers come out", render.plain "the **whole** box", "the whole box")
+  eq("questions: and a home path survives", render.plain "~/Code/paseo.nvim", "~/Code/paseo.nvim")
+  eq(
+    "questions: an identifier is not emphasis",
+    render.plain "composer_min and ui_style",
+    "composer_min and ui_style"
+  )
 end
 
 return {

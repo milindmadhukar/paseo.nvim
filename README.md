@@ -1027,6 +1027,46 @@ Multi-select is serialised the one way the provider parses back: `", "`-joined,
 quoting any label that contains the separator — otherwise `Rebase, then push`
 returns as two answers matching no option.
 
+**The record it leaves folds up.** The picker is transient and the conversation
+is the record, so the question, its options and their descriptions are written
+into the transcript as a card of their own. Answered, that card is **one line**
+— the question's header and what you chose — and `<Tab>` opens it again:
+
+```
+  Input box  Floor of 3, cap scales with the surface
+```
+```
+  Input box  Floor of 3, cap scales with the surface
+ The composer grows from 1 row up to a flat 7-row cap. What shape should the box take?
+ 󰗠 Floor of 3, cap scales with the surface
+     Empty box is 3 rows so it reads as a field, not a one-liner. The cap becomes
+     a share of the surface (≈a third of the window) instead of a flat 7.
+ · Keep the 1-row floor, just fix the scroll
+     Minimal change: the empty box stays a single row, but it grows correctly.
+```
+
+It used to be neither. It stood open forever — a dozen lines of identical grey
+in the middle of the transcript, every option run onto one line behind an em
+dash, for a decision whose whole outcome fits in the badge — and no key folded
+it, because the card was built as not collapsible. So: **the option you took is
+ticked** and the rest are not, descriptions sit under their own option, and an
+*unanswered* question still draws open whatever `ui.expand` says, because the
+options are the thing being asked about.
+
+**And a card is text, not markdown.** The transcript is `filetype=markdown` so
+that what the agent *writes* reads the way it wrote it, and an option
+description is not that — it is a string that lands in the same buffer, where
+treesitter will find emphasis in it and style straight over our own
+highlights. No extmark priority undoes that, because strikethrough and italic
+are attributes rather than colours. One real description read *"a share of the
+surface (~a third of the window) … a long prompt gets ~15 rows"*: two tildes in
+a paragraph is a GFM strikethrough, and everything between them was drawn
+struck through, across four wrapped lines, starting mid-sentence. So `**`, `~~`
+and backtick pairs are taken out of card text and a lone `~` becomes `≈`, which
+is what it meant. `_` is left alone on purpose — stripping it would turn
+`composer_min` into `composermin`, and a card lying about an option's text is
+worse than one drawing it in italics.
+
 Too narrow or too short a chat window — under 48 columns or 14 rows — or no chat
 window at all, and the same card opens centred on the editor instead. Same keys,
 same layout; only where it sits differs.

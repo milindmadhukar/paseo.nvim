@@ -162,6 +162,59 @@ function M.duration(seconds)
   return ("%dh %dm"):format(math.floor(seconds / 3600), math.floor((seconds % 3600) / 60))
 end
 
+-- ------------------------------------------------------------------ markdown
+
+---Text a MARKDOWN buffer cannot style, for a card that is not markdown.
+---
+---The transcript is `filetype=markdown` so that what the agent writes reads
+---the way it was written. Everything inside a card is text the agent did not
+---write as markdown -- a tool argument, an option label, a description -- and
+---it goes into the same buffer, where treesitter is happy to find emphasis in
+---it and style across our own highlights, which no priority here can undo
+---because strikethrough and italic are attributes rather than colours.
+---
+---That is not a hypothetical. An option description reading "a share of the
+---surface (~a third of the window) so a long prompt gets ~15 rows" has two
+---tildes in it, GFM takes a single `~` as strikethrough, and everything
+---between them was drawn struck through -- across four wrapped lines, starting
+---mid-sentence, on a card nobody had marked up at all.
+---
+---So the markers are taken out of paired emphasis, which is what a markdown
+---renderer shows anyway and all a card wants. A `~` is the exception: it is
+---`approximately` far more often than it is emphasis, and it becomes the sign
+---that says so rather than vanishing. `~/` is left alone -- that one is a home
+---directory.
+---
+---`_` AND A LONE `*` ARE LEFT WHERE THEY ARE, which looks like a gap and is
+---not. Stripping paired `_` turns a description mentioning `composer_min` and
+---`ui_style` into one mentioning `composermin` and `uistyle` -- a card lying
+---about an option's text is worse than a card drawing it in italics, and GFM
+---does not emphasise an underscore mid-word in the first place. What is left
+---is the three markers that pair across a whole paragraph and cannot be part
+---of a word.
+---@param text string
+---@return string
+function M.plain(text)
+  if type(text) ~= "string" or text == "" then
+    return text or ""
+  end
+  -- `**` before `~~` before a backtick, and each run to exhaustion: `**bold**`
+  -- must not be read as two `*` pairs around an empty span.
+  for _, marker in ipairs { "%*%*", "~~", "`" } do
+    local pattern = ("%s([^\n]-)%s"):format(marker, marker)
+    -- Bounded: a pass that fails to shorten the text stops rather than looping
+    -- on it.
+    while text:find(pattern) do
+      local replaced = text:gsub(pattern, "%1", 1)
+      if replaced == text then
+        break
+      end
+      text = replaced
+    end
+  end
+  return (text:gsub("~([^/])", "≈%1"):gsub("~$", "≈"))
+end
+
 -- -------------------------------------------------------------------- wrapping
 
 ---Split plain text into lines of cells, wrapped at `w` columns on word

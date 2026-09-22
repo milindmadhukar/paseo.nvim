@@ -564,6 +564,13 @@ function M.resolved(chat, request_id, resolution)
     local label = resolution
       and (resolution.label or (resolution.behavior == "allow" and "allowed" or "denied"))
     block.item.resolution = label or "answered"
+    -- The answers themselves, not just the sentence about them: the card ticks
+    -- the option that was taken, and matching labels against a badge string is
+    -- the fallback for a question answered in the Paseo app rather than here.
+    block.item.answers = resolution
+        and type(resolution.updatedInput) == "table"
+        and resolution.updatedInput.answers
+      or nil
     -- Written onto the item the transcript already holds, so the rendered card
     -- it cached against that table is now a lie. Say so before redrawing.
     transcript.invalidate(block)

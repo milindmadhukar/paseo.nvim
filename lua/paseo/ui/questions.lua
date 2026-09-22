@@ -160,33 +160,81 @@ function M.input(request, questions, answers, notes)
   return input
 end
 
----The question as it goes into the transcript.
+---Which of a question's options were actually chosen.
+---
+---Two sources, because a question can be answered somewhere else entirely. The
+---structured `answers` map is the exact one and is what the dialog in this
+---Neovim hands back; a question answered in the Paseo app arrives as a
+---resolution STRING and nothing else, so the labels are looked for in it. That
+---second path is a guess, and it is allowed to find nothing -- an option that
+---cannot be proved chosen is simply drawn as an option.
+---@param question paseo.Question
+---@param answers table<string, string>|nil  Keyed by question text or header.
+---@param resolution string|nil              The one-line badge, as a fallback.
+---@return table<string, boolean>
+function M.chosen(question, answers, resolution)
+  local said = answers
+    and (answers[question.question] or (question.header and answers[question.header]))
+  local picked = {}
+  for _, option in ipairs(question.options) do
+    if said then
+      -- `M.join`'s separator, and the quoting it uses for a label containing
+      -- one. Matching the whole string against each label would miss every
+      -- answer to a multi-select.
+      picked[option.label] = said == option.label or said:find(option.label, 1, true) ~= nil
+    elseif resolution and resolution ~= "" then
+      picked[option.label] = resolution:find(option.label, 1, true) ~= nil
+    end
+  end
+  return picked
+end
+
+---The question as it goes into the transcript, as ROWS rather than text.
 ---
 ---The picker is transient and the conversation is the record: what was asked,
----and what could have been said, should still be readable tomorrow.
+---and what could have been said, should still be readable tomorrow. But it was
+---readable as one flat block of dim prose -- the question, then every option
+---with its description run onto the same line behind an em dash -- which on a
+---question with three explained options is a dozen wrapped lines of identical
+---grey that says nothing about which one you picked.
+---
+---So it comes out structured and the drawing is |paseo.ui.timeline|'s: a row
+---knows whether it is the question, an option, that option's description, or
+---the note under a question, and whether the option was the one taken.
+---@class paseo.QuestionRow
+---@field kind "question"|"option"|"description"|"note"|"gap"
+---@field text string
+---@field chosen boolean|nil  Only on an option, and only when it is known.
 ---@param questions paseo.Question[]
----@return string[]
-function M.render(questions)
-  local lines = {}
+---@param answers table<string, string>|nil
+---@param resolution string|nil
+---@return paseo.QuestionRow[]
+function M.rows(questions, answers, resolution)
+  local rows = {}
   for index, question in ipairs(questions) do
-    if #lines > 0 then
-      lines[#lines + 1] = ""
+    if #rows > 0 then
+      rows[#rows + 1] = { kind = "gap", text = "" }
     end
-    lines[#lines + 1] = #questions > 1 and ("%d. %s"):format(index, question.question)
-      or question.question
+    rows[#rows + 1] = {
+      kind = "question",
+      text = #questions > 1 and ("%d. %s"):format(index, question.question) or question.question,
+    }
+
+    local picked = M.chosen(question, answers, resolution)
     for _, option in ipairs(question.options) do
-      lines[#lines + 1] = ("   - %s%s"):format(
-        option.label,
-        option.description and (" — " .. option.description) or ""
-      )
+      rows[#rows + 1] = { kind = "option", text = option.label, chosen = picked[option.label] }
+      if option.description then
+        rows[#rows + 1] = { kind = "description", text = option.description }
+      end
     end
+
     local note = question.multi and "choose as many as apply"
       or (#question.options == 0 and "type an answer" or nil)
     if note then
-      lines[#lines + 1] = ("   _(%s)_"):format(note)
+      rows[#rows + 1] = { kind = "note", text = note }
     end
   end
-  return lines
+  return rows
 end
 
 ---What was answered, in one line, for the transcript's resolution badge.

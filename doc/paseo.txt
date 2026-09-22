@@ -2490,6 +2490,42 @@ insert -- there is nothing else to do on one.
 There is no timeout, here or in the daemon. A question waits until it is
 answered.
 
+                                            *paseo-permission-question-card*
+THE RECORD IT LEAVES FOLDS UP. The picker is transient and the conversation is
+the record, so the question, its options and their descriptions are written
+into the transcript as a card of their own. Answered, that card is ONE line --
+the question's header and what you chose -- and |paseo-chat-keys| `<Tab>`
+opens it again: >
+
+      Input box  Floor of 3, cap scales with the surface
+     The composer grows from 1 row up to a flat 7-row cap. What shape
+     should the box take?
+     󰗠 Floor of 3, cap scales with the surface
+         Empty box is 3 rows so it reads as a field, not a one-liner.
+     · Keep the 1-row floor, just fix the scroll
+         Minimal change: the empty box stays a single row.
+<
+It used to be neither. It stood open for the rest of the session -- a dozen
+lines of identical grey, every option run onto one line behind an em dash, for
+a decision whose whole outcome fits in the badge -- and no key folded it,
+because the card was built as not collapsible. The option you TOOK is now
+ticked and the rest are not, each description sits under its own option, and
+an UNANSWERED question still draws open whatever |paseo-config.ui.expand|
+says, because the options are the thing being asked about.
+
+A card is TEXT, NOT MARKDOWN. The transcript is `filetype=markdown` so that
+what the agent writes reads the way it wrote it; an option description is not
+that -- it is a string landing in the same buffer, where treesitter finds
+emphasis in it and styles over our own highlights. No extmark priority undoes
+that, because strikethrough and italic are attributes rather than colours. One
+real description read "a share of the surface (~a third of the window) ... a
+long prompt gets ~15 rows": two tildes in a paragraph is a GFM strikethrough,
+and everything between them was drawn struck through, across four wrapped
+lines, starting mid-sentence. So `**`, `~~` and backtick pairs come out of
+card text and a lone `~` becomes the sign it meant. `_` is left alone --
+stripping it turns `composer_min` into `composermin`, and a card lying about
+an option's text is worse than one drawing it in italics.
+
                                               *paseo-permission-overlay*
 Where it draws ~
 

@@ -165,6 +165,13 @@ local function default_expanded(item)
   if mode == "always" then
     return true
   end
+  -- A question you have not answered yet draws OPEN, whatever `ui.expand`
+  -- says about tool cards: it is the one card on the transcript that is asking
+  -- you for something, and the options are the ask. Once it is answered the
+  -- header carries the answer and the rest folds away.
+  if item.kind == "permission" then
+    return item.resolution == nil
+  end
   if item.kind ~= "tool" then
     return false
   end
