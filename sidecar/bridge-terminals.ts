@@ -9,7 +9,7 @@ import type { BridgeConnection } from "./bridge-connection.ts";
  * (list / capture / kill) and its capture returns ANSI-stripped strings, which
  * throws away everything that makes watching `claude` or `codex` run worth
  * doing. The live half is on the raw DaemonClient this bridge already holds:
- * `subscribeTerminal` plus `onTerminalStreamEvent` deliver the PTY's own
+ * `observeTerminal` delivers the PTY's own
  * output, and Neovim has libvterm built in, so those bytes go straight to
  * `nvim_open_term` and render themselves.
  *
@@ -23,7 +23,15 @@ export function terminalOps(ctx: BridgeConnection): Ops {
   const raw = () => ctx.raw();
 
   const attached = new Set<string>();
-  let streamOff: (() => void) | null = null;
+  const terminalSubscriptions = new Map<
+    string,
+    { release: () => Promise<void>; unregister: () => void }
+  >();
+  const directorySubscriptions = new Map<
+    string,
+    { release: () => Promise<void>; unregister: () => void }
+  >();
+  let legacyStreamOff: (() => void) | null = null;
   // Output arrives in many small writes -- a build log is thousands of them.
   // Emitting a JSON line per write puts that whole flood through stdin parsing
   // and `vim.schedule` one chunk at a time, so it is coalesced per terminal
@@ -60,19 +68,17 @@ export function terminalOps(ctx: BridgeConnection): Ops {
     if (!timer) timer = setTimeout(flush, FLUSH_MS);
   }
 
-  /** Registered once, for every terminal: the router is per connection. */
-  function follow(): void {
-    if (streamOff) return;
-    streamOff = raw().onTerminalStreamEvent((event: any) => {
+  function followLegacyStream(): void {
+    if (legacyStreamOff) return;
+    legacyStreamOff = raw().onTerminalStreamEvent((event: any) => {
       if (!attached.has(event.terminalId)) return;
-      // `output` is live; `restore` is the scrollback replay the daemon sends
-      // on subscribe. Both are raw bytes and both belong in the same terminal,
-      // in the order they arrived. `snapshot` is the same content as a CELL
-      // GRID, for clients that render their own terminal -- we do not, so it
-      // is deliberately ignored rather than decoded and thrown away.
       if (event.type === "output" || event.type === "restore") {
         queue(event.terminalId, event.data);
       }
+    });
+    ctx.addCleanup(() => {
+      legacyStreamOff?.();
+      legacyStreamOff = null;
     });
   }
 
@@ -109,22 +115,37 @@ export function terminalOps(ctx: BridgeConnection): Ops {
     /** Push for the list: a terminal opened, closed or changed activity anywhere. */
     async "terminals.watch"(req) {
       const cwd = String(need(req.cwd, "cwd"));
-      raw().on("terminals_changed", (message: any) => {
-        emit("terminals", {
-          kind: "snapshot",
-          cwd: message?.payload?.cwd ?? cwd,
-          entries: message?.payload?.terminals ?? [],
-        });
-      });
-      raw().subscribeTerminals({ cwd });
-      // The subscription only reports CHANGES, so the first list has to be
-      // asked for. Without it the panel is empty until something happens.
-      const payload: any = await raw().listTerminals(cwd);
-      emit("terminals", {
-        kind: "snapshot",
-        cwd,
-        entries: payload?.terminals ?? [],
-      });
+      if (!directorySubscriptions.has(cwd)) {
+        const publish = (message: any) => {
+          const payload = message?.payload ?? message;
+          emit("terminals", {
+            kind: "snapshot",
+            cwd: payload?.cwd ?? cwd,
+            entries: payload?.terminals ?? [],
+          });
+        };
+        if (typeof (raw() as any).observeTerminals === "function") {
+          const observation = raw().observeTerminals({ cwd });
+          const unsubscribe = observation.subscribe({
+            snapshot: publish,
+            update: publish,
+          });
+          const release = async () => {
+            unsubscribe();
+            await observation.release();
+          };
+          const unregister = ctx.addCleanup(release);
+          directorySubscriptions.set(cwd, { release, unregister });
+          publish(await observation.ready);
+        } else {
+          const off = raw().on("terminals_changed", publish);
+          await (raw() as any).subscribeTerminals({ cwd });
+          const release = async () => off();
+          const unregister = ctx.addCleanup(release);
+          directorySubscriptions.set(cwd, { release, unregister });
+          publish(await raw().listTerminals(cwd));
+        }
+      }
       return { watching: true };
     },
 
@@ -160,6 +181,12 @@ export function terminalOps(ctx: BridgeConnection): Ops {
       const id = String(need(req.terminalId, "terminalId"));
       attached.delete(id);
       pending.delete(id);
+      const held = terminalSubscriptions.get(id);
+      if (held) {
+        terminalSubscriptions.delete(id);
+        held.unregister();
+        await held.release().catch(() => {});
+      }
       await raw().killTerminal(id);
       return { killed: true };
     },
@@ -178,11 +205,26 @@ export function terminalOps(ctx: BridgeConnection): Ops {
       const rows = Number(req.rows ?? 24);
       const cols = Number(req.cols ?? 80);
 
-      follow();
       attached.add(id);
 
+      const previous = terminalSubscriptions.get(id);
+      if (previous) {
+        terminalSubscriptions.delete(id);
+        previous.unregister();
+        await previous.release().catch(() => {});
+      }
+
       const restores = features()["terminal-restore-modes"] === true;
-      const result: any = await raw().subscribeTerminal(id, {
+      const receive = (event: any) => {
+        if (!attached.has(event.terminalId)) return;
+        // `output` is live; `restore` is the scrollback replay the daemon
+        // sends on subscribe. `snapshot` is a cell grid for clients that
+        // render terminals themselves, so Neovim's libvterm ignores it.
+        if (event.type === "output" || event.type === "restore") {
+          queue(event.terminalId, event.data);
+        }
+      };
+      const restoreOptions = {
         ...(restores
           ? {
               restore: {
@@ -192,11 +234,37 @@ export function terminalOps(ctx: BridgeConnection): Ops {
               },
             }
           : {}),
-      });
+      };
+
+      const observation =
+        typeof (raw() as any).observeTerminal === "function"
+          ? raw().observeTerminal(
+        id,
+              receive,
+              restoreOptions,
+            )
+          : null;
+      let result: any;
+      if (observation) {
+        result = await observation.ready;
+      } else {
+        followLegacyStream();
+        result = await raw().subscribeTerminal(id, restoreOptions);
+      }
       if (result?.error) {
         attached.delete(id);
+        await observation?.release().catch(() => {});
         throw new Error(String(result.error));
       }
+      const release = async () => {
+        attached.delete(id);
+        pending.delete(id);
+        if (observation) await observation.release();
+        else if (typeof (raw() as any).unsubscribeTerminal === "function")
+          await (raw() as any).unsubscribeTerminal(id);
+      };
+      const unregister = ctx.addCleanup(release);
+      terminalSubscriptions.set(id, { release, unregister });
 
       // Claim the size we are actually rendering at. `update` rather than
       // `claim`: this terminal may well be open in the Paseo app at the same
@@ -224,7 +292,12 @@ export function terminalOps(ctx: BridgeConnection): Ops {
       const id = String(need(req.terminalId, "terminalId"));
       attached.delete(id);
       pending.delete(id);
-      raw().unsubscribeTerminal(id);
+      const held = terminalSubscriptions.get(id);
+      if (held) {
+        terminalSubscriptions.delete(id);
+        held.unregister();
+        await held.release();
+      }
       return { detached: true };
     },
 

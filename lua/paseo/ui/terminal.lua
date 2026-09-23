@@ -26,6 +26,7 @@
 --- |paseo.ui.float|, which floats it over the Chat tab.
 
 local bridge = require "paseo.bridge"
+local hosts = require "paseo.hosts"
 
 local api = vim.api
 
@@ -33,6 +34,7 @@ local M = {}
 
 ---@class paseo.TerminalView
 ---@field id string
+---@field host_id string
 ---@field terminal paseo.Terminal
 ---@field buf integer
 ---@field chan integer
@@ -41,6 +43,10 @@ local M = {}
 
 ---@type table<string, paseo.TerminalView>
 local views = {}
+
+local function key(host_id, id)
+  return hosts.key(host_id, id)
+end
 
 ---A buffer that is never deleted, to park a window on.
 ---
@@ -64,7 +70,7 @@ end
 ---Feed bytes from the daemon into the right terminal channel.
 ---@param payload table
 local function receive(payload)
-  local view = payload.id and views[payload.id]
+  local view = payload.id and views[key(payload.hostId or hosts.selected(), payload.id)]
   if not view or not payload.data then
     return
   end
@@ -114,8 +120,8 @@ end
 
 ---@param id string
 ---@return paseo.TerminalView|nil
-function M.view(id)
-  return views[id]
+function M.view(id, host_id)
+  return views[key(host_id or hosts.selected(), id)]
 end
 
 ---The buffer and subscription for a terminal, created once.
@@ -129,7 +135,9 @@ end
 ---@return paseo.TerminalView
 function M.ensure(terminal, win)
   local id = terminal.id
-  local held = views[id]
+  local host_id = terminal.hostId or hosts.selected()
+  local view_key = key(host_id, id)
+  local held = views[view_key]
   if held and held.buf and api.nvim_buf_is_valid(held.buf) then
     held.terminal = terminal
     return held
@@ -154,15 +162,24 @@ function M.ensure(terminal, win)
       bridge.request(
         "terminals.input",
         { terminalId = id, data = vim.base64.encode(data) },
-        function() end
+        function() end,
+        host_id
       )
     end,
   })
 
   local rows, cols = size_of(win)
   ---@type paseo.TerminalView
-  local view = { id = id, terminal = terminal, buf = buf, chan = chan, rows = rows, cols = cols }
-  views[id] = view
+  local view = {
+    id = id,
+    host_id = host_id,
+    terminal = terminal,
+    buf = buf,
+    chan = chan,
+    rows = rows,
+    cols = cols,
+  }
+  views[view_key] = view
 
   bridge.request("terminals.attach", { terminalId = id, rows = rows, cols = cols }, function(err)
     if err then
@@ -171,10 +188,10 @@ function M.ensure(terminal, win)
           "paseo: cannot attach to that terminal — " .. tostring(err),
           vim.log.levels.ERROR
         )
-        M.detach(id)
+        M.detach(id, host_id)
       end)
     end
-  end)
+  end, host_id)
 
   return view
 end
@@ -196,7 +213,8 @@ function M.resize(view, win)
   bridge.request(
     "terminals.resize",
     { terminalId = view.id, rows = rows, cols = cols },
-    function() end
+    function() end,
+    view.host_id
   )
 end
 
@@ -229,14 +247,16 @@ end
 ---terminal nobody is subscribed to otherwise, and the sidecar goes on
 ---base64-ing every byte of it across the pipe.
 ---@param id string
-function M.detach(id)
-  local view = views[id]
+function M.detach(id, host_id)
+  host_id = host_id or hosts.selected()
+  local view_key = key(host_id, id)
+  local view = views[view_key]
   if not view then
     return
   end
-  views[id] = nil
+  views[view_key] = nil
 
-  bridge.request("terminals.detach", { terminalId = id }, function() end)
+  bridge.request("terminals.detach", { terminalId = id }, function() end, view.host_id)
   if view.buf and api.nvim_buf_is_valid(view.buf) then
     for _, win in ipairs(api.nvim_list_wins()) do
       if api.nvim_win_get_buf(win) == view.buf then
@@ -248,9 +268,9 @@ function M.detach(id)
 end
 
 function M.detach_all()
-  local ids = vim.tbl_keys(views)
-  for _, id in ipairs(ids) do
-    M.detach(id)
+  local held = vim.tbl_values(views)
+  for _, view in ipairs(held) do
+    M.detach(view.id, view.host_id)
   end
 end
 

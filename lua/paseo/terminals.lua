@@ -12,6 +12,7 @@
 
 local bridge = require "paseo.bridge"
 local config = require "paseo.config"
+local hosts = require "paseo.hosts"
 
 local M = {}
 
@@ -57,12 +58,17 @@ local labels = {}
 local listening = false
 local listeners = {}
 
+local function key(host_id, id)
+  return host_id .. ":" .. id
+end
+
 ---@param payload table
 local function apply(payload)
+  local host_id = payload.hostId or hosts.selected()
   if payload.kind == "error" then
     vim.notify("paseo: terminal directory: " .. tostring(payload.error), vim.log.levels.WARN)
     if payload.cwd then
-      watched[payload.cwd] = nil
+      watched[key(host_id, payload.cwd)] = nil
     end
     return
   end
@@ -72,9 +78,9 @@ local function apply(payload)
   -- the entries belonging to this cwd are cleared before the new ones land.
   local cwd = payload.cwd
   if cwd then
-    answered[cwd] = true
+    answered[key(host_id, cwd)] = true
     for id, at in pairs(roots) do
-      if at == cwd then
+      if at.hostId == host_id and at.cwd == cwd then
         terminals[id] = nil
         roots[id] = nil
       end
@@ -83,8 +89,10 @@ local function apply(payload)
 
   for _, terminal in ipairs(payload.entries or {}) do
     if terminal.id then
-      terminals[terminal.id] = terminal
-      roots[terminal.id] = cwd
+      terminal.hostId = host_id
+      local id = key(host_id, terminal.id)
+      terminals[id] = terminal
+      roots[id] = { hostId = host_id, cwd = cwd }
     end
   end
 
@@ -96,32 +104,38 @@ end
 ---Start following the terminals under `root`. Safe to call repeatedly.
 ---@param root string
 ---@param callback? fun(err: string|nil)
-function M.watch(root, callback)
+function M.watch(root, callback, host_id)
   callback = callback or function() end
-  if watched[root] then
+  local host = hosts.get(host_id)
+  if not host then
+    return callback("unknown Paseo host " .. tostring(host_id))
+  end
+  host_id = host.id
+  local watch_key = key(host_id, root)
+  if watched[watch_key] then
     return callback(nil)
   end
   -- Marked before the round trip, not after. `M.lines` calls this on every
   -- redraw, and a dashboard repaints many times before the first response
   -- lands -- so waiting for the answer would queue a subscription per frame.
-  watched[root] = true
+  watched[watch_key] = true
 
   bridge.ensure(function(err)
     if err then
-      watched[root] = nil
+      watched[watch_key] = nil
       return callback(err)
     end
     if not listening then
       listening = true
       bridge.on("terminals", apply)
     end
-    bridge.request("terminals.watch", { cwd = root }, function(sub_err)
+    bridge.request("terminals.watch", { cwd = root, hostId = host_id }, function(sub_err)
       if sub_err then
-        watched[root] = nil
+        watched[watch_key] = nil
       end
       callback(sub_err)
-    end)
-  end)
+    end, host_id)
+  end, host_id)
 end
 
 ---The payload handler, exposed for the spec.
@@ -139,12 +153,18 @@ M._apply = apply
 ---happened once. The snapshot replaces this the moment it lands.
 ---@param terminal paseo.Terminal
 ---@param root string
-function M.adopt(terminal, root)
+function M.adopt(terminal, root, host_id)
   if not (terminal and terminal.id) then
     return
   end
-  terminals[terminal.id] = terminal
-  roots[terminal.id] = root
+  host_id = (hosts.get(host_id) or {}).id
+  if not host_id then
+    return
+  end
+  terminal.hostId = host_id
+  local id = key(host_id, terminal.id)
+  terminals[id] = terminal
+  roots[id] = { hostId = host_id, cwd = root }
 end
 
 ---Call `fn` whenever the list changes.
@@ -156,14 +176,19 @@ end
 ---What to call a terminal. See `labels`.
 ---@param terminal paseo.Terminal|string  A terminal, or its id.
 ---@return string
-function M.label(terminal)
+function M.label(terminal, host_id)
   if type(terminal) == "string" then
-    terminal = terminals[terminal] or { id = terminal }
+    host_id = (hosts.get(host_id) or {}).id
+    terminal = (host_id and terminals[key(host_id, terminal)])
+      or { id = terminal, hostId = host_id }
   end
   if type(terminal) ~= "table" or not terminal.id then
     return "?"
   end
-  return labels[terminal.id] or terminal.name or terminal.title or terminal.id
+  return labels[key(terminal.hostId or hosts.selected(), terminal.id)]
+    or terminal.name
+    or terminal.title
+    or terminal.id
 end
 
 ---The live title the PTY reports for itself -- the shell's prompt title,
@@ -181,11 +206,15 @@ end
 
 ---@param id string
 ---@param label string|nil  nil or empty hands the name back to the daemon's.
-function M.set_label(id, label)
+function M.set_label(id, label, host_id)
   if not id then
     return
   end
-  labels[id] = (label and vim.trim(label) ~= "") and vim.trim(label) or nil
+  host_id = (hosts.get(host_id) or {}).id
+  if not host_id then
+    return
+  end
+  labels[key(host_id, id)] = (label and vim.trim(label) ~= "") and vim.trim(label) or nil
   for _, fn in ipairs(listeners) do
     pcall(fn, terminals)
   end
@@ -193,20 +222,42 @@ end
 
 ---@param id string
 ---@return paseo.Terminal|nil
-function M.get(id)
-  return terminals[id]
+function M.get(id, host_id)
+  host_id = (hosts.get(host_id) or {}).id
+  return host_id and terminals[key(host_id, id)] or nil
+end
+
+function M.all(host_id)
+  local out = {}
+  for _, terminal in pairs(terminals) do
+    if host_id == "*" or terminal.hostId == (hosts.get(host_id) or {}).id then
+      out[#out + 1] = terminal
+    end
+  end
+  table.sort(out, function(a, b)
+    return M.label(a) < M.label(b)
+  end)
+  return out
 end
 
 ---Terminals listed under `root`, in a stable order.
 ---@param root string
 ---@return paseo.Terminal[]
-function M.for_root(root)
-  root = vim.fn.resolve(vim.fn.fnamemodify(root, ":p")):gsub("/+$", "")
+function M.for_root(root, host_id)
+  local host = hosts.get(host_id)
+  if not host then
+    return {}
+  end
+  host_id = host.id
+  root = host.local_host and vim.fn.resolve(vim.fn.fnamemodify(root, ":p")):gsub("/+$", "")
+    or root:gsub("/+$", "")
   local out = {}
   for id, terminal in pairs(terminals) do
     local at = roots[id]
-    if at then
-      at = vim.fn.resolve(at):gsub("/+$", "")
+    if at and at.hostId == host_id then
+      at = host.local_host and vim.fn.resolve(at.cwd):gsub("/+$", "") or at.cwd:gsub("/+$", "")
+    else
+      at = nil
     end
     if at == root or (at and vim.startswith(at, root .. "/")) then
       out[#out + 1] = terminal
@@ -221,12 +272,20 @@ end
 ---Whether the directory has answered yet, so the panel can say "loading"
 ---rather than "none" before the first list lands.
 ---@return boolean
-function M.ready(root)
-  root = vim.fn.resolve(vim.fn.fnamemodify(root, ":p")):gsub("/+$", "")
-  for cwd, yes in pairs(answered) do
+function M.ready(root, host_id)
+  local host = hosts.get(host_id)
+  if not host then
+    return false
+  end
+  root = host.local_host and vim.fn.resolve(vim.fn.fnamemodify(root, ":p")):gsub("/+$", "")
+    or root:gsub("/+$", "")
+  local prefix = host.id .. ":"
+  for answer_key, yes in pairs(answered) do
     if yes then
-      local at = vim.fn.resolve(cwd):gsub("/+$", "")
-      if at == root or vim.startswith(at, root .. "/") then
+      local cwd = vim.startswith(answer_key, prefix) and answer_key:sub(#prefix + 1) or nil
+      local at = cwd
+        and (host.local_host and vim.fn.resolve(cwd):gsub("/+$", "") or cwd:gsub("/+$", ""))
+      if at and (at == root or vim.startswith(at, root .. "/")) then
         return true
       end
     end
@@ -252,10 +311,11 @@ end
 ---A one-line summary of a root's terminals, for a picker column.
 ---@param root string
 ---@return string
-function M.summary(root)
-  local list = M.for_root(root)
+function M.summary(root, host_id)
+  local host = hosts.get(host_id)
+  local list = M.for_root(root, host and host.id)
   if #list == 0 then
-    return watched[root] and "" or "…"
+    return host and watched[key(host.id, root)] and "" or "…"
   end
 
   local attention, working = 0, 0
@@ -301,7 +361,7 @@ end
 ---a model at all.
 ---@param cwd string
 ---@param callback fun(presets: table[])
-function M.presets(cwd, callback)
+function M.presets(cwd, callback, host_id)
   local out = { { label = "Shell", note = "$SHELL on the daemon's host" } }
 
   for _, preset in ipairs(config.get().ui.terminal.presets or {}) do
@@ -334,7 +394,7 @@ function M.presets(cwd, callback)
       table.insert(out, i + 1, preset)
     end
     callback(out)
-  end)
+  end, host_id)
 end
 
 ---Start a terminal in `cwd`.
@@ -346,10 +406,12 @@ end
 ---@param preset table  `{ command?, args?, label? }`
 ---@param size { rows: integer, cols: integer }
 ---@param callback fun(id: string|nil, err: string|nil)
-function M.create(cwd, preset, size, callback)
+function M.create(cwd, preset, size, callback, host_id)
   preset = preset or {}
+  host_id = (hosts.get(host_id) or {}).id
   require("paseo.bridge").request("terminals.create", {
     cwd = cwd,
+    hostId = host_id,
     command = preset.command,
     args = preset.args,
     name = preset.label ~= "Shell" and (preset.label or preset.command) or nil,
@@ -366,18 +428,19 @@ function M.create(cwd, preset, size, callback)
       end
       -- The directory is told by push and may not have caught up, so seed it
       -- rather than waiting for the snapshot.
-      M.adopt(item, cwd)
+      M.adopt(item, cwd, host_id)
       if preset.label and preset.label ~= "Shell" then
-        M.set_label(item.id, preset.label)
+        M.set_label(item.id, preset.label, host_id)
       end
       callback(item.id, nil)
     end)
-  end)
+  end, host_id)
 end
 
 ---@param id string
-function M.rename(id)
-  local item = M.get(id)
+function M.rename(id, host_id)
+  host_id = (hosts.get(host_id) or {}).id
+  local item = M.get(id, host_id)
   vim.ui.input({ prompt = "Name: ", default = item and M.label(item) or "" }, function(title)
     if title == nil then
       return
@@ -389,19 +452,21 @@ function M.rename(id)
     -- identically. The daemon is told anyway, because a later one may keep
     -- it and the name then shows up in the Paseo app too; nothing here waits
     -- on that answer.
-    M.set_label(id, title)
+    M.set_label(id, title, host_id)
     repaint()
     require("paseo.bridge").request(
       "terminals.rename",
-      { terminalId = id, title = title },
-      function() end
+      { terminalId = id, title = title, hostId = host_id },
+      function() end,
+      host_id
     )
   end)
 end
 
 ---@param id string
-function M.kill(id)
-  local item = M.get(id)
+function M.kill(id, host_id)
+  host_id = (hosts.get(host_id) or {}).id
+  local item = M.get(id, host_id)
   local name = item and M.label(item) or id
   -- Killing a terminal kills whatever is running in it, and "whatever" is
   -- routinely an agent mid-turn. Asked rather than assumed.
@@ -409,13 +474,13 @@ function M.kill(id)
     if choice ~= "yes" then
       return
     end
-    require("paseo.bridge").request("terminals.kill", { terminalId = id }, function(err)
+    require("paseo.bridge").request("terminals.kill", { terminalId = id, hostId = host_id }, function(err)
       if err then
         vim.schedule(function()
           vim.notify("paseo: could not kill it — " .. tostring(err), vim.log.levels.ERROR)
         end)
       end
-    end)
+    end, host_id)
   end)
 end
 

@@ -522,6 +522,7 @@ commands.skills = {
 ---@param opts? table See `paseo.Config`.
 function M.setup(opts)
   M.config.setup(opts)
+  require("paseo.hosts").setup()
 
   local repos = require "paseo.repos"
 

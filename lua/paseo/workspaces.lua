@@ -9,6 +9,7 @@
 --- the directory.
 
 local bridge = require "paseo.bridge"
+local hosts = require "paseo.hosts"
 local registry = require "paseo.registry"
 
 local M = {}
@@ -70,6 +71,9 @@ end
 ---@param ws paseo.PaseoWorkspace
 ---@return string
 function M.group(ws)
+  if ws.hostId and not (hosts.get(ws.hostId) or {}).local_host then
+    return ws.project or ws.name or ""
+  end
   local root = require("paseo.repos").workspace_root(ws.directory)
   if root then
     -- `root` is `<project>/<workspaces_dir>/<name>`, so the project is two up.
@@ -84,7 +88,12 @@ end
 
 ---Every workspace, Paseo's merged with ours.
 ---@param callback fun(list: paseo.PaseoWorkspace[]|nil, err: string|nil)
-function M.list(callback)
+function M.list(callback, host_id)
+  local host = hosts.get(host_id)
+  if not host then
+    return callback(nil, "unknown Paseo host " .. tostring(host_id))
+  end
+  host_id = host.id
   bridge.ensure(function(err)
     if err then
       return callback(nil, err)
@@ -98,8 +107,10 @@ function M.list(callback)
       -- Our registry, indexed by directory, so a Paseo workspace pointed at an
       -- assembled directory picks up its members.
       local assembled = {}
-      for _, ws in ipairs(registry.list()) do
-        assembled[normalise(ws.root)] = ws
+      if host.local_host then
+        for _, ws in ipairs(registry.list()) do
+          assembled[normalise(ws.root)] = ws
+        end
       end
 
       local out = {}
@@ -109,6 +120,8 @@ function M.list(callback)
           local merged = vim.tbl_extend("force", ws, {
             members = ours and registry.active(ours) or {},
             assembled = ours ~= nil,
+            hostId = host_id,
+            local_directory = hosts.to_local(host_id, ws.directory),
           })
           merged.group = M.group(merged)
           out[#out + 1] = merged
@@ -125,8 +138,36 @@ function M.list(callback)
         return (a.name or "") < (b.name or "")
       end)
       callback(out, nil)
-    end)
-  end)
+    end, host_id)
+  end, host_id)
+end
+
+---Every connected host's workspaces. One offline host does not blank the rest.
+function M.list_all(callback)
+  local left = hosts.count()
+  local out, errors = {}, {}
+  if left == 0 then
+    return callback(out, nil, errors)
+  end
+  for _, host in ipairs(hosts.all()) do
+    M.list(function(list, err)
+      if err then
+        errors[host.id] = err
+      else
+        vim.list_extend(out, list or {})
+      end
+      left = left - 1
+      if left == 0 then
+        table.sort(out, function(a, b)
+          if a.hostId ~= b.hostId then
+            return a.hostId < b.hostId
+          end
+          return (a.name or "") < (b.name or "")
+        end)
+        callback(out, nil, errors)
+      end
+    end, host.id)
+  end
 end
 
 -- ----------------------------------------------------------------- creating
@@ -235,7 +276,30 @@ function M.create(opts, callback)
     )
   end
 
-  local plan = M.strategy(opts.root or assert(vim.uv.cwd()))
+  local host = hosts.get(opts.host_id)
+  if not host then
+    return callback(nil, "unknown Paseo host " .. tostring(opts.host_id))
+  end
+  opts.host_id = host.id
+  local local_root = opts.local_root or (opts.remote and hosts.to_local(host.id, opts.root))
+  local source_root = local_root or opts.root or assert(vim.uv.cwd())
+  local plan = M.strategy(source_root)
+  if not host.local_host then
+    if plan.kind == "assemble" or plan.kind == "discover" then
+      return callback(
+        nil,
+        "multi-repo assembled workspaces are local-only; create this workspace on the local host"
+      )
+    end
+    local remote_root = opts.remote and opts.root or hosts.to_remote(host.id, source_root)
+    if not remote_root then
+      return callback(nil, source_root .. " is not mapped on Paseo host " .. host.label)
+    end
+    plan.root = remote_root
+    if plan.kind == "worktree" then
+      plan.repo = remote_root
+    end
+  end
 
   -- A discovered manifest is OFFERED before it is written. It used to be
   -- written outright, on the grounds that being sent to read a TOML file is
@@ -310,6 +374,7 @@ function M.assemble(plan, opts, callback)
     plan.members = #registry.active(ws)
   end
 
+  local host_id = opts.host_id
   bridge.ensure(function(err)
     if err then
       return callback(nil, err, plan)
@@ -337,7 +402,7 @@ function M.assemble(plan, opts, callback)
           assembled = false,
           members = {},
         } or nil)
-      end)
+      end, host_id)
     end
 
     -- `open` rather than `create`: it reuses the active workspace for that
@@ -356,14 +421,14 @@ function M.assemble(plan, opts, callback)
         assembled = plan.kind == "assemble",
         members = {},
       } or nil)
-    end)
-  end)
+    end, host_id)
+  end, host_id)
 end
 
 ---One workspace by daemon id.
 ---@param id string
 ---@param callback fun(workspace: paseo.PaseoWorkspace|nil, err: string|nil)
-function M.get(id, callback)
+function M.get(id, callback, host_id)
   M.list(function(list, err)
     if err then
       return callback(nil, err)
@@ -374,7 +439,7 @@ function M.get(id, callback)
       end
     end
     callback(nil, "the created workspace is not in Paseo's workspace list")
-  end)
+  end, host_id)
 end
 
 ---Switch to a workspace.
@@ -406,6 +471,21 @@ function M.open(ws)
     return false
   end
 
+  local host = hosts.get(ws.hostId)
+  if host then
+    hosts.select(host.id)
+  end
+  local local_root = ws.local_directory or (host and hosts.to_local(host.id, root))
+  if host and not host.local_host and not local_root then
+    require("paseo.ui.chat").open {
+      root = root,
+      host_id = host.id,
+      remote = true,
+      title = ws.name,
+    }
+    return true
+  end
+  local switch_root = local_root or root
   local how = require("paseo.config").get().workspaces.open
 
   if type(how) == "function" then
@@ -423,16 +503,29 @@ function M.open(ws)
   if how == "tab" then
     vim.cmd.tabnew()
   end
-  vim.cmd[how == "cd" and "cd" or "tcd"](vim.fn.fnameescape(root))
+  vim.cmd[how == "cd" and "cd" or "tcd"](vim.fn.fnameescape(switch_root))
   require("paseo.repos").invalidate()
 
   -- After the `tcd`, so the chat that lands is looking at the directory this
   -- Neovim is now in, and before the autocmd, so a config that opens something
   -- in the new tab gets the last word on where the cursor ends up.
-  require("paseo.ui.chat").follow(root)
+  if host and not host.local_host then
+    require("paseo.ui.chat").open {
+      root = root,
+      local_root = switch_root,
+      host_id = host.id,
+      remote = true,
+      create = false,
+    }
+  else
+    require("paseo.ui.chat").follow(switch_root)
+  end
 
-  vim.api.nvim_exec_autocmds("User", { pattern = "PaseoWorkspaceOpen", data = { root = root } })
-  vim.notify("paseo: " .. vim.fn.fnamemodify(root, ":~"), vim.log.levels.INFO)
+  vim.api.nvim_exec_autocmds("User", {
+    pattern = "PaseoWorkspaceOpen",
+    data = { root = switch_root, remote_root = root, host = host and host.id },
+  })
+  vim.notify("paseo: " .. vim.fn.fnamemodify(switch_root, ":~"), vim.log.levels.INFO)
   return true
 end
 
@@ -464,7 +557,7 @@ function M.archive(ws, opts, callback)
 
   bridge.request("workspace.archive", { workspaceId = ws.id }, function(err)
     callback(err)
-  end)
+  end, ws.hostId)
 end
 
 ---Archive a workspace, asking the one question worth asking.
@@ -562,6 +655,7 @@ end
 ---@param ws paseo.PaseoWorkspace
 ---@param callback fun(agent_sessions: table[]|nil, err: string|nil)
 function M.agent_sessions(ws, callback)
+  local host_id = ws.hostId
   bridge.ensure(function(err)
     if err then
       return callback(nil, err)
@@ -584,8 +678,8 @@ function M.agent_sessions(ws, callback)
         return (a.title or a.id) < (b.title or b.id)
       end)
       callback(out, nil)
-    end)
-  end)
+    end, host_id)
+  end, host_id)
 end
 
 ---Compatibility alias for the old ambiguous name.
@@ -603,19 +697,25 @@ M.sessions = M.agent_sessions
 ---@param root string
 ---@param callback fun(ws: paseo.PaseoWorkspace|nil, err: string|nil)
 function M.for_dir(root, callback)
-  local here = vim.fn.resolve(vim.fn.fnamemodify(root, ":p")):gsub("/+$", "")
+  local host = hosts.get()
+  local here = host.local_host and vim.fn.resolve(vim.fn.fnamemodify(root, ":p")):gsub("/+$", "")
+    or hosts.to_remote(host.id, root)
+  if not here then
+    return callback(nil, root .. " is not mapped on Paseo host " .. host.label)
+  end
   M.list(function(list, err)
     if err then
       return callback(nil, err)
     end
     for _, ws in ipairs(list) do
-      local dir = vim.fn.resolve(ws.directory or ""):gsub("/+$", "")
+      local dir = host.local_host and vim.fn.resolve(ws.directory or ""):gsub("/+$", "")
+        or (ws.directory or ""):gsub("/+$", "")
       if dir ~= "" and (here == dir or vim.startswith(here, dir .. "/")) then
         return callback(ws, nil)
       end
     end
     callback(nil, "this directory is not in a Paseo workspace yet")
-  end)
+  end, host.id)
 end
 
 ---@param callback fun(id: string|nil, err: string|nil)
@@ -623,7 +723,9 @@ function M.new_agent_session(ws, opts, callback)
   opts = opts or {}
   require("paseo.ui.create").review({
     cwd = ws.directory,
-    preferred = require("paseo.config").get().paseo.provider,
+    preferred = (hosts.get(ws.hostId) or {}).provider
+      or require("paseo.config").get().paseo.provider,
+    host_id = ws.hostId,
   }, function(draft, review_err)
     if review_err or not draft then
       return callback(nil, review_err or "cancelled")
@@ -640,7 +742,7 @@ function M.new_agent_session(ws, opts, callback)
         require("paseo.config").get().paseo.provider = draft.provider
       end
       callback(result and result.id, err)
-    end)
+    end, ws.hostId)
   end)
 end
 

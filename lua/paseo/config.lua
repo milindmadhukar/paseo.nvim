@@ -35,6 +35,27 @@ local M = {}
 --- (There is no `cli` key. `/usr/bin/paseo` is a perfectly good headless CLI,
 --- but it still pays Node startup -- about 1s against 8ms for the socket -- so
 --- nothing here shells out to it. The daemon is reached over its WebSocket.)
+---@field default_host string? Configured host alias used by directory-based actions.
+---@field hosts table<string, paseo.Config.Host>? Declarative daemon hosts. When
+---                        absent the legacy keys above form one implicit local host.
+
+---@class paseo.Config.Host
+---@field label string?
+---@field connections paseo.Config.Connection[]
+---@field paths paseo.Config.PathMap[]?
+---@field provider string?
+
+---@class paseo.Config.Connection
+---@field id string?
+---@field type "local"|"direct"|"relay"
+---@field address string? Direct host:port or ws(s) URL.
+---@field tls boolean?
+---@field password string|fun(): string?
+---@field offer string|fun(): string?
+
+---@class paseo.Config.PathMap
+---@field local_root string
+---@field remote_root string
 
 ---@class paseo.Config.UI
 ---@field surface "float"|"sidebar"|"buffer"  Which surface `:Paseo chat` opens
@@ -512,6 +533,50 @@ local config = vim.deepcopy(defaults)
 ---@return paseo.Config
 function M.setup(opts)
   config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts or {})
+
+  vim.validate("paseo.hosts", config.paseo.hosts, function(v)
+    return v == nil or type(v) == "table"
+  end, "a table keyed by host alias")
+  vim.validate("paseo.default_host", config.paseo.default_host, function(v)
+    return v == nil or type(v) == "string"
+  end, "a configured host alias")
+  if config.paseo.hosts then
+    if next(config.paseo.hosts) == nil then
+      error("paseo.hosts must contain at least one host")
+    end
+    for alias, host in pairs(config.paseo.hosts) do
+      vim.validate("paseo.hosts key", alias, "string")
+      vim.validate("paseo.hosts." .. alias, host, "table")
+      vim.validate("paseo.hosts." .. alias .. ".label", host.label, function(v)
+        return v == nil or type(v) == "string"
+      end, "a string")
+      vim.validate("paseo.hosts." .. alias .. ".connections", host.connections, function(v)
+        return type(v) == "table" and #v > 0
+      end, "a non-empty list")
+      for i, connection in ipairs(host.connections) do
+        local at = ("paseo.hosts.%s.connections[%d]"):format(alias, i)
+        vim.validate(at, connection, "table")
+        vim.validate(at .. ".type", connection.type, function(v)
+          return v == "local" or v == "direct" or v == "relay"
+        end, '"local", "direct", or "relay"')
+        if connection.type == "direct" then
+          vim.validate(at .. ".address", connection.address, "string")
+        elseif connection.type == "relay" then
+          vim.validate(at .. ".offer", connection.offer, function(v)
+            return type(v) == "string" or type(v) == "function"
+          end, "a pairing-link string or function")
+        end
+      end
+      for i, mapping in ipairs(host.paths or {}) do
+        local at = ("paseo.hosts.%s.paths[%d]"):format(alias, i)
+        vim.validate(at .. ".local_root", mapping.local_root, "string")
+        vim.validate(at .. ".remote_root", mapping.remote_root, "string")
+      end
+    end
+    if config.paseo.default_host and not config.paseo.hosts[config.paseo.default_host] then
+      error(("paseo.default_host %q is not present in paseo.hosts"):format(config.paseo.default_host))
+    end
+  end
 
   vim.validate("ui.pr.enabled", config.ui.pr.enabled, "boolean")
   vim.validate("ui.pr.ttl", config.ui.pr.ttl, "number")

@@ -22,6 +22,7 @@ local M = {}
 
 ---@class paseo.Draft
 ---@field cwd string
+---@field host_id string|nil
 ---@field entries table[]  The provider catalogue, as `providers` reports it.
 ---@field provider string  `"claude/opus-5"` -- provider and model, the way the daemon wants it.
 ---@field entry table  The catalogue entry for the selected provider.
@@ -70,9 +71,10 @@ M.offerable = offerable
 ---@param entries table[]
 ---@param selection { provider: string, entry: table, model: table }
 ---@return paseo.Draft
-function M.new(cwd, entries, selection)
+function M.new(cwd, entries, selection, host_id)
   return {
     cwd = cwd,
+    host_id = host_id,
     entries = entries,
     provider = selection.provider,
     entry = selection.entry,
@@ -282,7 +284,7 @@ function M.refresh_features(draft, keep_values, done)
       draft.loading = false
       done()
     end)
-  end)
+  end, draft.host_id)
 end
 
 ---Select a provider by id, keeping nothing: its modes, models, thinking
@@ -402,7 +404,7 @@ function M.load(draft, done)
       draft.provider = draft.entry.provider .. "/" .. draft.model.id
       M.refresh_features(draft, true, done)
     end)
-  end)
+  end, draft.host_id)
 end
 
 ---What `M.review` hands back: exactly the four fields `agent.ensure` takes.

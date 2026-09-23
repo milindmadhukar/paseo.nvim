@@ -180,7 +180,7 @@ function M.respond(chat, request, opts)
         vim.notify("paseo: " .. notice, vim.log.levels.WARN)
       end
     end)
-  end)
+  end, chat.host_id)
 
   -- Mark it locally straight away. `permission_resolved` will confirm, but the
   -- round trip is visible and leaving the card reading "awaiting" in the
