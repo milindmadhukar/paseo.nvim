@@ -6,35 +6,47 @@
 --- the workspace picker a dashboard rather than a list of directories.
 
 local bridge = require "paseo.bridge"
+local hosts = require "paseo.hosts"
 
 local M = {}
 
----@type table<string, table>  agent id -> agent
+---@type table<string, table<string, table>>  host id -> agent id -> agent
 local agents = {}
-local subscribed = false
+local subscribed = {}
+local listening = false
 local listeners = {}
 
 ---Render from the SNAPSHOT first, then apply updates. The snapshot always
 ---arrives before any update, so starting from an empty table and waiting for
 ---upserts would show nothing until something changed.
 local function apply(payload)
+  local host_id = payload.hostId or hosts.selected()
+  agents[host_id] = agents[host_id] or {}
+  local directory = agents[host_id]
   if payload.kind == "snapshot" then
-    agents = {}
+    directory = {}
+    agents[host_id] = directory
     for _, agent in ipairs(payload.entries or {}) do
-      agents[agent.id] = agent
+      agent.hostId = host_id
+      directory[agent.id] = agent
     end
   elseif payload.kind == "upsert" and payload.agent then
-    agents[payload.agent.id] = payload.agent
+    payload.agent.hostId = host_id
+    directory[payload.agent.id] = payload.agent
   elseif payload.kind == "remove" and payload.id then
-    agents[payload.id] = nil
+    directory[payload.id] = nil
   elseif payload.kind == "error" then
-    vim.notify("paseo: agent directory: " .. tostring(payload.error), vim.log.levels.WARN)
-    subscribed = false
+    local host = hosts.get(host_id)
+    vim.notify(
+      ("paseo: agent directory on %s: %s"):format(host and host.label or host_id, payload.error),
+      vim.log.levels.WARN
+    )
+    subscribed[host_id] = nil
     return
   end
 
   for _, fn in ipairs(listeners) do
-    pcall(fn, agents)
+    pcall(fn, directory, host_id)
   end
 end
 
@@ -43,9 +55,15 @@ M._apply = apply
 
 ---Start following the directory. Safe to call repeatedly.
 ---@param callback? fun(err: string|nil)
-function M.watch(callback)
+---@param host_id? string
+function M.watch(callback, host_id)
   callback = callback or function() end
-  if subscribed then
+  local host = hosts.get(host_id)
+  if not host then
+    return callback("unknown Paseo host " .. tostring(host_id))
+  end
+  host_id = host.id
+  if subscribed[host_id] then
     return callback(nil)
   end
 
@@ -53,12 +71,32 @@ function M.watch(callback)
     if err then
       return callback(err)
     end
-    bridge.on("agents", apply)
-    bridge.request("agents.subscribe", {}, function(sub_err)
-      subscribed = not sub_err
+    if not listening then
+      listening = true
+      bridge.on("agents", apply)
+    end
+    bridge.request("agents.subscribe", { hostId = host_id }, function(sub_err)
+      subscribed[host_id] = not sub_err
       callback(sub_err)
-    end)
-  end)
+    end, host_id)
+  end, host_id)
+end
+
+---Watch every configured host. Failures are reported per host and do not stop peers.
+function M.watch_all(callback)
+  callback = callback or function() end
+  local left = hosts.count()
+  if left == 0 then
+    return callback(nil)
+  end
+  for _, host in ipairs(hosts.all()) do
+    M.watch(function()
+      left = left - 1
+      if left == 0 then
+        callback(nil)
+      end
+    end, host.id)
+  end
 end
 
 ---Call `fn` whenever the directory changes.
@@ -69,16 +107,30 @@ end
 
 ---One agent from the directory, by id.
 ---@param id string
+---@param host_id? string
 ---@return table|nil
-function M.get(id)
-  return agents[id]
+function M.get(id, host_id)
+  host_id = (hosts.get(host_id) or {}).id
+  return host_id and agents[host_id] and agents[host_id][id] or nil
 end
 
 ---Every non-archived agent session in the subscribed directory.
 ---@return table[]
-function M.all()
+function M.all(host_id)
+  local source
+  if host_id == "*" then
+    source = {}
+    for _, directory in pairs(agents) do
+      for key, agent in pairs(directory) do
+        source[(agent.hostId or "?") .. ":" .. key] = agent
+      end
+    end
+  else
+    host_id = (hosts.get(host_id) or {}).id
+    source = (host_id and agents[host_id]) or {}
+  end
   local out = {}
-  for _, agent in pairs(agents) do
+  for _, agent in pairs(source) do
     out[#out + 1] = agent
   end
   table.sort(out, function(a, b)
@@ -88,8 +140,17 @@ function M.all()
 end
 
 ---@return boolean
-function M.ready()
-  return subscribed
+function M.ready(host_id)
+  if host_id == "*" then
+    for _, host in ipairs(hosts.all()) do
+      if not subscribed[host.id] then
+        return false
+      end
+    end
+    return true
+  end
+  host_id = (hosts.get(host_id) or {}).id
+  return host_id and subscribed[host_id] == true or false
 end
 
 ---The statuses that mean the agent is DOING something, as the daemon spells
@@ -107,10 +168,10 @@ local WORKING = {
 
 ---Agent sessions whose work is live, or whose work is waiting on the user.
 ---@return table[]
-function M.active()
+function M.active(host_id)
   return vim.tbl_filter(function(agent)
     return agent.requiresAttention or WORKING[agent.status] == true
-  end, M.all())
+  end, M.all(host_id))
 end
 
 ---Is anything the daemon knows about actually WORKING?
@@ -119,8 +180,8 @@ end
 ---is the question "does anything on screen need animating", and a permission
 ---prompt sitting there does not move.
 ---@return boolean
-function M.busy()
-  for _, agent in ipairs(M.all()) do
+function M.busy(host_id)
+  for _, agent in ipairs(M.all(host_id)) do
     if WORKING[agent.status] == true then
       return true
     end
@@ -139,8 +200,8 @@ end
 ---touched are different answers, and the glyphs for them differ.
 ---@param root string
 ---@return "attention"|"working"|"idle"|"none"
-function M.state(root)
-  local list = M.for_root(root)
+function M.state(root, host_id)
+  local list = M.for_root(root, host_id)
   if #list == 0 then
     return "none"
   end
@@ -180,12 +241,16 @@ end
 ---the daemon has no idea the directory is six worktrees.
 ---@param root string
 ---@return table[]
-function M.for_root(root)
-  root = vim.fn.resolve(vim.fn.fnamemodify(root, ":p")):gsub("/+$", "")
+function M.for_root(root, host_id)
+  host_id = (hosts.get(host_id) or {}).id
+  local local_host = host_id and hosts.get(host_id).local_host
+  root = local_host and vim.fn.resolve(vim.fn.fnamemodify(root, ":p")):gsub("/+$", "")
+    or root:gsub("/+$", "")
   local out = {}
-  for _, agent in pairs(agents) do
+  for _, agent in pairs((host_id and agents[host_id]) or {}) do
     if agent.cwd then
-      local cwd = vim.fn.resolve(agent.cwd):gsub("/+$", "")
+      local cwd = local_host and vim.fn.resolve(agent.cwd):gsub("/+$", "")
+        or agent.cwd:gsub("/+$", "")
       if cwd == root or vim.startswith(cwd, root .. "/") then
         out[#out + 1] = agent
       end
@@ -200,10 +265,11 @@ end
 ---A one-line summary of a root's agents, for a picker column.
 ---@param root string
 ---@return string
-function M.summary(root)
-  local list = M.for_root(root)
+function M.summary(root, host_id)
+  local host = hosts.get(host_id)
+  local list = M.for_root(root, host and host.id)
   if #list == 0 then
-    return subscribed and "" or "…"
+    return host and subscribed[host.id] and "" or "…"
   end
 
   local attention, busy = 0, 0

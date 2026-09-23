@@ -12,15 +12,15 @@ local function current_root()
   return chat and chat.root or assert(vim.uv.cwd())
 end
 
-local function fetch_catalogue(cwd, callback)
+local function fetch_catalogue(cwd, callback, host_id)
   bridge.ensure(function(err)
     if err then
       return callback(nil, err)
     end
-    bridge.request("providers", { cwd = cwd }, function(fetch_err, result)
+    bridge.request("providers", { cwd = cwd, hostId = host_id }, function(fetch_err, result)
       callback(result and result.entries or nil, fetch_err)
-    end)
-  end)
+    end, host_id)
+  end, host_id)
 end
 
 ---Resolve the first slash only: some model ids themselves contain slashes.
@@ -46,7 +46,7 @@ end
 
 ---A provider picker followed by that provider's models. An explicit value is
 ---validated against the same catalogue without opening either picker.
----@param opts? { cwd?: string, direct?: string }
+---@param opts? { cwd?: string, direct?: string, host_id?: string }
 ---@param callback fun(selection: table|nil, err: string|nil)
 function M.select_model(opts, callback)
   opts = opts or {}
@@ -95,7 +95,7 @@ function M.select_model(opts, callback)
         end)
       end)
     end)
-  end)
+  end, opts.host_id)
 end
 
 ---@deprecated  Use |paseo.ui.draft|.new. Kept because the spec drives it.
@@ -111,8 +111,8 @@ end
 ---has, and a second copy of this call is a second thing to keep in step.
 ---@param cwd string
 ---@param callback fun(entries: table[]|nil, err: string|nil)
-function M.catalogue(cwd, callback)
-  fetch_catalogue(cwd, callback)
+function M.catalogue(cwd, callback, host_id)
+  fetch_catalogue(cwd, callback, host_id)
 end
 
 ---Everything a new agent session is set to, before it exists, on one screen.
@@ -126,7 +126,7 @@ end
 ---Which also retires the picker: a cold open lands on the Provider card with
 ---the first ready provider selected, rather than opening two `vim.ui.select`
 ---prompts before you see anything. The screen IS the picker.
----@param opts { cwd: string, preferred?: string }
+---@param opts { cwd: string, preferred?: string, host_id?: string }
 ---@param callback fun(draft: table|nil, err: string|nil)
 function M.review(opts, callback)
   local draft_model = require "paseo.ui.draft"
@@ -168,7 +168,7 @@ function M.review(opts, callback)
       if done then
         return
       end
-      local draft = draft_model.new(opts.cwd, entries, selection)
+      local draft = draft_model.new(opts.cwd, entries, selection, opts.host_id)
 
       local function create()
         -- The features are part of what is being created, so creating before
@@ -246,7 +246,7 @@ function M.review(opts, callback)
         end
       end)
     end)
-  end)
+  end, opts.host_id)
 end
 
 function M.preference(value, callback)

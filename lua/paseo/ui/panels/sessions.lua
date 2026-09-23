@@ -28,6 +28,7 @@
 --- which row you were on, and arriving at the tab never put you on one.
 
 local agents = require "paseo.agents"
+local hosts = require "paseo.hosts"
 local icons = require "paseo.ui.icons"
 local list = require "paseo.ui.list"
 local terminals = require "paseo.terminals"
@@ -81,7 +82,16 @@ local KEYS = { terminal = "c", agent = "a", copy = "y", rename = "R", kill = "d"
 ---@param chat table
 ---@return { kind: string, id: string|nil }
 local function here(chat)
-  return require("paseo.ui.float").session() or { kind = "agent", id = chat.agent_id }
+  return require("paseo.ui.float").session()
+    or { kind = "agent", id = chat.agent_id, hostId = chat.host_id }
+end
+
+local function badge(host_id)
+  if not hosts.multiple() then
+    return nil
+  end
+  local host = hosts.get(host_id)
+  return widgets.chip((host and host.label) or host_id, host and host.status == "online" and nil or "warn")
 end
 
 ---Start an agent, here or in a workspace of its own.
@@ -96,12 +106,17 @@ end
 local function new_agent(chat)
   -- Through the workspace, because `agent.create` is addressed by workspace
   -- id: the directory is where the agent RUNS, not what it belongs to.
-  require("paseo.workspaces").for_dir(chat.root, function(ws, err)
+  require("paseo.workspaces").for_dir(chat.local_root or chat.root, function(ws, err)
     vim.schedule(function()
       if not ws then
         return vim.notify("paseo: " .. tostring(err), vim.log.levels.WARN)
       end
-      require("paseo.start").agent({ root = chat.root, workspace = ws }, function(_, start_err)
+      require("paseo.start").agent({
+        root = chat.root,
+        local_root = chat.local_root,
+        host_id = chat.host_id,
+        workspace = ws,
+      }, function(_, start_err)
         if start_err then
           vim.notify("paseo: " .. start_err, vim.log.levels.ERROR)
         end
@@ -111,7 +126,7 @@ local function new_agent(chat)
 end
 
 ---@param id string
-local function archive(id)
+local function archive(id, host_id)
   -- Archiving an agent is not killing it -- the session survives on the daemon
   -- -- but it does take it off every list, so it is asked for too.
   vim.ui.select({ "no", "yes" }, { prompt = "Archive this session?" }, function(choice)
@@ -125,7 +140,7 @@ local function archive(id)
           err and vim.log.levels.ERROR or vim.log.levels.INFO
         )
       end)
-    end)
+    end, host_id)
   end)
 end
 
@@ -134,18 +149,25 @@ end
 local function sections(chat)
   -- Both directories are push-fed. Without a subscription an empty table reads
   -- as "nothing here", which is a lie about a workspace with three running.
-  agents.watch()
-  terminals.watch(chat.root)
+  if hosts.multiple() then
+    agents.watch_all()
+  else
+    agents.watch(nil, chat.host_id)
+  end
+  terminals.watch(chat.root, nil, chat.host_id)
 
   local at = here(chat)
+  local filter = hosts.filter()
   local agent_rows = {}
-  for _, agent in ipairs(agents.for_root(chat.root)) do
+  local visible_agents = hosts.multiple() and agents.all(filter) or agents.for_root(chat.root, chat.host_id)
+  for _, agent in ipairs(visible_agents) do
+    local host_id = agent.hostId or chat.host_id
     local glyph = agent.requiresAttention and GLYPH.permission
       or GLYPH[agent.status or "idle"]
       or GLYPH.idle
     -- `mine` is "the session on screen RIGHT NOW", which while the Chat tab is
     -- showing a terminal is none of these rows -- see `here`.
-    local mine = at.kind == "agent" and at.id == agent.id
+    local mine = at.kind == "agent" and at.id == agent.id and (at.hostId or chat.host_id) == host_id
 
     -- Metadata is RIGHT-ALIGNED into one column rather than trailing the
     -- title. A provider written three spaces after a title of whatever length
@@ -160,6 +182,11 @@ local function sections(chat)
     end
     if agent.provider then
       right[#right + 1] = { agent.provider, "PaseoDim" }
+    end
+    local host_badge = badge(host_id)
+    if host_badge then
+      table.insert(right, 1, { " ", "PaseoDim" })
+      table.insert(right, 1, host_badge)
     end
 
     agent_rows[#agent_rows + 1] = {
@@ -191,6 +218,8 @@ local function sections(chat)
         end
         require("paseo.ui.chat").open {
           root = agent.cwd or chat.root,
+          host_id = host_id,
+          remote = true,
           agent_id = agent.id,
           title = agent.title,
         }
@@ -200,14 +229,17 @@ local function sections(chat)
           agents.copy_id { id = agent.id, title = agent.title }
         end,
         [KEYS.kill] = function()
-          archive(agent.id)
+          archive(agent.id, host_id)
         end,
       },
     }
   end
 
   local terminal_rows = {}
-  for _, item in ipairs(terminals.for_root(chat.root)) do
+  local visible_terminals = hosts.multiple() and terminals.all(filter)
+    or terminals.for_root(chat.root, chat.host_id)
+  for _, item in ipairs(visible_terminals) do
+    local host_id = item.hostId or chat.host_id
     local glyph = terminals.glyph(item)
     local reason = item.activity and item.activity.attentionReason
     local right = {}
@@ -216,10 +248,16 @@ local function sections(chat)
     elseif reason == "finished" then
       right[#right + 1] = { "finished", "PaseoDim" }
     end
+    local host_badge = badge(host_id)
+    if host_badge then
+      table.insert(right, 1, host_badge)
+    end
 
     terminal_rows[#terminal_rows + 1] = {
       id = "terminal." .. item.id,
-      active = at.kind == "terminal" and at.id == item.id,
+      active = at.kind == "terminal"
+        and at.id == item.id
+        and (at.hostId or chat.host_id) == host_id,
       cells = {
         { KIND.terminal[1] .. " ", KIND.terminal[2] },
         { glyph[1] .. " ", glyph[2] },
@@ -231,14 +269,18 @@ local function sections(chat)
       -- same way opening an agent does. It used to open a surface of its own,
       -- over the top of this one.
       activate = function()
-        require("paseo.ui.float").show_session { kind = "terminal", id = item.id }
+        require("paseo.ui.float").show_session {
+          kind = "terminal",
+          id = item.id,
+          hostId = host_id,
+        }
       end,
       keys = {
         [KEYS.rename] = function()
-          terminals.rename(item.id)
+          terminals.rename(item.id, host_id)
         end,
         [KEYS.kill] = function()
-          terminals.kill(item.id)
+          terminals.kill(item.id, host_id)
         end,
       },
     }
@@ -251,7 +293,8 @@ local function sections(chat)
       -- "Agents", not "Sessions": the TAB is Sessions, and both blocks under
       -- it are sessions. A heading repeating the tab's name over half of what
       -- the tab holds is the row that made the old split read as a lie.
-      title = "Agents in " .. vim.fn.fnamemodify(chat.root, ":~"),
+      title = hosts.multiple() and (filter == "*" and "Agents · All hosts" or "Agents · " .. hosts.get(filter).label)
+        or "Agents in " .. vim.fn.fnamemodify(chat.root, ":~"),
       -- NAMES THE TWO KEYS. This is the one row on the surface someone with
       -- an empty workspace will be looking at, and "nothing running here yet"
       -- on its own is a dead end -- the hint bar carries `a` and `c` but it
@@ -270,7 +313,8 @@ local function sections(chat)
       icon = icons.panel.Terminals,
       hl = "PaseoYellow1",
       title = "Terminals",
-      summary = { { "  " .. terminals.summary(chat.root), "PaseoDim" } },
+      summary = hosts.multiple() and nil
+        or { { "  " .. terminals.summary(chat.root, chat.host_id), "PaseoDim" } },
       -- No `empty`: a workspace with agents and no terminals should not be
       -- told twice that it has nothing running.
       rows = terminal_rows,

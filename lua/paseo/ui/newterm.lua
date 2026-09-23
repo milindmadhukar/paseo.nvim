@@ -47,7 +47,7 @@ end
 ---`callback` receives the new terminal's id. Nothing is started until you
 ---press `<CR>`: there is no Create card, because a card that is not a choice
 ---reads as one.
----@param opts { root: string, size?: { rows: integer, cols: integer } }
+---@param opts { root: string, host_id?: string, size?: { rows: integer, cols: integer } }
 ---@param callback? fun(id: string|nil, err: string|nil)
 function M.open(opts, callback)
   callback = callback or function() end
@@ -63,7 +63,7 @@ function M.open(opts, callback)
         vim.notify("paseo: could not start a terminal — " .. err, vim.log.levels.ERROR)
       end
       callback(id, err)
-    end)
+    end, opts.host_id)
   end
 
   local source = {
@@ -116,7 +116,7 @@ function M.open(opts, callback)
       terminals.presets(opts.root, function(found)
         presets = found
         vim.schedule(done)
-      end)
+      end, opts.host_id)
     end,
   }
 

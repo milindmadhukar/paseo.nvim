@@ -730,11 +730,11 @@ end
 ---@return string|nil icon, string|nil label
 local function session_label()
   local chat = state.chat
-  local here = state.session or { kind = "agent", id = chat.agent_id }
+  local here = state.session or { kind = "agent", id = chat.agent_id, hostId = chat.host_id }
 
   if here.kind == "terminal" then
     local terminals = require "paseo.terminals"
-    local item = here.id and terminals.get(here.id)
+    local item = here.id and terminals.get(here.id, here.hostId or chat.host_id)
     if not item then
       return nil
     end
@@ -744,7 +744,7 @@ local function session_label()
   -- BY ID, not by filtering the directory on the root: this row repaints ten
   -- times a second while a turn runs, and `for_root` resolves a symlink per
   -- agent to compare paths.
-  local agent = here.id and require("paseo.agents").get(here.id)
+  local agent = here.id and require("paseo.agents").get(here.id, here.hostId or chat.host_id)
   if agent then
     return icons.panel.Sessions, agent.title or agent.id
   end
@@ -1493,12 +1493,12 @@ local function show_terminal_pane()
   end
   local terminals = require "paseo.terminals"
   local terminal = require "paseo.ui.terminal"
-  local item = terminals.get(state.session.id)
+  local item = terminals.get(state.session.id, state.session.hostId or state.chat.host_id)
   if not item then
     -- The terminal died while we were pointed at it -- a directory update that
     -- no longer lists it, never a process exiting under us. Fall back rather
     -- than leaving the tab blank.
-    state.session = { kind = "agent", id = state.chat.agent_id }
+    state.session = { kind = "agent", id = state.chat.agent_id, hostId = state.chat.host_id }
     return show_agent_panes()
   end
 
@@ -1861,7 +1861,7 @@ function M.open(chat, opts)
     -- Chat tab came back showing the same PTY -- a key that visibly did
     -- nothing. The session pointer is what "open the chat" moves.
     if not (state.session and state.session.kind == "agent") then
-      state.session = { kind = "agent", id = chat.agent_id }
+      state.session = { kind = "agent", id = chat.agent_id, hostId = chat.host_id }
       hide_panes()
     end
     M.select "Chat"
@@ -2204,7 +2204,7 @@ function M.body_area()
 end
 
 ---The session the Chat tab is showing.
----@return { kind: "agent"|"terminal", id: string|nil }|nil
+---@return { kind: "agent"|"terminal", id: string|nil, hostId: string|nil }|nil
 function M.session()
   return state and state.session
 end
@@ -2259,17 +2259,29 @@ end
 ---different `paseo.Chat`, and |paseo.ui.chat|.open is the thing that knows how
 ---to subscribe to it, fetch its timeline and reseat this window. Anything else
 ----- the agent we already have, or any terminal -- is a repaint.
----@param session { kind: "agent"|"terminal", id: string|nil }
+---@param session { kind: "agent"|"terminal", id: string|nil, hostId?: string }
 function M.show_session(session)
   if not state then
     return
   end
-  if session.kind == "agent" and session.id and session.id ~= state.chat.agent_id then
-    return require("paseo.ui.chat").open { root = state.chat.root, agent_id = session.id }
+  local host_id = session.hostId or state.chat.host_id
+  if
+    session.kind == "agent"
+    and session.id
+    and (session.id ~= state.chat.agent_id or host_id ~= state.chat.host_id)
+  then
+    local agent = require("paseo.agents").get(session.id, host_id)
+    return require("paseo.ui.chat").open {
+      root = (agent and agent.cwd) or state.chat.root,
+      host_id = host_id,
+      remote = true,
+      agent_id = session.id,
+      title = agent and agent.title,
+    }
   end
 
   hide_panes()
-  state.session = { kind = session.kind, id = session.id }
+  state.session = { kind = session.kind, id = session.id, hostId = host_id }
   if state.tab ~= "Chat" then
     -- `select` shows the panes itself, and detaches whatever panel we are
     -- leaving on the way.
@@ -2290,11 +2302,11 @@ function M.cycle_session(step)
   end
   local chat = state.chat
   local order = {}
-  for _, agent in ipairs(require("paseo.agents").for_root(chat.root)) do
-    order[#order + 1] = { kind = "agent", id = agent.id }
+  for _, agent in ipairs(require("paseo.agents").for_root(chat.root, chat.host_id)) do
+    order[#order + 1] = { kind = "agent", id = agent.id, hostId = chat.host_id }
   end
-  for _, item in ipairs(require("paseo.terminals").for_root(chat.root)) do
-    order[#order + 1] = { kind = "terminal", id = item.id }
+  for _, item in ipairs(require("paseo.terminals").for_root(chat.root, chat.host_id)) do
+    order[#order + 1] = { kind = "terminal", id = item.id, hostId = chat.host_id }
   end
   if #order == 0 then
     return
@@ -2303,7 +2315,11 @@ function M.cycle_session(step)
   local here = state.session or {}
   local at = 1
   for i, item in ipairs(order) do
-    if item.kind == here.kind and item.id == here.id then
+    if
+      item.kind == here.kind
+      and item.id == here.id
+      and item.hostId == (here.hostId or chat.host_id)
+    then
       at = i
     end
   end

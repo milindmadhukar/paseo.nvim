@@ -187,7 +187,7 @@ function M.load(chat, done)
       chat.config_snapshot = config
       done(config, nil)
     end)
-  end)
+  end, chat.host_id)
 end
 
 ---A notice is the provider having something to say about a change it accepted.
@@ -234,7 +234,7 @@ local function apply_direct(chat, group, entry, done)
         done()
       end)
     end)
-  end)
+  end, chat.host_id)
 end
 
 function M.apply(chat, group, entry, done)
@@ -477,7 +477,8 @@ function M.plan()
           chat.mode_before_plan = entering and config.modeId or nil
           require("paseo.ui.chat").load_settings(chat)
         end)
-      end
+      end,
+      chat.host_id
     )
   end)
 end

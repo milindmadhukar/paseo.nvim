@@ -6,28 +6,40 @@
 
 local config = require "paseo.config"
 local daemon = require "paseo.daemon"
+local hosts = require "paseo.hosts"
 
 local M = {}
 
 ---@class paseo.Bridge
+---@field host_id string
 ---@field handle vim.SystemObj|nil
 ---@field next_id integer
 ---@field pending table<integer, fun(err: string|nil, result: table|nil)>
----@field listeners table<string, fun(payload: table)[]>
 ---@field buffer string
 ---@field ready boolean
 ---@field starting boolean a spawn is in flight; `handle` is not set yet
 ---@field waiting fun(err: string|nil)[] callers queued behind that spawn
-local state = {
-  handle = nil,
-  next_id = 0,
-  pending = {},
-  listeners = {},
-  buffer = "",
-  ready = false,
-  starting = false,
-  waiting = {},
-}
+---@type table<string, paseo.Bridge>
+local states = {}
+---@type table<string, fun(payload: table)[]>
+local listeners = {}
+
+local function state_for(host_id)
+  host_id = host_id or hosts.selected()
+  if not states[host_id] then
+    states[host_id] = {
+      host_id = host_id,
+      handle = nil,
+      next_id = 0,
+      pending = {},
+      buffer = "",
+      ready = false,
+      starting = false,
+      waiting = {},
+    }
+  end
+  return states[host_id]
+end
 
 ---Resolve everyone who queued behind a boot, exactly once.
 ---
@@ -37,8 +49,9 @@ local state = {
 ---its own sidecar; the last assignment to state.handle won and the rest were
 ---orphaned with their stdin still open, so nothing ever told them to exit.
 ---That is how one leak per session became sixteen.
+---@param state paseo.Bridge
 ---@param err string|nil
-local function settle(err)
+local function settle(state, err)
   if not state.starting then
     return
   end
@@ -76,7 +89,7 @@ local function runtime()
 end
 
 ---@param line string
-local function on_line(line)
+local function on_line(state, line)
   -- `luanil` is not optional. Without it JSON `null` decodes to `vim.NIL`,
   -- which is a userdata value and therefore TRUTHY -- so `if not ws.archivingAt`
   -- was false for every workspace that had never been archived, and the list
@@ -89,7 +102,8 @@ local function on_line(line)
   end
 
   if message.event then
-    for _, fn in ipairs(state.listeners[message.event] or {}) do
+    message.hostId = state.host_id
+    for _, fn in ipairs(listeners[message.event] or {}) do
       pcall(fn, message)
     end
     if message.event == "ready" then
@@ -115,7 +129,7 @@ local function on_line(line)
 end
 
 ---@param chunk string
-local function on_stdout(_, chunk)
+local function on_stdout(state, _, chunk)
   if not chunk then
     return
   end
@@ -131,7 +145,7 @@ local function on_stdout(_, chunk)
       -- Back onto the main loop: handlers touch buffers and windows, and this
       -- runs on the libuv thread.
       vim.schedule(function()
-        on_line(line)
+        on_line(state, line)
       end)
     end
   end
@@ -152,21 +166,28 @@ end
 ---@param event string
 ---@param fn fun(payload: table)
 function M.on(event, fn)
-  state.listeners[event] = state.listeners[event] or {}
-  table.insert(state.listeners[event], fn)
+  listeners[event] = listeners[event] or {}
+  table.insert(listeners[event], fn)
 end
 
+---@param host_id? string
 ---@return boolean
-function M.running()
-  return state.handle ~= nil
+function M.running(host_id)
+  if host_id then
+    return state_for(host_id).handle ~= nil
+  end
+  for _, state in pairs(states) do
+    if state.handle then
+      return true
+    end
+  end
+  return false
 end
 
----Start the sidecar and connect it to the daemon.
----@param callback? fun(err: string|nil)
----Start the sidecar, once an endpoint is known.
----@param endpoint paseo.Endpoint
+---Start one host's sidecar process. Connections are attempted after it exists.
+---@param state paseo.Bridge
 ---@param callback fun(err: string|nil)
-local function spawn(endpoint, callback)
+local function spawn(state, callback)
   local argv = runtime()
   if not argv then
     return callback "no bun or node found, and the sidecar needs one"
@@ -192,7 +213,9 @@ local function spawn(endpoint, callback)
     stdin = true,
     text = true,
     cwd = sidecar_dir,
-    stdout = on_stdout,
+    stdout = function(_, chunk)
+      on_stdout(state, nil, chunk)
+    end,
     stderr = function(_, chunk)
       if chunk and chunk ~= "" then
         vim.schedule(function()
@@ -205,9 +228,10 @@ local function spawn(endpoint, callback)
     -- a dead pipe.
     vim.schedule(function()
       state.handle, state.ready, state.buffer = nil, false, ""
+      hosts.update(state.host_id, { status = "offline" })
       -- A sidecar that dies DURING its own boot must not leave `starting` set:
       -- every later ensure() would queue behind a spawn that is already over.
-      settle "sidecar exited"
+      settle(state, "sidecar exited")
       for id, pending in pairs(state.pending) do
         state.pending[id] = nil
         pcall(pending, "sidecar exited", nil)
@@ -232,20 +256,99 @@ local function spawn(endpoint, callback)
     return callback(nil)
   end
   state.handle = handle
+  callback(nil)
+end
 
-  M.request("connect", {
-    url = endpoint.ws,
-    password = config.get().paseo.password,
-  }, function(err)
-    callback(err)
+---@param state paseo.Bridge
+---@param host paseo.Host
+---@param connection table
+---@param callback fun(options: table|nil, err: string|nil)
+local function connection_options(state, host, connection, callback)
+  if connection.type ~= "local" then
+    local options, err = hosts.connection_options(connection)
+    return callback(options, err)
+  end
+
+  local endpoint = select(1, daemon.resolve())
+  if endpoint then
+    return callback({ url = endpoint.ws, password = hosts.secret(connection.password) }, nil)
+  end
+  if connection.autostart == false or config.get().paseo.autostart == false then
+    return callback(nil, "no local Paseo daemon answered; see :checkhealth paseo")
+  end
+  vim.notify("paseo: no daemon answered — starting one…", vim.log.levels.INFO)
+  daemon.start({}, function(started, err)
+    if not started then
+      return callback(nil, err or "could not start the local daemon")
+    end
+    vim.notify("paseo: daemon up", vim.log.levels.INFO)
+    callback({ url = started.ws, password = hosts.secret(connection.password) }, nil)
   end)
 end
 
----Start the sidecar and connect it to the daemon, starting the daemon if
----nothing answers.
+---@param state paseo.Bridge
+---@param host paseo.Host
+---@param index integer
+---@param errors string[]
+local function connect_next(state, host, index, errors)
+  local connection = host.connections[index]
+  if not connection then
+    local err = #errors > 0 and table.concat(errors, "; ") or "no usable connection"
+    hosts.update(host.id, { status = "error", error = err, active_connection = vim.NIL })
+    return settle(state, err)
+  end
+
+  hosts.update(host.id, {
+    status = "connecting",
+    error = vim.NIL,
+    active_connection = connection.id,
+  })
+  local began = vim.uv.now()
+  connection_options(state, host, connection, function(options, option_err)
+    if option_err or not options then
+      errors[#errors + 1] = connection.id .. ": " .. tostring(option_err)
+      return connect_next(state, host, index + 1, errors)
+    end
+    options.hostId = host.id
+    M.request("connect", options, function(err, result)
+      if err then
+        -- Never include the target or secret-bearing offer in this string.
+        errors[#errors + 1] = connection.id .. ": " .. tostring(err)
+        return connect_next(state, host, index + 1, errors)
+      end
+      result = result or {}
+      if options.expectedServerId and result.serverId ~= options.expectedServerId then
+        errors[#errors + 1] = connection.id .. ": daemon identity did not match pairing offer"
+        return connect_next(state, host, index + 1, errors)
+      end
+      if host.server_id and result.serverId and host.server_id ~= result.serverId then
+        errors[#errors + 1] = connection.id .. ": connection belongs to a different daemon"
+        return connect_next(state, host, index + 1, errors)
+      end
+      hosts.update(host.id, {
+        status = "online",
+        error = vim.NIL,
+        server_id = result.serverId,
+        hostname = result.hostname,
+        version = result.version,
+        active_connection = connection.id,
+        latency = math.max(0, vim.uv.now() - began),
+      })
+      settle(state, nil)
+    end, host.id)
+  end)
+end
+
+---Start one host runtime and connect it using that profile's ordered candidates.
 ---@param callback? fun(err: string|nil)
-function M.start(callback)
+---@param host_id? string
+function M.start(callback, host_id)
   callback = callback or function() end
+  local host = hosts.get(host_id)
+  if not host then
+    return callback("unknown Paseo host " .. tostring(host_id))
+  end
+  local state = state_for(host.id)
 
   -- BEFORE the handle check, not after: `spawn` sets state.handle and only
   -- then sends `connect`, so there is a window where the sidecar exists and
@@ -257,31 +360,22 @@ function M.start(callback)
   end
 
   if state.handle then
-    return callback(nil)
+    if host.status == "online" then
+      return callback(nil)
+    end
+    state.starting = true
+    state.waiting = { callback }
+    return connect_next(state, host, 1, {})
   end
 
   state.starting = true
   state.waiting = { callback }
-
-  local endpoint = select(1, daemon.resolve())
-  if endpoint then
-    return spawn(endpoint, settle)
-  end
-
-  if config.get().paseo.autostart == false then
-    return settle "no Paseo daemon answered; see :checkhealth paseo"
-  end
-
-  -- Nothing answered, so start one. This is why the plugin can be the only
-  -- thing you open: the alternative is every agent action failing until you go
-  -- and start the daemon by hand.
-  vim.notify("paseo: no daemon answered — starting one…", vim.log.levels.INFO)
-  daemon.start({}, function(started, err)
-    if not started then
-      return settle(err or "could not start the daemon")
+  spawn(state, function(err)
+    if err then
+      hosts.update(host.id, { status = "error", error = err })
+      return settle(state, err)
     end
-    vim.notify("paseo: daemon up", vim.log.levels.INFO)
-    spawn(started, settle)
+    connect_next(state, host, 1, {})
   end)
 end
 
@@ -289,8 +383,15 @@ end
 ---@param op string
 ---@param args? table
 ---@param callback? fun(err: string|nil, result: table|nil)
-function M.request(op, args, callback)
+---@param host_id? string
+function M.request(op, args, callback, host_id)
   callback = callback or function() end
+  host_id = host_id or (args and args.hostId) or hosts.selected()
+  local host = hosts.get(host_id)
+  if not host then
+    return callback("unknown Paseo host " .. tostring(host_id))
+  end
+  local state = state_for(host.id)
 
   if not state.handle then
     return callback "sidecar is not running"
@@ -312,13 +413,27 @@ function M.request(op, args, callback)
   end
 end
 
----Start if needed, then run `fn`.
+---Start a particular host if needed, then run `fn`.
 ---@param fn fun(err: string|nil)
-function M.ensure(fn)
-  if state.handle and state.ready then
-    return fn(nil)
+---@param host_id? string
+function M.ensure(fn, host_id)
+  local host = hosts.get(host_id)
+  if not host then
+    return fn("unknown Paseo host " .. tostring(host_id))
   end
-  M.start(fn)
+  local state = state_for(host.id)
+  if state.handle and state.ready then
+    if host.status == "online" then
+      return fn(nil)
+    end
+  end
+  M.start(fn, host.id)
+end
+
+---Restart a host runtime and re-run connection selection.
+function M.reconnect(host_id, callback)
+  M.stop(100, host_id)
+  M.start(callback, host_id)
 end
 
 ---Stop the sidecar, synchronously enough for VimLeavePre.
@@ -333,7 +448,22 @@ end
 ---that matters -- it is the EOF the sidecar exits on -- and it happens whether
 ---or not the reply arrived.
 ---@param timeout? integer ms to wait for the close reply before insisting (default 200)
-function M.stop(timeout)
+---@param host_id? string stop one host; absent stops every host
+function M.stop(timeout, host_id)
+  if not host_id then
+    local ids = {}
+    for id in pairs(states) do
+      ids[#ids + 1] = id
+    end
+    for _, id in ipairs(ids) do
+      M.stop(timeout, id)
+    end
+    return
+  end
+  local state = states[host_id]
+  if not state then
+    return
+  end
   local handle = state.handle
   if not handle then
     return
@@ -342,7 +472,7 @@ function M.stop(timeout)
   local replied = false
   M.request("close", {}, function()
     replied = true
-  end)
+  end, host_id)
 
   -- Nothing may write to or respawn onto this handle while it goes down.
   state.handle, state.ready = nil, false
@@ -367,11 +497,12 @@ function M.stop(timeout)
   end)
 
   state.buffer = ""
-  settle "sidecar stopped"
+  settle(state, "sidecar stopped")
   for id, pending in pairs(state.pending) do
     state.pending[id] = nil
     pcall(pending, "sidecar stopped", nil)
   end
+  hosts.update(host_id, { status = "offline" })
 end
 
 return M

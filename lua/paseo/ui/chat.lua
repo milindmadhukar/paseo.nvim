@@ -9,6 +9,7 @@
 
 local bridge = require "paseo.bridge"
 local config = require "paseo.config"
+local hosts = require "paseo.hosts"
 local sidebar = require "paseo.ui.sidebar"
 local transcript = require "paseo.ui.transcript"
 local widgets = require "paseo.ui.widgets"
@@ -17,6 +18,8 @@ local M = {}
 
 ---@class paseo.Chat
 ---@field root string        Directory the agent works in.
+---@field local_root string|nil Local counterpart, when the daemon is remote.
+---@field host_id string
 ---@field agent_id string|nil
 ---@field provider string|nil
 ---@field conversation integer  bufnr
@@ -313,7 +316,7 @@ function M.stop(chat)
         notice(chat, "stop failed: " .. err, "error")
       end)
     end
-  end)
+  end, chat.host_id)
 
   -- Optimistic, and it has to be: the header is the only thing that says a
   -- turn is running, and leaving the spinner going until the daemon gets round
@@ -377,7 +380,7 @@ local function send(chat)
         notice(chat, "send failed: " .. err, "error")
       end)
     end
-  end)
+  end, chat.host_id)
 end
 
 ---Put text in the composer, at the cursor when that is where you are.
@@ -927,7 +930,7 @@ local function load_history(chat)
       -- request we are still holding that was answered during the gap.
       require("paseo.ui.permission").reconcile(chat, result.pendingPermissions or {})
     end)
-  end)
+  end, chat.host_id)
 end
 
 ---Everything a chat needs once its agent is known: a clean buffer, the live
@@ -952,7 +955,7 @@ initialise = function(chat)
   -- The seq comparison in `fresh` is what stops the overlap rendering twice.
   bridge.request("timeline.subscribe", { agentId = chat.agent_id }, function()
     load_history(chat)
-  end)
+  end, chat.host_id)
   M.load_settings(chat)
 end
 
@@ -1003,19 +1006,37 @@ end
 ---looking at belongs to the window, not to the conversation you are switching
 ---to. Passing a literal here is how `:Paseo term` used to drag you off the
 ---buffer dashboard and keep you off it.
----@param opts? { root?: string, focus?: boolean, agent_id?: string, title?: string, create?: boolean, surface?: "float"|"sidebar"|"buffer" }
+---@param opts? { root?: string, local_root?: string, host_id?: string, remote?: boolean, focus?: boolean, agent_id?: string, title?: string, create?: boolean, surface?: "float"|"sidebar"|"buffer" }
 ---@param callback? fun(chat: paseo.Chat|nil, err: string|nil)
 function M.open(opts, callback)
   opts = opts or {}
   callback = callback or function() end
 
+  local host = hosts.get(opts.host_id)
+  if not host then
+    local err = "unknown Paseo host " .. tostring(opts.host_id)
+    vim.notify("paseo: " .. err, vim.log.levels.ERROR)
+    return callback(nil, err)
+  end
+  local local_root = opts.local_root or (opts.remote and hosts.to_local(host.id, opts.root))
   local root = opts.root or here()
+  if not opts.remote then
+    local_root = root
+    root = hosts.to_remote(host.id, root)
+    if not root then
+      local err = ("%s is not mapped on Paseo host %s"):format(local_root, host.label)
+      vim.notify("paseo: " .. err, vim.log.levels.ERROR)
+      return callback(nil, err)
+    end
+  end
 
-  local key = opts.agent_id or root
+  local key = hosts.key(host.id, opts.agent_id or root)
   local chat = chats[key]
   if not chat then
     chat = {
       root = root,
+      local_root = local_root,
+      host_id = host.id,
       agent_id = opts.agent_id,
       title = opts.title,
       streaming = false,
@@ -1062,7 +1083,7 @@ function M.open(opts, callback)
         initialise(chat)
       end)
       callback(chat, nil)
-    end)
+    end, chat.host_id)
   end
 
   notice(chat, "connecting…")
@@ -1074,11 +1095,12 @@ function M.open(opts, callback)
       return callback(nil, err)
     end
 
-    local preferred = config.get().paseo.provider
+    local preferred = host.provider or config.get().paseo.provider
     local function adopt(result)
-      local known = chats[result.id]
+      local agent_key = hosts.key(host.id, result.id)
+      local known = chats[agent_key]
       if known and known ~= chat then
-        chats[root] = nil
+        chats[key] = nil
         if current == chat then
           M.close()
           current = known
@@ -1089,8 +1111,8 @@ function M.open(opts, callback)
       end
       chat.agent_id = result.id
       chat.provider = result.provider
-      chats[root] = nil
-      chats[result.id] = chat
+      chats[key] = nil
+      chats[agent_key] = chat
       vim.schedule(function()
         initialise(chat)
       end)
@@ -1115,7 +1137,12 @@ function M.open(opts, callback)
       -- came here for, and left a terminal reachable only from a tab of a
       -- surface you had to create an agent in order to see.
       notice(chat, "nothing running here yet…")
-      require("paseo.start").open({ root = root, preferred = preferred }, function(result, err)
+      require("paseo.start").open({
+        root = root,
+        local_root = local_root,
+        host_id = host.id,
+        preferred = preferred,
+      }, function(result, err)
         if err then
           notice(chat, err, "error")
           return callback(nil, err)
@@ -1123,7 +1150,7 @@ function M.open(opts, callback)
 
         ---Give this empty chat up. Nothing was ever attached to it.
         local function stand_down(reason)
-          chats[root] = nil
+          chats[key] = nil
           if current == chat then
             M.close()
           end
@@ -1166,10 +1193,10 @@ function M.open(opts, callback)
           end
           config.get().paseo.provider = draft.provider
           adopt(agent)
-        end)
+        end, host.id)
       end)
-    end)
-  end)
+    end, host.id)
+  end, host.id)
 end
 
 ---Queue a reference as context for the next send, and open the composer on it.
@@ -1474,9 +1501,9 @@ function M.attach_events()
 
   ---@param agent_id string
   ---@return paseo.Chat|nil
-  local function by_agent(agent_id)
+  local function by_agent(agent_id, host_id)
     for _, chat in pairs(chats) do
-      if chat.agent_id == agent_id then
+      if chat.agent_id == agent_id and (not host_id or chat.host_id == host_id) then
         return chat
       end
     end
@@ -1486,7 +1513,7 @@ function M.attach_events()
   ---Render an item, if it is not something history already covered.
   ---@param payload table
   local function ingest(payload)
-    local chat = by_agent(payload.agentId)
+    local chat = by_agent(payload.agentId, payload.hostId)
     if chat and fresh(chat, payload) then
       transcript.upsert(chat, payload)
     end
@@ -1495,7 +1522,7 @@ function M.attach_events()
   -- A user message, from wherever it was typed: here, the Paseo app, another
   -- client. This is what makes the two views the same conversation.
   bridge.on("user", function(payload)
-    local chat = by_agent(payload.agentId)
+    local chat = by_agent(payload.agentId, payload.hostId)
     if not chat or not fresh(chat, payload) then
       return
     end
@@ -1504,7 +1531,7 @@ function M.attach_events()
   end)
 
   bridge.on("text", function(payload)
-    local chat = by_agent(payload.agentId)
+    local chat = by_agent(payload.agentId, payload.hostId)
     if chat and fresh(chat, payload) then
       transcript.stream(chat, payload.text or "")
     end
@@ -1519,14 +1546,14 @@ function M.attach_events()
 
   -- A permission request. The agent is BLOCKED until this is answered.
   bridge.on("permission", function(payload)
-    local chat = by_agent(payload.agentId)
+    local chat = by_agent(payload.agentId, payload.hostId)
     if chat and payload.request then
       require("paseo.ui.permission").offer(chat, payload.request)
     end
   end)
 
   bridge.on("permission_resolved", function(payload)
-    local chat = by_agent(payload.agentId)
+    local chat = by_agent(payload.agentId, payload.hostId)
     if chat then
       require("paseo.ui.permission").resolved(chat, payload.requestId, payload.resolution)
     end
@@ -1540,10 +1567,10 @@ function M.attach_events()
   -- This is the daemon's own "somebody is needed here" event; it was emitted
   -- by the sidecar and listened to by nobody.
   bridge.on("attention", function(payload)
-    if payload.reason ~= "permission" or by_agent(payload.agentId) then
+    if payload.reason ~= "permission" or by_agent(payload.agentId, payload.hostId) then
       return
     end
-    local agent = require("paseo.agents").get(payload.agentId)
+    local agent = require("paseo.agents").get(payload.agentId, payload.hostId)
     vim.notify(
       ("paseo: %s needs permission — `:Paseo chat` in its worktree to answer"):format(
         (agent and agent.title) or payload.agentId
@@ -1556,7 +1583,7 @@ function M.attach_events()
   -- daemon changes the mode ITSELF when a plan is approved. Without this the
   -- header shows whatever we last set from here and quietly lies.
   bridge.on("settings", function(payload)
-    local chat = by_agent(payload.agentId)
+    local chat = by_agent(payload.agentId, payload.hostId)
     if not chat then
       return
     end
@@ -1574,7 +1601,7 @@ function M.attach_events()
   -- spent the rest of the session drawing two empty cards. Holding the last
   -- complete turn here costs one table and is what the panel falls back to.
   bridge.on("usage", function(payload)
-    local chat = by_agent(payload.agentId)
+    local chat = by_agent(payload.agentId, payload.hostId)
     if chat then
       chat.usage = payload.usage
       local turn = payload.usage or {}
@@ -1588,7 +1615,7 @@ function M.attach_events()
   -- Turn completion comes from `turn_*`, never from a status transition to
   -- idle: idle is reached for other reasons too.
   bridge.on("turn", function(payload)
-    local chat = by_agent(payload.agentId)
+    local chat = by_agent(payload.agentId, payload.hostId)
     if chat then
       -- A turn STARTING is the other half of this, and it matters because the
       -- turn need not have started here: the Paseo app, a schedule or a
@@ -1609,7 +1636,7 @@ function M.attach_events()
   end)
 
   bridge.on("stream_error", function(payload)
-    local chat = by_agent(payload.agentId)
+    local chat = by_agent(payload.agentId, payload.hostId)
     if chat then
       M.set_streaming(chat, false)
       transcript.upsert(
@@ -1629,7 +1656,7 @@ function M.attach_events()
   -- always did the right thing; this is the same move, minus throwing the
   -- transcript away, because the epoch is still valid.
   bridge.on("restored", function(payload)
-    local chat = by_agent(payload.agentId)
+    local chat = by_agent(payload.agentId, payload.hostId)
     if chat then
       notice(chat, "reconnected — anything said during the gap was not replayed", "warning")
       M.load_settings(chat)
@@ -1643,7 +1670,7 @@ function M.attach_events()
   -- replacement left a transcript of messages that no longer exist. Throw the
   -- buffer away and refetch rather than appending to a lie.
   bridge.on("replaced", function(payload)
-    local chat = by_agent(payload.agentId)
+    local chat = by_agent(payload.agentId, payload.hostId)
     if chat then
       transcript.reset(chat)
       load_history(chat)
@@ -1689,7 +1716,7 @@ function M.load_settings(chat)
 
       set_winbar(chat)
     end)
-  end)
+  end, chat.host_id)
 end
 
 ---@return paseo.Chat|nil

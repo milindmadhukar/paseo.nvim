@@ -18,6 +18,7 @@ export class BridgeConnection {
   // level, usage -- and those are not on the timeline at all. See
   // `timeline.subscribe` in bridge-timeline.ts.
   timelines = new Map<string, TimelineEntry>();
+  private cleanups = new Set<() => void | Promise<void>>();
   directory: {
     subscription?: { release: () => Promise<void> };
     localUnsubscribe?: (() => void) | null;
@@ -35,19 +36,45 @@ export class BridgeConnection {
     return this.daemon;
   }
 
-  async connect(url: string, password?: string): Promise<void> {
+  addCleanup(cleanup: () => void | Promise<void>): () => void {
+    this.cleanups.add(cleanup);
+    return () => this.cleanups.delete(cleanup);
+  }
+
+  async connect(
+    url: string,
+    password?: string,
+    e2ee?: { enabled: true; daemonPublicKeyB64: string },
+  ): Promise<Record<string, unknown>> {
     if (this.daemon) await this.close();
     this.daemon = new DaemonClient({
       url,
       clientId: `paseo.nvim-${process.pid}`,
       clientType: "cli",
       ...(password ? { password } : {}),
+      ...(e2ee ? { e2ee } : {}),
     });
     await this.daemon.connect();
     this.client = createPaseoApi(this.daemon);
+    const info = this.daemon.getLastServerInfoMessage();
+    return {
+      connected: true,
+      serverId: info?.serverId,
+      hostname: info?.hostname,
+      version: info?.version,
+    };
   }
 
   async close(): Promise<void> {
+    const cleanups = [...this.cleanups];
+    this.cleanups.clear();
+    for (const cleanup of cleanups) {
+      try {
+        await cleanup();
+      } catch {
+        /* teardown is best-effort */
+      }
+    }
     if (this.directory) {
       const held = this.directory;
       this.directory = null;
@@ -72,11 +99,21 @@ export class BridgeConnection {
 export function connectionOps(ctx: BridgeConnection): Ops {
   return {
     async connect(req) {
-      await ctx.connect(
+      return await ctx.connect(
         String(need(req.url, "url")),
         req.password ? String(req.password) : undefined,
+        req.e2ee && typeof req.e2ee === "object"
+          ? {
+              enabled: true,
+              daemonPublicKeyB64: String(
+                need(
+                  (req.e2ee as Record<string, unknown>).daemonPublicKeyB64,
+                  "e2ee.daemonPublicKeyB64",
+                ),
+              ),
+            }
+          : undefined,
       );
-      return { connected: true };
     },
     async close() {
       await ctx.close();
