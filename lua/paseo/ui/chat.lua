@@ -1362,13 +1362,25 @@ end
 ---Focus follows the surface: the float covers the screen, so you need to be
 ---able to type into it; the sidebar sits beside code you were editing, so it
 ---must not steal your cursor.
+---
+---`offer` is for OPENING A WORKSPACE, which is not merely changing directory:
+---you picked it to work in it. One with no agent yet gets the start menu
+---(|paseo.start|) rather than an empty window saying so -- on the surface that
+---is up, or on the default one when none is. One that has an agent still
+---opens nothing unbidden.
 ---@param root string
----@param opts? { focus?: boolean }
+---@param opts? { focus?: boolean, offer?: boolean }
 ---@return boolean followed
 function M.follow(root, opts)
   opts = opts or {}
   local chat = current
-  if not chat or type(root) ~= "string" or root == "" then
+  if type(root) ~= "string" or root == "" then
+    return false
+  end
+  if not chat then
+    if opts.offer then
+      M.offer(root)
+    end
     return false
   end
 
@@ -1384,6 +1396,9 @@ function M.follow(root, opts)
     -- `agent.find` returns an id it already knows. So the window stays shut,
     -- and the memory of where we were goes.
     M.forget()
+    if opts.offer then
+      M.offer(root)
+    end
     return false
   end
 
@@ -1397,8 +1412,30 @@ function M.follow(root, opts)
   end
 
   M.close()
-  M.open { root = root, surface = surface, focus = focus, create = false }
+  M.open { root = root, surface = surface, focus = focus, create = opts.offer == true }
   return true
+end
+
+---Offer to start something in `root` when nothing is running there yet.
+---
+---Asks the daemon first, so a workspace that already has an agent opens no
+---window at all: opening one is not a request for a chat. Local host only, as
+---`follow` is.
+---@param root string
+function M.offer(root)
+  local host = hosts.get()
+  local remote = host and hosts.to_remote(host.id, root)
+  if not remote then
+    return
+  end
+  bridge.request("agent.find", { cwd = remote }, function(err, found)
+    if err or (found and found.id) then
+      return
+    end
+    vim.schedule(function()
+      M.open { root = root, host_id = host.id, create = true }
+    end)
+  end, host.id)
 end
 
 ---Put the chat on a named surface, keeping the conversation and the draft.

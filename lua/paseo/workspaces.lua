@@ -605,7 +605,8 @@ function M.open(ws)
       create = false,
     }
   else
-    require("paseo.ui.chat").follow(switch_root)
+    -- `offer`: a workspace with no agent yet asks what to start in it.
+    require("paseo.ui.chat").follow(switch_root, { offer = true })
   end
 
   vim.api.nvim_exec_autocmds("User", {

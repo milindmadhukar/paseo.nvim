@@ -192,6 +192,33 @@ local function test_chat_follow()
       { offered, seen },
       { true, true }
     )
+
+    -- OPENING A WORKSPACE is not merely changing directory: one with no agent
+    -- yet offers the start menu, whether or not a chat is on screen.
+    vim.ui.select = function(_, _, done)
+      offered = true
+      done(nil)
+    end
+    offered = false
+    chat.open { root = here }
+    vim.wait(200)
+    chat.follow(empty, { offer = true })
+    truthy("follow: opening an agentless workspace offers the menu", vim.wait(1000, function()
+      return offered
+    end))
+    chat.close()
+    chat.forget()
+    offered = false
+    chat.follow(empty, { offer = true })
+    truthy("follow: even with no chat on screen", vim.wait(1000, function()
+      return offered
+    end))
+    chat.close()
+    chat.forget()
+    offered = false
+    chat.follow(there, { offer = true })
+    vim.wait(200)
+    eq("follow: but one with an agent opens nothing unbidden", { offered, chat.current() }, { false, nil })
     create.review, vim.ui.select = old_review, old_select
 
     -- The switch itself carries the chat: this is the reported bug end to end,
