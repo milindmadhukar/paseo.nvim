@@ -145,20 +145,16 @@ function M.open(opts)
       -- openfin's and tracker's in it. <C-a> flips between the two.
       local here = workspaces.here()
       local label = vim.fn.fnamemodify(here, ":t")
-      if not opts.all then
-        local scoped = workspaces.scope(list, here)
-        if #scoped == 0 and #list > 0 then
-          vim.notify(
-            ("paseo: no workspaces in %s yet; showing every project's"):format(label),
-            vim.log.levels.INFO
-          )
-          opts = vim.tbl_extend("force", opts, { all = true })
-        else
-          list = scoped
-        end
-      end
+      --
+      -- A project with none yet is an EMPTY picker, not every project's: the
+      -- fallback put openfin's workspaces in front of you in kora under a
+      -- title that was the only sign anything had changed. Empty, the title
+      -- says so and <C-n> / <C-a> are right there.
+      local scoped = not opts.all and workspaces.scope(list, here) or list
+      local empty_here = not opts.all and #scoped == 0 and #list > 0
+      list = scoped
 
-      if #list == 0 then
+      if #list == 0 and not empty_here then
         vim.notify("paseo: no workspaces yet", vim.log.levels.INFO)
         return M.create(nil, function()
           M.open(opts)
@@ -173,10 +169,12 @@ function M.open(opts)
 
       local picker
       picker = pickers.new(opts, {
-        prompt_title = ("Workspaces · %s  ·  <CR> open  <C-s> agents  <C-n> new  <C-d> archive  <C-a> %s"):format(
-          opts.all and "all projects" or label,
-          opts.all and "this project" or "all"
-        ),
+        prompt_title = empty_here
+            and ("Workspaces · %s  ·  none yet  ·  <C-n> new  <C-a> all projects"):format(label)
+          or ("Workspaces · %s  ·  <CR> open  <C-s> agents  <C-n> new  <C-d> archive  <C-a> %s"):format(
+            opts.all and "all projects" or label,
+            opts.all and "this project" or "all"
+          ),
         finder = finders.new_table {
           results = list,
           entry_maker = function(ws)
@@ -221,7 +219,9 @@ function M.open(opts)
           map({ "i", "n" }, "<C-n>", function()
             local entry = state.get_selected_entry()
             actions.close(bufnr)
-            M.create(entry and entry.value.projectRoot or nil, reopen)
+            -- Here, unless the row says otherwise: in an empty picker there is
+            -- no row, and the project it was opened for is the one meant.
+            M.create(entry and entry.value.projectRoot or (not opts.all and here) or nil, reopen)
           end)
 
           map({ "i", "n" }, "<C-d>", function()

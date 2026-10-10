@@ -844,8 +844,9 @@ skills.method                                       `"link"`|`"copy"`, default `
     The workspace picker, for the project you are in: the manifested
     multi-repo project when the cwd is one of its repos or workspaces, else
     the main checkout of the git repository around the cwd, else the cwd.
-    `all` lists every project's. With none here yet, it says so and lists
-    every project's. See |paseo-workspaces-keys|.
+    `all` lists every project's. A project with none yet opens an empty
+    picker that says so: <C-n> creates the first, <C-a> lists every
+    project's. See |paseo-workspaces-keys|.
 
 :Paseo wcreate                                            *:Paseo-wcreate*
 
