@@ -270,6 +270,47 @@ local function test_answer()
   eq("ask: `n` declines rather than allowing", declined, "deny")
   ask.close()
 
+  -- Going BACK to an answered question, with the arrows, and changing it.
+  -- Before, the only way back was `<S-Tab>` -- on no hint anywhere -- and the
+  -- focus came back on option 1 rather than on the answer, so `<Space>` there
+  -- quietly replaced it.
+  local revisit = vim.tbl_extend("force", pair, { id = "ask-3" })
+  ask.open(chat, revisit, { actions = revisit.actions, state = questions.state(questions.parse(revisit)) }, handlers())
+  local card3 = vim.api.nvim_get_current_buf()
+  truthy("ask: the hint offers the arrows between questions", drawn(card3):find("question", 1, true) ~= nil)
+  press "2"
+  truthy("ask: answering moves on", drawn(card3):find("2 of 2", 1, true) ~= nil, drawn(card3))
+  press "<Left>"
+  truthy("ask: <Left> goes back to the answered question", drawn(card3):find("1 of 2", 1, true) ~= nil, drawn(card3))
+  press "<Right>"
+  truthy("ask: <Right> goes forward again", drawn(card3):find("2 of 2", 1, true) ~= nil, drawn(card3))
+  press "h"
+  truthy("ask: and so do h and l", drawn(card3):find("1 of 2", 1, true) ~= nil, drawn(card3))
+  -- The focus landed on the answer, so <Space> keeps it rather than flipping it
+  -- to option 1.
+  press "<Space>"
+  press "<Left>"
+  -- And a number replaces it outright.
+  press "1"
+  press "2"
+  press "<CR>"
+  eq("ask: the edited answer is the one sent", sent and sent[1], "A")
+  eq("ask: alongside the other", sent and sent[2], "D")
+  ask.close()
+  sent = nil
+
+  -- <Space> on a revisited question re-takes ITS answer, not option 1.
+  local again = vim.tbl_extend("force", pair, { id = "ask-4" })
+  ask.open(chat, again, { actions = again.actions, state = questions.state(questions.parse(again)) }, handlers())
+  press "2"
+  press "<Left>"
+  press "<Space>"
+  press "1"
+  press "<CR>"
+  eq("ask: landing on the answer keeps it under <Space>", sent and sent[1], "B")
+  ask.close()
+  sent = nil
+
   -- More options than rows. The list is windowed around the focus rather than
   -- cut off, because a fifteenth option you cannot scroll to is unreachable
   -- however the keys are bound -- and the card must still fit the chat window.

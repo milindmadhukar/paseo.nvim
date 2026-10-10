@@ -2661,10 +2661,15 @@ sends your answers instead of a bare allow.
 
                                           *paseo-permission-question-keys*
     1-9       pick that option
-    j k       move among the options, for the ones past the ninth
+    j k       move among the options, for the ones past the ninth (and
+              <Up> <Down>)
     <Space>   pick the one you are on
     <CR>, y   SEND, once nothing is missing -- until then, go to what is
-    <Tab>     the next question · <S-Tab> the previous
+    <Left> <Right>
+              the previous and next question, answered or not -- and so do
+              h l, and <S-Tab> <Tab>. Returning to an answered question puts
+              the focus ON ITS ANSWER, so <Space>, c and x act on what you
+              chose and a number replaces it
     i, o      answer in your own words, in a box you can type in
     c         note WHY, about the answer you picked
     x         clear this question's answer (and its note)

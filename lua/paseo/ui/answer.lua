@@ -208,13 +208,37 @@ local function hint_rows(pairs_, w)
   return rows
 end
 
+---Put the focus somewhere sensible on the question the stepper has just
+---reached.
+---
+---ON THE ANSWER, when it has one. Going back is how you change your mind, and
+---the focus left wherever it last was -- usually option 1, because a pick by
+---number never moves it -- so `<Space>` on a question answered `2` re-picked
+---`1`, and `c` and `x` had no visible connection to the answer they act on.
+---Landing on what you chose makes "go back" mean "go back to my answer".
+---A question with no pick, or only typed text, keeps the focus it had.
+---@param o paseo.Answer
+local function land(o)
+  local index = o.state.current
+  local picked = o.state.picked[index] or {}
+  if #picked > 0 then
+    for at, option in ipairs(o.state.questions[index].options) do
+      if option.label == picked[1] then
+        o.focus[index] = at
+        return
+      end
+    end
+  end
+  o.focus[index] = o.focus[index] or 1
+end
+
 ---@param o paseo.Answer
 ---@param index integer
 ---@return fun()
 local function goto_question(o, index)
   return function()
     o.state.current = math.max(1, math.min(#o.state.questions, index))
-    o.focus[o.state.current] = o.focus[o.state.current] or 1
+    land(o)
     M.refresh()
   end
 end
@@ -227,7 +251,7 @@ local function pick(o, at)
     questions.choose(o.state, at)
     -- `choose` may have moved on; the question we land on needs a focus of its
     -- own or `j` would start from nowhere.
-    o.focus[o.state.current] = o.focus[o.state.current] or 1
+    land(o)
     M.refresh()
   end
 end
@@ -546,8 +570,11 @@ local function build(o, f)
           and (missing ~= state.current and ("question %d"):format(missing) or #state.questions == 1 and "answer it first" or "answer this one")
         or (nothing and "send (nothing answered)" or "send the answers"),
     }
+    -- The arrows, not `<Tab>`: both work, but `<Tab>` alone never said that
+    -- going BACK was possible -- `<S-Tab>` was nowhere on the card -- and an
+    -- answered question you cannot see a way back to reads as locked.
     if #state.questions > 1 then
-      hints[#hints + 1] = { "<Tab>", "question" }
+      hints[#hints + 1] = { icons.key["<Left>"] .. " " .. icons.key["<Right>"], "question" }
     end
     if question.free then
       hints[#hints + 1] = { "i", "type" }
@@ -816,7 +843,7 @@ local function enter(o)
     return vim.notify("paseo: that question still needs an answer", vim.log.levels.WARN)
   end
   o.state.current = missing
-  o.focus[missing] = o.focus[missing] or 1
+  land(o)
   M.refresh()
 end
 
@@ -1002,10 +1029,24 @@ local function bind(o, buf)
       enter(o)
     end)
 
-    for key, delta in pairs { ["<Tab>"] = 1, ["<S-Tab>"] = -1 } do
+    -- Between QUESTIONS, where `j`/`k` and the up and down arrows are between
+    -- options: the stepper runs left to right across the top of the card, so
+    -- the horizontal keys walk it. `h`/`l` because that is what moves by
+    -- section everywhere else in this plugin, and `<Tab>`/`<S-Tab>` because
+    -- they always did. Every one of them goes back as readily as forward, to
+    -- an answered question as readily as an open one -- and lands on the
+    -- answer, so changing it is one more key. See `land`.
+    for key, delta in pairs {
+      ["<Tab>"] = 1,
+      ["<S-Tab>"] = -1,
+      ["<Right>"] = 1,
+      ["<Left>"] = -1,
+      l = 1,
+      h = -1,
+    } do
       map(key, function()
         questions.move(o.state, delta)
-        o.focus[o.state.current] = o.focus[o.state.current] or 1
+        land(o)
         M.refresh()
       end)
     end
@@ -1027,7 +1068,7 @@ local function bind(o, buf)
       if not questions.skip(o.state) then
         return vim.notify("paseo: that question needs an answer", vim.log.levels.WARN)
       end
-      o.focus[o.state.current] = o.focus[o.state.current] or 1
+      land(o)
       M.refresh()
     end)
 

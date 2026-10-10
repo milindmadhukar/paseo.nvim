@@ -1113,12 +1113,15 @@ above it — `●` answered, `◉` where you are, `○` not yet:
 │    choose as many as apply                                  │
 ╰─────────────────────────────────────────────────────────────╯
 
-  1-9  pick    ⏎  send the answers    c  note    ⇥  question    ␛  later
+  1-9  pick    ⏎  send the answers    ← →  question    c  note    ␛  later
 ```
 
-`1`-`9` picks, `j`/`k` reaches an option past the ninth, `<Space>` takes the one
-you are on, `x` clears the answer, `s` skips an optional question, and `<Tab>`
-moves between them. The marker is a checkbox where a second pick **adds** and a
+`1`-`9` picks, `j`/`k` (or `↑`/`↓`) reaches an option past the ninth, `<Space>`
+takes the one you are on, `x` clears the answer, `s` skips an optional question,
+and `←`/`→` move between questions — so do `h`/`l` and `<Tab>`/`<S-Tab>`. Back
+is as easy as forward: an answered question is never locked, and returning to
+one puts the focus **on its answer**, so `<Space>`, `c` and `x` act on what you
+chose and a number replaces it. The marker is a checkbox where a second pick **adds** and a
 radio where it **replaces**, so the shape tells you which before you press
 anything. The bar beside `2 of 3` is how much of the set is answered.
 
