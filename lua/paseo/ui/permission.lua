@@ -49,6 +49,7 @@ end
 ---for several would be unanswerable.
 ---@type table|nil
 local open_dialog
+local arm
 
 -- ------------------------------------------------------------------ geometry
 
@@ -466,6 +467,46 @@ end
 
 -- ----------------------------------------------------------------- the queue
 
+---Whether a request may take the screen now: this chat is the window you are
+---looking at, you are not mid-sentence in the composer, and nothing else is
+---already waiting on you. That last one matters: opening unconditionally tore
+---down a half-answered question and threw the answers away, and the queue
+---already reopens in order from `M.resolved`.
+---@param chat table
+---@return boolean
+local function ready(chat)
+  local win = api.nvim_get_current_win()
+  local mine = win == chat.win_conversation or win == chat.win_composer
+  local typing = api.nvim_get_mode().mode:find "i" ~= nil
+  local showing = overlay() and overlay().showing() or nil
+  local busy = showing or (open_dialog and open_dialog.request.id)
+  return mine and not typing and not busy
+end
+
+---Open the first held request the moment `ready` says it may: on entering the
+---chat, or on leaving insert mode in its composer. Once, then disarmed -- a
+---request you dismiss with <Esc> stays dismissed, and `gp` reopens it.
+---@param chat table
+arm = function(chat)
+  local group = api.nvim_create_augroup("paseo.permission." .. tostring(chat.agent_id or chat.root), { clear = true })
+  api.nvim_create_autocmd({ "WinEnter", "BufEnter", "InsertLeave" }, {
+    group = group,
+    callback = function()
+      vim.schedule(function()
+        local request = (chat.permissions or {})[1]
+        if not request then
+          return pcall(api.nvim_del_augroup_by_id, group)
+        end
+        if ready(chat) then
+          pcall(api.nvim_del_augroup_by_id, group)
+          open(chat, request)
+        end
+      end)
+    end,
+    desc = "paseo: open a held permission request once the chat is in front of you",
+  })
+end
+
 ---A request has arrived (live, or found pending when the chat opened).
 ---@param chat table
 ---@param request table
@@ -512,13 +553,7 @@ function M.offer(chat, request)
   -- unconditionally, so a second request arriving tore down a half-answered
   -- question and threw the answers away. The queue already reopens in order from
   -- `M.resolved`, so holding it costs nothing.
-  local win = api.nvim_get_current_win()
-  local mine = win == chat.win_conversation or win == chat.win_composer
-  local typing = api.nvim_get_mode().mode:find "i" ~= nil
-  local showing = overlay() and overlay().showing() or nil
-  local busy = showing or (open_dialog and open_dialog.request.id)
-
-  if mine and not typing and not busy then
+  if ready(chat) then
     open(chat, request)
   else
     vim.notify(
@@ -527,6 +562,12 @@ function M.offer(chat, request)
       ),
       vim.log.levels.WARN
     )
+    -- HELD, NOT DROPPED. This used to be the request's one chance: arriving
+    -- while you were typing, in another window, or while the chat was still
+    -- opening -- a reconcile runs before its windows exist -- it got the
+    -- notification above and nothing else, and the agent sat blocked behind
+    -- a winbar that said `needs you` until somebody thought to press `gp`.
+    arm(chat)
   end
 end
 
@@ -581,7 +622,13 @@ function M.resolved(chat, request_id, resolution)
   local next_request = chat.permissions[1]
   if next_request then
     vim.schedule(function()
-      open(chat, next_request)
+      -- The same rule as a request that has just arrived: the next one waits
+      -- for this chat to be in front of you rather than opening over another.
+      if ready(chat) then
+        open(chat, next_request)
+      else
+        arm(chat)
+      end
     end)
   elseif resolution and resolution.behavior == "allow" then
     -- Allowed means the turn carries on, so the agent is working again. It was
@@ -632,6 +679,12 @@ function M.reconcile(chat, list)
   for _, request in ipairs(list) do
     M.offer(chat, request)
   end
+end
+
+---The id of the request the allow/deny dialog is showing, if any. For tests.
+---@return string|nil
+function M._showing()
+  return open_dialog and open_dialog.request and open_dialog.request.id or nil
 end
 
 ---Reopen the pending prompt. Bound to `gp` in the conversation.

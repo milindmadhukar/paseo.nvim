@@ -62,6 +62,39 @@ local function test_permission_sync()
   eq("sync: and is not held twice", #chat.permissions, 1)
 end
 
+--- A request that could not open when it arrived is HELD, not dropped: it
+--- opens the moment the chat is in front of you. It used to get one passing
+--- notification and nothing else -- arriving while you typed, or during the
+--- reconcile that runs before a chat's windows exist -- and the agent sat
+--- blocked behind a winbar saying `needs you`.
+local function test_permission_held()
+  local permission = require "paseo.ui.permission"
+  local transcript = require "paseo.ui.transcript"
+
+  local chat = { agent_id = "held", conversation = vim.api.nvim_create_buf(false, true) }
+  transcript.reset(chat)
+  permission.offer(chat, { id = "h", kind = "tool", name = "Bash", title = "Run h", actions = {} })
+  vim.wait(50)
+  eq("held: no chat window yet, nothing opens", permission._showing(), nil)
+
+  vim.cmd "split"
+  vim.api.nvim_win_set_buf(0, chat.conversation)
+  chat.win_conversation = vim.api.nvim_get_current_win()
+  vim.cmd "wincmd p"
+  vim.cmd "wincmd p"
+  truthy("held: entering the chat opens it", vim.wait(500, function()
+    return permission._showing() == "h"
+  end))
+
+  permission.close()
+  vim.cmd "wincmd p"
+  vim.cmd "wincmd p"
+  vim.wait(100)
+  eq("held: once -- dismissed stays dismissed until `gp`", permission._showing(), nil)
+  vim.api.nvim_win_close(chat.win_conversation, true)
+end
+
 return {
   { "sync", test_permission_sync },
+  { "held", test_permission_held },
 }
