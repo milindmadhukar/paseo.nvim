@@ -859,6 +859,24 @@ skills.method                                       `"link"`|`"copy"`, default `
     Agent sessions in the workspace containing this directory. `sessions` is
     retained as a compatibility alias; `agents` is the canonical command.
 
+:Paseo subagents                                      *:Paseo-subagents*
+
+    The subagents of the agent session in the chat; `gs` in the conversation
+    opens the same list. The header counts them -- `2 of 3 subagents running`
+    -- and keeps the total once they finish, so one can still be read.
+
+    Two kinds, and the kind decides what <CR> does:
+
+    provider  the provider's own -- Claude's Task tool, Codex's spawned
+              agents. Opens READ-ONLY in a tab: its prompt, every tool call
+              and its answer, live while it runs. Paseo has no message that
+              sends one anything, so `i` there opens the PARENT's chat with a
+              line naming the subagent -- the parent is the one that can act
+              on an instruction about it. `q` closes.
+    paseo     an agent this one started through Paseo, linked by the label
+              `paseo.parent-agent-id`. An ordinary agent: opens as a chat, and
+              the composer talks to it.
+
 :Paseo term                                                  *:Paseo-term*
 :Paseo terminals                                        *:Paseo-terminals*
 
@@ -1962,6 +1980,7 @@ In the conversation ~
     1-6       jump to a tab (full screen; see ui.float.tab_keys)
     <M-1>..6  the same, without taking the count keys
     gp        reopen a pending permission prompt
+    gs        this agent's subagents. See |:Paseo-subagents|
     f         fork the complete conversation. See |paseo-fork|
     <C-f>     switch surface
     <C-c>     stop the turn. See |paseo-chat-stop|

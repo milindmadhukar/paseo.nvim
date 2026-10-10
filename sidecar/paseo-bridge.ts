@@ -40,6 +40,7 @@ import { workspaceOps } from "./bridge-workspaces.ts";
 import { timelineOps } from "./bridge-timeline.ts";
 import { terminalOps } from "./bridge-terminals.ts";
 import { voiceOps } from "./bridge-voice.ts";
+import { subagentOps } from "./bridge-subagents.ts";
 
 const ctx = new BridgeConnection();
 const ops: Ops = {
@@ -50,6 +51,7 @@ const ops: Ops = {
   ...voiceOps(ctx),
   ...timelineOps(ctx),
   ...terminalOps(ctx),
+  ...subagentOps(ctx),
 };
 setShutdown(() => ops.close({ op: "close" }));
 

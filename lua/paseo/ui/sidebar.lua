@@ -213,6 +213,24 @@ local function parts(chat)
     part(5, vim.list_slice(context, 2))
   end
 
+  -- SUBAGENTS, both kinds -- the provider's (Claude's Task tool) and agents
+  -- this one started through Paseo. The app draws them as a track above the
+  -- composer; here it is a count, and `gs` is the list. Running first because
+  -- that is the news; the total stays once they finish, so you can still open
+  -- one and read what it did. Shrinks to the glyph and the numbers.
+  local running, total = require("paseo.subagents").counts(chat.agent_id, chat.host_id)
+  if total > 0 then
+    local glyph = icons.tool.sub_agent .. " "
+    local numbers = running > 0 and ("%d/%d"):format(running, total) or tostring(total)
+    local hl = running > 0 and "PaseoToolRunning" or "PaseoDim"
+    local word = total == 1 and "subagent" or "subagents"
+    local said = running > 0 and ("%d of %d %s running (gs)"):format(running, total, word)
+      or ("%d %s (gs)"):format(total, word)
+    part(3, { { glyph .. said, hl } }, function()
+      return { { glyph .. numbers, hl } }
+    end)
+  end
+
   -- Something is waiting on you. Worth shouting about: the agent is blocked
   -- until it is answered, so this is the one part that is never dropped.
   if chat.permissions and #chat.permissions > 0 then

@@ -131,6 +131,7 @@ export function describeAgent(agent: any): Record<string, unknown> {
     id: agent.id,
     title: agent.title ?? null,
     status: agent.status ?? null,
+    createdAt: agent.createdAt ?? null,
     cwd: agent.cwd ?? null,
     workspaceId: agent.workspaceId ?? null,
     provider: agent.runtimeInfo?.provider ?? null,

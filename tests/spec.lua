@@ -56,6 +56,7 @@ local files = {
   "quit",
   "workspace_create",
   "skills",
+  "subagents",
   "chat",
 }
 

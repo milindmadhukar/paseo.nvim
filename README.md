@@ -201,6 +201,7 @@ this document uses those four words and no others for it.
 | `:Paseo workspaces [all]` | Workspace picker for this project (`<C-a>` or `all`: every project's) — open, inspect agent sessions, create, archive |
 | `:Paseo wcreate` | Create a workspace here — the shape is worked out for you |
 | `:Paseo agents` | Agent sessions in this workspace |
+| `:Paseo subagents` | Subagents of the chat's agent (`gs` in the chat) — a Paseo one opens as a chat you can message, a provider one (Claude's Task tool) opens read-only, live |
 | `:Paseo sessions` | Compatibility alias for `agents` |
 | `:Paseo term` | Terminals in this workspace, on the Sessions tab |
 | `:Paseo ws …` | Manifest-level: `init` · `edit` · `create <name> [repos]` · `rm` · `ls` · `status` |

@@ -646,6 +646,9 @@ local function make_buffers(chat)
     vim.keymap.set("n", "gp", function()
       require("paseo.ui.permission").reopen(chat)
     end, vim.tbl_extend("force", conv, { desc = "paseo: reopen permission prompt" }))
+    vim.keymap.set("n", "gs", function()
+      require("paseo.pickers.subagents").open(chat)
+    end, vim.tbl_extend("force", conv, { desc = "paseo: this agent's subagents" }))
     vim.keymap.set("n", "f", function()
       require("paseo.fork").start(chat)
     end, vim.tbl_extend("force", conv, { desc = "paseo: fork this conversation" }))
@@ -957,6 +960,8 @@ initialise = function(chat)
     load_history(chat)
   end, chat.host_id)
   M.load_settings(chat)
+  -- Its subagents, both kinds: the count in the header and `gs`.
+  require("paseo.subagents").follow(chat.agent_id, chat.host_id)
 end
 
 -- --------------------------------------------------------------------- API
@@ -1547,6 +1552,16 @@ function M.attach_events()
     bridge.on(event, ingest)
   end
 
+  -- A subagent started, moved or finished: the header counts them.
+  require("paseo.subagents").on_change(function(host_id, parent)
+    for _, chat in pairs(chats) do
+      if chat.agent_id and (parent == nil or chat.agent_id == parent)
+        and (host_id == nil or chat.host_id == host_id) then
+        M.refresh(chat)
+      end
+    end
+  end)
+
   -- A permission request. The agent is BLOCKED until this is answered.
   bridge.on("permission", function(payload)
     local chat = by_agent(payload.agentId, payload.hostId)
@@ -1664,6 +1679,9 @@ function M.attach_events()
       notice(chat, "reconnected — anything said during the gap was not replayed", "warning")
       M.load_settings(chat)
       load_history(chat)
+      -- The subagent stream belonged to the old socket. Follow again, and
+      -- re-list: one that started or finished in the gap was never pushed.
+      require("paseo.subagents").follow(chat.agent_id, chat.host_id)
     end
   end)
 

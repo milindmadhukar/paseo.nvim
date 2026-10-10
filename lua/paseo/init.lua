@@ -232,6 +232,13 @@ commands.workspaces = {
   end,
 }
 
+commands.subagents = {
+  desc = "Subagents of the chat's agent session: a Paseo one opens as a chat, a provider one read-only",
+  run = function()
+    require("paseo.pickers.subagents").open()
+  end,
+}
+
 commands.wcreate = {
   desc = "Create a workspace here — assembled, worktree or plain, worked out for you",
   run = function()

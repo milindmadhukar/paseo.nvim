@@ -13,6 +13,7 @@ import { terminalOps } from "./bridge-terminals.ts";
 import { workspaceOps } from "./bridge-workspaces.ts";
 import { voiceOps } from "./bridge-voice.ts";
 import { emit } from "./bridge-io.ts";
+import { subagentOps } from "./bridge-subagents.ts";
 
 /** stdout IS the protocol, so asserting on it is asserting on the wire. */
 function captureStdout(run: () => void): string[] {
@@ -887,4 +888,83 @@ test("terminal input survives the trip as bytes, and output coalesces", async ()
     await new Promise((done) => setTimeout(done, 40));
   });
   assert.equal(after.filter((l) => l.includes("terminal_output")).length, 0);
+});
+
+test("subagent updates reach Lua as the events it listens for, in the chat's item shape", async () => {
+  let deliver: ((message: any) => void) | null = null;
+  const subscribed: string[][] = [];
+  const ctx = new BridgeConnection();
+  ctx.connected = (() => ({
+    observeEvents(events: string[]) {
+      subscribed.push(events);
+      return {
+        subscribe({ update }: any) {
+          deliver = update;
+        },
+        ready: Promise.resolve(),
+        async release() {},
+      };
+    },
+  })) as any;
+  ctx.raw = (() => ({
+    async listProviderSubagents(parent: string) {
+      return { subagents: [{ id: "t1", parentAgentId: parent, title: "Explore", status: "running", extra: "dropped" }] };
+    },
+    async fetchProviderSubagentTimeline(_parent: string, _id: string, options: any) {
+      assert.equal(options.direction, "tail");
+      return {
+        epoch: "e1",
+        window: { minSeq: 1, maxSeq: 2, nextSeq: 3 },
+        rows: [
+          { seq: 1, item: { type: "assistant_message", text: "looking" } },
+          { seq: 2, item: { type: "plugin", id: "x" } },
+        ],
+      };
+    },
+  })) as any;
+  const ops = subagentOps(ctx);
+
+  await ops["subagents.follow"]({ op: "subagents.follow" });
+  assert.deepEqual(subscribed, [["agent.provider_subagents.update"]]);
+  assert.equal((await ops["subagents.follow"]({ op: "subagents.follow" }) as any).already, true);
+
+  const lines = captureStdout(() => {
+    deliver!({
+      type: "agent.provider_subagents.update",
+      payload: { kind: "upsert", subagent: { id: "t1", parentAgentId: "p", status: "completed" } },
+    });
+    deliver!({
+      type: "agent.provider_subagents.update",
+      payload: {
+        kind: "timeline",
+        parentAgentId: "p",
+        subagentId: "t1",
+        item: { type: "assistant_message", text: "done" },
+        seq: 7,
+        epoch: "e1",
+      },
+    });
+    deliver!({
+      type: "agent.provider_subagents.update",
+      payload: { kind: "remove", parentAgentId: "p", subagentId: "t1" },
+    });
+  }).map((line) => JSON.parse(line));
+
+  assert.equal(lines[0].event, "subagent");
+  assert.equal(lines[0].subagent.status, "completed");
+  assert.deepEqual(
+    { event: lines[1].event, kind: lines[1].kind, text: lines[1].text, seq: lines[1].seq, subagentId: lines[1].subagentId },
+    { event: "subagent_item", kind: "text", text: "done", seq: 7, subagentId: "t1" },
+  );
+  assert.deepEqual({ event: lines[2].event, kind: lines[2].kind }, { event: "subagent", kind: "remove" });
+
+  const listed: any = await ops["subagents.list"]({ op: "subagents.list", agentId: "p" });
+  assert.equal(listed.subagents[0].title, "Explore");
+  assert.equal(listed.subagents[0].extra, undefined);
+
+  // An item with nothing to render is skipped, not drawn as a blank card.
+  const history: any = await ops["subagent.history"]({ op: "subagent.history", agentId: "p", subagentId: "t1" });
+  assert.deepEqual(history.items, [{ kind: "text", text: "looking", seq: 1 }]);
+  assert.equal(history.seq, 2);
+  assert.equal(history.epoch, "e1");
 });

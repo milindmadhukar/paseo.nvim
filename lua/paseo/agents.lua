@@ -166,6 +166,13 @@ local WORKING = {
   in_progress = true,
 }
 
+---Is a status one of the working ones?
+---@param status string|nil
+---@return boolean
+function M.working(status)
+  return WORKING[status] == true
+end
+
 ---Agent sessions whose work is live, or whose work is waiting on the user.
 ---@return table[]
 function M.active(host_id)
