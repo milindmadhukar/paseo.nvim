@@ -58,7 +58,7 @@ local function split(text)
 end
 
 commands.ws = {
-  desc = "Manifest-level: init [raw] | create <name> [repos] | rm <name> [force] | ls | status",
+  desc = "Manifest-level: init [raw] | edit | create <name> [repos] | rm <name> [force] | ls | status",
   run = function(args)
     local sub = args[1] or "ls"
     local workspace = require "paseo.workspace"
@@ -75,7 +75,12 @@ commands.ws = {
           where = args[i]
         end
       end
-      local root = where and vim.fn.fnamemodify(vim.fn.expand(where), ":p") or assert(vim.uv.cwd())
+      -- The project the cwd is IN, when it has a manifest: run from inside a
+      -- workspace or one of its repos, the cwd is not the project, and a
+      -- screen opened on it would discover a different one.
+      local root = where and vim.fn.fnamemodify(vim.fn.expand(where), ":p")
+        or registry.project_root()
+        or assert(vim.uv.cwd())
       root = root:gsub("/+$", "")
 
       local ui = require "paseo.ui.manifest"
@@ -105,6 +110,21 @@ commands.ws = {
           vim.log.levels.INFO
         )
       end)
+    end
+
+    if sub == "edit" then
+      -- The FILE, as it is on disk, comments and all -- where `init raw` hands
+      -- you a freshly rendered draft under that name. No manifest yet means
+      -- there is nothing to edit, so the screen that writes one opens instead.
+      local where = args[2] and vim.fn.fnamemodify(vim.fn.expand(args[2]), ":p")
+      local root = where or registry.project_root()
+      local path = root and workspace.manifest.find((root:gsub("/+$", "")))
+      if not path then
+        vim.notify("paseo: no workspace.toml here or above; opening the setup screen", vim.log.levels.INFO)
+        return commands.ws.run(where and { "init", where } or { "init" })
+      end
+      vim.cmd.tabedit(vim.fn.fnameescape(path))
+      return
     end
 
     local m, root, err = project { root = nil }

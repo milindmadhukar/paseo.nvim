@@ -865,14 +865,18 @@ skills.method                                       `"link"`|`"copy"`, default `
     over the top of everything. `terminals` is the older name still and also
     lands here; both tags are published, so both keep working.
 
-:Paseo ws [init|create|rm|ls|status]                           *:Paseo-ws*
+:Paseo ws [init|edit|create|rm|ls|status]                      *:Paseo-ws*
 
     The manifest-level controls, for when you want to see the machinery
     rather than have it decided for you. |:Paseo-wcreate| needs none of this.
 
     `init` opens the manifest as a SCREEN -- see |paseo-ws-dialog|. `init raw`
     is the old behaviour: the generated TOML in a buffer you `:w` yourself.
-    Both load an existing manifest rather than replacing it.
+    Both load an existing manifest rather than replacing it, and both work
+    from anywhere inside the project -- a workspace, or a repo in one.
+
+    `edit` opens `<project>/.workspaces/workspace.toml` itself, as it is on
+    disk, in a tab of its own. With no manifest yet it opens the `init` screen.
 
     `create <name> [repo,repo]` assembles worktrees, and is the only way to
     pick WHICH repos a workspace gets; `rm <name> [force]` dismantles one and

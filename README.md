@@ -203,7 +203,7 @@ this document uses those four words and no others for it.
 | `:Paseo agents` | Agent sessions in this workspace |
 | `:Paseo sessions` | Compatibility alias for `agents` |
 | `:Paseo term` | Terminals in this workspace, on the Sessions tab |
-| `:Paseo ws …` | Manifest-level: `init` · `create <name> [repos]` · `rm` · `ls` · `status` |
+| `:Paseo ws …` | Manifest-level: `init` · `edit` · `create <name> [repos]` · `rm` · `ls` · `status` |
 | `:Paseo agent [stop]` | Sidecar and agent status |
 | `:Paseo repos` | The repos in the current unit of work |
 | `:Paseo health` | `:checkhealth paseo` |
@@ -1631,8 +1631,9 @@ listed `test quotes` and `test-s3` months later because of it. Opening the
 screen on a project that already has a manifest **loads** it, and a sibling
 you pruned stays pruned even though it is still on disk.
 
-`:Paseo ws init` opens the same screen; `:Paseo ws init raw` is the old TOML
-buffer. `:Paseo ws create <name> repo,repo` is still the only way to pick
+`:Paseo ws init` opens the same screen, from anywhere inside the project;
+`:Paseo ws init raw` is the old TOML buffer, and `:Paseo ws edit` opens the
+file itself as it is on disk. `:Paseo ws create <name> repo,repo` is still the only way to pick
 which repos one workspace gets — but none of it is a prerequisite.
 
 The point is that "is this the `ws init` kind of project?" is a question about

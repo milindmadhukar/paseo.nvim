@@ -374,8 +374,34 @@ local function test_parent_project()
   eq("parent project: nor is the project itself", workspaces.parent_project(project), nil)
 end
 
+local function test_ws_edit()
+  -- `ws edit` opens the manifest FILE, from anywhere inside the project.
+  local manifest = require "paseo.workspace.manifest"
+  local project = vim.fn.resolve(vim.fn.tempname())
+  local inside = vim.fs.joinpath(project, ".workspaces", "billing", "app")
+  vim.fn.mkdir(inside, "p")
+  local path = manifest.path(project)
+  local fd = assert(io.open(path, "w"))
+  fd:write "# mine, by hand\nbranch_prefix = \"ws/\"\n"
+  fd:close()
+
+  local tabs = #vim.api.nvim_list_tabpages()
+  in_dir(inside, function()
+    vim.cmd "Paseo ws edit"
+  end)
+  eq("ws edit: in a tab of its own", #vim.api.nvim_list_tabpages(), tabs + 1)
+  eq("ws edit: the manifest of the project around the cwd", vim.api.nvim_buf_get_name(0), path)
+  eq(
+    "ws edit: as it is on disk, not a re-render",
+    vim.api.nvim_buf_get_lines(0, 0, 1, false)[1],
+    "# mine, by hand"
+  )
+  vim.cmd "tabclose"
+end
+
 return {
   { "workspace", test_workspace },
+  { "ws edit", test_ws_edit },
   { "parent project", test_parent_project },
   { "manifest location", test_manifest_location },
   { "workspace group", test_workspace_group },
