@@ -411,8 +411,8 @@ local function test_workspace_scope()
   truthy("scope: manifest saved", manifest.save(kora, { shared = {}, repos = {} }, {}))
   eq("here: a manifested project, from inside one of its workspaces", workspaces.here(member), kora)
 
-  -- A MEMBER repo of the manifest is the project; a repo that only sits under
-  -- the project directory is a project of its own.
+  -- A git repo under the project directory is a project of its own, whether
+  -- or not the manifest lists it.
   local function git_init(path)
     vim.fn.mkdir(path, "p")
     vim.system({ "git", "init", "-q", path }):wait()
@@ -420,7 +420,7 @@ local function test_workspace_scope()
   git_init(vim.fs.joinpath(kora, "app"))
   git_init(vim.fs.joinpath(kora, "loner"))
   truthy("scope: manifest names app", manifest.save(kora, { shared = {}, repos = { app = { base = "main" } } }, {}))
-  eq("here: a member repo is the manifested project", workspaces.here(vim.fs.joinpath(kora, "app")), kora)
+  eq("here: a member repo opened on its own is its own project", workspaces.here(vim.fs.joinpath(kora, "app")), vim.fs.joinpath(kora, "app"))
   eq(
     "here: a repo beside the members is its own project",
     workspaces.here(vim.fs.joinpath(kora, "loner")),

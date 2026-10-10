@@ -170,15 +170,46 @@ function M.find(name, project)
   return nil
 end
 
----The nearest ancestor of `start` holding a manifest.
+---The main checkout of the git repository `dir` is in, or nil.
+---
+---`<repo>/.git` is the common dir of a checkout and of every worktree cut from
+---it, so a worktree answers with the repo it was cut from. A bare repository
+---has no checkout and counts as none.
+---@param dir string
+---@return string|nil
+local function main_checkout(dir)
+  local res = vim
+    .system({ "git", "-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir" }, { text = true })
+    :wait()
+  local common = res.code == 0 and vim.trim(res.stdout or "") or ""
+  if vim.fs.basename(common) ~= ".git" then
+    return nil
+  end
+  return (vim.fn.resolve(vim.fs.dirname(common)):gsub("/+$", ""))
+end
+
+---The multi-repo project `start` belongs to: the nearest ancestor holding a
+---manifest -- unless `start` is in a git repository, which is a project of its
+---own and wins. Opening `~/Code/openfin/clm-platform`, or even a repo the
+---manifest lists, means that repo: Paseo cuts worktrees from it. The manifest
+---answers only where there is no repository to prefer (the project directory
+---itself, an assembled workspace's root) and inside an assembled workspace,
+---whose member checkouts are the assembly's, not their repos'.
 ---@param start? string
 ---@return string|nil
 function M.project_root(start)
-  local dir = vim.fn.fnamemodify(start or assert(vim.uv.cwd()), ":p")
+  local from = (vim.fn.resolve(vim.fn.fnamemodify(start or assert(vim.uv.cwd()), ":p")):gsub("/+$", ""))
+  local dir = from
   local manifest = require "paseo.workspace.manifest"
-  while dir and dir ~= "/" do
+  while dir and dir ~= "/" and dir ~= "" do
     if manifest.find(dir) then
-      return (dir:gsub("/+$", ""))
+      local project = (dir:gsub("/+$", ""))
+      local assembled = vim.startswith(from .. "/", vim.fs.joinpath(project, manifest.dir()) .. "/")
+      local repo = not assembled and vim.fn.isdirectory(from) == 1 and main_checkout(from) or nil
+      if repo and repo ~= project then
+        return nil
+      end
+      return project
     end
     dir = vim.fs.dirname(dir)
   end

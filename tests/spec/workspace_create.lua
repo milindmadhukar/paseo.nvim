@@ -83,9 +83,10 @@ end
 --- The regression this exists to prevent: `wcreate` in a plain git repo used to
 --- fall through to `workspace.open` on the PRIMARY checkout, so two
 --- "workspaces" were two names for the same files -- no isolation at all, and
---- nothing said so. The other half is ordering: an explicit manifest has to win
---- over "this is a git repo", or a member repo of a multi-repo project gets
---- isolated on its own and the siblings are left behind.
+--- nothing said so. The other half is ordering: a git repo wins over a
+--- manifest in a directory above it -- opening `openfin/clm-platform` means
+--- that repo, not openfin -- and the manifest answers only at the project
+--- directory and inside its assembled workspaces.
 local function test_strategy()
   local workspaces = require "paseo.workspaces"
   local manifest = require "paseo.workspace.manifest"
@@ -145,16 +146,27 @@ local function test_strategy()
   truthy("strategy: the discovered manifest saves", manifest.save(project, fresh.manifest, {}))
   eq("strategy: and is `assemble` from then on", workspaces.strategy(project).kind, "assemble")
 
-  -- The ordering that matters: an explicit manifest beats "this is a repo".
+  -- A git repository is a project of its own and wins, even one the manifest
+  -- lists: opening it means that repo, not the directory around it.
+  eq("strategy: a member repo opened on its own is just a repo", workspaces.strategy(repo).kind, "worktree")
+  eq("project_root: and is not the manifest's project", require("paseo.registry").project_root(repo), nil)
+  eq("project_root: the project directory itself is", require("paseo.registry").project_root(project), project)
+
+  -- A repo that merely SITS under a manifested directory, without being one
+  -- of its repos, is a repo of its own: `~/Code/openfin/clm-platform`.
+  local stranger = vim.fs.joinpath(project, "stranger")
+  vim.fn.mkdir(stranger, "p")
+  vim.system({ "git", "-C", stranger, "init", "-q", "-b", "dev", "." }):wait()
+  vim.system({ "git", "-C", stranger, "-c", "user.email=t@example.com", "-c", "user.name=t", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "init" }):wait()
   eq(
-    "strategy: a manifest wins from inside a member repo",
-    workspaces.strategy(repo).kind,
-    "assemble"
+    "strategy: a repo under a manifest it is not in gets its own worktree",
+    workspaces.strategy(stranger).kind,
+    "worktree"
   )
   eq(
-    "strategy: and points at the project, not the member",
-    workspaces.strategy(repo).project,
-    project
+    "project_root: and is not that manifest's project",
+    require("paseo.registry").project_root(stranger),
+    nil
   )
 
   vim.fn.delete(project, "rf")

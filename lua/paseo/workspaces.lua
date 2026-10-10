@@ -116,35 +116,30 @@ end
 
 ---The project the editor is standing in, as a directory.
 ---
----The MAIN checkout of the git repository `dir` is in, so a worktree -- cut by
----Paseo under `~/.paseo/worktrees`, or assembled into a workspace -- answers
----with the repo it was cut from. A manifested multi-repo project around `dir`
----wins over that repo only when the repo is one of its MEMBERS: a repo that
----merely sits under such a directory (`~/Code/openfin/clm-platform`, beside
----the members of openfin's manifest) is a project of its own. With no
----repository -- the root of an assembled workspace, say -- the manifested
----project; else `dir`.
+---A manifested multi-repo project where `registry.project_root` finds one --
+---its own directory, or inside one of its assembled workspaces. Otherwise the
+---MAIN checkout of the git repository `dir` is in, so a worktree Paseo cut
+---under `~/.paseo/worktrees` answers with the repo it was cut from; a git repo
+---under a manifested directory (`~/Code/openfin/clm-platform`) is a project of
+---its own. With neither, `dir`.
 ---@param dir? string  Defaults to the cwd.
 ---@return string
 function M.here(dir)
   dir = normalise(dir or assert(vim.uv.cwd()))
   local project = registry.project_root(dir)
-  project = project and normalise(project)
-
+  if project then
+    return normalise(project)
+  end
   local res = vim
     .system({ "git", "-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir" }, { text = true })
     :wait()
   local common = res.code == 0 and vim.trim(res.stdout or "") or ""
   -- `<repo>/.git` for a checkout and every worktree of it. A bare repository
   -- has no checkout to name, and counts as no repository.
-  local repo = vim.fs.basename(common) == ".git" and normalise(vim.fs.dirname(common)) or nil
-
-  if repo and project then
-    local m = require("paseo.workspace.manifest").load(project)
-    local rel = vim.startswith(repo, project .. "/") and repo:sub(#project + 2) or nil
-    return (m and rel and m.repos[rel]) and project or repo
+  if vim.fs.basename(common) == ".git" then
+    return normalise(vim.fs.dirname(common))
   end
-  return repo or project or dir
+  return dir
 end
 
 ---The workspaces that belong to the project at `root`.
@@ -302,8 +297,9 @@ end
 function M.strategy(root)
   root = (vim.fn.fnamemodify(vim.fn.expand(root), ":p"):gsub("/+$", ""))
 
-  -- An explicit manifest wins outright, and wins from INSIDE a member repo:
-  -- ~/Code/kora/kora-app belongs to kora's manifest, not to kora-app alone.
+  -- A manifest answers at its project directory and inside its assembled
+  -- workspaces. A git repo elsewhere under it -- even one it lists -- is a
+  -- repo of its own; `project_root` says which.
   local project = registry.project_root(root)
   if project then
     return { kind = "assemble", root = root, project = project }
