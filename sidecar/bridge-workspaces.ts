@@ -8,6 +8,46 @@ export function canonical(path: string): string {
 }
 
 /**
+ * The id of the project rooted at `root`, registering it if Paseo has not seen
+ * it. `addProject` is find-or-create by root path, so this is idempotent.
+ */
+export async function projectIdFor(
+  ctx: BridgeConnection,
+  root: string,
+): Promise<string> {
+  const result: any = await ctx.raw().addProject(canonical(root));
+  if (result?.error || !result?.project?.projectId) {
+    throw new Error(result?.error ?? `Paseo did not register ${root} as a project`);
+  }
+  return String(result.project.projectId);
+}
+
+/**
+ * A new directory workspace at `cwd`, inside the project rooted at `project`.
+ *
+ * The project is the point. An assembled workspace --
+ * `<project>/.workspaces/<name>`, N worktrees side by side -- is not a git
+ * repository, and a directory source WITHOUT a `projectId` makes the daemon
+ * find-or-create a project rooted at that exact directory: every workspace
+ * became a top-level project named after itself, beside the one it belongs
+ * to. That path is a server compat shim
+ * (`COMPAT(workspaceCreateMissingProjectId)`, due for removal after
+ * 2027-01-15); naming the project is the supported request.
+ */
+async function createInProject(
+  ctx: BridgeConnection,
+  cwd: string,
+  project: string,
+  title?: string,
+): Promise<any> {
+  const projectId = await projectIdFor(ctx, project);
+  return await ctx.connected().workspaces.create({
+    source: { kind: "directory", path: canonical(cwd), projectId },
+    ...(title ? { title } : {}),
+  });
+}
+
+/**
  * The workspace handle covering `cwd` -- the EXISTING one wherever there is
  * one.
  *
@@ -17,13 +57,15 @@ export function canonical(path: string): string {
  * owns: a Paseo-cut worktree gets registered a second time, as its own project,
  * because the worktree directory is itself a git repository.
  *
- * `workspaces.open()` is the fallback and not the first move: it is only
- * reached when nothing covers the directory, which is the case where
- * registering something new is what was actually wanted.
+ * Registering something new is only reached when nothing covers the directory.
+ * With `project` -- the root of the project an assembled workspace belongs to
+ * -- it is registered inside that project; without, `workspaces.open()` lets
+ * the daemon decide, which is right for an ordinary checkout.
  */
 export async function workspaceFor(
   ctx: BridgeConnection,
   cwd: string,
+  project?: string | null,
 ): Promise<any> {
   const api = ctx.connected();
   const want = canonical(cwd);
@@ -35,7 +77,9 @@ export async function workspaceFor(
     return dir ? canonical(String(dir)) === want : false;
   });
 
-  return owner ? api.workspaces.ref(owner.id) : await api.workspaces.open(cwd);
+  if (owner) return api.workspaces.ref(owner.id);
+  if (project) return await createInProject(ctx, cwd, project);
+  return await api.workspaces.open(cwd);
 }
 
 export function workspaceOps(ctx: BridgeConnection): Ops {
@@ -60,8 +104,10 @@ export function workspaceOps(ctx: BridgeConnection): Ops {
 
   return {
     async "workspace.open"(req) {
-      const workspace = await connected().workspaces.open(
+      const workspace = await workspaceFor(
+        ctx,
         String(need(req.cwd, "cwd")),
+        req.project ? String(req.project) : null,
       );
       return await createdWorkspace(workspace);
     },
@@ -97,6 +143,16 @@ export function workspaceOps(ctx: BridgeConnection): Ops {
     },
 
     async "workspace.create"(req) {
+      if (!req.worktree && req.project) {
+        const workspace = await createInProject(
+          ctx,
+          String(need(req.cwd, "cwd")),
+          String(req.project),
+          req.title ? String(req.title) : undefined,
+        );
+        return await createdWorkspace(workspace);
+      }
+
       const source: any = req.worktree
         ? {
             kind: "worktree",

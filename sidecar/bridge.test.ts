@@ -627,6 +627,75 @@ test("a workspace carries its project id, and a project can be forgotten", async
   await assert.rejects(() => ops["project.remove"]({ op: "project.remove" }));
 });
 
+test("an assembled workspace is created inside its project, not as one of its own", async () => {
+  const created: any[] = [];
+  const added: string[] = [];
+  const opened: string[] = [];
+  const ctx = new BridgeConnection();
+  ctx.connected = (() => ({
+    workspaces: {
+      async list() {
+        return {
+          entries: [{ id: "wks_old", workspaceDirectory: "/code/kora/.workspaces/old/" }],
+        };
+      },
+      ref: (id: string) => ({ id, directory: "/code/kora/.workspaces/old" }),
+      async create(input: any) {
+        created.push(input);
+        return { id: "wks_new", directory: input.source.path, projectId: input.source.projectId };
+      },
+      async open(cwd: string) {
+        opened.push(cwd);
+        return { id: "wks_open", directory: cwd, projectId: "prj_invented" };
+      },
+    },
+  })) as any;
+  ctx.raw = (() => ({
+    async addProject(cwd: string) {
+      added.push(cwd);
+      return { project: { projectId: "prj_kora" }, error: null };
+    },
+  })) as any;
+  const ops = workspaceOps(ctx);
+
+  const fresh: any = await ops["workspace.open"]({
+    op: "workspace.open",
+    cwd: "/code/kora/.workspaces/billing",
+    project: "/code/kora/",
+  });
+  assert.equal(fresh.projectId, "prj_kora");
+  assert.deepEqual(added, ["/code/kora"]);
+  assert.deepEqual(created[0].source, {
+    kind: "directory",
+    path: "/code/kora/.workspaces/billing",
+    projectId: "prj_kora",
+  });
+  assert.deepEqual(opened, [], "never the find-or-create-by-directory path");
+
+  // One that already exists is reused, whatever project it is under.
+  const again: any = await ops["workspace.open"]({
+    op: "workspace.open",
+    cwd: "/code/kora/.workspaces/old",
+    project: "/code/kora",
+  });
+  assert.equal(again.id, "wks_old");
+  assert.equal(created.length, 1);
+
+  // `create` names the project too, and keeps the title.
+  await ops["workspace.create"]({
+    op: "workspace.create",
+    cwd: "/code/kora/.workspaces/billing",
+    project: "/code/kora",
+    title: "billing",
+  });
+  assert.equal(created[1].source.projectId, "prj_kora");
+  assert.equal(created[1].title, "billing");
+
+  // No project: an ordinary directory, which the daemon places itself.
+  await ops["workspace.open"]({ op: "workspace.open", cwd: "/code/tracker" });
+  assert.deepEqual(opened, ["/code/tracker"]);
+});
+
 test("stopping a turn goes through the raw client, which is the only one that has it", async () => {
   // `PaseoAgentHandle` has no cancel in 0.8.0 -- the typed API cannot express
   // this at all -- so the op reaches for `ctx.raw()`. That is not a

@@ -302,7 +302,11 @@ export function agentOps(ctx: BridgeConnection): Ops {
         provider = `${entry.provider}/${model.id}`;
       }
 
-      const workspace = await workspaceFor(ctx, cwd);
+      const workspace = await workspaceFor(
+        ctx,
+        cwd,
+        req.project ? String(req.project) : null,
+      );
       // `agent.find` is only a read-only preview. Another client may have
       // created the matching review agent while we resolved the workspace.
       const concurrent = await reviewAgent(cwd, requested);

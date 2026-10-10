@@ -352,8 +352,31 @@ local function test_manifest_location()
   eq("manifest: and no longer writes workspaces_dir", text:find "workspaces_dir", nil)
 end
 
+local function test_parent_project()
+  -- The project an assembled workspace is registered INSIDE, rather than the
+  -- daemon inventing a top-level project named after the workspace.
+  local workspaces = require "paseo.workspaces"
+  local manifest = require "paseo.workspace.manifest"
+  local project = vim.fn.resolve(vim.fn.tempname())
+  local ws = vim.fs.joinpath(project, ".workspaces", "billing")
+  vim.fn.mkdir(vim.fs.joinpath(ws, "app"), "p")
+
+  eq("parent project: none without a manifest", workspaces.parent_project(ws), nil)
+
+  truthy("parent project: manifest saved", manifest.save(project, { shared = {}, repos = {} }, {}))
+  eq("parent project: the workspace root names its project", workspaces.parent_project(ws), project)
+  eq("parent project: a trailing slash changes nothing", workspaces.parent_project(ws .. "/"), project)
+  eq(
+    "parent project: a member inside it is not the workspace",
+    workspaces.parent_project(vim.fs.joinpath(ws, "app")),
+    nil
+  )
+  eq("parent project: nor is the project itself", workspaces.parent_project(project), nil)
+end
+
 return {
   { "workspace", test_workspace },
+  { "parent project", test_parent_project },
   { "manifest location", test_manifest_location },
   { "workspace group", test_workspace_group },
   { "ws init", test_ws_init },

@@ -1181,6 +1181,9 @@ function M.open(opts, callback)
         local draft = result.draft
         bridge.request("agent.ensure", {
           cwd = root,
+          -- An assembled workspace Paseo has not seen yet is registered inside
+          -- its project, not as one of its own.
+          project = host.local_host and require("paseo.workspaces").parent_project(root) or nil,
           provider = draft.provider,
           modeId = draft.modeId,
           thinkingOptionId = draft.thinkingOptionId,

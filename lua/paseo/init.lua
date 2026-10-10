@@ -141,7 +141,7 @@ commands.ws = {
       local bridge = require "paseo.bridge"
       bridge.ensure(function(bridge_err)
         if not bridge_err then
-          bridge.request("workspace.open", { cwd = ws.root }, function() end)
+          bridge.request("workspace.open", { cwd = ws.root, project = root }, function() end)
         end
       end)
 

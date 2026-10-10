@@ -64,6 +64,10 @@ end
 ---comes back as a project called `billing`, sitting as a sibling of `openfin`
 ---rather than inside it -- which is exactly how the sidebar drew it.
 ---
+---Workspaces this plugin assembles are now created inside their project
+---(`M.parent_project`), so that no longer happens to new ones. This stays for
+---the ones registered before, and for one opened from the app by path.
+---
 ---The shape is recognisable from the path alone, which `repos.workspace_root`
 ---already does for the repo list. So the editor groups on that and leaves the
 ---daemon's own record alone: nothing is renamed, nothing is migrated, and a
@@ -84,6 +88,30 @@ function M.group(ws)
     end
   end
   return ws.project or ws.name or ""
+end
+
+---The project an assembled workspace belongs to, if `dir` is one.
+---
+---`<project>/<workspaces.dir>/<name>` with a manifest at `<project>` -- the
+---shape `M.group` reads, plus the manifest that says it was assembled rather
+---than merely named like it. Handed to the daemon so the workspace is created
+---INSIDE that project: without it, Paseo registers the directory as a project
+---of its own, named after the workspace. Local paths only.
+---@param dir string
+---@return string|nil project
+function M.parent_project(dir)
+  -- The same spelling `workspace_root` answers in -- absolute, symlinks
+  -- resolved -- or the comparison below never holds.
+  local normal = (vim.fn.resolve(vim.fn.fnamemodify(vim.fn.expand(dir), ":p")):gsub("/+$", ""))
+  local root = require("paseo.repos").workspace_root(normal)
+  if root ~= normal then
+    return nil
+  end
+  local project = vim.fs.dirname(vim.fs.dirname(root))
+  if not require("paseo.workspace.manifest").find(project) then
+    return nil
+  end
+  return project
 end
 
 ---Every workspace, Paseo's merged with ours.
@@ -410,6 +438,11 @@ function M.assemble(plan, opts, callback)
     -- duplicates pointing at the same place.
     local op = opts.new and "workspace.create" or "workspace.open"
     local args = opts.new and { cwd = directory, title = opts.name } or { cwd = directory }
+    if plan.kind == "assemble" then
+      -- Inside the project, not beside it as one of its own: see
+      -- `M.parent_project`.
+      args.project = plan.project
+    end
     bridge.request(op, args, function(open_err, result)
       callback(result and result.id, open_err, plan, result and {
         id = result.id,
