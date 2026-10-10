@@ -38,4 +38,10 @@ require("gitsigns").setup {}
 require("paseo").setup {}
 
 vim.opt.swapfile = false
+
+-- State the plugin REMEMBERS -- the workspace rail's toggle, the skills it
+-- installed -- goes somewhere of the suite's own. Left at the default, a test
+-- pressing the toggle hid the rail in your own editor the next time you
+-- opened it.
+vim.env.XDG_STATE_HOME = vim.fn.tempname()
 vim.opt.shada = ""

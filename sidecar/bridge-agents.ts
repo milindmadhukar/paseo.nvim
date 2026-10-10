@@ -136,6 +136,15 @@ export function describeAgent(agent: any): Record<string, unknown> {
     workspaceId: agent.workspaceId ?? null,
     provider: agent.runtimeInfo?.provider ?? null,
     requiresAttention: (agent.pendingPermissions?.length ?? 0) > 0,
+    // What the desktop app sorts its workspace sidebar by, carried whole so
+    // the Lua side can draw the same four states. `requiresAttention` above is
+    // OURS -- "a permission is pending" -- and every caller already reads it
+    // that way; the daemon's own flag means something wider (a turn finished,
+    // or failed, while nobody was looking), so it travels under its own name
+    // rather than replacing ours under the same one.
+    pendingPermissionCount: agent.pendingPermissions?.length ?? 0,
+    attentionReason: agent.attentionReason ?? null,
+    daemonAttention: agent.requiresAttention === true,
     // Carried through so the Lua side can tell OUR agents apart from the ones
     // that did the work. `explain` lists the latter for the review agent to
     // interrogate, and listing itself would be a loop.

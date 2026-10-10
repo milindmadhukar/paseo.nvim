@@ -171,6 +171,15 @@ local M = {}
 ---                       is open. Set false to keep the counts; `<M-1>`-`<M-6>`
 ---                       and `<Tab>` still switch tabs. In TERMINAL mode a
 ---                       digit is never taken: it belongs to what is running.
+---@field rail paseo.Config.UI.Rail  The workspace rail down the left.
+
+---@class paseo.Config.UI.Rail
+---@field enabled boolean  Shown the first time. After that your last toggle
+---                       is remembered, in `stdpath("state")/paseo/ui.json`.
+---@field width integer   Cells. Capped at a quarter of the surface, and the
+---                       rail is left out altogether below 90 columns.
+---@field keys { toggle: string|false, focus: string|false }  Normal mode, on
+---                       every buffer the dashboard owns. `false` unbinds.
 
 ---@class paseo.Config.UI.Buffer
 ---
@@ -412,6 +421,21 @@ local defaults = {
       zindex = 30,
       backdrop = true,
       tab_keys = true,
+      -- The project's workspaces down the left of the body, each with what
+      -- its agents are doing. `enabled` is only where it STARTS: the toggle
+      -- is remembered across restarts, and that wins once you have pressed it.
+      rail = {
+        enabled = true,
+        -- Cells. Never more than a quarter of the surface, and no rail at
+        -- all on one narrower than 90.
+        width = 28,
+        keys = {
+          toggle = "<C-b>",
+          -- Into the rail and back out. `<C-h>` because the rail is the
+          -- window to the left -- the key a split user already presses.
+          focus = "<C-h>",
+        },
+      },
     },
 
     -- The same dashboard, in a window of its own rather than floating over
@@ -672,6 +696,13 @@ function M.setup(opts)
   -- below 1 outright, and the backdrop sits five below this.
   vim.validate("ui.float.zindex", config.ui.float.zindex, "number")
   config.ui.float.zindex = math.max(10, math.floor(config.ui.float.zindex))
+  vim.validate("ui.float.rail", config.ui.float.rail, "table")
+  vim.validate("ui.float.rail.width", config.ui.float.rail.width, "number")
+  for name, key in pairs(config.ui.float.rail.keys or {}) do
+    vim.validate(("ui.float.rail.keys.%s"):format(name), key, function(v)
+      return v == false or type(v) == "string"
+    end, "a key, or false to leave it unbound")
+  end
   vim.validate("ui.terminal.presets", config.ui.terminal.presets, "table")
   for name, key in pairs(config.ui.terminal.keys) do
     vim.validate(("ui.terminal.keys.%s"):format(name), key, function(v)

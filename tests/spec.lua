@@ -42,6 +42,7 @@ local files = {
   "ui.composer",
   "ui.theme",
   "ui.invariants",
+  "ui.rail",
   "provider",
   "questions",
   "plan",

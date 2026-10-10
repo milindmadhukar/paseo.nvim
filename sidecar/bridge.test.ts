@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { BridgeConnection } from "./bridge-connection.ts";
 import {
   agentOps,
+  describeAgent,
   matchesReviewAgent,
   preferredAgent,
   creationConfig,
@@ -831,6 +832,31 @@ test("describeSettings carries the daemon's pending permissions", () => {
   // No pendings is an EMPTY LIST, never absent: the Lua treats nil as "this
   // sidecar is too old to say" and would skip reconciling entirely.
   assert.deepEqual(describeSettings({}).pendingPermissions, []);
+});
+
+test("describeAgent carries what the workspace column sorts by", () => {
+  // A turn that FAILED while nobody watched, with nothing pending: the daemon
+  // wants attention, ours does not, and the reason is what tells red from a
+  // plain unread finish.
+  const failed: any = describeAgent({
+    id: "a1",
+    status: "idle",
+    requiresAttention: true,
+    attentionReason: "error",
+    pendingPermissions: [],
+  });
+  assert.equal(failed.requiresAttention, false);
+  assert.equal(failed.daemonAttention, true);
+  assert.equal(failed.attentionReason, "error");
+  assert.equal(failed.pendingPermissionCount, 0);
+
+  const asking: any = describeAgent({ id: "a2", pendingPermissions: [{ id: "r" }] });
+  assert.equal(asking.requiresAttention, true);
+  assert.equal(asking.pendingPermissionCount, 1);
+  // Absent on the wire is null and false, never undefined: a missing key is
+  // dropped by JSON and the Lua cannot tell "no" from "too old to say".
+  assert.equal(asking.attentionReason, null);
+  assert.equal(asking.daemonAttention, false);
 });
 
 test("terminal input survives the trip as bytes, and output coalesces", async () => {

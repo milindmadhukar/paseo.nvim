@@ -86,10 +86,15 @@ end
 ---Is there a turning glyph on screen right now?
 ---@return boolean
 local function spinner_wanted()
-  return state ~= nil
-    and state.tab == "Workspaces"
-    and api.nvim_buf_is_valid(state.buf)
-    and require("paseo.agents").busy()
+  if state == nil or not api.nvim_buf_is_valid(state.buf) then
+    return false
+  end
+  -- The rail is on every tab, so a workspace spinning on it wants the clock
+  -- whichever panel is under it.
+  if require("paseo.ui.rail").spinning() then
+    return true
+  end
+  return state.tab == "Workspaces" and require("paseo.agents").busy()
 end
 
 ---A 10Hz repaint while a workspace row is spinning, and NOT A MOMENT LONGER.
@@ -121,7 +126,11 @@ local function sync_spinner()
       if not spinner_wanted() then
         return stop_spinner()
       end
-      pcall(require("volt").redraw, state.buf, { "body" })
+      if state.tab == "Workspaces" then
+        pcall(require("volt").redraw, state.buf, { "body" })
+      end
+      -- A dozen short lines rewritten in place; no volt, no row offsets.
+      pcall(require("paseo.ui.rail").draw)
     end)
   )
 end
@@ -163,6 +172,8 @@ local function directory_changed()
       sections[#sections + 1] = "body"
     end
     pcall(require("volt").redraw, state.buf, sections)
+    -- The rail draws what the agents are doing, on every tab.
+    pcall(require("paseo.ui.rail").directory_changed)
     -- An agent that just STARTED is the event that makes a spinner necessary,
     -- and one that just finished is the event that makes it stop.
     sync_spinner()
@@ -670,14 +681,29 @@ local function host_geometry(win)
   }
 end
 
+---Give a geometry its rail: the cells the workspace column takes off the left
+---of the body, or 0 when it is hidden or the surface is too narrow for one.
+---
+---ON THE GEOMETRY, because everything that places a pane already reads the
+---geometry -- |paseo.ui.layout|.panes takes it from there, and so every pane,
+---the terminal and the search box move right of the rail without one of
+---them having to ask whether there is one.
+---@param g table
+---@return table
+local function with_rail(g)
+  local rail = require "paseo.ui.rail"
+  g.rail = rail.visible() and layout.rail_width(g.width, rail.options(g.mount).width or 28) or 0
+  return g
+end
+
 ---@param mount string|nil
 ---@param host integer|nil
 ---@return table
 local function geometry_for(mount, host)
   if mount == "buffer" and host and api.nvim_win_is_valid(host) then
-    return host_geometry(host)
+    return with_rail(host_geometry(host))
   end
-  return float_geometry()
+  return with_rail(float_geometry())
 end
 
 ---The `relative` half of a window config, from the geometry rather than from
@@ -921,29 +947,42 @@ local function body_lines()
   local height = layout.rows(g.height).body_height
   local lines = {}
 
+  -- With the rail up, every row starts with the blank the rail's window
+  -- covers and the rule beside it, and the panel gets what is left -- the
+  -- same width the panes get, so a panel and the conversation share a left
+  -- edge on either side of a tab switch.
+  local rail = layout.panes(g).rail
+  local width = rail and layout.panes(g).width or g.width - 4
+  local function lead()
+    if not rail then
+      return { { "  ", nil } }
+    end
+    return { { string.rep(" ", rail.rule), nil }, { style.BAR.thin, "PaseoBorder" }, { " ", nil } }
+  end
+
   if state.tab ~= "Chat" then
     local ok, panel = pcall(require, "paseo.ui.panels." .. panel_module(state.tab))
     -- The height is passed as well as the width. A panel that can tighten
     -- itself -- Agent drops the breathing room inside its cards -- needs to
     -- know how many rows it is being given, and the rest simply ignore it.
-    local body = ok and panel.lines(state.chat, g.width - 4, height)
+    local body = ok and panel.lines(state.chat, width, height)
       or {
         { { "  this panel is unavailable", "PaseoToolFail" } },
       }
     for _, line in ipairs(body) do
-      local row = { { "  ", nil } }
-      vim.list_extend(row, render.truncate(vim.deepcopy(line), g.width - 4))
+      local row = lead()
+      vim.list_extend(row, render.truncate(vim.deepcopy(line), width))
       lines[#lines + 1] = row
     end
   end
-  -- On the Chat tab there is nothing to draw: the conversation is a real
-  -- buffer floated over exactly this area.
+  -- On the Chat tab there is nothing to draw but the rule: the conversation
+  -- is a real buffer floated over exactly this area.
 
   -- Pad out: volt draws one extmark per row at a row computed in `gen_data`
   -- and clears nothing first, so a panel that shrank leaves the previous
   -- draw's rows behind with nothing to overwrite them.
   while #lines < height do
-    lines[#lines + 1] = {}
+    lines[#lines + 1] = rail and lead() or {}
   end
   while #lines > height do
     table.remove(lines)
@@ -1020,6 +1059,13 @@ local function footer_lines()
     { "<C-t>", "speak" },
     { "q", "close" },
   })
+  -- The rail's toggle, on every tab because the rail is on every tab -- and
+  -- LAST, so on a narrow surface it is the first hint to go: the rail is in
+  -- plain sight, which says it is there better than a hint does.
+  local rail_keys = require("paseo.ui.rail").options(state and state.mount).keys or {}
+  if rail_keys.toggle then
+    pairs_[#pairs_ + 1] = { rail_keys.toggle, "workspaces" }
+  end
 
   if not state then
     return { widgets.hints(pairs_) }
@@ -1205,6 +1251,44 @@ local function unbind_tabs(buf, cycle)
   if cycle then
     pcall(vim.keymap.del, "n", "<Tab>", { buffer = buf })
     pcall(vim.keymap.del, "n", "<S-Tab>", { buffer = buf })
+  end
+end
+
+---The rail's two keys -- show/hide, and into it -- on a buffer of ours.
+---
+---Bound wherever the cursor can be, for the reason `bind_tabs` gives: a key
+---mapped only on the chrome is a key that does nothing from the composer,
+---which is where the Chat tab puts you. Normal mode only, everywhere. In the
+---composer's insert mode `<C-h>` is backspace, and in a PTY it is whatever the
+---program running there says it is.
+---@param buf integer
+local function bind_rail(buf)
+  if not api.nvim_buf_is_valid(buf) then
+    return
+  end
+  local keys = require("paseo.ui.rail").options(state and state.mount).keys or {}
+  if keys.toggle then
+    vim.keymap.set("n", keys.toggle, function()
+      M.toggle_rail()
+    end, { buffer = buf, nowait = true, silent = true, desc = "paseo: show or hide the workspace rail" })
+  end
+  if keys.focus then
+    vim.keymap.set("n", keys.focus, function()
+      M.focus_rail()
+    end, { buffer = buf, nowait = true, silent = true, desc = "paseo: into the workspace rail" })
+  end
+end
+
+---@param buf integer|nil
+local function unbind_rail(buf)
+  if not buf or not api.nvim_buf_is_valid(buf) then
+    return
+  end
+  local keys = require("paseo.ui.rail").options().keys or {}
+  for _, lhs in ipairs { keys.toggle, keys.focus } do
+    if lhs then
+      pcall(vim.keymap.del, "n", lhs, { buffer = buf })
+    end
   end
 end
 
@@ -1397,6 +1481,8 @@ local function show_agent_panes()
 
   bind_tabs(chat.conversation, false)
   bind_tabs(chat.composer, true)
+  bind_rail(chat.conversation)
+  bind_rail(chat.composer)
 
   M.refresh_live(chat)
   transcript.redraw(chat)
@@ -1524,6 +1610,7 @@ local function show_terminal_pane()
   local view = terminal.ensure(item, state.term_win)
   terminal.show(view, state.term_win)
   bind_terminal(view.buf)
+  bind_rail(view.buf)
 
   M.refresh_live(state.chat)
   -- Entered, and in insert. Landing on the chrome instead would send every
@@ -1574,6 +1661,70 @@ local function hide_panes()
     chat.win_composer, chat.win_conversation = nil, nil
   end
   state.term_win = nil
+end
+
+---How often the rail refetches the workspace list while it is up. The
+---statuses are pushed and need no clock; the LIST is not, and a workspace
+---cut by an agent elsewhere would otherwise appear only on the next open.
+local RAIL_REFETCH_MS = 15000
+
+---@type uv.uv_timer_t|nil
+local rail_timer
+
+local function stop_rail_timer()
+  if rail_timer then
+    rail_timer:stop()
+    if not rail_timer:is_closing() then
+      rail_timer:close()
+    end
+    rail_timer = nil
+  end
+end
+
+---Float the rail over the left of the body, or take it down when the
+---geometry has no room for one -- hidden by you, or a surface too narrow.
+local function show_rail()
+  local rail = require "paseo.ui.rail"
+  if not state then
+    return rail.hide()
+  end
+  local g = state.geometry
+  local area = layout.panes(g).rail
+  if not area then
+    stop_rail_timer()
+    return rail.hide()
+  end
+  rail.on_change = sync_spinner
+  rail.show(
+    placed(g, {
+      row = area.row,
+      col = area.col,
+      width = area.width,
+      height = area.height,
+      zindex = g.z_panes,
+    }),
+    {
+      back = M.focus_main,
+      on_toggle = M.toggle_rail,
+      toggle = (rail.options(g.mount).keys or {}).toggle,
+      focus = (rail.options(g.mount).keys or {}).focus,
+    }
+  )
+  -- The tabs from the rail too: it is a buffer the cursor can be in.
+  bind_tabs(rail.buf {}, true)
+  if not rail_timer then
+    rail_timer = vim.uv.new_timer()
+    rail_timer:start(
+      RAIL_REFETCH_MS,
+      RAIL_REFETCH_MS,
+      vim.schedule_wrap(function()
+        if state and rail.win() then
+          rail.load()
+        end
+      end)
+    )
+  end
+  sync_spinner()
 end
 
 -- ------------------------------------------------------------------- tabs
@@ -1746,6 +1897,7 @@ function M.close()
   -- window that no longer exists, and the next `:tabclose` dies with `E315:
   -- ml_get: Invalid lnum` or takes the process down outright.
   doom(state.term_win)
+  doom(require("paseo.ui.rail").win())
   reseat(doomed)
   -- Before `state` goes: `panel_keys` reads it, and a panel left attached
   -- would have its mappings outlive the buffer they were bound to. So does
@@ -1758,6 +1910,9 @@ function M.close()
   -- Before anything else that can fail: a timer outliving the buffer it
   -- redraws is an error every frame, forever.
   stop_spinner()
+  stop_rail_timer()
+  -- The window goes; the buffer stays, with the list in it, for the next one.
+  require("paseo.ui.rail").hide()
 
   -- A list's search box is a window of OURS floated over the body, and the
   -- ordinary way it closes is losing focus -- which does not happen when the
@@ -1784,6 +1939,8 @@ function M.close()
 
   unbind_tabs(held.chat.conversation, false)
   unbind_tabs(held.chat.composer, true)
+  unbind_rail(held.chat.conversation)
+  unbind_rail(held.chat.composer)
 
   -- BEFORE THE WINDOWS GO, and it is what decides whether one of them goes at
   -- all. The `"here"` mount borrowed a window the user opened; closing it
@@ -1901,9 +2058,9 @@ function M.open(chat, opts)
       win, tabpage, displaced = mount_here(buf)
     end
     style_host(win, displaced and "here" or "tab")
-    g = host_geometry(win)
+    g = with_rail(host_geometry(win))
   else
-    g = float_geometry()
+    g = with_rail(float_geometry())
 
     if g.backdrop then
       backdrop = api.nvim_create_buf(false, true)
@@ -2008,6 +2165,7 @@ function M.open(chat, opts)
   map("p", function() end)
   map("P", function() end)
   map("q", M.close)
+  bind_rail(buf)
   if mount == "float" then
     -- `<Esc>` DISMISSES A FLOAT AND DOES NOT DESTROY A TAB PAGE.
     --
@@ -2172,6 +2330,9 @@ function M.open(chat, opts)
     vim.bo[buf].filetype = M.FILETYPE
   end
 
+  -- Before the panes: `show_agent_panes` enters the composer, and that has
+  -- to be the last window anything opens.
+  show_rail()
   show_panes()
 end
 
@@ -2330,7 +2491,9 @@ end
 ---
 ---A full `rebuild` rather than a `redraw`: the width changed, and volt records
 ---each section's rows and widths once, in `gen_data`.
-function M.relayout()
+---@param force? boolean  Re-fit even though the box has not moved -- the rail
+---                       was toggled, and only the geometry INSIDE it changed.
+function M.relayout(force)
   if not state or not api.nvim_win_is_valid(state.win) then
     return
   end
@@ -2363,7 +2526,9 @@ function M.relayout()
   -- click.
   local old = state.geometry
   if
-    old
+    force ~= true
+    and old
+    and old.rail == g.rail
     and old.host == g.host
     and old.row == g.row
     and old.col == g.col
@@ -2395,6 +2560,10 @@ function M.relayout()
       })
     end
   end
+
+  -- Moved, shown or taken down. Its window survives a move, so focus in it
+  -- does too.
+  show_rail()
 
   -- The panes are laid out from the geometry, so they are cheapest to close
   -- and reopen -- and on any tab but Chat there are none.
@@ -2429,6 +2598,63 @@ function M.relayout()
   end
 
   M.rebuild()
+end
+
+---Show or hide the workspace rail, and remember which across restarts.
+function M.toggle_rail()
+  local rail = require "paseo.ui.rail"
+  local had_focus = rail.win() and api.nvim_get_current_win() == rail.win()
+  rail.set_visible(not rail.visible())
+  if not state then
+    return
+  end
+  M.relayout(true)
+  -- Hiding the window you were standing in drops you on whatever Neovim
+  -- picks, which on a float is the window under the dashboard.
+  if had_focus and not rail.win() then
+    M.focus_main()
+  end
+end
+
+---Into the rail -- showing it first if it is hidden, because a key that does
+---nothing while the thing it names is out of sight is a key you stop trusting.
+function M.focus_rail()
+  if not state then
+    return
+  end
+  local rail = require "paseo.ui.rail"
+  if not rail.win() then
+    if rail.visible() then
+      -- Visible but not drawn: the surface is too narrow for it.
+      return vim.notify("paseo: the dashboard is too narrow for the workspace rail", vim.log.levels.INFO)
+    end
+    M.toggle_rail()
+  end
+  local win = rail.win()
+  if not win then
+    return
+  end
+  if api.nvim_get_mode().mode ~= "n" then
+    pcall(vim.cmd.stopinsert)
+  end
+  pcall(api.nvim_set_current_win, win)
+end
+
+---Out of the rail, to where you would have been typing: the composer, the
+---PTY, or the chrome on a panel tab.
+function M.focus_main()
+  if not state then
+    return
+  end
+  local chat = state.chat
+  local target
+  if state.tab == "Chat" then
+    target = (chat and chat.win_composer) or state.term_win
+  end
+  target = target and api.nvim_win_is_valid(target) and target or state.win
+  if target and api.nvim_win_is_valid(target) then
+    pcall(api.nvim_set_current_win, target)
+  end
 end
 
 ---@param chat table

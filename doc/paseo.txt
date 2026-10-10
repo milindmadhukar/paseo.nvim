@@ -95,6 +95,11 @@ Defaults: >lua
           zindex = 30,            -- below the 50 a float gets by default
           backdrop = true,
           tab_keys = true,
+          rail = {                -- the workspaces, down the left
+            enabled = true,       -- where it STARTS; your toggle is remembered
+            width = 28,           -- cells; at most a quarter of the surface
+            keys = { toggle = "<C-b>", focus = "<C-h>" },
+          },
         },
 
         buffer = {
@@ -426,6 +431,23 @@ ui.float.tab_keys                                 boolean, default true
     keep the counts -- `<M-1>`-`<M-6>` and `<Tab>` still switch tabs, and
     collide with nothing. Inside a terminal, in TERMINAL mode, a digit is
     never taken at all: it belongs to whatever is running.
+
+                                                  *paseo-config.ui.float.rail*
+ui.float.rail                                                       table
+
+    The workspace rail down the left of the dashboard -- see |paseo-rail|. >lua
+        rail = {
+          enabled = true,
+          width = 28,
+          keys = { toggle = "<C-b>", focus = "<C-h>" },
+        }
+<
+    `enabled` is only where the rail STARTS. The toggle is remembered across
+    restarts, in `stdpath("state")/paseo/ui.json`, and once you have pressed
+    it that wins. `width` is in CELLS and is capped at a quarter of the
+    surface; below 90 columns there is no rail at all. Each key is bound in
+    NORMAL mode on every buffer the dashboard owns, or `false` to leave it
+    unbound. `ui.buffer.rail` overrides any of it on the buffer mount.
 
                                                  *paseo-config.ui.sidebar*
 ui.sidebar                                                          table
@@ -1670,6 +1692,29 @@ and the conversation as well as on the chrome, because the Chat tab puts your
 cursor in the composer, and a key bound only to a window you are never in is a
 key that does not work.
 
+                                                                  *paseo-rail*
+THE WORKSPACE RAIL is the column down the left of the body: every workspace
+in the project you are standing in, each with what its agents are doing --
+the desktop app's sidebar, with the same rule deciding the state: >
+
+    ⠋  spinner          an agent is working
+    !  yellow           one is waiting on you -- a permission or a question
+    ●  red              a turn failed
+    ●  blue             a turn finished while you were elsewhere
+    ●  green            done
+    ○  dim              no agent has run here
+<
+A workspace shows its MOST URGENT agent: one waiting on you among three
+running says `!`. The bar on the left and the green name are the workspace you
+are in. It is on every tab, not only Chat.
+
+`<C-b>` shows and hides it, and the choice is remembered across restarts.
+`<C-h>` goes into it -- showing it first if it was hidden -- and in it `j`/`k`
+move, `<CR>` (or a double click) opens the workspace the way the workspace
+picker does, `r` refetches, and `<C-h>`, `q` or `<Esc>` go back to where you
+were typing. See |paseo-config.ui.float.rail|. There is no rail on a dashboard
+narrower than 90 columns.
+
                                                           *paseo-chat-buffer*
 The DASHBOARD on its BUFFER MOUNT is the same dashboard in a real WINDOW --
 `:Paseo buf`, or `ui.surface = "buffer"`. Same chrome, same six tabs, same
@@ -1964,6 +2009,8 @@ In the composer ~
     <Tab>     next tab, <S-Tab> the previous one
     <C-f>     switch surface -- float <-> sidebar. Not bound on the buffer
               surface; see |paseo-chat-buffer|
+    <C-b>     show or hide the workspace rail (normal mode). See |paseo-rail|
+    <C-h>     into the workspace rail (normal mode)
     <C-c>     stop the turn -- normal or insert. See |paseo-chat-stop|
     <C-t>     speak instead of typing. See |paseo-dictation|
     f         fork the complete conversation. See |paseo-fork|
@@ -1983,6 +2030,8 @@ In the conversation ~
     gs        this agent's subagents. See |:Paseo-subagents|
     f         fork the complete conversation. See |paseo-fork|
     <C-f>     switch surface
+    <C-b>     show or hide the workspace rail. See |paseo-rail|
+    <C-h>     into the workspace rail
     <C-c>     stop the turn. See |paseo-chat-stop|
     q         close the chat
 

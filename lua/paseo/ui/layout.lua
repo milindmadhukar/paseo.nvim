@@ -93,6 +93,29 @@ function M.screen_row(g, row)
   return g.row + (g.border and 1 or 0) + row - 1
 end
 
+---Cells between the rail's right edge and the panes' left one: a gap, the
+---rule, a gap.
+M.RAIL_GAP = 3
+
+---No rail on a surface narrower than this. Below it the conversation would
+---be squeezed to make room for a list you can reach from the Workspaces tab
+---anyway, which is the wrong way round.
+M.RAIL_MIN_SURFACE = 90
+
+---How wide the rail is on a surface `width` cells wide, or 0 for none.
+---
+---A quarter of the surface at most, whatever the config asks for: the rail
+---is an index to the conversation, not a second one beside it.
+---@param width integer  The surface's width.
+---@param want integer   The configured width.
+---@return integer
+function M.rail_width(width, want)
+  if width < M.RAIL_MIN_SURFACE or want <= 0 then
+    return 0
+  end
+  return math.max(12, math.min(math.floor(want), math.floor(width / 4)))
+end
+
 ---Screen geometry for the panes floated over the body.
 ---
 ---`body` is the whole of it, which is what a session with no composer gets --
@@ -109,7 +132,7 @@ end
 ---                   `ui.style`'s `rounded` and `square` give it. Unframed it
 ---                   still costs one row more than its content: the bar above
 ---                   it, which is a `winbar` and therefore inside the window.
----@return { top: integer, col: integer, width: integer, conversation: integer, composer_row: integer, composer: integer, frame: integer, body: { row: integer, col: integer, width: integer, height: integer } }
+---@return { top: integer, col: integer, width: integer, conversation: integer, composer_row: integer, composer: integer, frame: integer, body: { row: integer, col: integer, width: integer, height: integer }, rail: { row: integer, col: integer, width: integer, height: integer, rule: integer }|nil }
 function M.panes(g, composer_h, opts)
   -- The panes only ever cover the Chat tab, and the chrome's rows are the
   -- same on every tab.
@@ -127,11 +150,30 @@ function M.panes(g, composer_h, opts)
   local frame = (opts and opts.framed) and 2 or 0
   local composer_row = M.screen_row(g, rows.body_last) - composer_h - frame
 
-  local col, width = g.col + 2, g.width - 4
+  -- The workspace rail, when it is up, takes the left of the BODY and every
+  -- pane shifts right of it: a rule and a cell of gap either side of the rule.
+  -- Read off the geometry rather than passed in, so the dozen callers that
+  -- only want "where does the conversation go" keep asking the same question
+  -- and get the narrower answer without having to know there is a rail.
+  local rail = g.rail or 0
+  local shift = rail > 0 and rail + M.RAIL_GAP or 0
+  local col, width = g.col + 2 + shift, g.width - 4 - shift
   return {
     top = top,
     col = col,
     width = width,
+    rail = rail > 0 and {
+      row = top,
+      col = g.col + 2,
+      width = rail,
+      height = rows.body_height,
+      -- The rule between the rail and the panes, in CHROME TEXT columns: the
+      -- cells volt draws from, which start one `xpad` in from the window's
+      -- content edge -- itself one in from `g.col` when there is a frame. On
+      -- screen it is the middle cell of the gap, `g.col + 2 + rail + 1`.
+      -- `body_lines` pads each row out to it.
+      rule = rail + 2 - (g.border and 1 or 0),
+    } or nil,
     -- One row of gap between the conversation and the top of the box.
     conversation = math.max(5, composer_row - 1 - top),
     composer_row = composer_row,

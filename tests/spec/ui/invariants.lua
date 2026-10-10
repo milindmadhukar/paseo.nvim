@@ -207,15 +207,16 @@ local function test_invariants()
   -- return, which is the thing `placed` reads. A sixth means a pane went back
   -- to being hardcoded.
   --
-  -- And six `placed(g,`: its definition, and the five panes -- the composer
+  -- And seven `placed(g,`: its definition, and the six panes -- the composer
   -- and the conversation in `resize_composer`, both of them again in
-  -- `show_agent_panes`, and the PTY in `show_terminal_pane`.
+  -- `show_agent_panes`, the PTY in `show_terminal_pane`, and the workspace
+  -- rail in `show_rail`.
   local float_source = source_of "lua/paseo/ui/float.lua"
   if float_source then
     local _, anchored = float_source:gsub('relative = "editor",\n', "")
     eq("ui: only the dashboard's own box is anchored to the editor", anchored, 5)
     local _, placed = float_source:gsub("placed%(g, ", "")
-    eq("ui: and every pane is anchored through the geometry", placed, 6)
+    eq("ui: and every pane is anchored through the geometry", placed, 7)
   end
 
   local source_line = { { "click me", "PaseoKey", { click = function() end } } }

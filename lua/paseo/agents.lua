@@ -225,6 +225,55 @@ function M.state(root, host_id)
   return working and "working" or "idle"
 end
 
+---The desktop app's answer to "what is this agent doing", as one of five
+---buckets -- the rule its workspace sidebar is drawn from, ported from
+---`@getpaseo/protocol`'s `deriveAgentStateBucket` so the two agree on what a
+---workspace is doing.
+---
+---Wider than `M.state` in the two places that matter for a sidebar: a turn
+---that FAILED is its own answer rather than "idle", and one that finished
+---while you were elsewhere is `attention` rather than `done`. Both depend on
+---fields an older sidecar does not send, and without them this degrades to
+---exactly `M.state`'s three answers rather than to anything wrong.
+---@param agent table
+---@return "needs_input"|"failed"|"running"|"attention"|"done"
+function M.bucket(agent)
+  if (agent.pendingPermissionCount or 0) > 0 or agent.requiresAttention or agent.attentionReason == "permission" then
+    return "needs_input"
+  end
+  if agent.status == "error" or agent.attentionReason == "error" then
+    return "failed"
+  end
+  -- `WORKING` rather than the app's bare `running`: `initializing` and
+  -- `queued` are busy too, and a dot that sits still while an agent boots
+  -- says it has finished.
+  if WORKING[agent.status] then
+    return "running"
+  end
+  if agent.daemonAttention then
+    return "attention"
+  end
+  return "done"
+end
+
+---Most urgent first. A workspace answers with its most urgent agent: one
+---waiting on a permission among three running says the permission.
+local BUCKET_RANK = { needs_input = 1, failed = 2, running = 3, attention = 4, done = 5 }
+
+---One bucket for every agent under `root`, or `"none"` with no agents at all.
+---@param root string
+---@return "needs_input"|"failed"|"running"|"attention"|"done"|"none"
+function M.workspace_bucket(root, host_id)
+  local best
+  for _, agent in ipairs(M.for_root(root, host_id)) do
+    local bucket = M.bucket(agent)
+    if not best or BUCKET_RANK[bucket] < BUCKET_RANK[best] then
+      best = bucket
+    end
+  end
+  return best or "none"
+end
+
 ---Copy an agent id for Paseo's cross-agent prompting workflow.
 ---@param agent table
 ---@return boolean

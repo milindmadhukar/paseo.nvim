@@ -106,6 +106,11 @@ require("paseo").setup {
       zindex = 30,                -- BELOW the 50 a float gets by default
       backdrop = true,
       tab_keys = true,            -- bare 1-6 switch tabs; see below
+      rail = {                    -- the workspaces down the left; see below
+        enabled = true,           -- where it starts — the toggle is remembered
+        width = 28,               -- cells, at most a quarter of the surface
+        keys = { toggle = "<C-b>", focus = "<C-h>" },
+      },
     },
 
     buffer = {                    -- the same dashboard, in a window of its own
@@ -469,6 +474,32 @@ do — does not take it with it.
 
 `1`–`6` jump, `<M-1>`–`<M-6>` and `<Tab>`/`<S-Tab>` do the same, and
 everything that does something responds to a click as well.
+
+#### The workspace rail
+
+Down the left of the body, on every tab: each workspace in the project you
+are standing in, and what its agents are doing. It is the desktop app's
+sidebar, and it uses the same rule to decide the state:
+
+| | |
+|---|---|
+| spinner | an agent is working |
+| yellow `!` | one is waiting on you: a permission, or a question |
+| red dot | a turn failed |
+| blue dot | a turn finished while you were elsewhere |
+| green dot | done |
+| hollow dot | no agent has run here |
+
+A workspace shows its **most urgent** agent, so one waiting on you among three
+running shows the `!`. The bar and the green name mark the workspace you are
+in.
+
+`<C-b>` shows and hides the rail, and the choice is remembered across restarts.
+`<C-h>` moves into it, showing it first if it was hidden. Inside it, `j`/`k`
+move, `<CR>` or a double click opens the workspace the way the picker does,
+`r` refetches the list, and `<C-h>`, `q` or `<Esc>` take you back to where you
+were typing. It is 28 cells wide by default, never more than a quarter of the
+dashboard, and left out entirely below 90 columns.
 
 ### The dashboard, on its buffer mount
 
@@ -1823,6 +1854,7 @@ lua/paseo/          the plugin
                     which is what lets the dashboard be a float or a window
     float.lua       the dashboard, on either mount: floating over your code,
                     or a real buffer taking over the window you are in
+    rail.lua        the workspace rail down the dashboard's left
     sidebar.lua     the narrow pane beside your code, in two real splits
     animate.lua     motion, none of which may change a height
     render.lua      the cell/line alphabet and the three sinks

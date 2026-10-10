@@ -44,6 +44,10 @@ M.status = {
   todo = g(0xf0279), -- md-format_list_bulleted
   note = g(0xf039e), -- md-note_text
   idle = g(0xf09de), -- md-circle_medium
+  -- A bare `!`, for the workspace rail's "waiting on you". `permission` is a
+  -- triangle with the mark inside it, which is twice the ink at rail size and
+  -- reads as a warning about the workspace rather than as a question to it.
+  waiting = g(0xf12a), -- fa-exclamation
 }
 
 -- ------------------------------------------------------------------ markers
