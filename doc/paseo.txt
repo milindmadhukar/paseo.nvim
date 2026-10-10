@@ -839,9 +839,13 @@ skills.method                                       `"link"`|`"copy"`, default `
     Attach an image to the chat: the clipboard, or `path` if given. See
     |paseo-chat-images|.
 
-:Paseo workspaces                                      *:Paseo-workspaces*
+:Paseo workspaces [all]                                *:Paseo-workspaces*
 
-    The workspace picker. See |paseo-workspaces-keys|.
+    The workspace picker, for the project you are in: the manifested
+    multi-repo project when the cwd is one of its repos or workspaces, else
+    the main checkout of the git repository around the cwd, else the cwd.
+    `all` lists every project's. With none here yet, it says so and lists
+    every project's. See |paseo-workspaces-keys|.
 
 :Paseo wcreate                                            *:Paseo-wcreate*
 
@@ -1313,6 +1317,7 @@ In the workspace picker (|:Paseo-workspaces|) ~
     <C-r>     review it here: `tcd` into the workspace so the repo list widens
               to every member, then fire |paseo-review-autocmd| -- what
               "review" means is your config's to say
+    <C-a>     this project's workspaces, or every project's
 
 In the agent picker (|:Paseo-agents|; |:Paseo-sessions| is an alias) ~
 

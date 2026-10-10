@@ -114,6 +114,64 @@ function M.parent_project(dir)
   return project
 end
 
+---The project the editor is standing in, as a directory.
+---
+---The MAIN checkout of the git repository `dir` is in, so a worktree -- cut by
+---Paseo under `~/.paseo/worktrees`, or assembled into a workspace -- answers
+---with the repo it was cut from. A manifested multi-repo project around `dir`
+---wins over that repo only when the repo is one of its MEMBERS: a repo that
+---merely sits under such a directory (`~/Code/openfin/clm-platform`, beside
+---the members of openfin's manifest) is a project of its own. With no
+---repository -- the root of an assembled workspace, say -- the manifested
+---project; else `dir`.
+---@param dir? string  Defaults to the cwd.
+---@return string
+function M.here(dir)
+  dir = normalise(dir or assert(vim.uv.cwd()))
+  local project = registry.project_root(dir)
+  project = project and normalise(project)
+
+  local res = vim
+    .system({ "git", "-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir" }, { text = true })
+    :wait()
+  local common = res.code == 0 and vim.trim(res.stdout or "") or ""
+  -- `<repo>/.git` for a checkout and every worktree of it. A bare repository
+  -- has no checkout to name, and counts as no repository.
+  local repo = vim.fs.basename(common) == ".git" and normalise(vim.fs.dirname(common)) or nil
+
+  if repo and project then
+    local m = require("paseo.workspace.manifest").load(project)
+    local rel = vim.startswith(repo, project .. "/") and repo:sub(#project + 2) or nil
+    return (m and rel and m.repos[rel]) and project or repo
+  end
+  return repo or project or dir
+end
+
+---The workspaces that belong to the project at `root`.
+---
+---Paseo's own record says so when the workspace was registered under that
+---project. One registered before workspaces were created inside their project
+---carries a project of its own, rooted AT the workspace -- so that one also
+---belongs when its directory is in `root`'s workspaces directory. Only there:
+---`~/Code/openfin/clm-platform` is a project of its own on the same evidence,
+---and it is inside `~/Code/openfin` too.
+---@param list paseo.PaseoWorkspace[]
+---@param root string
+---@return paseo.PaseoWorkspace[]
+function M.scope(list, root)
+  root = normalise(root)
+  local out = {}
+  for _, ws in ipairs(list) do
+    local dir = normalise(ws.local_directory or ws.directory)
+    local project = normalise(ws.projectRoot)
+    local assembled = vim.startswith(dir, vim.fs.joinpath(root, require("paseo.config").get().workspaces.dir) .. "/")
+    if project == root or (assembled and (project == "" or project == dir)) then
+      out[#out + 1] = ws
+    end
+  end
+  return out
+end
+
 ---Every workspace, Paseo's merged with ours.
 ---@param callback fun(list: paseo.PaseoWorkspace[]|nil, err: string|nil)
 function M.list(callback, host_id)

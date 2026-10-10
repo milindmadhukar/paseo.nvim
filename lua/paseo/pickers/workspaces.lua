@@ -117,7 +117,7 @@ function M.create(root, after)
   end)
 end
 
----@param opts? table
+---@param opts? table  `all = true` lists every project's workspaces.
 function M.open(opts)
   opts = opts or {}
 
@@ -140,6 +140,24 @@ function M.open(opts)
     end
 
     vim.schedule(function()
+      -- THIS project's workspaces, unless asked for all of them: Paseo knows
+      -- every project on the machine, and a picker opened from kora had
+      -- openfin's and tracker's in it. <C-a> flips between the two.
+      local here = workspaces.here()
+      local label = vim.fn.fnamemodify(here, ":t")
+      if not opts.all then
+        local scoped = workspaces.scope(list, here)
+        if #scoped == 0 and #list > 0 then
+          vim.notify(
+            ("paseo: no workspaces in %s yet; showing every project's"):format(label),
+            vim.log.levels.INFO
+          )
+          opts = vim.tbl_extend("force", opts, { all = true })
+        else
+          list = scoped
+        end
+      end
+
       if #list == 0 then
         vim.notify("paseo: no workspaces yet", vim.log.levels.INFO)
         return M.create(nil, function()
@@ -155,7 +173,10 @@ function M.open(opts)
 
       local picker
       picker = pickers.new(opts, {
-        prompt_title = "Workspaces  ·  <CR> open  <C-s> agents  <C-n> new  <C-d> archive",
+        prompt_title = ("Workspaces · %s  ·  <CR> open  <C-s> agents  <C-n> new  <C-d> archive  <C-a> %s"):format(
+          opts.all and "all projects" or label,
+          opts.all and "this project" or "all"
+        ),
         finder = finders.new_table {
           results = list,
           entry_maker = function(ws)
@@ -190,6 +211,11 @@ function M.open(opts)
             if entry then
               require("paseo.pickers.sessions").open(entry.value)
             end
+          end)
+
+          map({ "i", "n" }, "<C-a>", function()
+            actions.close(bufnr)
+            M.open(vim.tbl_extend("force", opts, { all = not opts.all }))
           end)
 
           map({ "i", "n" }, "<C-n>", function()

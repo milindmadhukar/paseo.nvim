@@ -198,7 +198,7 @@ this document uses those four words and no others for it.
 | `:Paseo buf` | Toggle the dashboard on its **buffer mount**, in a window of its own (`:Paseo tab`) |
 | `:Paseo sidebar` | The chat in the pane beside your code |
 | `:Paseo model [provider/model]` | Set the preference for new agents; no agent is created |
-| `:Paseo workspaces` | Workspace picker — open, inspect agent sessions, create, archive |
+| `:Paseo workspaces [all]` | Workspace picker for this project (`<C-a>` or `all`: every project's) — open, inspect agent sessions, create, archive |
 | `:Paseo wcreate` | Create a workspace here — the shape is worked out for you |
 | `:Paseo agents` | Agent sessions in this workspace |
 | `:Paseo sessions` | Compatibility alias for `agents` |

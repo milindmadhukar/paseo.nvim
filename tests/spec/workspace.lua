@@ -399,8 +399,64 @@ local function test_ws_edit()
   vim.cmd "tabclose"
 end
 
+local function test_workspace_scope()
+  -- The picker lists the workspaces of the project you are in, not every
+  -- project Paseo knows.
+  local workspaces = require "paseo.workspaces"
+  local manifest = require "paseo.workspace.manifest"
+
+  local kora = vim.fn.resolve(vim.fn.tempname())
+  local member = vim.fs.joinpath(kora, ".workspaces", "billing", "app")
+  vim.fn.mkdir(member, "p")
+  truthy("scope: manifest saved", manifest.save(kora, { shared = {}, repos = {} }, {}))
+  eq("here: a manifested project, from inside one of its workspaces", workspaces.here(member), kora)
+
+  -- A MEMBER repo of the manifest is the project; a repo that only sits under
+  -- the project directory is a project of its own.
+  local function git_init(path)
+    vim.fn.mkdir(path, "p")
+    vim.system({ "git", "init", "-q", path }):wait()
+  end
+  git_init(vim.fs.joinpath(kora, "app"))
+  git_init(vim.fs.joinpath(kora, "loner"))
+  truthy("scope: manifest names app", manifest.save(kora, { shared = {}, repos = { app = { base = "main" } } }, {}))
+  eq("here: a member repo is the manifested project", workspaces.here(vim.fs.joinpath(kora, "app")), kora)
+  eq(
+    "here: a repo beside the members is its own project",
+    workspaces.here(vim.fs.joinpath(kora, "loner")),
+    vim.fs.joinpath(kora, "loner")
+  )
+
+  local repo = vim.fn.resolve(vim.fn.tempname())
+  vim.fn.mkdir(vim.fs.joinpath(repo, "src"), "p")
+  vim.system({ "git", "init", "-q", repo }):wait()
+  eq("here: a git repo, from a subdirectory", workspaces.here(vim.fs.joinpath(repo, "src")), repo)
+
+  local plain = vim.fn.resolve(vim.fn.tempname())
+  vim.fn.mkdir(plain, "p")
+  eq("here: anything else is itself", workspaces.here(plain), plain)
+
+  local list = {
+    { name = "billing", directory = kora .. "/.workspaces/billing", projectRoot = kora },
+    -- Registered before workspaces were created inside their project: the
+    -- daemon's project is rooted at the workspace itself.
+    { name = "legacy", directory = kora .. "/.workspaces/legacy", projectRoot = kora .. "/.workspaces/legacy" },
+    -- A Paseo-cut worktree lives elsewhere; its project root is the repo.
+    { name = "cut", directory = "/home/x/.paseo/worktrees/ab/cut", projectRoot = kora },
+    { name = "other", directory = "/home/x/Code/openfin", projectRoot = "/home/x/Code/openfin" },
+    -- Inside the directory, but a project of its own by the daemon's record.
+    { name = "nested", directory = kora .. "/loner", projectRoot = kora .. "/loner" },
+    { name = "prefix", directory = kora .. "-old/.workspaces/x", projectRoot = kora .. "-old" },
+  }
+  local names = vim.tbl_map(function(ws)
+    return ws.name
+  end, workspaces.scope(list, kora))
+  eq("scope: this project's, by record, by path, and a cut worktree", names, { "billing", "legacy", "cut" })
+end
+
 return {
   { "workspace", test_workspace },
+  { "workspace scope", test_workspace_scope },
   { "ws edit", test_ws_edit },
   { "parent project", test_parent_project },
   { "manifest location", test_manifest_location },

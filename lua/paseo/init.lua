@@ -226,9 +226,9 @@ commands.ws = {
 }
 
 commands.workspaces = {
-  desc = "Workspace picker: open, agent sessions, new, archive",
-  run = function()
-    require("paseo.pickers.workspaces").open()
+  desc = "Workspace picker for this project (`all`: every project): open, agent sessions, new, archive",
+  run = function(args)
+    require("paseo.pickers.workspaces").open { all = args[1] == "all" }
   end,
 }
 
