@@ -1775,7 +1775,7 @@ fail: it breaks for reasons that are not this plugin's.
 The plugin ships five skills in `.agents/skills/` — `workspace`,
 `workspace-commit`, `workspace-pr` (multi-repo workspaces), `explain-change`
 (the rubric `:Paseo explain` uses) and `paseo-sdk`. They are plain markdown
-over plain git and `.ws/workspace.toml`; nothing in them needs a binary this
+over plain git and `.workspaces/workspace.toml`; nothing in them needs a binary this
 plugin does not ship.
 
 An agent only discovers skills near its working directory, so bundled ones are

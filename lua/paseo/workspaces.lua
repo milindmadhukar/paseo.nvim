@@ -76,7 +76,7 @@ function M.group(ws)
   end
   local root = require("paseo.repos").workspace_root(ws.directory)
   if root then
-    -- `root` is `<project>/<workspaces_dir>/<name>`, so the project is two up.
+    -- `root` is `<project>/<workspaces.dir>/<name>`, so the project is two up.
     local project = vim.fs.dirname(vim.fs.dirname(root))
     local name = vim.fs.basename(project)
     if name and name ~= "" and name ~= "/" then

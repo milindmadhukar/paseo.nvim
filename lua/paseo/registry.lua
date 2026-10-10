@@ -177,7 +177,7 @@ function M.project_root(start)
   local dir = vim.fn.fnamemodify(start or assert(vim.uv.cwd()), ":p")
   local manifest = require "paseo.workspace.manifest"
   while dir and dir ~= "/" do
-    if vim.uv.fs_stat(manifest.path(dir)) then
+    if manifest.find(dir) then
       return (dir:gsub("/+$", ""))
     end
     dir = vim.fs.dirname(dir)

@@ -206,7 +206,8 @@ local function test_ws_init()
   -- `raw`, because plain `ws init` now opens the configuration dialog. The
   -- buffer is the escape hatch behind it, and it is the half that carries the
   -- regression: `:Paseo ws init` named the buffer <root>/.ws/workspace.toml
-  -- without creating .ws/, so `:w` failed with E212 "Can't open file for
+  -- without creating .ws/ (the manifest's home before it moved into
+  -- .workspaces/), so `:w` failed with E212 "Can't open file for
   -- writing: no such file or directory" -- which reads like a permissions
   -- problem rather than a missing parent directory.
   local project = vim.fn.tempname()
@@ -234,11 +235,11 @@ local function test_ws_init()
     local named = vim.api.nvim_buf_get_name(0)
     truthy(
       "ws init raw: the buffer is named after the manifest",
-      named:find "%.ws/workspace%.toml" ~= nil,
+      named:find "%.workspaces/workspace%.toml" ~= nil,
       named
     )
     truthy(
-      "ws init raw: .ws/ exists BEFORE you write",
+      "ws init raw: .workspaces/ exists BEFORE you write",
       vim.uv.fs_stat(vim.fs.dirname(named)) ~= nil
     )
 
@@ -320,8 +321,40 @@ local function test_workspace_group()
   require("paseo.config").setup {}
 end
 
+local function test_manifest_location()
+  -- The manifest moved from `.ws/` into the workspaces directory. A project
+  -- that still has the old file has to keep working, and the next save moves it.
+  local manifest = require "paseo.workspace.manifest"
+  local registry = require "paseo.registry"
+  local project = vim.fn.tempname()
+  local legacy = vim.fs.joinpath(project, ".ws", "workspace.toml")
+  vim.fn.mkdir(vim.fs.dirname(legacy), "p")
+  local fd = assert(io.open(legacy, "w"))
+  fd:write 'workspaces_dir = ".elsewhere"\nbranch_prefix = "ws/"\n\n[repos.app]\nbase = "dev"\n'
+  fd:close()
+
+  eq(
+    "manifest: written to the workspaces directory",
+    manifest.path(project),
+    vim.fs.joinpath(project, ".workspaces", "workspace.toml")
+  )
+  eq("manifest: a legacy .ws/ manifest is still found", manifest.find(project), legacy)
+  eq("manifest: and still marks the project root", registry.project_root(project), project)
+
+  local m = assert(manifest.load(project))
+  eq("manifest: the legacy file loads", m.repos.app.base, "dev")
+  eq("manifest: its workspaces_dir is not obeyed", m.workspaces_dir, nil)
+
+  truthy("manifest: saving succeeds", manifest.save(project, m, {}))
+  eq("manifest: saving moves it", manifest.find(project), manifest.path(project))
+  eq("manifest: and removes .ws/", vim.uv.fs_stat(vim.fs.dirname(legacy)), nil)
+  local text = table.concat(vim.fn.readfile(manifest.path(project)), "\n")
+  eq("manifest: and no longer writes workspaces_dir", text:find "workspaces_dir", nil)
+end
+
 return {
   { "workspace", test_workspace },
+  { "manifest location", test_manifest_location },
   { "workspace group", test_workspace_group },
   { "ws init", test_ws_init },
 }

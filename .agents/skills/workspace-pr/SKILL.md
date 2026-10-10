@@ -16,7 +16,7 @@ and `$ws` (the workspace root), and how to list members. Commit with
 ## The two rules that break things
 
 **The base branch is per repo, and it is often not `main`.** Read `base` from
-`<project>/.ws/workspace.toml` for each member. In some projects every repo
+`<project>/.workspaces/workspace.toml` for each member. In some projects every repo
 sits on `dev` while `origin/HEAD` still reports `main` — opening a PR against
 `main` there targets the wrong branch and the diff will look enormous and
 wrong.
@@ -58,7 +58,7 @@ hangs or fails with a misleading `Permission denied (publickey)`.
 2. Per member, confirm the base:
 
    ```bash
-   grep -A5 "\[repos\.<name>\]" "$root/.ws/workspace.toml"
+   grep -A5 "\[repos\.<name>\]" "$root/.workspaces/workspace.toml"
    ```
 
 3. Push that member's branch over HTTPS, as above.

@@ -37,7 +37,7 @@ local function project(args)
   if not root then
     return nil,
       nil,
-      "no .ws/workspace.toml here or above — `:Paseo wcreate` needs none, and "
+      "no .workspaces/workspace.toml here or above — `:Paseo wcreate` needs none, and "
         .. "writes one if this project turns out to want one"
   end
   local m, err = require("paseo.workspace.manifest").load(root)

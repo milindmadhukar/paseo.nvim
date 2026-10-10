@@ -1,4 +1,14 @@
---- `<project>/.ws/workspace.toml` -- reading and writing.
+--- `<project>/.workspaces/workspace.toml` -- reading and writing.
+---
+--- It lives in the directory the workspaces are assembled into, so a project
+--- carries one dot-directory rather than two. That directory is
+--- `config.workspaces.dir` and nothing else: the manifest used to carry a
+--- `workspaces_dir` of its own, which `repos.lua` never read, so a manifest that
+--- disagreed with the Lua config assembled workspaces the repo layer could not
+--- see. A manifest cannot sensibly name the directory it sits in anyway.
+---
+--- `<project>/.ws/workspace.toml` is where it used to live. It is still read
+--- when there is nothing at the new path, and `save` moves it.
 ---
 --- The manifest is project-local and uncommitted. "Committed" is not even
 --- expressible for a project like ~/Code/openfin, which is a plain directory
@@ -10,10 +20,12 @@
 --- executable Lua config is the wrong shape for a file agents may also write.
 --- The parser below covers exactly the subset that shape needs.
 
+local config = require "paseo.config"
+
 local M = {}
 
-M.DIR = ".ws"
 M.FILE = "workspace.toml"
+M.LEGACY_DIR = ".ws"
 
 ---@class paseo.ws.Repo
 ---@field base string            Ref new worktrees branch from.
@@ -26,14 +38,32 @@ M.FILE = "workspace.toml"
 
 ---@class paseo.ws.Manifest
 ---@field shared string[]        Untracked siblings symlinked into every workspace.
----@field workspaces_dir string
 ---@field branch_prefix string
 ---@field repos table<string, paseo.ws.Repo>
 
+---The directory workspaces are assembled into, and the manifest sits in.
+---@return string
+function M.dir()
+  return config.get().workspaces.dir
+end
+
+---Where the manifest is written.
 ---@param root string
 ---@return string
 function M.path(root)
-  return vim.fs.joinpath(root, M.DIR, M.FILE)
+  return vim.fs.joinpath(root, M.dir(), M.FILE)
+end
+
+---Where the manifest is read from: the current path, else the legacy one.
+---@param root string
+---@return string|nil
+function M.find(root)
+  for _, path in ipairs { M.path(root), vim.fs.joinpath(root, M.LEGACY_DIR, M.FILE) } do
+    if vim.uv.fs_stat(path) then
+      return path
+    end
+  end
+  return nil
 end
 
 --- A TOML value: a quoted string, a bare bool, or an inline array of strings.
@@ -120,7 +150,9 @@ function M.parse(text)
     ::continue::
   end
 
-  out.workspaces_dir = out.workspaces_dir or ".workspaces"
+  -- A manifest from before the move may still name its directory; that is
+  -- `config.workspaces.dir` now, so the key is dropped rather than obeyed.
+  out.workspaces_dir = nil
   out.branch_prefix = out.branch_prefix or "ws/"
   return out
 end
@@ -128,10 +160,10 @@ end
 ---@param root string
 ---@return paseo.ws.Manifest|nil, string|nil error
 function M.load(root)
-  local path = M.path(root)
-  local fd = io.open(path, "r")
+  local path = M.find(root)
+  local fd = path and io.open(path, "r")
   if not fd then
-    return nil, ("no %s -- run `:Paseo ws init` first"):format(path)
+    return nil, ("no %s -- run `:Paseo ws init` first"):format(M.path(root))
   end
   local text = fd:read "*a"
   fd:close()
@@ -229,7 +261,6 @@ function M.render(m, notes)
   end
 
   vim.list_extend(out, {
-    ("workspaces_dir = %q"):format(m.workspaces_dir or ".workspaces"),
     ("branch_prefix = %q"):format(m.branch_prefix or "ws/"),
     "",
   })
@@ -264,14 +295,21 @@ end
 ---@param notes { repo: string, text: string }[]
 ---@return boolean ok, string|nil error
 function M.save(root, m, notes)
-  local dir = vim.fs.joinpath(root, M.DIR)
-  vim.fn.mkdir(dir, "p")
-  local fd, err = io.open(M.path(root), "w")
+  local path = M.path(root)
+  vim.fn.mkdir(vim.fs.dirname(path), "p")
+  local fd, err = io.open(path, "w")
   if not fd then
     return false, err
   end
   fd:write(M.render(m, notes))
   fd:close()
+
+  -- The move: once the new file is written, the old one would only be read by
+  -- something that has not caught up, and it would be stale. `fs_rmdir` refuses
+  -- a directory that still holds anything else, which is the point.
+  local legacy = vim.fs.joinpath(root, M.LEGACY_DIR)
+  os.remove(vim.fs.joinpath(legacy, M.FILE))
+  vim.uv.fs_rmdir(legacy)
   return true, nil
 end
 

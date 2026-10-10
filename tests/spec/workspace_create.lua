@@ -236,7 +236,7 @@ local function test_manifest()
   )
 
   -- Confirming writes what the hook handed back, not what discovery guessed.
-  local edited = { workspaces_dir = ".workspaces", branch_prefix = "ws/", shared = {}, repos = {
+  local edited = { branch_prefix = "ws/", shared = {}, repos = {
     solo = { base = "main", default = false },
   } }
   require("paseo.workspaces").create({

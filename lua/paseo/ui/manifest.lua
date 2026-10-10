@@ -1,6 +1,6 @@
 --- The workspace manifest, as a screen you answer rather than a file you find.
 ---
---- `<project>/.ws/workspace.toml` used to arrive one of two ways, and neither
+--- The manifest used to arrive one of two ways, and neither
 --- of them asked you anything. `:Paseo wcreate` in a multi-repo directory
 --- discovered a manifest and WROTE it, reporting what it had guessed through a
 --- `vim.notify` you cannot act on; `:Paseo ws init` dropped you into a raw TOML
@@ -18,12 +18,8 @@
 --- screen is -- same cards, same focus model, same footer. A second renderer of
 --- "a list of things with a state each" is how the two drift.
 ---
---- `workspaces_dir` is deliberately NOT offered. Assembly builds the workspace
---- path from the manifest's value (`workspace/init.lua`), but `repos.lua`
---- detects a workspace using `config.workspaces.dir` -- so a manifest that
---- disagrees with the Lua config assembles workspaces the repo layer cannot
---- see. Until those two are one value, a control for it is a control for
---- breaking the review surface.
+--- Where workspaces go is not offered: it is `config.workspaces.dir`, and the
+--- manifest lives inside it (|paseo.workspace.manifest|).
 
 local icons = require "paseo.ui.icons"
 
@@ -104,7 +100,6 @@ end
 local function merge(draft, found, notes, saved)
   draft.notes = by_repo(notes)
   draft.manifest = {
-    workspaces_dir = (saved and saved.workspaces_dir) or found.workspaces_dir or ".workspaces",
     branch_prefix = (saved and saved.branch_prefix) or found.branch_prefix or "ws/",
     repos = {},
     shared = {},
@@ -218,7 +213,6 @@ function M.result(draft)
   end
 
   return {
-    workspaces_dir = draft.manifest.workspaces_dir,
     branch_prefix = draft.manifest.branch_prefix,
     repos = repos,
     shared = shared,

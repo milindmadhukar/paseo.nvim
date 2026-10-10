@@ -1137,7 +1137,7 @@ A workspace this plugin assembles is a directory: >
     ├── clm_api/    a worktree of <project>/clm_api, on ws/<name>
     └── Docs/       a symlink to <project>/Docs, shared
 <
-It is driven by `<project>/.ws/workspace.toml`, which |:Paseo-ws| generates.
+It is driven by `<project>/.workspaces/workspace.toml`, which |:Paseo-ws| generates.
 Without a manifest, creating a workspace just registers the directory with
 Paseo -- which is the right behaviour for an ordinary single-repo project,
 where Paseo's own worktree isolation already works.
@@ -2837,7 +2837,7 @@ This plugin ships five agent skills in its own `.agents/skills/`:
     explain-change      the rubric |:Paseo-explain| uses
     paseo-sdk           writing a program against the Paseo daemon
 
-They are plain markdown over plain git and `<project>/.ws/workspace.toml`.
+They are plain markdown over plain git and `<project>/.workspaces/workspace.toml`.
 Nothing in them needs a binary this plugin does not ship, which is what makes
 them usable by whatever agent you happen to be running.
 

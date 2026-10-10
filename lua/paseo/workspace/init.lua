@@ -228,8 +228,8 @@ function M.discover(root)
       if
         (kind == "directory" or kind == "link")
         and name ~= ".git"
-        and name ~= ".ws"
-        and name ~= ".workspaces"
+        and name ~= manifest.LEGACY_DIR
+        and name ~= manifest.dir()
         and name ~= "node_modules"
       then
         if is_repo(path) then
@@ -272,7 +272,7 @@ function M.discover(root)
   table.sort(shared)
 
   ---@type paseo.ws.Manifest
-  local m = { shared = shared, workspaces_dir = ".workspaces", branch_prefix = "ws/", repos = {} }
+  local m = { shared = shared, branch_prefix = "ws/", repos = {} }
   local notes = {}
   for _, found in ipairs(repos) do
     local repo, repo_notes = describe(root, found.name, found.path)
@@ -461,7 +461,7 @@ function M.create(m, opts)
     return nil, "no repos selected; every repo is default = false, so name some with --repos"
   end
 
-  local root = vim.fs.joinpath(opts.root, m.workspaces_dir, opts.name)
+  local root = vim.fs.joinpath(opts.root, manifest.dir(), opts.name)
   if vim.uv.fs_stat(root) then
     return nil, root .. " already exists"
   end

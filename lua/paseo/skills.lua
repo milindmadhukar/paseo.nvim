@@ -135,7 +135,7 @@ function M.targets(spec, from)
 
   local root = require("paseo.registry").project_root(from)
   if not root then
-    return nil, "no .ws/workspace.toml here or above — `project` needs a ws project"
+    return nil, "no .workspaces/workspace.toml here or above — `project` needs a ws project"
   end
   -- Writing `.claude/skills/` into somebody's REPOSITORY is not a thing a
   -- plugin does uninvited. A ws project root is a plain directory holding

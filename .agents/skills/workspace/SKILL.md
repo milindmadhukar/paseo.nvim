@@ -25,23 +25,23 @@ wcreate`), and everything you need to read is plain git plus one TOML file.
 
 ## Find out where you are
 
-**The project root** is the nearest ancestor holding `.ws/workspace.toml`. This
+**The project root** is the nearest ancestor holding `.workspaces/workspace.toml`. This
 walks up from anywhere inside a workspace or a member:
 
 ```bash
 root=$PWD
-while [ "$root" != / ] && [ ! -f "$root/.ws/workspace.toml" ]; do
+while [ "$root" != / ] && [ ! -f "$root/.workspaces/workspace.toml" ]; do
   root=$(dirname "$root")
 done
 ```
 
 **The manifest is the source of truth** for what a workspace *should* contain.
-`<project>/.ws/workspace.toml` has a `[repos.<name>]` table per member, keyed by
+`<project>/.workspaces/workspace.toml` has a `[repos.<name>]` table per member, keyed by
 path relative to the project root — so a name may contain `/`, as in
 `[repos.archive/broker-portal]`.
 
 ```bash
-cat "$root/.ws/workspace.toml"
+cat "$root/.workspaces/workspace.toml"
 ```
 
 **The members on disk** are the directories under the workspace that are git
@@ -81,7 +81,7 @@ branches in unrelated repositories. A commit in `clm` does not exist in
 `clm_api`.
 
 **The base branch is per repo and is not necessarily `main`.** It is recorded
-as `base` in `<project>/.ws/workspace.toml`. Read it; do not assume. In some
+as `base` in `<project>/.workspaces/workspace.toml`. Read it; do not assume. In some
 projects every repo sits on `dev` while `origin/HEAD` still says `main`, and
 branching from the wrong one silently bases the work on the wrong history.
 
