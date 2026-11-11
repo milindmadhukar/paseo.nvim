@@ -1851,7 +1851,7 @@ function M.attach_events()
   -- THE MISSING HALF. Reasoning, tool calls, todos, notices and compaction all
   -- reach Neovim now; before this they were dropped at the sidecar and the
   -- window showed a long silence while the agent read files and ran commands.
-  for _, event in ipairs { "tool", "todo", "notice", "compaction" } do
+  for _, event in ipairs { "tool", "agent_message", "todo", "notice", "compaction" } do
     bridge.on(event, ingest)
   end
 

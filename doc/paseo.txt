@@ -1575,6 +1575,13 @@ below -- `:Paseo sidebar`, or `<C-f>` from the dashboard. Narrow, beside your
 code, for when the conversation is a thing you glance at rather than the thing
 you are doing.
 
+                                                  *paseo-chat-agent-messages*
+MESSAGES FROM OTHER AGENTS. When another agent sends this one a message, or
+the daemon tells it a child agent finished, failed or needs a permission, the
+chat draws it as a message with its sender -- `from Planner`, `Planner
+finished` -- the way `you` is drawn for yours. These used to arrive as an
+empty tool card called "Agent message".
+
                                                           *paseo-chat-header*
 The header ~
 

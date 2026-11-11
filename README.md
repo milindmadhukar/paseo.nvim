@@ -266,6 +266,21 @@ atomically. A host without the `agentForkContext` capability is rejected before
 anything is created. If agent creation fails after a workspace was created for
 it, that empty workspace is retained and named in the error.
 
+### Messages from other agents
+
+When another agent sends this one a message (one agent steering another
+through Paseo's tools), or the daemon tells it that a child agent finished,
+failed or needs a permission, the chat draws it as a message with its sender,
+as `you` is drawn for yours:
+
+```
+▌ 󱙺 from Planner
+▌ the schema is ready for review
+```
+
+These used to arrive as an empty tool card called *Agent message*. The sender
+and the words were on the item, and nothing read them.
+
 ### The header
 
 The header says what the session *is*:

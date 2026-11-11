@@ -422,6 +422,26 @@ local function card_lines(item, opts)
     return { lines = lines, collapsible = false }
   end
 
+  -- ANOTHER AGENT SPEAKING: a message one agent sent this one, or the daemon
+  -- telling it that a child finished, failed, or needs a permission. Drawn as
+  -- a message with its sender, the way `you` is drawn for yours. It used to
+  -- arrive as a tool call named "Agent message" with nothing in it -- the
+  -- sender and the words are on the item, and nothing read them.
+  if kind == "agent_message" then
+    local who = (item.sender and (item.sender.title or item.sender.id)) or "another agent"
+    local said = ({
+      finished = who .. " finished",
+      errored = who .. " failed",
+      ["permission-required"] = who .. " needs a permission",
+      closed = who .. " closed",
+    })[item.event] or ("from " .. who)
+    local lines = { { { "▌ " .. icons.tool.sub_agent .. " " .. said, "PaseoAgent" } } }
+    if item.text and item.text ~= "" then
+      vim.list_extend(lines, render.wrap(item.text, width, nil, { { "▌ ", "PaseoAgent" } }))
+    end
+    return { lines = lines, collapsible = false }
+  end
+
   if kind == "text" then
     return { lines = render.wrap(item.text or "", width, nil), collapsible = false }
   end

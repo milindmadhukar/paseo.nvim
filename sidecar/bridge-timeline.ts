@@ -35,6 +35,24 @@ export function describeItem(
       return { kind: "thinking", text: item.text ?? "" };
 
     case "tool_call": {
+      // A message from ANOTHER AGENT -- or the daemon telling this one that
+      // a child finished, failed or needs a permission -- rides a tool call
+      // with `agentMessage` on it. It is a message, not a tool, and its sender
+      // and words are the whole of it; as a tool card it drew "Agent message"
+      // over nothing.
+      if (item.agentMessage) {
+        const message = item.agentMessage;
+        return {
+          kind: "agent_message",
+          callId: item.callId,
+          event: message.event ?? "message",
+          sender: {
+            id: message.sender?.id ?? null,
+            title: message.sender?.title ?? null,
+          },
+          text: message.text ?? "",
+        };
+      }
       // `display` is precomputed here so the Lua never has to know that a
       // "shell" detail keys its command as `command` and a "read" keys its path
       // as `filePath`. The renderer still gets the raw `detail` for the
