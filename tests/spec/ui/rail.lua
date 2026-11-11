@@ -188,8 +188,44 @@ local function test_toggle()
   end
 end
 
+local function test_current()
+  local rail = require "paseo.ui.rail"
+  local float = require "paseo.ui.float"
+  local agents = require "paseo.agents"
+  local saved = { chat = float.chat, get = agents.get }
+  local dir = vim.fn.tempname()
+  vim.fn.mkdir(dir, "p")
+  local list = {
+    { id = "ws-1", name = "main", directory = dir },
+    { id = "ws-2", name = "main", directory = dir },
+    { id = "ws-3", name = "other", directory = dir .. "-other" },
+  }
+  local ok, failure = pcall(function()
+    float.chat = function()
+      return { agent_id = "a", host_id = "local", root = dir }
+    end
+    agents.get = function()
+      return { id = "a", cwd = dir, workspaceId = "ws-2" }
+    end
+    eq("rail: the agent's own workspace, not the first on its directory", rail.current_index(list), 2)
+    agents.get = function()
+      return { id = "a", cwd = dir }
+    end
+    eq("rail: without an id, the first on the directory -- and only it", rail.current_index(list), 1)
+    float.chat = function()
+      return { host_id = "local", root = dir .. "-other" }
+    end
+    eq("rail: a draft is on the directory it was opened in", rail.current_index(list), 3)
+  end)
+  float.chat, agents.get = saved.chat, saved.get
+  if not ok then
+    error(failure, 0)
+  end
+end
+
 return {
   { "ui.rail.buckets", test_buckets },
   { "ui.rail.layout", test_layout },
   { "ui.rail.toggle", test_toggle },
+  { "ui.rail.current", test_current },
 }

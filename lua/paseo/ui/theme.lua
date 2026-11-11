@@ -688,6 +688,9 @@ function M.groups(t)
     -- here would compete with whatever the row itself is saying.
     groups.PaseoRowHover = { bg = bg.bg3 }
     groups.PaseoRowActive = { bg = bg.bg4 }
+    -- The workspace on screen, on the rail: a green-tinted band rather than a
+    -- tier, so it is not mistaken for where the cursor is.
+    groups.PaseoRowCurrent = { bg = M.blend(c.green, bg.bg1, 84) or bg.bg3 }
 
     -- THE GUTTER, which is how "the one I am in" survives being pointed at.
     -- A focused row is painted in one flat band, so an active row that said so
@@ -772,6 +775,7 @@ function M.groups(t)
 
     groups.PaseoRowHover = { bold = true }
     groups.PaseoRowActive = { reverse = true }
+    groups.PaseoRowCurrent = { bold = true, underline = true }
     groups.PaseoRowBar = { fg = c.green, bold = true }
     groups.PaseoRowBarHover = { fg = c.green, bold = true }
     groups.PaseoRowBarActive = { fg = c.green, bold = true, reverse = true }

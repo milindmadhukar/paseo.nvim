@@ -519,8 +519,10 @@ sidebar, and it uses the same rule to decide the state:
 | hollow dot | no agent has run here |
 
 A workspace shows its **most urgent** agent, so one waiting on you among three
-running shows the `!`. The bar and the green name mark the workspace you are
-in.
+running shows the `!`. **The workspace on screen** (the one the agent you are
+talking to belongs to) has a green band across its row, a bar and a green
+name. It is matched by the agent's workspace, not the directory, so when
+several workspaces share one checkout only the right one is marked.
 
 A row ends with its agents' subagents when they have any: a robot and the
 count, `1/3` (running/total) in the running colour while some work, or just `3`

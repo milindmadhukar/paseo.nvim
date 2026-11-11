@@ -38,6 +38,10 @@ local buf
 ---@type table<integer, table>
 local at_line = {}
 
+---The buffer line of the workspace on screen, from the last `M.lines`.
+---@type integer|nil
+local current_line
+
 ---The last fetch. `root` is the project it was scoped to, so a fetch that
 ---lands after you have moved project is not drawn as this one's.
 local cache = { root = nil, list = nil, err = nil, loading = false }
@@ -312,18 +316,79 @@ function M.subagent_badge(ws)
   return { { icons.tool.sub_agent .. " " .. numbers, running > 0 and "PaseoToolRunning" or "PaseoDim" } }
 end
 
+---@param path string
+---@return string
+local function canonical(path)
+  return (vim.fn.resolve(vim.fn.fnamemodify(path, ":p")):gsub("/+$", ""))
+end
+
 ---@param ws table
+---@param path string
 ---@return boolean
-local function is_here(ws)
-  local here = vim.fn.resolve(vim.fn.fnamemodify(vim.fn.getcwd(), ":p")):gsub("/+$", "")
-  local dir = vim.fn.resolve(ws.local_directory or ws.directory or ""):gsub("/+$", "")
-  return dir ~= "" and (here == dir or vim.startswith(here, dir .. "/"))
+local function contains(ws, path)
+  local dir = ws.local_directory or ws.directory or ""
+  if dir == "" then
+    return false
+  end
+  dir = canonical(dir)
+  path = canonical(path)
+  return path == dir or vim.startswith(path, dir .. "/")
+end
+
+---The workspace the dashboard is showing, as a key into the list.
+---
+---BY WORKSPACE ID when the agent on screen has one, and only then by
+---directory. The directory alone cannot say which: every `paseo run` in a
+---repository makes a workspace of its own on the SAME directory, so a rail
+---that marked "the one my cwd is in" marked all of them -- two green bars, and
+---no way to tell which one the conversation beside it belonged to.
+---@return { id: string|nil, dir: string|nil }
+function M.showing()
+  local float = package.loaded["paseo.ui.float"]
+  local chat = float and float.chat()
+  if chat then
+    local agent = chat.agent_id and require("paseo.agents").get(chat.agent_id, chat.host_id)
+    return {
+      id = agent and agent.workspaceId or nil,
+      dir = (agent and agent.cwd) or chat.local_root or chat.root,
+    }
+  end
+  return { dir = vim.fn.getcwd() }
+end
+
+---Which row of `list` is the workspace on screen: its index, or nil.
+---
+---ONE ROW, whichever rule finds it: the id if anything carries it, else the
+---first workspace whose directory holds the chat's, else the first holding the
+---cwd.
+---@param list table[]
+---@return integer|nil
+function M.current_index(list)
+  local showing = M.showing()
+  if showing.id then
+    for i, ws in ipairs(list) do
+      if ws.id == showing.id then
+        return i
+      end
+    end
+  end
+  for _, path in ipairs { showing.dir, vim.fn.getcwd() } do
+    if path and path ~= "" then
+      for i, ws in ipairs(list) do
+        if contains(ws, path) then
+          return i
+        end
+      end
+    end
+  end
+  return nil
 end
 
 ---The lines, as |paseo.ui.render| means a line, and what is on each.
 ---@param width integer
 ---@return table[][] lines, table<integer, table> rows
 function M.lines(width)
+  current_line = nil
   local out, rows = {}, {}
   local name = cache.root and vim.fs.basename(cache.root) or "workspaces"
   local count = cache.list and ("  " .. #cache.list) or ""
@@ -341,8 +406,9 @@ function M.lines(width)
     return out, rows
   end
 
-  for _, ws in ipairs(cache.list) do
-    local here = is_here(ws)
+  local current = M.current_index(cache.list)
+  for i, ws in ipairs(cache.list) do
+    local here = i == current
     local glyph, hl = M.status(M.bucket(ws))
     local line = {
       -- The bar that says "you are in this one", in the same glyph the list
@@ -367,6 +433,9 @@ function M.lines(width)
     vim.list_extend(line, name)
     out[#out + 1] = line
     rows[#out] = ws
+    if here then
+      current_line = #out
+    end
   end
   return out, rows
 end
@@ -427,6 +496,12 @@ function M.draw()
   api.nvim_buf_set_lines(buf, 0, -1, false, text)
   vim.bo[buf].modifiable = false
   api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+  -- THE ROW YOU ARE ON, across the whole width: a bar in the gutter and a
+  -- green name said it, and said it about every workspace sharing the
+  -- directory. A band says it at a glance, from across the surface.
+  if current_line then
+    api.nvim_buf_set_extmark(buf, ns, current_line - 1, 0, { line_hl_group = "PaseoRowCurrent", priority = 10 })
+  end
   for i, line in ipairs(lines) do
     local col = 0
     for _, cell in ipairs(line) do
@@ -455,17 +530,14 @@ function M.seat()
   if not M.win() then
     return
   end
-  local first, mine
+  local first
   for line = 1, api.nvim_buf_line_count(buf) do
-    local ws = at_line[line]
-    if ws then
-      first = first or line
-      if not mine and is_here(ws) then
-        mine = line
-      end
+    if at_line[line] then
+      first = line
+      break
     end
   end
-  local line = mine or first
+  local line = current_line or first
   if line then
     pcall(api.nvim_win_set_cursor, win, { line, 0 })
   end
