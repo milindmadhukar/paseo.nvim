@@ -240,6 +240,20 @@ function M.status(bucket)
   return icons.status.pending, "PaseoDim"
 end
 
+---The subagent count a row ends with, or nil when the workspace's agents have
+---none: the robot and `2`, or `1/3` while some run -- running first, because
+---that is the news, in the colour a running tool card is.
+---@param ws table
+---@return table[]|nil
+function M.subagent_badge(ws)
+  local running, total = require("paseo.subagents").counts_under(ws.directory or "", ws.hostId)
+  if total == 0 then
+    return nil
+  end
+  local numbers = running > 0 and ("%d/%d"):format(running, total) or tostring(total)
+  return { { icons.tool.sub_agent .. " " .. numbers, running > 0 and "PaseoToolRunning" or "PaseoDim" } }
+end
+
 ---@param ws table
 ---@return boolean
 local function is_here(ws)
@@ -279,10 +293,15 @@ function M.lines(width)
       { here and icons.marker.mine or " ", "PaseoAgent" },
       { glyph .. " ", hl },
     }
-    vim.list_extend(
-      line,
-      render.truncate({ { ws.name or "", here and "PaseoAgent" or "PaseoText" } }, math.max(1, width - 3))
-    )
+    local badge = M.subagent_badge(ws)
+    local name_width = math.max(1, width - 3 - (badge and render.width(badge) + 1 or 0))
+    local name = render.truncate({ { ws.name or "", here and "PaseoAgent" or "PaseoText" } }, name_width)
+    if badge then
+      -- Right-aligned, so a column of them reads as a column.
+      name = render.pad(name, name_width + 1)
+      vim.list_extend(name, badge)
+    end
+    vim.list_extend(line, name)
     out[#out + 1] = line
     rows[#out] = ws
   end

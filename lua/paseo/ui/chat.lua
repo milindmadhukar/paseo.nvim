@@ -1860,6 +1860,8 @@ function M.attach_events()
       load_history(chat)
       -- The subagent stream belonged to the old socket. Follow again, and
       -- re-list: one that started or finished in the gap was never pushed.
+      -- The rail's parents too, which it re-tracks as it next draws.
+      require("paseo.subagents").untrack()
       require("paseo.subagents").follow(chat.agent_id, chat.host_id)
     end
   end)

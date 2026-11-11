@@ -193,6 +193,14 @@ local function watch_directories()
   watching = true
   require("paseo.agents").on_change(directory_changed)
   require("paseo.terminals").on_change(directory_changed)
+  -- A subagent started or finished: the rail's rows end with the count. Its
+  -- own lines only -- the panels do not draw subagents, and the agent
+  -- directory moving already reaches the rail by the path above.
+  require("paseo.subagents").on_change(function(_, parent)
+    if parent ~= nil and state then
+      pcall(require("paseo.ui.rail").draw)
+    end
+  end)
 end
 
 -- ----------------------------------------------------------------- the mount

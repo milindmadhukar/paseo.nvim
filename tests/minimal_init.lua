@@ -45,3 +45,14 @@ vim.opt.swapfile = false
 -- opened it.
 vim.env.XDG_STATE_HOME = vim.fn.tempname()
 vim.opt.shada = ""
+
+-- THE SUITE NEVER STARTS A REAL SIDECAR. Every suite stubs `bridge.ensure`
+-- and puts back what it found -- which, before this, was the real one. A
+-- suite that forgot to stub it (anything reaching `agents.watch`) spawned a
+-- sidecar that dialled the daemon on 6767: YOUR daemon, with your sessions.
+-- Its late answer to one suite's `agent.find` then opened a start menu inside
+-- another and hung the whole run on `inputlist`. The real `ensure` is now this,
+-- so forgetting fails one request instead of reaching outside the suite.
+require("paseo.bridge").ensure = function(callback)
+  callback "the test suite never starts a real sidecar"
+end
