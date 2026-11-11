@@ -58,6 +58,7 @@ case "${1:-}" in
         "extends": "acp",
         "label": "Fake (e2e)",
         "command": ["node", "$here/fake-acp.mjs"],
+        "env": { "FAKE_ACP_STATE": "$root/fake-acp" },
         "options": { "supportsMcpServers": false }
       }
     }
@@ -91,6 +92,13 @@ JSON
     echo $! >"$pidfile"
     for _ in $(seq 1 120); do
       if ready; then
+        # Up is not usable: the `fake` provider is probed after the daemon
+        # answers, and a scenario that starts before it lists its model finds
+        # nothing to create an agent with.
+        for _ in $(seq 1 60); do
+          "$bin" --host "127.0.0.1:$port" provider models fake 2>/dev/null | grep -q scripted && break
+          sleep 0.5
+        done
         print_env
         exit 0
       fi

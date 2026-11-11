@@ -981,6 +981,11 @@ local function load_history(chat)
   bridge.request("timeline.history", { agentId = chat.agent_id, limit = 60 }, function(err, result)
     if err or not result then
       return vim.schedule(function()
+        -- SAID, not swallowed. An agent whose provider cannot resume it --
+        -- archived, its process gone after a daemon restart -- used to open
+        -- onto an empty chat with no word about why, which reads as a
+        -- conversation that never happened.
+        notice(chat, "could not load the conversation: " .. tostring(err or "no reply"), "error")
         release(chat)
       end)
     end

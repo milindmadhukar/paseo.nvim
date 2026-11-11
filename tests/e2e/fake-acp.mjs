@@ -19,12 +19,26 @@
 
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const out = (message) => process.stdout.write(JSON.stringify(message) + "\n");
 const reply = (id, result) => out({ jsonrpc: "2.0", id, result });
 const fail = (id, code, message) => out({ jsonrpc: "2.0", id, error: { code, message } });
-const update = (sessionId, body) =>
+
+// Every update a session has sent, on disk, so `session/load` can replay it
+// after the daemon restarts -- which is what a real provider's resume does,
+// and without it a chat reopened after a restart has no history to show.
+const STATE = process.env.FAKE_ACP_STATE || join(process.env.HOME || ".", ".cache", "fake-acp");
+mkdirSync(STATE, { recursive: true });
+const journal = (sessionId) => join(STATE, `${sessionId.replace(/[^\w-]/g, "_")}.jsonl`);
+
+const update = (sessionId, body) => {
   out({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: body } });
+  try {
+    appendFileSync(journal(sessionId), JSON.stringify(body) + "\n");
+  } catch {}
+};
 
 const sessions = new Map();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -59,6 +73,14 @@ async function turn(id, params) {
   const session = sessions.get(params.sessionId);
   if (!session) return fail(id, -32602, `unknown session ${params.sessionId}`);
   const text = promptText(params.prompt);
+  // The prompt goes in the journal too: a replayed session starts with what
+  // the user said, as a real one does.
+  try {
+    appendFileSync(
+      journal(params.sessionId),
+      JSON.stringify({ sessionUpdate: "user_message_chunk", content: { type: "text", text } }) + "\n",
+    );
+  } catch {}
   const has = (word) => new RegExp(`\\b${word}\\b`, "i").test(text);
   const plain = !["think", "tool", "echo", "long"].some(has);
   const gap = has("slow") ? 40 : has("long") ? 400 : 5;
@@ -122,7 +144,7 @@ const handlers = {
     reply(id, {
       protocolVersion: 1,
       agentCapabilities: {
-        loadSession: false,
+        loadSession: true,
         promptCapabilities: { image: true, embeddedContext: true },
       },
       authMethods: [],
@@ -131,6 +153,22 @@ const handlers = {
     const sessionId = `fake_${randomUUID().slice(0, 12)}`;
     sessions.set(sessionId, { cwd: params?.cwd ?? process.cwd(), cancelled: false });
     reply(id, { sessionId, modes: MODES, models: MODELS });
+  },
+  "session/load": (id, params) => {
+    const sessionId = params?.sessionId;
+    sessions.set(sessionId, { cwd: params?.cwd ?? process.cwd(), cancelled: false });
+    let lines = [];
+    try {
+      lines = readFileSync(journal(sessionId), "utf8").split("\n").filter(Boolean);
+    } catch {}
+    for (const line of lines) {
+      out({
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: { sessionId, update: JSON.parse(line) },
+      });
+    }
+    reply(id, { modes: MODES, models: MODELS });
   },
   "session/prompt": (id, params) => {
     turn(id, params).catch((error) => fail(id, -32603, String(error)));

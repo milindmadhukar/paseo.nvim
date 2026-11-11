@@ -5,6 +5,7 @@
 # reopened chat (projected history) showed it whole.
 source "$(dirname "$0")/../lib.sh"
 
+repo_with_agent >/dev/null
 open_chat
 send_prompt "think slow"
 wait_idle 30

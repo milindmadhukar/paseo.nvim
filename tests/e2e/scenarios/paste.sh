@@ -17,9 +17,12 @@ PY
 shape="(s['mount'], s['tabpages'], len(s['wins']))"
 composer='table.concat(vim.api.nvim_buf_get_lines(require("paseo.ui.chat").current().composer, 0, -1, false), " ")'
 
+repo="$(fresh_repo)"
+"$D" paseo run --provider fake/scripted --cwd "$repo" "echo seed" >/dev/null 2>&1 || fail "no seed agent"
+
 for surface in buffer float; do
   "$E" stop
-  "$E" start
+  "$E" start "$repo"
   if [ "$surface" = buffer ]; then
     "$E" keys ':Paseo buf' Enter
   else

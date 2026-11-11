@@ -54,3 +54,28 @@ wait_idle() {
   "$E" wait "_G.paseo_e2e.turn_done(${users_before:-0})" "${1:-30}" \
     || fail "turn did not finish"
 }
+
+# A repository of this scenario's own: one commit, one README, on `main`.
+# Shared fixtures meant a scenario opened whatever agent the last one left.
+fresh_repo() {
+  local repo="$PASEO_E2E_ROOT/repos/$(basename "$0" .sh)-$$-$RANDOM"
+  mkdir -p "$repo"
+  git -C "$repo" init -q -b main
+  echo "# fixture" >"$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" -c user.name="paseo tests" -c user.email=tests@paseo.invalid \
+    -c commit.gpgsign=false commit -qm init
+  echo "$repo"
+}
+
+# A repository with one finished agent in it, and Neovim open there.
+# Prints the repo path.
+repo_with_agent() {
+  local repo
+  repo="$(fresh_repo)"
+  "$D" paseo run --provider fake/scripted --cwd "$repo" "echo seed" >/dev/null 2>&1 \
+    || fail "could not seed an agent in $repo"
+  "$E" stop
+  "$E" start "$repo"
+  echo "$repo"
+}

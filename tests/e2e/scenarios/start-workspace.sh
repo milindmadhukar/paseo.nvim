@@ -6,12 +6,7 @@
 # the slug for good. The slug still picks the branch; the title must not be it.
 source "$(dirname "$0")/../lib.sh"
 
-repo="$PASEO_E2E_ROOT/fresh-$$-$RANDOM"
-mkdir -p "$repo"
-git -C "$repo" init -q -b main
-echo hi >"$repo/README.md"
-git -C "$repo" add README.md
-git -C "$repo" -c user.name=t -c user.email=t@t.invalid -c commit.gpgsign=false commit -qm init
+repo="$(fresh_repo)"
 
 "$E" stop
 "$E" start "$repo"
