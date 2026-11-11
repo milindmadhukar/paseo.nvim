@@ -1968,7 +1968,26 @@ function M.attach_events()
         notice(chat, ("the turn did not finish — %d queued message(s) kept; send to deliver"):format(#chat.queued), "warning")
       end
       if payload.error then
-        transcript.upsert(chat, { kind = "notice", level = "error", message = payload.error })
+        -- The code and the provider's own diagnostic, when it gave one: "turn
+        -- failed" over nothing is a dead end, and the reason -- a session
+        -- limit, a bad key -- is usually what you need to act on.
+        local message = payload.error
+        if payload.code and payload.code ~= vim.NIL and not tostring(message):find(payload.code, 1, true) then
+          message = ("%s (%s)"):format(message, payload.code)
+        end
+        -- Only what the diagnostic ADDS. Daemons often restate the error and
+        -- the code in it (`Usage limit reached | code=-32000`), and the same
+        -- sentence twice is noise in front of the one line that matters.
+        local diagnostic = payload.diagnostic ~= vim.NIL and vim.trim(tostring(payload.diagnostic or "")) or ""
+        local extra = diagnostic
+          :gsub(vim.pesc(tostring(payload.error)), "")
+          :gsub("|?%s*code=" .. vim.pesc(tostring(payload.code or "")), "")
+          :gsub("^[%s|:]+", "")
+          :gsub("[%s|:]+$", "")
+        if extra ~= "" then
+          message = message .. "\n" .. diagnostic
+        end
+        transcript.upsert(chat, { kind = "notice", level = "error", message = message })
       end
     end
   end)

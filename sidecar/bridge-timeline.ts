@@ -189,6 +189,10 @@ export function timelineOps(ctx: BridgeConnection): Ops {
                 agentId: id,
                 outcome: event.type,
                 error: event.error ?? null,
+                // What the provider said, beyond the one-line error: a session
+                // limit, an invalid key, an exit code. Shown under the error.
+                code: event.code ?? null,
+                diagnostic: event.diagnostic ?? null,
                 reason: event.reason ?? null,
               });
               break;

@@ -15,6 +15,7 @@
 //   slow     40ms between chunks instead of 5ms, so a turn can be watched
 //   long     a turn that lasts ~20s, for steering and interrupt checks
 //   echo     the answer repeats the prompt
+//   fail     the turn fails with an error, and a diagnostic on stderr
 // With none of them it does think + tool + a short answer.
 
 import { createInterface } from "node:readline";
@@ -82,6 +83,13 @@ async function turn(id, params) {
     );
   } catch {}
   const has = (word) => new RegExp(`\\b${word}\\b`, "i").test(text);
+  if (has("fail")) {
+    // A provider error the way real ones arrive: a line on stderr, which the
+    // daemon keeps as the diagnostic, and the turn answered with an error.
+    process.stderr.write("fake-acp: usage limit reached; resets at 18:00\n");
+    await sleep(50);
+    return fail(id, -32000, "Usage limit reached");
+  }
   const plain = !["think", "tool", "echo", "long"].some(has);
   const gap = has("slow") ? 40 : has("long") ? 400 : 5;
   const cancelled = () => session.cancelled;
