@@ -211,6 +211,38 @@ local function test_subagents()
     eq("subagents: in the running colour", badge[1][2], "PaseoToolRunning")
     eq("subagents: and nothing on a workspace without", rail.subagent_badge { directory = ws_root .. "-none" }, nil)
 
+    -- THE GREEN DOT OVER RUNNING WORK. The parent's turn is over -- it handed
+    -- the work to a subagent -- and the workspace read "done" while the
+    -- subagent was still going.
+    agents._apply {
+      kind = "snapshot",
+      hostId = hosts.selected(),
+      entries = { { id = "parent", status = "idle", cwd = ws_root } },
+    }
+    eq("subagents: an idle parent alone is done", agents.workspace_bucket(ws_root), "done")
+    eq("subagents: but a running subagent keeps the workspace running", rail.bucket { directory = ws_root }, "running")
+    handlers.subagent {
+      kind = "upsert",
+      subagent = { id = "task-4", parentAgentId = "parent", title = "Explore", status = "completed" },
+    }
+    vim.wait(500, function()
+      return rail.bucket { directory = ws_root } == "done"
+    end, 10)
+    eq("subagents: and done once it finishes", rail.bucket { directory = ws_root }, "done")
+    agents._apply {
+      kind = "snapshot",
+      hostId = hosts.selected(),
+      entries = { { id = "parent", status = "idle", cwd = ws_root, pendingPermissionCount = 1 } },
+    }
+    handlers.subagent {
+      kind = "upsert",
+      subagent = { id = "task-5", parentAgentId = "parent", title = "Explore", status = "running" },
+    }
+    vim.wait(500, function()
+      return select(1, subagents.counts "parent") > 0
+    end, 10)
+    eq("subagents: waiting on you still outranks a running subagent", rail.bucket { directory = ws_root }, "needs_input")
+
     eq("subagents: seconds between two stamps", subagents.seconds("2026-10-10T10:00:00Z", "2026-10-10T10:03:05Z"), 185)
     eq("subagents: a duration reads as one", subagents.duration(185), "3m 05s")
     eq("subagents: short ones in seconds", subagents.duration(42), "42s")

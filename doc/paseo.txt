@@ -1714,7 +1714,7 @@ THE WORKSPACE RAIL is the column down the left of the body: every workspace
 in the project you are standing in, each with what its agents are doing --
 the desktop app's sidebar, with the same rule deciding the state: >
 
-    ⠋  spinner          an agent is working
+    ⠋  spinner          an agent is working, or a subagent of one is
     !  yellow           one is waiting on you -- a permission or a question
     ●  red              a turn failed
     ●  blue             a turn finished while you were elsewhere

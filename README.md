@@ -489,7 +489,7 @@ sidebar, and it uses the same rule to decide the state:
 
 | | |
 |---|---|
-| spinner | an agent is working |
+| spinner | an agent is working — or a subagent of one is, after its parent's turn has ended |
 | yellow `!` | one is waiting on you: a permission, or a question |
 | red dot | a turn failed |
 | blue dot | a turn finished while you were elsewhere |

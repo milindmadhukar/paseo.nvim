@@ -199,6 +199,9 @@ local function watch_directories()
   require("paseo.subagents").on_change(function(_, parent)
     if parent ~= nil and state then
       pcall(require("paseo.ui.rail").draw)
+      -- A running subagent spins its workspace's row, so starting one starts
+      -- the clock and the last one finishing stops it.
+      sync_spinner()
     end
   end)
 end
