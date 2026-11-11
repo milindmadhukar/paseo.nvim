@@ -22,7 +22,6 @@ workspaces_in() {
 "$E" keys ':Paseo chat' Enter
 sleep 5 # the start menu is a vim.ui.select prompt, which nothing can wait on
 "$E" keys 1 Enter
-"$E" wait 'vim.bo.filetype ~= "" and vim.api.nvim_win_get_config(0).relative ~= ""' 10 || fail "no review"
 create_from_review 'require("paseo.ui.chat").current() and require("paseo.ui.chat").current().draft ~= nil'
 
 # A draft creates nothing on the daemon.

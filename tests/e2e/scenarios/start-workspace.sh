@@ -15,9 +15,9 @@ sleep 5 # the start menu is a vim.ui.select prompt, which nothing can wait on
 "$E" keys 2 Enter
 sleep 1
 "$E" keys C-u 'billing-fix' Enter
-"$E" wait 'vim.api.nvim_win_get_config(0).relative ~= ""' 10 || fail "no review"
-create_from_review 'vim.api.nvim_buf_get_name(0):find("paseo://ask/", 1, true) ~= nil'
-sleep 1
+# The prompt box: a floating markdown buffer that opens in insert mode. (Not
+# by its name -- naming can fail on a collision and leave it `[No Name]`.)
+create_from_review 'vim.bo.filetype == "markdown" and vim.api.nvim_win_get_config(0).relative ~= "" and vim.fn.mode() == "i"'
 "$E" keys 'Fix the invoice rounding in billing' Escape Enter
 
 "$E" wait 'require("paseo.ui.chat").current() and require("paseo.ui.chat").current().agent_id ~= nil' 60 \
