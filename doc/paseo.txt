@@ -1888,9 +1888,12 @@ Where the first message lands depends on what is already there. A Paseo
 worktree, or a workspace somebody titled, keeps its name and the agent joins
 it. A plain checkout still called by its branch gets a fresh workspace beside
 it, in the same project, named from the prompt; the untitled one is left
-alone. `new agent in a new workspace` asks for a name, creates the
-appropriate assembled/worktree/local workspace (|paseo-workspace-kinds|),
-starts the agent in it and moves the editor there. `new terminal` opens the
+alone. `new agent in a new workspace` asks for a name, then the settings,
+then the first prompt, and only then creates the appropriate
+assembled/worktree/local workspace (|paseo-workspace-kinds|) WITH the agent
+and the prompt in the same request, and moves the editor there. The name picks
+the directory and the branch; the title comes from the prompt. Forking into a
+new workspace works the same way. `new terminal` opens the
 terminal picker (|paseo-terminals|) and points the Chat tab at the PTY; the
 directory still has no agent, so asking again later asks again.
 

@@ -9,6 +9,7 @@ local function test_start()
   local chat = require "paseo.ui.chat"
   local create = require "paseo.ui.create"
   local newterm = require "paseo.ui.newterm"
+  local prompt = require "paseo.ui.prompt"
 
   local old = {
     select = vim.ui.select,
@@ -20,10 +21,12 @@ local function test_start()
     chat = chat.open,
     review = create.review,
     newterm = newterm.open,
+    prompt = prompt.open,
   }
 
   local ok, failure = pcall(function()
     local menu, picked, name_answer
+    local prompt_answer = "Fix the invoice rounding"
     local created, opened, chat_opened, session_in, terminal_in, reviewed
 
     local function reset()
@@ -49,6 +52,9 @@ local function test_start()
       reviewed = opts
       done({ provider = "codex/gpt", modeId = "auto" }, nil)
     end
+    prompt.open = function(_, done)
+      done(prompt_answer)
+    end
     newterm.open = function(opts, done)
       terminal_in = opts
       done("term-1", nil)
@@ -59,6 +65,8 @@ local function test_start()
         id = "ws-new",
         name = opts.name,
         directory = "/work/new",
+        -- The agent the first prompt created, in the same request.
+        agent_id = opts.first and "agent-new" or nil,
       })
     end
     workspaces.open = function(ws)
@@ -137,7 +145,15 @@ local function test_start()
     eq("start: the workspace is cut from this directory", created.root, "/work/here")
     eq("start: under the name you gave", created.name, "billing")
     eq("start: and is a distinct one even in a shared checkout", created.new, true)
-    eq("start: the agent goes in the workspace that was just made", session_in.id, "ws-new")
+    -- THE PROMPT RIDES THE CREATE. It is the only request the daemon names a
+    -- workspace from; creating it bare and starting the agent after left it
+    -- called by its slug for good.
+    eq("start: the first prompt goes with the workspace", created.first.prompt, prompt_answer)
+    eq("start: and so do the settings", {
+      created.first.provider,
+      created.first.modeId,
+    }, { "codex/gpt", "auto" })
+    eq("start: no second request starts the agent", session_in, nil)
     eq("start: the editor moves to it", opened.id, "ws-new")
     eq("start: and opens it", {
       chat_opened.root,
@@ -199,7 +215,19 @@ local function test_start()
       return chat_opened ~= nil
     end)
     eq("start: elsewhere cuts one", created.name, "otp")
-    eq("start: and the agent lands in it, not in the one you were in", session_in.id, "ws-new")
+    eq("start: and the agent lands in it, not in the one you were in", {
+      session_in,
+      chat_opened.agent_id,
+      chat_opened.root,
+    }, { nil, "agent-new", "/work/new" })
+
+    -- No prompt, no workspace: an empty one would be named by nothing.
+    reset()
+    picked, name_answer, prompt_answer = "workspace", "otp", nil
+    start.agent(here, function(value)
+      result = value
+    end)
+    eq("start: cancelling the first prompt creates nothing", created, nil)
   end)
 
   vim.ui.select, vim.ui.input = old.select, old.input
@@ -208,6 +236,7 @@ local function test_start()
   workspaces.new_session = old.session
   chat.open = old.chat
   create.review = old.review
+  prompt.open = old.prompt
   newterm.open = old.newterm
   truthy("start: cases completed", ok, failure)
 end

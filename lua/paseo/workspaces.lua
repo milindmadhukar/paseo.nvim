@@ -339,13 +339,23 @@ function M.describe(plan)
   return ("%d worktree(s)"):format(plan.members or 0)
 end
 
+---@class paseo.FirstAgent
+---@field prompt string
+---@field provider string  `provider/model`
+---@field modeId? string
+---@field thinkingOptionId? string
+---@field featureValues? table
+---@field attachments? table[]
+---@field images? table[]
+---@field title? string  The AGENT's title. The workspace's comes from the prompt.
+
 ---Create a workspace, whatever kind of project this is.
 ---
 ---ONE ENTRY POINT. `strategy` decides the shape, not the caller, and all three
 ---paths converge on the same thing: an ordinary Paseo workspace with a
 ---directory. That is the seam -- Paseo never learns whether it is looking at
 ---six assembled worktrees, one it cut itself, or a plain checkout.
----@param opts { name: string, root?: string, new?: boolean, configure?: fun(ctx: table, done: fun(m: table|nil, notes: table[]|nil)) }
+---@param opts { name: string, root?: string, new?: boolean, first?: paseo.FirstAgent, configure?: fun(ctx: table, done: fun(m: table|nil, notes: table[]|nil)) }
 ---@param callback fun(id: string|nil, err: string|nil, plan: paseo.Strategy|nil, workspace: paseo.PaseoWorkspace|nil)
 function M.create(opts, callback)
   if not opts.name or opts.name == "" then
@@ -457,6 +467,31 @@ function M.assemble(plan, opts, callback)
   end
 
   local host_id = opts.host_id
+
+  -- THE FIRST AGENT, when the caller already has its prompt. It rides the
+  -- same request as the workspace, because that is the only request the
+  -- daemon names a workspace from: a workspace created bare and handed an
+  -- agent afterwards keeps its branch name -- `main`, `ws/thing` -- for good.
+  -- And no title beside a prompt: the name typed here still picks the
+  -- branch and the directory, but an explicit title is permanent and would
+  -- stop the daemon naming it from what you asked for.
+  local first = opts.first
+  local function with_first(args)
+    if not (first and first.prompt and first.prompt ~= "") then
+      return args
+    end
+    args.title = nil
+    args.prompt = first.prompt
+    args.provider = first.provider
+    args.modeId = first.modeId
+    args.thinkingOptionId = first.thinkingOptionId
+    args.featureValues = first.featureValues
+    args.attachments = first.attachments
+    args.images = first.images
+    args.agentTitle = first.title
+    return args
+  end
+
   bridge.ensure(function(err)
     if err then
       return callback(nil, err, plan)
@@ -467,7 +502,7 @@ function M.assemble(plan, opts, callback)
       -- checkout -- not isolation at all, just a second name for the same
       -- files, which is the trap this branch exists to avoid.
       local prefix = require("paseo.config").get().workspaces.branch_prefix or "ws/"
-      return bridge.request("workspace.create", {
+      return bridge.request("workspace.create", with_first {
         cwd = plan.repo,
         worktree = true,
         branch = prefix .. opts.name,
@@ -477,6 +512,7 @@ function M.assemble(plan, opts, callback)
         callback(result and result.id, create_err, plan, result and {
           id = result.id,
           name = opts.name,
+          agent_id = result.agentId,
           directory = result.directory,
           project = plan.repo,
           kind = "worktree",
@@ -491,7 +527,7 @@ function M.assemble(plan, opts, callback)
     -- exact directory, so assembling twice does not litter the app with
     -- duplicates pointing at the same place.
     local op = opts.new and "workspace.create" or "workspace.open"
-    local args = opts.new and { cwd = directory, title = opts.name } or { cwd = directory }
+    local args = opts.new and with_first { cwd = directory, title = opts.name } or { cwd = directory }
     if plan.kind == "assemble" then
       -- Inside the project, not beside it as one of its own: see
       -- `M.parent_project`.
@@ -501,6 +537,7 @@ function M.assemble(plan, opts, callback)
       callback(result and result.id, open_err, plan, result and {
         id = result.id,
         name = opts.name,
+        agent_id = result.agentId,
         directory = result.directory or directory,
         project = plan.project or plan.root,
         kind = plan.kind == "local" and "directory" or plan.kind,

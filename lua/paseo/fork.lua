@@ -259,10 +259,23 @@ local function into_workspace(fork, settings)
       if not prompt then
         return
       end
+      -- The agent rides the request that creates the workspace: it is the
+      -- only one the daemon names a workspace from, and this already has the
+      -- prompt to name it with.
+      local title = fork.title and ("Fork of " .. fork.title) or nil
       require("paseo.workspaces").create({
         name = name,
         root = fork.cwd,
         new = true,
+        first = {
+          prompt = prompt,
+          provider = settings.provider,
+          modeId = settings.modeId,
+          thinkingOptionId = settings.thinkingOptionId,
+          featureValues = settings.featureValues,
+          attachments = { fork.attachment },
+          title = title,
+        },
       }, function(id, create_err, _, workspace)
         vim.schedule(function()
           if create_err then
@@ -273,7 +286,20 @@ local function into_workspace(fork, settings)
           end
           local function finish(resolved)
             resolved.name = resolved.name or name
-            create_agent(fork, resolved, prompt, settings, { created = true })
+            local agent_id = workspace and workspace.agent_id
+            if not agent_id then
+              return notify(
+                ("could not create the forked agent; the empty workspace %q was retained"):format(
+                  resolved.name
+                )
+              )
+            end
+            require("paseo.workspaces").open(resolved)
+            require("paseo.ui.chat").open {
+              root = resolved.directory or fork.cwd,
+              agent_id = agent_id,
+              title = title,
+            }
           end
           if workspace and workspace.directory then
             return finish(workspace)

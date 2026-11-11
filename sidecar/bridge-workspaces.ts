@@ -97,6 +97,7 @@ async function createWithFirstAgent(
       config: {
         ...splitProvider(String(req.provider)),
         cwd: sourceCwd,
+        ...(req.agentTitle ? { title: String(req.agentTitle) } : {}),
         ...(req.modeId ? { modeId: String(req.modeId) } : {}),
         ...(req.thinkingOptionId
           ? { thinkingOptionId: String(req.thinkingOptionId) }

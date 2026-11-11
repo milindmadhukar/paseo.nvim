@@ -21,6 +21,8 @@
 --- the window is pointed at. This hands back the settings and lets the caller
 --- do what it already did.
 
+local config = require "paseo.config"
+
 local M = {}
 
 ---The three things there are to start, in menu order.
@@ -76,65 +78,88 @@ end
 ---belongs to is a different chat.
 ---@param root string
 ---@param callback fun(result: table|nil, err: string|nil)
-local function into_workspace(root, callback)
+---A new workspace with an agent in it: a name, the settings, the first
+---prompt -- and then ONE request for all of it.
+---
+---The prompt is asked for BEFORE anything is created, because it has to ride
+---the request that creates the workspace: that is the only request the daemon
+---names a workspace from. This used to create the workspace bare and start the
+---agent afterwards, so the app's sidebar and the rail showed the slug typed
+---here -- or the branch -- for the life of the workspace. The name still picks
+---the directory and the branch; the TITLE comes from what you asked for.
+---@param root string
+---@param callback fun(result: table|nil, err: string|nil)
+---@param preferred? string
+local function into_workspace(root, callback, preferred)
   vim.ui.input({ prompt = "New workspace name: ", default = slug(root) }, function(name)
     if not name or name == "" then
       return callback(nil, nil)
     end
-    require("paseo.workspaces").create({
-      name = name,
-      root = root,
-      new = true,
-    }, function(id, create_err, _, workspace)
-      vim.schedule(function()
-        if create_err then
-          return callback(nil, create_err)
-        end
-        if not id then
+    require("paseo.ui.create").review({ cwd = root, preferred = preferred }, function(settings, review_err)
+      if review_err then
+        return callback(nil, review_err)
+      end
+      if not settings then
+        return callback(nil, nil)
+      end
+      require("paseo.ui.prompt").open({
+        title = "First prompt — it names the workspace",
+        root = root,
+      }, function(prompt)
+        if not prompt or vim.trim(prompt) == "" then
           return callback(nil, nil)
         end
+        require("paseo.workspaces").create({
+          name = name,
+          root = root,
+          new = true,
+          first = {
+            prompt = prompt,
+            provider = settings.provider,
+            modeId = settings.modeId,
+            thinkingOptionId = settings.thinkingOptionId,
+            featureValues = settings.featureValues,
+          },
+        }, function(id, create_err, _, workspace)
+          vim.schedule(function()
+            if create_err then
+              return callback(nil, create_err)
+            end
+            if not id then
+              return callback(nil, nil)
+            end
+            local agent_id = workspace and workspace.agent_id
+            if not agent_id then
+              -- The workspace is real and on disk. Saying so is the
+              -- difference between "try again" and "go and find out what
+              -- that directory is".
+              return callback(
+                nil,
+                ("the workspace %q was created, but no agent started in it"):format(name)
+              )
+            end
+            config.get().paseo.provider = settings.provider
 
-        local function finish(resolved)
-          resolved.name = resolved.name or name
-          require("paseo.workspaces").new_agent_session(resolved, {
-            title = "paseo.nvim · " .. (resolved.name or name),
-          }, function(agent_id, agent_err)
-            vim.schedule(function()
-              if agent_err and agent_err ~= "cancelled" then
-                -- The workspace is real and on disk. Saying so is the
-                -- difference between "try again" and "go and find out what
-                -- that directory is".
-                return callback(
-                  nil,
-                  ("the workspace %q was created, but no agent started in it — %s"):format(
-                    resolved.name or name,
-                    agent_err
-                  )
-                )
-              end
-              if not agent_id then
-                return callback(nil, nil)
-              end
+            local function finish(resolved)
+              resolved.name = resolved.name or name
               require("paseo.workspaces").open(resolved)
               require("paseo.ui.chat").open {
                 root = resolved.directory,
                 agent_id = agent_id,
-                title = resolved.name,
               }
               callback({ kind = "agent", id = agent_id, moved = true }, nil)
-            end)
-          end)
-        end
-
-        if workspace and workspace.directory then
-          return finish(workspace)
-        end
-        require("paseo.workspaces").get(id, function(resolved, get_err)
-          vim.schedule(function()
-            if not resolved then
-              return callback(nil, get_err or "could not resolve the created workspace")
             end
-            finish(resolved)
+            if workspace.directory then
+              return finish(workspace)
+            end
+            require("paseo.workspaces").get(id, function(resolved, get_err)
+              vim.schedule(function()
+                if not resolved then
+                  return callback(nil, get_err or "could not resolve the created workspace")
+                end
+                finish(resolved)
+              end)
+            end)
           end)
         end)
       end)
@@ -169,7 +194,7 @@ function M.agent(opts, callback)
       return callback(nil, nil)
     end
     if choice.id == "workspace" then
-      return into_workspace(opts.root, callback)
+      return into_workspace(opts.root, callback, opts.preferred)
     end
     require("paseo.workspaces").new_agent_session(opts.workspace, {}, function(id, err)
       vim.schedule(function()
@@ -239,7 +264,7 @@ function M.open(opts, callback)
           notify(err)
         end
         callback(result, err)
-      end)
+      end, opts.preferred)
     end
     require("paseo.ui.create").review(
       { cwd = opts.root, preferred = opts.preferred },

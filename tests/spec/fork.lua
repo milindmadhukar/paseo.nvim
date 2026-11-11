@@ -82,6 +82,7 @@ local function test_fork()
         id = "ws-fork",
         name = opts.name,
         directory = "/work/fork",
+        agent_id = opts.first and "agent-fork" or nil,
       })
     end
     workspaces.open = function(ws)
@@ -230,8 +231,12 @@ local function test_fork()
     eq("fork: creates from the source workspace root", created.root, "/work/source")
     eq("fork: uses the requested workspace name", created.name, "source-fork")
     eq("fork: requires a distinct workspace even for a shared directory", created.new, true)
-    eq("fork: creates the first prompt atomically", agent_args.prompt, prompt_answer)
-    eq("fork: attaches the complete chat history atomically", agent_args.attachments, {
+    -- WITH the workspace, in one request: the only one the daemon names a
+    -- workspace from. `first` is that request's agent.
+    local first = created.first
+    eq("fork: no separate agent.create after the workspace", agent_args, nil)
+    eq("fork: creates the first prompt atomically", first.prompt, prompt_answer)
+    eq("fork: attaches the complete chat history atomically", first.attachments, {
       {
         type = "text",
         mimeType = "text/plain",
@@ -240,10 +245,10 @@ local function test_fork()
       },
     })
     eq("fork: preserves source settings", {
-      agent_args.provider,
-      agent_args.modeId,
-      agent_args.thinkingOptionId,
-      agent_args.featureValues.fast_mode,
+      first.provider,
+      first.modeId,
+      first.thinkingOptionId,
+      first.featureValues.fast_mode,
     }, { "codex/old", "full-access", "high", true })
     eq("fork: opens the exact created workspace", opened.id, "ws-fork")
     eq("fork: opens the new agent session", chat_opened.agent_id, "agent-fork")
