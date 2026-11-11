@@ -1936,7 +1936,9 @@ lua/paseo/          the plugin
   skills.lua        installing the bundled skills where an agent can see them
 sidecar/            paseo-bridge.ts entry point, bridge-*.ts modules, SDK deps
 .agents/skills/     the bundled agent skills -- the source of truth
-.claude/skills/     symlinks into .agents/skills, for Claude Code
+.claude/skills/     symlinks into .agents/skills, for Claude Code -- plus
+                    paseo-e2e, the dev-only skill for driving this checkout
+                    against real test agents (not shipped)
 tests/              fixtures + suites, run by tests/run.sh
 doc/                :help paseo
 ```
