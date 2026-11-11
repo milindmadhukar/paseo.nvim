@@ -71,50 +71,77 @@ local function notify(message, level)
   vim.notify("paseo: " .. message, level or vim.log.levels.ERROR)
 end
 
----Start an agent in a workspace of its own, and point the editor at it.
----
----The whole thing, unlike the "here" case: there is nothing for the caller to
----adopt, because the agent is not in the caller's directory and the chat it
----belongs to is a different chat.
----@param root string
+---The settings screen, then a DRAFT: the ordinary conversation view with
+---nothing created yet. The first message creates it -- `start` says how.
+---@param ctx paseo.StartContext
+---@param start? fun(chat: table): fun(prompt: string, images: table[], done: fun(err: string|nil, agent_id: string|nil))
 ---@param callback fun(result: table|nil, err: string|nil)
----A new workspace with an agent in it: a name, the settings, the first
----prompt -- and then ONE request for all of it.
+---@param banner? string
+local function draft(ctx, start, callback, banner)
+  require("paseo.ui.create").review({
+    cwd = ctx.local_root or ctx.root,
+    preferred = ctx.preferred,
+    host_id = ctx.host_id,
+  }, function(settings, review_err)
+    if review_err then
+      return callback(nil, review_err)
+    end
+    if not settings then
+      return callback(nil, nil)
+    end
+    vim.schedule(function()
+      local chat
+      chat = require("paseo.ui.chat").draft {
+        root = ctx.root,
+        local_root = ctx.local_root,
+        host_id = ctx.host_id,
+        settings = settings,
+        banner = banner,
+        -- Late-bound: the start needs the chat, and the chat is made with it.
+        start = start and function(prompt, images, done)
+          return start(chat)(prompt, images, done)
+        end or nil,
+      }
+      callback({ kind = "agent", draft = true, moved = true, chat = chat }, nil)
+    end)
+  end)
+end
+
+---@class paseo.StartContext
+---@field root string           Where it starts, as the daemon sees it.
+---@field local_root? string    The same directory on this machine.
+---@field host_id? string
+---@field preferred? string     The provider the settings screen opens on.
+---@field workspace_id? string  The workspace "here" means, when known.
+
+---A new agent in a workspace of its own: a name for its directory and
+---branch, the settings -- and then the ordinary conversation view, empty.
 ---
----The prompt is asked for BEFORE anything is created, because it has to ride
----the request that creates the workspace: that is the only request the daemon
----names a workspace from. This used to create the workspace bare and start the
----agent afterwards, so the app's sidebar and the rail showed the slug typed
----here -- or the branch -- for the life of the workspace. The name still picks
----the directory and the branch; the TITLE comes from what you asked for.
----@param root string
+---NOTHING IS CREATED until you send the first message, and then everything
+---is, in one request: the workspace and its agent, with your words as the
+---agent's first prompt. That is the only request the daemon names a
+---workspace from. This used to ask for the prompt in a box of its own before
+---it would show you anything, which also meant the first prompt could not be
+---dictated, pasted as an image, or written with the composer's keys.
+---@param ctx paseo.StartContext
 ---@param callback fun(result: table|nil, err: string|nil)
----@param preferred? string
-local function into_workspace(root, callback, preferred)
+local function into_workspace(ctx, callback)
+  local root = ctx.local_root or ctx.root
   vim.ui.input({ prompt = "New workspace name: ", default = slug(root) }, function(name)
     if not name or name == "" then
       return callback(nil, nil)
     end
-    require("paseo.ui.create").review({ cwd = root, preferred = preferred }, function(settings, review_err)
-      if review_err then
-        return callback(nil, review_err)
-      end
-      if not settings then
-        return callback(nil, nil)
-      end
-      require("paseo.ui.prompt").open({
-        title = "First prompt — it names the workspace",
-        root = root,
-      }, function(prompt)
-        if not prompt or vim.trim(prompt) == "" then
-          return callback(nil, nil)
-        end
+    draft(ctx, function(chat)
+      return function(prompt, images, done)
+        local settings = chat.draft and chat.draft.settings or {}
         require("paseo.workspaces").create({
           name = name,
           root = root,
+          host_id = ctx.host_id,
           new = true,
           first = {
             prompt = prompt,
+            images = #images > 0 and images or nil,
             provider = settings.provider,
             modeId = settings.modeId,
             thinkingOptionId = settings.thinkingOptionId,
@@ -123,31 +150,27 @@ local function into_workspace(root, callback, preferred)
         }, function(id, create_err, _, workspace)
           vim.schedule(function()
             if create_err then
-              return callback(nil, create_err)
+              return done(create_err)
             end
             if not id then
-              return callback(nil, nil)
+              return done "cancelled"
             end
             local agent_id = workspace and workspace.agent_id
             if not agent_id then
               -- The workspace is real and on disk. Saying so is the
               -- difference between "try again" and "go and find out what
               -- that directory is".
-              return callback(
-                nil,
-                ("the workspace %q was created, but no agent started in it"):format(name)
-              )
+              return done(("the workspace %q was created, but no agent started in it"):format(name))
             end
             config.get().paseo.provider = settings.provider
 
             local function finish(resolved)
               resolved.name = resolved.name or name
+              local chats = require "paseo.ui.chat"
+              chats.discard(chat)
               require("paseo.workspaces").open(resolved)
-              require("paseo.ui.chat").open {
-                root = resolved.directory,
-                agent_id = agent_id,
-              }
-              callback({ kind = "agent", id = agent_id, moved = true }, nil)
+              chats.open { root = resolved.directory, agent_id = agent_id }
+              done(nil)
             end
             if workspace.directory then
               return finish(workspace)
@@ -155,25 +178,56 @@ local function into_workspace(root, callback, preferred)
             require("paseo.workspaces").get(id, function(resolved, get_err)
               vim.schedule(function()
                 if not resolved then
-                  return callback(nil, get_err or "could not resolve the created workspace")
+                  return done(get_err or "could not resolve the created workspace")
                 end
                 finish(resolved)
               end)
             end)
           end)
         end)
-      end)
-    end)
+      end
+    end, callback, ("new workspace %s — your first message creates it, and names it"):format(name))
   end)
+end
+
+---A new agent in the workspace you are in, as a draft: the conversation view
+---at once, and the agent made by your first message, with it as its prompt.
+---
+---Into THAT workspace by id when it is known -- the one the agent on screen
+---belongs to -- so a second agent beside the first lands beside it, not in a
+---fresh workspace on the same directory.
+---@param ctx paseo.StartContext
+---@param callback fun(result: table|nil, err: string|nil)
+local function into_here(ctx, callback)
+  if not ctx.workspace_id then
+    -- `agent.start`: joins a named workspace, or makes one named from the
+    -- prompt where there is only an untitled checkout.
+    return draft(ctx, nil, callback)
+  end
+  draft(ctx, function(chat)
+    return function(prompt, images, done)
+      local settings = chat.draft and chat.draft.settings or {}
+      require("paseo.bridge").request("agent.create", {
+        workspaceId = ctx.workspace_id,
+        provider = settings.provider,
+        modeId = settings.modeId,
+        thinkingOptionId = settings.thinkingOptionId,
+        featureValues = settings.featureValues,
+        prompt = prompt,
+        images = #images > 0 and images or nil,
+      }, function(err, result)
+        if err or not (result and result.id) then
+          return done(err or "no agent was created")
+        end
+        done(nil, result.id)
+      end, ctx.host_id)
+    end
+  end, callback)
 end
 
 ---Where an agent goes, when WHAT it is has already been settled.
 ---
----The same two places `M.CHOICES` offers and the same words for them. A
----surface that already has a key meaning "agent" -- the Sessions panel's `a`
------ has answered the first question and should not be asked it again; what it
----could never ask before is this one, so starting an agent from there always
----put it in the workspace you were already in.
+---The same two places `M.CHOICES` offers and the same words for them.
 M.WHERE = {
   { id = "here", label = "here", note = "in this workspace" },
   { id = "workspace", label = "a new workspace", note = "a directory of its own" },
@@ -181,11 +235,9 @@ M.WHERE = {
 }
 
 ---Start an agent, having asked only where it goes.
----
----@param opts { root: string, workspace: table }  `workspace` is the Paseo
----        workspace `root` is in, which the caller already resolved.
+---@param ctx paseo.StartContext
 ---@param callback fun(result: table|nil, err: string|nil)
-function M.agent(opts, callback)
+function M.agent(ctx, callback)
   vim.ui.select(M.WHERE, {
     prompt = "Start an agent…",
     format_item = spell,
@@ -194,23 +246,9 @@ function M.agent(opts, callback)
       return callback(nil, nil)
     end
     if choice.id == "workspace" then
-      return into_workspace(opts.root, callback, opts.preferred)
+      return into_workspace(ctx, callback)
     end
-    require("paseo.workspaces").new_agent_session(opts.workspace, {}, function(id, err)
-      vim.schedule(function()
-        if err and err ~= "cancelled" then
-          return callback(nil, err)
-        end
-        if not id then
-          return callback(nil, nil)
-        end
-        require("paseo.ui.chat").open {
-          root = opts.workspace.directory or opts.root,
-          agent_id = id,
-        }
-        callback({ kind = "agent", id = id, moved = true }, nil)
-      end)
-    end)
+    into_here(ctx, callback)
   end)
 end
 
@@ -242,13 +280,13 @@ end
 
 ---Ask, then do it.
 ---
----@param opts { root: string, preferred?: string }
+---@param opts paseo.StartContext
 ---@param callback fun(result: table|nil, err: string|nil)
 ---        `result.kind` is `"agent"` or `"terminal"`.
 ---        For an agent started HERE, `result.draft` carries the settings and
----        nothing has been created -- the caller creates it.
+---        nothing has been created -- the caller makes its own chat the draft.
 ---        For one started in a new workspace, `result.moved` is true and the
----        editor is already pointed at it.
+---        editor is already showing that workspace's draft.
 ---        Both `result` and `err` nil means cancelled, which is not an error.
 function M.open(opts, callback)
   M.choose(opts, function(choice)
@@ -259,12 +297,12 @@ function M.open(opts, callback)
       return into_terminal(opts.root, callback)
     end
     if choice == "workspace" then
-      return into_workspace(opts.root, function(result, err)
+      return into_workspace(opts, function(result, err)
         if err then
           notify(err)
         end
         callback(result, err)
-      end, opts.preferred)
+      end)
     end
     require("paseo.ui.create").review(
       { cwd = opts.root, preferred = opts.preferred },
@@ -279,6 +317,61 @@ function M.open(opts, callback)
       end
     )
   end)
+end
+
+---What `<C-n>` offers on the dashboard: everything there is to start, from
+---wherever you are on it.
+M.NEW = {
+  { id = "here", label = "new agent", note = "in this workspace" },
+  { id = "workspace", label = "new agent in a new workspace", note = "a directory of its own" },
+  { id = "terminal", label = "new terminal", note = "a shell in this workspace" },
+}
+
+---Start something from the dashboard -- `kind` says what, or a menu asks.
+---
+---THE ONE WAY IN, whichever key or click it came from: `<C-n>` and the
+---footer's `new` ask; the session tree's `a`, `w` and `t` already know.
+---@param ctx paseo.StartContext
+---@param kind? "here"|"workspace"|"terminal"
+function M.new(ctx, kind)
+  local function report(_, err)
+    if err and err ~= "cancelled" then
+      notify(err)
+    end
+  end
+  local function go(id)
+    if id == "terminal" then
+      return into_terminal(ctx.root, report)
+    end
+    if id == "workspace" then
+      return into_workspace(ctx, report)
+    end
+    if id == "here" then
+      return into_here(ctx, report)
+    end
+  end
+  if kind then
+    return go(kind)
+  end
+  vim.ui.select(M.NEW, { prompt = "Start…", format_item = spell }, function(choice)
+    if choice then
+      go(choice.id)
+    end
+  end)
+end
+
+---The context `M.new` needs, from the chat on screen.
+---@param chat table
+---@return paseo.StartContext
+function M.context(chat)
+  local agent = chat.agent_id and require("paseo.agents").get(chat.agent_id, chat.host_id)
+  return {
+    root = chat.root,
+    local_root = chat.local_root,
+    host_id = chat.host_id,
+    preferred = (require("paseo.hosts").get(chat.host_id) or {}).provider or config.get().paseo.provider,
+    workspace_id = agent and agent.workspaceId or nil,
+  }
 end
 
 return M

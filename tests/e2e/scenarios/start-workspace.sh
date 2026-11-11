@@ -1,5 +1,6 @@
-# "New agent in a new workspace" sends its first prompt WITH the workspace,
-# so the daemon names it -- a worktree here, since the fixture is one repo.
+# "New agent in a new workspace" opens the ordinary view as a draft, and its
+# first message is sent WITH the workspace, so the daemon names it -- a
+# worktree here, since the fixture is one repo.
 #
 # The regression: the workspace was created bare (titled with the slug typed
 # for its directory) and the agent started in it afterwards, so its name was
@@ -7,6 +8,10 @@
 source "$(dirname "$0")/../lib.sh"
 
 repo="$(fresh_repo)"
+count_workspaces() {
+  "$D" paseo workspace ls --json 2>/dev/null | python3 -I -c 'import json,sys; print(len(json.load(sys.stdin)))'
+}
+before="$(count_workspaces)"
 
 "$E" stop
 "$E" start "$repo"
@@ -15,9 +20,11 @@ sleep 5 # the start menu is a vim.ui.select prompt, which nothing can wait on
 "$E" keys 2 Enter
 sleep 1
 "$E" keys C-u 'billing-fix' Enter
-# The prompt box: a floating markdown buffer that opens in insert mode. (Not
-# by its name -- naming can fail on a collision and leave it `[No Name]`.)
-create_from_review 'vim.bo.filetype == "markdown" and vim.api.nvim_win_get_config(0).relative ~= "" and vim.fn.mode() == "i"'
+# No prompt box: the ordinary conversation view, a draft, with the composer
+# in insert mode -- and nothing created yet.
+create_from_review 'require("paseo.ui.chat").current() and require("paseo.ui.chat").current().draft ~= nil and vim.fn.mode() == "i"'
+[ "$(count_workspaces)" = "$before" ] || fail "the draft created a workspace"
+"$E" shot start-workspace-draft >/dev/null
 "$E" keys 'Fix the invoice rounding in billing' Escape Enter
 
 "$E" wait 'require("paseo.ui.chat").current() and require("paseo.ui.chat").current().agent_id ~= nil' 60 \

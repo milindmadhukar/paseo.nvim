@@ -454,6 +454,34 @@ local function send(chat, alternate)
   if chat.draft and not chat.agent_id then
     local draft = chat.draft
     local settings = draft.settings
+
+    ---A start that failed hands the words back: it must not eat the prompt.
+    local function give_back(err)
+      M.set_streaming(chat, false)
+      vim.api.nvim_buf_set_lines(chat.composer, 0, -1, false, vim.split(prompt, "\n"))
+      chat.images = attached
+      M.fit_composer(chat)
+      notice(chat, "could not start: " .. tostring(err), "error")
+    end
+
+    -- A draft that knows how to start itself -- a new WORKSPACE, whose first
+    -- agent rides the request that creates it. See `M.draft`.
+    if draft.start then
+      notice(chat, "starting…")
+      return draft.start(prompt, images, function(err, agent_id)
+        vim.schedule(function()
+          if err then
+            return give_back(err)
+          end
+          -- An agent HERE binds to this chat; a new workspace has already
+          -- pointed the editor at a chat of its own.
+          if agent_id then
+            draft.bind(agent_id)
+          end
+        end)
+      end)
+    end
+
     notice(chat, "starting…")
     return bridge.request("agent.start", {
       cwd = chat.root,
@@ -467,12 +495,7 @@ local function send(chat, alternate)
     }, function(err, result)
       vim.schedule(function()
         if err or not (result and result.agentId) then
-          M.set_streaming(chat, false)
-          -- Give the words back: a failed start must not eat the prompt.
-          vim.api.nvim_buf_set_lines(chat.composer, 0, -1, false, vim.split(prompt, "\n"))
-          chat.images = attached
-          M.fit_composer(chat)
-          return notice(chat, "could not start: " .. tostring(err or "no agent"), "error")
+          return give_back(err or "no agent")
         end
         draft.bind(result.agentId)
       end)
@@ -1187,6 +1210,103 @@ end
 
 -- --------------------------------------------------------------------- API
 
+---Turn `chat` into a DRAFT: settings chosen, nothing created, the composer
+---waiting for the message that will create it.
+---
+---Nothing is created until that message because the daemon names a workspace
+---from the first prompt, and only when the prompt rides the request that
+---creates it -- so an agent made empty here left every workspace started from
+---the editor called `main`. `send` sees `chat.draft` and starts it.
+---@param chat paseo.Chat
+---@param key string  Where `chats` holds it until it is an agent.
+---@param opts { settings: table, project?: string, start?: fun(prompt: string, images: table[], done: fun(err: string|nil, agent_id: string|nil)), banner?: string }
+local function make_draft(chat, key, opts)
+  local settings = opts.settings
+  local host = hosts.get(chat.host_id)
+  -- What the bar shows until the agent exists and its own settings arrive:
+  -- the choices just made, rather than `…`.
+  chat.provider = settings.provider
+  chat.mode = settings.modeId
+  chat.draft = {
+    settings = settings,
+    project = opts.project
+      or (host and host.local_host and require("paseo.workspaces").parent_project(chat.local_root or chat.root))
+      or nil,
+    start = opts.start,
+    ---Bind the agent the first message created.
+    bind = function(agent_id)
+      chat.draft = nil
+      config.get().paseo.provider = settings.provider
+      chat.agent_id = agent_id
+      chat.provider = settings.provider
+      chats[key] = nil
+      chats[hosts.key(chat.host_id, agent_id)] = chat
+      vim.schedule(function()
+        initialise(chat)
+      end)
+    end,
+  }
+  vim.schedule(function()
+    notice(chat, opts.banner or "new session — your first message starts it")
+    set_winbar(chat)
+    if chat.win_composer and vim.api.nvim_win_is_valid(chat.win_composer) then
+      vim.api.nvim_set_current_win(chat.win_composer)
+      vim.cmd.startinsert()
+    end
+  end)
+end
+
+---How many drafts have been opened: each gets a key of its own.
+local draft_count = 0
+
+---Open a DRAFT on the surface you are on: the ordinary conversation view,
+---empty, with the composer waiting. Nothing exists on the daemon until the
+---first message, which creates the agent -- and, with `start`, whatever else
+---it needs, a whole workspace -- in the request that can NAME it.
+---
+---A chat of its own, never the one on screen: that one already has an agent,
+---and a draft beside it is a second session in the same workspace.
+---
+---`start(prompt, images, done)` replaces the default start (`agent.start`,
+---which may make a fresh directory workspace). It is handed the first message
+---and answers `done(err)` on failure, `done(nil, agent_id)` to bind the agent
+---it made to this chat, or `done(nil)` when it pointed the editor at a chat
+---of its own.
+---@param opts { root: string, local_root?: string, host_id?: string, settings: table, project?: string, start?: fun(prompt: string, images: table[], done: fun(err: string|nil, agent_id: string|nil)), banner?: string }
+---@return paseo.Chat
+function M.draft(opts)
+  local host = assert(hosts.get(opts.host_id), "unknown Paseo host")
+  draft_count = draft_count + 1
+  local key = hosts.key(host.id, "draft:" .. draft_count)
+  local chat = {
+    root = opts.root,
+    local_root = opts.local_root or opts.root,
+    host_id = host.id,
+    streaming = false,
+    pending = {},
+    images = {},
+  }
+  chats[key] = chat
+  current = chat
+  layout(chat)
+  make_draft(chat, key, opts)
+  return chat
+end
+
+---Throw a draft away -- its first message made something that another chat
+---is now showing. Its window goes only if it is still the one up.
+---@param chat paseo.Chat
+function M.discard(chat)
+  for k, c in pairs(chats) do
+    if c == chat then
+      chats[k] = nil
+    end
+  end
+  if current == chat then
+    current = nil
+  end
+end
+
 ---Where a chat opens when nobody said which directory.
 ---
 ---THE DIRECTORY YOU ARE STANDING IN, resolved to the unit of work that
@@ -1430,36 +1550,7 @@ function M.open(opts, callback)
         -- the prompt is part of the request that creates it -- so creating the
         -- agent here, empty, is what left every workspace started from the
         -- editor called `main`. `send` sees `chat.draft` and starts it.
-        local draft = result.draft
-        -- What the bar shows until the agent exists and its own settings
-        -- arrive: the choices just made, rather than `…`.
-        chat.provider = draft.provider
-        chat.mode = draft.modeId
-        chat.draft = {
-          settings = draft,
-          project = host.local_host and require("paseo.workspaces").parent_project(root) or nil,
-          ---Bind the agent the first message created. `adopt` without the
-          ---callback: M.open's caller was answered when the draft opened.
-          bind = function(agent_id)
-            chat.draft = nil
-            config.get().paseo.provider = draft.provider
-            chat.agent_id = agent_id
-            chat.provider = draft.provider
-            chats[key] = nil
-            chats[hosts.key(host.id, agent_id)] = chat
-            vim.schedule(function()
-              initialise(chat)
-            end)
-          end,
-        }
-        vim.schedule(function()
-          notice(chat, "new session — your first message starts it")
-          set_winbar(chat)
-          if chat.win_composer and vim.api.nvim_win_is_valid(chat.win_composer) then
-            vim.api.nvim_set_current_win(chat.win_composer)
-            vim.cmd.startinsert()
-          end
-        end)
+        make_draft(chat, key, { settings = result.draft })
         callback(chat, nil)
       end)
     end, host.id)

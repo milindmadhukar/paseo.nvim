@@ -392,15 +392,19 @@ export function agentOps(ctx: BridgeConnection): Ops {
         provider = `${entry.provider}/${model.id}`;
       }
 
+      // Images ride with a first prompt, as they do on `agent.start`: a
+      // draft's first message is whatever you sent, screenshots included.
+      const images = req.prompt ? pictures(req) : null;
       const agent = await workspace.agents.create({
         config: creationConfig(req, provider),
         ...(req.title ? { title: String(req.title) } : {}),
         ...(req.prompt ? { prompt: String(req.prompt) } : {}),
+        ...(images ? { images } : {}),
         ...(Array.isArray(req.attachments) && req.attachments.length > 0
           ? { attachments: req.attachments as any }
           : {}),
         labels: { "paseo.nvim": "session" },
-      });
+      } as any);
       return { id: agent.id, provider };
     },
 

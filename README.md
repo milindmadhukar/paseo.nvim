@@ -836,16 +836,19 @@ workspace somebody titled, keeps its name and the agent joins it. A plain
 checkout still called by its branch gets a fresh, named workspace beside it in
 the same project.
 
-**new agent in a new workspace** asks for a name, then the settings, then the
-first prompt, and only then creates the appropriate local/worktree/assembled
-workspace, **with the agent and the prompt in the same request**, and moves
-the editor there. The name picks the directory and the branch. The title comes
-from the prompt, the same way as above. Forking into a new workspace (`f`)
-works the same way. **new terminal** opens the [terminal picker](#terminals) and points the
-Chat tab at the PTY. `a` on the `Sessions` tab has already answered the first
-question and asks only the second — *here* or *a new workspace* — which it
-could not ask at all before, so every agent started from that panel shared a
-checkout with the one already in it.
+**new agent in a new workspace** asks for a name, then the settings, and then
+opens **the ordinary conversation view as a draft** — no box asking for the
+first prompt, so that prompt can be dictated, carry images, or be anything
+else the composer can do. Your first message creates the appropriate
+local/worktree/assembled workspace, **with the agent and that message in the
+same request**, and moves the editor there. The name picks the directory and
+the branch; the title comes from the message, the same way as above. Forking
+into a new workspace (`f`) sends its prompt with the workspace too. **new
+terminal** opens the [terminal picker](#terminals) and points the Chat tab at
+the PTY. `a` on the `Sessions` tab has already answered the first
+question and asks only the second — *here* or *a new workspace*. Either way the
+agent is a draft until its first message, and *here* joins the workspace you
+are in.
 
 An *automatic* open never reaches any of this: following a workspace switch
 passes `create = false`, so a workspace with no agent says so rather than
