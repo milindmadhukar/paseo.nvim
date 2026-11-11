@@ -66,6 +66,16 @@ local M = {}
 ---                       chrome, same six tabs -- in a real window with a
 ---                       buffer of its own, on a tab page of its own, using the
 ---                       whole screen rather than 94% of it.
+---@field send_behavior "steer"|"interrupt"|"queue"  What sending does while
+---                       the agent is mid-turn. "steer" (the default, as in the
+---                       Paseo app) folds the message into the running turn;
+---                       "interrupt" stops the turn and starts a new one with
+---                       it; "queue" holds it here and sends it when the turn
+---                       ends -- or interrupts, if the agent is waiting on a
+---                       permission, since a queued message would then never
+---                       go. The other key (`g<CR>`, `<S-CR>`) does the
+---                       opposite: queue when this steers, send now when it
+---                       queues. Sending to an idle agent is just sending.
 ---@field style string|paseo.Style  Frame language. A preset name --
 ---                       "plate", "rule", "rounded", "square" -- or a table of
 ---                       the same fields, which only has to name what it
@@ -368,6 +378,7 @@ local defaults = {
 
   ui = {
     surface = "float",
+    send_behavior = "steer",
 
     -- Derived from the colourscheme. The alternative is a plugin that looks
     -- pasted in, which is why this is the default and not the other way round.
@@ -606,6 +617,9 @@ function M.setup(opts)
   vim.validate("ui.pr.ttl", config.ui.pr.ttl, "number")
   vim.validate("review.agents", config.review.agents, "boolean")
   vim.validate("quit.warn_active_agents", config.quit.warn_active_agents, "boolean")
+  vim.validate("ui.send_behavior", config.ui.send_behavior, function(v)
+    return v == "steer" or v == "interrupt" or v == "queue"
+  end, '"steer", "interrupt" or "queue"')
   vim.validate("ui.surface", config.ui.surface, function(v)
     return v == "float" or v == "sidebar" or v == "buffer"
   end, '"float", "sidebar" or "buffer"')

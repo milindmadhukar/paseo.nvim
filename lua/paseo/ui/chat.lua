@@ -326,8 +326,70 @@ function M.stop(chat)
   notice(chat, "stopped", "warning")
 end
 
+---Hand a prompt to the agent.
 ---@param chat paseo.Chat
-local function send(chat)
+---@param prompt string
+---@param images table[]
+---@param behavior? "steer"|"interrupt"  Only while a turn is running.
+local function deliver(chat, prompt, images, behavior)
+  M.set_streaming(chat, true)
+  bridge.request("agent.send", {
+    agentId = chat.agent_id,
+    prompt = prompt,
+    -- Absent rather than empty: an empty list is still a list on the wire, and
+    -- the daemon should see a plain text message as a plain text message.
+    images = #images > 0 and images or nil,
+    activeTurnBehavior = behavior,
+  }, function(err)
+    if err then
+      vim.schedule(function()
+        M.set_streaming(chat, false)
+        notice(chat, "send failed: " .. err, "error")
+      end)
+    end
+  end, chat.host_id)
+end
+
+---What a send does while the agent is mid-turn. See |paseo-config.ui|'s
+---`send_behavior`; `alternate` is the other key, which does the opposite --
+---the app's long-press on Send.
+---@param chat paseo.Chat
+---@param alternate? boolean
+---@return "steer"|"interrupt"|"queue"
+function M.send_behavior(chat, alternate)
+  local behavior = config.get().ui.send_behavior or "steer"
+  if alternate then
+    behavior = behavior == "queue" and "steer" or "queue"
+  end
+  -- A message queued behind a turn that is waiting on YOU never goes: the
+  -- turn does not end until the permission is answered. The app interrupts
+  -- instead, and so does this.
+  if behavior == "queue" and #(chat.permissions or {}) > 0 then
+    behavior = "interrupt"
+  end
+  return behavior
+end
+
+---Send whatever was queued behind the turn that just ended, as one message.
+---@param chat paseo.Chat
+function M.flush_queue(chat)
+  local queued = chat.queued
+  if not queued or #queued == 0 then
+    return
+  end
+  chat.queued = nil
+  local prompts, images = {}, {}
+  for _, entry in ipairs(queued) do
+    prompts[#prompts + 1] = entry.prompt
+    vim.list_extend(images, entry.images)
+  end
+  set_winbar(chat)
+  deliver(chat, table.concat(prompts, "\n\n"), images)
+end
+
+---@param chat paseo.Chat
+---@param alternate? boolean  The other send key: see |M.send_behavior|.
+local function send(chat, alternate)
   local body = vim.api.nvim_buf_get_lines(chat.composer, 0, -1, false)
   local text = vim.trim(table.concat(body, "\n"))
 
@@ -366,6 +428,7 @@ local function send(chat)
   -- a user edit, and leaving it to `TextChanged` is how a four-line prompt
   -- leaves a four-line empty box behind after it is sent.
   M.fit_composer(chat)
+  local was_streaming = chat.streaming
   M.set_streaming(chat, true)
 
   -- The first message of a draft STARTS the session: the agent, and a
@@ -398,20 +461,23 @@ local function send(chat)
     end, chat.host_id)
   end
 
-  bridge.request("agent.send", {
-    agentId = chat.agent_id,
-    prompt = prompt,
-    -- Absent rather than empty: an empty list is still a list on the wire, and
-    -- the daemon should see a plain text message as a plain text message.
-    images = #images > 0 and images or nil,
-  }, function(err)
-    if err then
-      vim.schedule(function()
-        M.set_streaming(chat, false)
-        notice(chat, "send failed: " .. err, "error")
-      end)
+  -- MID-TURN, the daemon's own default is to INTERRUPT -- so typing a
+  -- follow-up while the agent worked used to stop it. The app steers by
+  -- default; so does this, and `ui.send_behavior` says otherwise.
+  if was_streaming then
+    local behavior = M.send_behavior(chat, alternate)
+    if behavior == "queue" then
+      chat.queued = chat.queued or {}
+      chat.queued[#chat.queued + 1] = { prompt = prompt, images = images }
+      -- On the bar (`N queued`), not in the transcript: a notice is a block,
+      -- and a block landing mid-stream splits the thought it lands in.
+      set_winbar(chat)
+      M.refresh(chat)
+      return
     end
-  end, chat.host_id)
+    return deliver(chat, prompt, images, behavior)
+  end
+  deliver(chat, prompt, images)
 end
 
 ---Put text in the composer, at the cursor when that is where you are.
@@ -751,6 +817,19 @@ local function make_buffers(chat)
         send(chat)
       end, vim.tbl_extend("force", opts, { desc = "paseo: send" }))
     end
+
+    -- THE OTHER SEND, the app's long-press: queue it behind the running turn
+    -- when sending steers, send it now when sending queues. `g<CR>` works in
+    -- every terminal; `<S-CR>` in those that can tell it from `<CR>`.
+    vim.keymap.set("n", "g<CR>", function()
+      send(chat, true)
+    end, vim.tbl_extend("force", opts, { desc = "paseo: send the other way (queue / now)" }))
+    vim.keymap.set({ "n", "i" }, "<S-CR>", function()
+      if vim.fn.mode() == "i" then
+        vim.cmd.stopinsert()
+      end
+      send(chat, true)
+    end, vim.tbl_extend("force", opts, { desc = "paseo: send the other way (queue / now)" }))
 
     -- And `<C-s>` means here what it means everywhere else: the session list.
     -- From the box that is a surface change, so it opens the dashboard on that
@@ -1834,6 +1913,13 @@ function M.attach_events()
       -- The open assistant block is finished; the next reply starts a new one
       -- rather than being appended to this answer.
       transcript.close(chat)
+      -- Whatever was queued behind it goes now -- but not behind a failure
+      -- or a stop, which is you or the agent saying "not like this".
+      if payload.outcome == "turn_completed" then
+        M.flush_queue(chat)
+      elseif chat.queued then
+        notice(chat, ("the turn did not finish — %d queued message(s) kept; send to deliver"):format(#chat.queued), "warning")
+      end
       if payload.error then
         transcript.upsert(chat, { kind = "notice", level = "error", message = payload.error })
       end

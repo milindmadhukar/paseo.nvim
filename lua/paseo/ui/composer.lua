@@ -443,8 +443,30 @@ end
 ---it means "the session list" everywhere in this plugin, and a composer that
 ---quietly meant something else by it was the one place the keyboard
 ---contradicted itself.
+---
+---MID-TURN it says what sending will DO, because that is no longer just
+---"send": `<CR>` steers (or interrupts, or queues -- `ui.send_behavior`) and
+---`g<CR>` does the other thing. A queue waiting behind the turn is counted.
+---@param chat? table
 ---@return table[]
-function M.send_hint()
+function M.send_hint(chat)
+  if chat and chat.streaming and chat.agent_id then
+    local chat_ui = require "paseo.ui.chat"
+    local primary = chat_ui.send_behavior(chat)
+    local other = chat_ui.send_behavior(chat, true)
+    local out = {}
+    if chat.queued and #chat.queued > 0 then
+      out[#out + 1] = { (" %d queued ·"):format(#chat.queued), "PaseoComposerKey" }
+    end
+    vim.list_extend(out, {
+      { " ", "PaseoComposerHint" },
+      { icons.spell "<CR>", "PaseoComposerKey" },
+      { " " .. primary .. " · ", "PaseoComposerHint" },
+      { "g" .. icons.spell "<CR>", "PaseoComposerKey" },
+      { " " .. other .. " ", "PaseoComposerHint" },
+    })
+    return out
+  end
   return {
     { " ", "PaseoComposerHint" },
     { icons.spell "<CR>", "PaseoComposerKey" },
@@ -495,7 +517,7 @@ function M.bar(chat, width)
     -- happen to share a row.
     tail[#tail + 1] = { " " .. style.BOX.square.h .. " ", "PaseoComposerBorder" }
   end
-  vim.list_extend(tail, M.send_hint())
+  vim.list_extend(tail, M.send_hint(chat))
 
   -- The tail first: it is the fixed cost, and what is left is the width the
   -- header is asked to fit -- ASKED, not cut to. A sixty-column sidebar has

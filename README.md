@@ -85,6 +85,8 @@ require("paseo").setup {
   ui = {
     surface = "float",            -- where `:Paseo chat` opens.
                                   -- Or "sidebar", or "buffer".
+    send_behavior = "steer",      -- sending mid-turn: "steer", "interrupt"
+                                  -- or "queue". `g<CR>` does the other.
 
     style = "plate",              -- frame language. See "Style".
 
@@ -602,6 +604,19 @@ it.) **`<C-s>` is not either of them.** It means *the session list* on the
 chrome and in every terminal — so a composer that quietly sent on it was one
 key with two meanings, both advertised on screen at once. From the composer it now does what it does
 everywhere else: takes you to the session list.
+
+**While the agent is working**, the hint changes to say what sending will
+*do*: `󰌑 steer · g󰌑 queue`. Mid-turn, the daemon's own default is to
+**interrupt**, so a follow-up typed here while the agent worked used to stop
+it. Now `<CR>` **steers** by default, as in the Paseo app: the message is
+folded into the running turn. Set `ui.send_behavior` to `"interrupt"` for the
+old behaviour, or to `"queue"` to hold the message until the turn ends.
+`g<CR>` (and `<S-CR>`, where the terminal can tell it apart) does the
+opposite: it queues when you steer and sends now when you queue, like
+long-pressing Send in the app. A queue is counted on the bar (`2 queued`) and
+sent as one message when the turn **completes**. It is kept, with a warning,
+when the turn fails or is stopped. While the agent is waiting on a permission,
+a queued message would never go, so queue interrupts instead.
 
 A bare digit is also a **count**, and the two panes these are bound on are
 ordinary buffers — so while the dashboard is open, `3p` and `5j` in the

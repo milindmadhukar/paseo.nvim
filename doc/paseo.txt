@@ -80,6 +80,7 @@ Defaults: >lua
 
       ui = {
         surface = "float",        -- or "sidebar", or "buffer"
+        send_behavior = "steer",  -- mid-turn: "steer", "interrupt", "queue"
 
         style = "plate",          -- frame language
         colors = "auto",          -- or "fixed": ignore the colourscheme
@@ -2018,6 +2019,9 @@ In the composer ~
     <M-CR>    send, from normal or insert mode. NOT <C-s>: that is the
               session list, here as everywhere else -- see |paseo-chat-keys-send|
     <C-CR>    the same, where the terminal can send it
+    g<CR>     send THE OTHER WAY while a turn runs: queue it when sending
+              steers, send it now when sending queues (|paseo-send-behavior|)
+    <S-CR>    the same, where the terminal can send it
     <C-s>     the session list
     p  P      paste -- an image if the clipboard has one, text otherwise
     1-6       jump to a tab (full screen; see ui.float.tab_keys)
@@ -2373,6 +2377,22 @@ the kitty keyboard protocol; the ones that do not never deliver it.
 `<C-s>` IS NOT EITHER OF THEM. It means THE SESSION LIST on the chrome and in
 every terminal -- so a composer that quietly sent on it was one key with two
 meanings, both advertised on screen at once. From the composer it now does what it does everywhere else.
+
+                                                        *paseo-send-behavior*
+WHILE THE AGENT IS WORKING the hint says what sending will DO --
+`󰌑 steer · g󰌑 queue`. Mid-turn, the daemon's own default is to INTERRUPT, so
+a follow-up typed while the agent worked used to stop it. `<CR>` now STEERS
+by default, as the Paseo app does: the message joins the running turn.
+`ui.send_behavior` = "interrupt" restores the old behaviour; "queue" holds the
+message until the turn ends. `g<CR>` (and `<S-CR>`) does the opposite of the
+setting -- queue when it steers, send now when it queues -- like long-pressing
+Send in the app.
+
+A queue is counted on the bar (`2 queued`) and sent as ONE message when the
+turn COMPLETES; it is kept, with a warning, when the turn fails or is stopped.
+While the agent waits on a permission, a queued message would never go, so
+queue interrupts instead. How well a provider steers is the provider's: one
+without native steering (a plain ACP agent) ends the turn and starts another.
 
 Its groups are `PaseoComposerBar` (the title row, and the base every cell on
 it is combined with), `PaseoComposerBorder`, `PaseoComposerLabel`,

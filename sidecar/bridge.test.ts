@@ -303,6 +303,33 @@ function agentSendHarness(
   return { calls, send: agentOps(ctx)["agent.send"] };
 }
 
+test("a mid-turn send says how it meets the running turn, and an idle one says nothing", async () => {
+  const seen: any[] = [];
+  const ctx = new BridgeConnection();
+  ctx.connected = (() => ({
+    agents: {
+      ref: () => ({
+        async send(_prompt: string, options: any) {
+          seen.push(options);
+        },
+      }),
+    },
+  })) as any;
+  const send = agentOps(ctx)["agent.send"];
+  await send({ op: "agent.send", agentId: "a", prompt: "x", activeTurnBehavior: "steer" });
+  await send({ op: "agent.send", agentId: "a", prompt: "x", activeTurnBehavior: "interrupt" });
+  // `queue` is the editor's own -- held until the turn ends -- and never a
+  // wire value; nor is anything else.
+  await send({ op: "agent.send", agentId: "a", prompt: "x", activeTurnBehavior: "queue" });
+  await send({ op: "agent.send", agentId: "a", prompt: "x" });
+  assert.deepEqual(seen, [
+    { activeTurnBehavior: "steer" },
+    { activeTurnBehavior: "interrupt" },
+    {},
+    {},
+  ]);
+});
+
 test("a send is only a send: naming an agent is the daemon's job", async () => {
   // The sidecar used to fetch the agent and rename it from the first prompt
   // before every send -- a 0.8 workaround. The daemon does it now, so a send

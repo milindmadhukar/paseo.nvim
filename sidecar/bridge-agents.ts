@@ -307,7 +307,15 @@ export function agentOps(ctx: BridgeConnection): Ops {
       // first prompt itself (verified against 0.15.3), which this used to do
       // by hand -- a fetch and an update in front of every send, for a 0.8
       // daemon nobody runs any more.
-      await agent.send(prompt, images ? { images } : undefined);
+      const behavior =
+        req.activeTurnBehavior === "steer" ||
+        req.activeTurnBehavior === "interrupt"
+          ? req.activeTurnBehavior
+          : undefined;
+      await agent.send(prompt, {
+        ...(images ? { images } : {}),
+        ...(behavior ? { activeTurnBehavior: behavior } : {}),
+      } as any);
       return { sent: true, images: images?.length ?? 0 };
     },
 
