@@ -1723,6 +1723,14 @@ picker does, `r` refetches, and `<C-h>`, `q` or `<Esc>` go back to where you
 were typing. See |paseo-config.ui.float.rail|. There is no rail on a dashboard
 narrower than 90 columns.
 
+PINNED workspaces lead the rail, with a pin; `P` pins or unpins the one
+under the cursor. The pin is the daemon's -- the same one the app's sidebar
+shows. BACKGROUND workspaces, which agents and plugins make for themselves,
+are hidden as the app hides them; `ui.float.rail.show_background = true`
+shows them. The list refetches the moment the daemon says a workspace changed
+-- created, archived, pinned or TITLED -- so a generated title appears when it
+is written, not on the next poll.
+
                                                           *paseo-chat-buffer*
 The DASHBOARD on its BUFFER MOUNT is the same dashboard in a real WINDOW --
 `:Paseo buf`, or `ui.surface = "buffer"`. Same chrome, same six tabs, same

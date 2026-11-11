@@ -131,6 +131,7 @@ M.ui = {
   features = g(0xf140b), -- md-lightning_bolt
   model = g(0xf09d1), -- md-brain
   settings = g(0xf0493), -- md-cog
+  pin = g(0xf0403), -- md-pin
   question = g(0xf173a), -- md-message_question
   repo = g(0xf0ccf), -- md-source_repository
   folder = g(0xf024b), -- md-folder

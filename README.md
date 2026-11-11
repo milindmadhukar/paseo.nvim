@@ -518,6 +518,15 @@ move, `<CR>` or a double click opens the workspace the way the picker does,
 were typing. It is 28 cells wide by default, never more than a quarter of the
 dashboard, and left out entirely below 90 columns.
 
+**Pinned workspaces lead it**, with a pin. `P` pins or unpins the one under the
+cursor. The pin is the daemon's, so it is the same pin the app's sidebar
+shows, whichever side set it. **Background workspaces**, which agents and
+plugins make for themselves, are hidden the way the app hides them unless
+"Show background" is on. `ui.float.rail.show_background = true` shows them.
+The list refetches the moment the daemon says a workspace changed (created,
+archived, pinned, or **titled**), so a generated title appears when it is
+written rather than on the next poll.
+
 ### The dashboard, on its buffer mount
 
 `:Paseo buf` — or `ui.surface = "buffer"` — puts everything above in a **real

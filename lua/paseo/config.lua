@@ -190,6 +190,9 @@ local M = {}
 ---                       rail is left out altogether below 90 columns.
 ---@field keys { toggle: string|false, focus: string|false }  Normal mode, on
 ---                       every buffer the dashboard owns. `false` unbinds.
+---@field show_background boolean  Show the workspaces agents and plugins make
+---                       for themselves, which the app's sidebar hides unless
+---                       "Show background" is on. Default false.
 
 ---@class paseo.Config.UI.Buffer
 ---
@@ -437,6 +440,7 @@ local defaults = {
       -- is remembered across restarts, and that wins once you have pressed it.
       rail = {
         enabled = true,
+        show_background = false,
         -- Cells. Never more than a quarter of the surface, and no rail at
         -- all on one narrower than 90.
         width = 28,

@@ -200,7 +200,7 @@ function M.load(done)
       cache.loading = false
       cache.err = err
       if list then
-        cache.list = ws.scope(list, root)
+        cache.list = M.arrange(ws.scope(list, root))
       end
       M.draw()
       if done then
@@ -211,6 +211,44 @@ function M.load(done)
       end
     end)
   end)
+end
+
+---What the rail shows of a project's workspaces, in the order it shows them.
+---
+---BACKGROUND ONES HIDDEN, as the app's sidebar hides them unless "Show
+---background" is on: workspaces agents and plugins make for themselves, which
+---are not places you went. `ui.float.rail.show_background` shows them.
+---
+---PINNED ONES FIRST, in the order they came; everything else after, in its
+---own. A pin set in the app leads here too -- it is the daemon's, not ours.
+---@param list table[]
+---@return table[]
+function M.arrange(list)
+  local show_background = require("paseo.config").get().ui.float.rail.show_background
+  local pinned, rest = {}, {}
+  for _, ws in ipairs(list) do
+    if show_background or not ws.background then
+      table.insert(ws.pinned and pinned or rest, ws)
+    end
+  end
+  return vim.list_extend(pinned, rest)
+end
+
+---Pin or unpin the workspace under the cursor.
+function M.toggle_pin()
+  local ws = M.current()
+  if not (ws and ws.id) then
+    return
+  end
+  require("paseo.bridge").request("workspace.pin", { workspaceId = ws.id, pinned = not ws.pinned }, function(err)
+    vim.schedule(function()
+      if err then
+        return vim.notify("paseo: could not pin — " .. tostring(err), vim.log.levels.ERROR)
+      end
+      cache.loading = false
+      M.load()
+    end)
+  end, ws.hostId)
 end
 
 -- ---------------------------------------------------------------- drawing
@@ -279,9 +317,13 @@ function M.lines(width)
       { here and icons.marker.mine or " ", "PaseoAgent" },
       { glyph .. " ", hl },
     }
+    local pin = ws.pinned and (icons.ui.pin .. " ") or ""
     vim.list_extend(
       line,
-      render.truncate({ { ws.name or "", here and "PaseoAgent" or "PaseoText" } }, math.max(1, width - 3))
+      render.truncate(
+        { { pin, "PaseoDim" }, { ws.name or "", here and "PaseoAgent" or "PaseoText" } },
+        math.max(1, width - 3)
+      )
     )
     out[#out + 1] = line
     rows[#out] = ws
@@ -465,6 +507,7 @@ function M.buf(keys)
   map("r", function()
     M.load()
   end, "refetch the workspaces")
+  map("P", M.toggle_pin, "pin or unpin this workspace")
   -- Back to where you were typing. `<Esc>` too: in a list, it is "I am done
   -- here", and the dashboard's own `<Esc>` -- close everything -- would be a
   -- large answer to a small question.

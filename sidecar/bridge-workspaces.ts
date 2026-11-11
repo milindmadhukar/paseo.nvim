@@ -228,8 +228,26 @@ export function workspaceOps(ctx: BridgeConnection): Ops {
           // primary checkout -- the difference between isolated and not.
           ownedWorktree: ws.project?.checkout?.isPaseoOwnedWorktree ?? false,
           archivingAt: ws.archivingAt ?? null,
+          // The raw title -- null when the name is derived from the branch,
+          // which is how a list tells "still `main`" from "named".
+          title: ws.title ?? null,
+          // Hidden from the app's sidebar unless "Show background" is on:
+          // workspaces agents and plugins make for themselves.
+          background: ws.background === true,
+          pinned: Boolean(ws.pinnedAt),
         })),
       };
+    },
+
+    /** Pin or unpin: pinned workspaces lead the app's sidebar and the rail. */
+    async "workspace.pin"(req) {
+      const result: any = await ctx
+        .raw()
+        .setWorkspacePinned(
+          String(need(req.workspaceId, "workspaceId")),
+          req.pinned !== false,
+        );
+      return { pinned: req.pinned !== false, result: result ?? null };
     },
 
     async "workspace.create"(req) {
