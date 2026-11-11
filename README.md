@@ -1794,11 +1794,45 @@ tests/
     helpers.lua       eq, truthy, and the shared fixtures
     git.lua  ui/      ...
   orphan.sh           does the sidecar die when Neovim does?
+  e2e/                a real daemon, a real Neovim, in tmux (below)
 ```
 
 The suites share one Neovim and one fixture tree, so `tests/spec.lua` lists
 them in a deliberate order rather than discovering them — a file nobody listed
 fails the run instead of silently never being run.
+
+### End to end, against a real daemon
+
+The headless suite stubs the daemon, so it cannot catch the bugs that only
+exist with one: a thought that streams in as fourteen blocks, a surface that
+swaps when you paste, a workspace that never gets its title. `tests/e2e/`
+drives the whole stack instead:
+
+```sh
+tests/e2e/run.sh              # every scenario
+tests/e2e/run.sh thinking     # only scenarios whose name matches
+tests/e2e/daemon.sh stop      # take the throwaway daemon down
+```
+
+- **A throwaway daemon.** `daemon.sh` runs your installed `paseo` with its
+  own `PASEO_HOME` under `$TMPDIR/paseo-e2e`, on port 6797, with the relay
+  off. It never touches the daemon on 6767. It stops only the pid it started.
+- **A provider with no model behind it.** `fake-acp.mjs` is a scripted ACP
+  agent registered as the `fake` provider. It streams reasoning in small
+  chunks, makes a tool call, and answers. It is free, offline and the same
+  every run. Words in the prompt pick the script: `think`, `tool`, `slow`,
+  `long`, `echo`.
+- **A real Neovim in tmux.** `nvim.sh` opens Neovim against that daemon and
+  sends it keys. Scenarios assert on `nvim.sh state`, a JSON dump of the
+  mount, windows and transcript blocks read from the running instance, and on
+  the daemon's own CLI (`daemon.sh paseo ls --json`).
+- **Screenshots.** `nvim.sh shot <name>` captures the pane in colour and
+  renders it to a PNG under `$TMPDIR/paseo-e2e/shots`, because a test never
+  says how something looks.
+
+It needs `tmux`, `python3`, `node` and a Chromium-family browser for the
+PNGs. It is opt-in and not part of CI: it runs the daemon you have
+installed, which is the point.
 
 [![tests](https://github.com/milindmadhukar/paseo.nvim/actions/workflows/tests.yml/badge.svg)](https://github.com/milindmadhukar/paseo.nvim/actions/workflows/tests.yml)
 

@@ -1,0 +1,56 @@
+# Sourced by scenarios. Small assertions over `nvim.sh state` and the CLI.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+E="$here/nvim.sh"
+D="$here/daemon.sh"
+eval "$("$D" env)"
+
+fail() {
+  echo "  $*" >&2
+  "$E" shot "fail-$(basename "$0" .sh)" >/dev/null 2>&1 || true
+  exit 1
+}
+
+# `jq`-free: a Python one-liner over the state JSON.
+#   q '<python expr over s>'
+q() {
+  "$E" state | python3 -I -c "import json,sys; s=json.load(sys.stdin); print($1)"
+}
+
+# Open the chat on the fixture repo and wait until an agent is bound.
+open_chat() {
+  "$E" keys ':Paseo chat' Enter
+  "$E" wait 'require("paseo.ui.chat").current() ~= nil' 20 || fail "no chat opened"
+  settle
+}
+
+# The transcript has stopped changing: history fetched and drawn. Sending
+# before this races the history fetch, and a test then reads the PREVIOUS turn.
+settle() {
+  local last="" now="" same=0
+  for _ in $(seq 1 100); do
+    now="$("$E" lua '_G.paseo_e2e.users() .. ":" .. #((require("paseo.ui.chat").current() or {}).order or {})')"
+    if [ "$now" = "$last" ] && [ "$now" != "0:0" -o "$same" -gt 8 ]; then
+      same=$((same + 1))
+      [ "$same" -ge 4 ] && return 0
+    else
+      same=0
+    fi
+    last="$now"
+    sleep 0.25
+  done
+  fail "transcript never settled ($now)"
+}
+
+# Type a prompt into the composer and send it (normal-mode <CR> sends).
+# Remembers how many user messages were on screen, so `wait_idle` waits for
+# THIS turn rather than returning on the idle state before it started.
+send_prompt() {
+  users_before="$("$E" lua '_G.paseo_e2e.users()')"
+  "$E" keys i "$1" Escape Enter
+}
+
+# The turn sent last is on screen, finished, and has an answer below it.
+wait_idle() {
+  "$E" wait "_G.paseo_e2e.turn_done(${users_before:-0})" "${1:-30}" \
+    || fail "turn did not finish"
+}
