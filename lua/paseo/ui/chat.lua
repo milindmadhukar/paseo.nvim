@@ -1585,9 +1585,18 @@ function M.attach_events()
   -- THE MISSING HALF. Reasoning, tool calls, todos, notices and compaction all
   -- reach Neovim now; before this they were dropped at the sidecar and the
   -- window showed a long silence while the agent read files and ran commands.
-  for _, event in ipairs { "thinking", "tool", "todo", "notice", "compaction" } do
+  for _, event in ipairs { "tool", "todo", "notice", "compaction" } do
     bridge.on(event, ingest)
   end
+
+  -- Reasoning streams in deltas exactly as the answer does, so it goes where
+  -- the answer goes: into the open block, not a new one per chunk.
+  bridge.on("thinking", function(payload)
+    local chat = by_agent(payload.agentId, payload.hostId)
+    if chat and fresh(chat, payload) then
+      transcript.stream(chat, payload.text or "", "thinking")
+    end
+  end)
 
   -- A subagent started, moved or finished: the header counts them.
   require("paseo.subagents").on_change(function(host_id, parent)
@@ -1683,7 +1692,7 @@ function M.attach_events()
       M.set_streaming(chat, false)
       -- The open assistant block is finished; the next reply starts a new one
       -- rather than being appended to this answer.
-      chat.open_text = nil
+      transcript.close(chat)
       if payload.error then
         transcript.upsert(chat, { kind = "notice", level = "error", message = payload.error })
       end

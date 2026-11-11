@@ -612,6 +612,65 @@ end
 --- Both are invisible when they work and silently wrong when they do not, so
 --- they are asserted on `changedtick` -- the only thing that answers "did this
 --- write to the buffer" without caring what it wrote.
+local function test_transcript_streaming()
+  -- Reasoning arrives in deltas, exactly as the answer does. It used to be
+  -- appended a block per delta: one thought drew as `I'm` / `looking at what` /
+  -- `the`, fourteen blocks for a slow one, while the reopened chat (projected
+  -- history) showed it whole.
+  local chat = { conversation = vim.api.nvim_create_buf(false, true) }
+  transcript.reset(chat)
+  local function kinds()
+    local out = {}
+    for _, id in ipairs(chat.order) do
+      out[#out + 1] = chat.blocks[id].item.kind
+    end
+    return table.concat(out, " ")
+  end
+
+  transcript.upsert(chat, { kind = "user", text = "why" })
+  for _, chunk in ipairs { "I'm ", "looking at ", "what ", "the user asked." } do
+    transcript.stream(chat, chunk, "thinking")
+  end
+  eq("ui: thinking deltas are one block", "user thinking", kinds())
+  eq(
+    "ui: and that block holds the whole thought",
+    "I'm looking at what the user asked.",
+    chat.blocks[chat.order[2]].item.text
+  )
+
+  -- A different kind closes it: the answer below is a block of its own, and
+  -- does not swallow the thought.
+  transcript.stream(chat, "Done", "text")
+  transcript.stream(chat, ".", "text")
+  eq("ui: the answer after a thought is its own block", "user thinking text", kinds())
+  eq("ui: and streams into itself", "Done.", chat.blocks[chat.order[3]].item.text)
+
+  -- A whole item in between -- a tool card -- splits a thought in two, the
+  -- way the daemon's projection does: a thought that resumes after the tool
+  -- is a second one, below the card.
+  transcript.stream(chat, "first", "thinking")
+  transcript.upsert(chat, {
+    kind = "tool",
+    callId = "call-s",
+    name = "Read",
+    status = "completed",
+    display = { displayName = "Read", summary = "README.md" },
+    detail = { type = "read", filePath = "README.md" },
+  })
+  transcript.stream(chat, "second", "thinking")
+  eq(
+    "ui: a tool card between two thoughts keeps them apart",
+    "user thinking text thinking tool thinking",
+    kinds()
+  )
+
+  -- A turn ending closes the open block: the next turn's first thought is new.
+  transcript.close(chat)
+  transcript.stream(chat, "next turn", "thinking")
+  eq("ui: a closed block is not extended", "user thinking text thinking tool thinking thinking", kinds())
+  vim.api.nvim_buf_delete(chat.conversation, { force = true })
+end
+
 local function test_transcript_cache()
   require("paseo.ui.hl").setup()
 
@@ -697,5 +756,6 @@ return {
   { "ui.render", test_render },
   { "ui.timeline", test_timeline },
   { "ui.transcript", test_transcript },
+  { "ui.transcript.streaming", test_transcript_streaming },
   { "ui.transcript.cache", test_transcript_cache },
 }

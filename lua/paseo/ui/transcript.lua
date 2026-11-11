@@ -52,7 +52,7 @@ function M.reset(chat)
   chat.order = {}
   chat.by_call = {}
   chat.next_id = 1
-  chat.open_text = nil
+  chat.open = nil
   chat.seq, chat.epoch = nil, nil
   -- The blocks are gone, so nothing is drawn at that width any more. Without
   -- this, a chat reset and refetched at the SAME width -- which is every
@@ -492,39 +492,63 @@ function M.upsert(chat, item)
   if item.callId and chat.by_call[item.callId] then
     local block = chat.blocks[chat.by_call[item.callId]]
     if block then
-      -- Anything other than assistant text ends the open reply, so the next
-      -- chunk starts a new paragraph below the card instead of being spliced
-      -- onto the sentence that preceded it.
-      chat.open_text = nil
+      -- Anything that is not a streamed chunk ends the open block, so the
+      -- next chunk starts a new paragraph below the card instead of being
+      -- spliced onto the sentence that preceded it.
+      chat.open = nil
       M.rerender(chat, block, merge(block.item, item))
       return block
     end
   end
 
-  if item.kind ~= "text" then
-    chat.open_text = nil
-  end
+  -- A whole item -- history, or a live card -- is never extended by the
+  -- chunk after it: the next chunk opens a block of its own below it.
+  chat.open = nil
   return M.append(chat, item)
 end
 
----Assistant text, which arrives in PIECES.
+---End the block being streamed into, so the next chunk starts a new one.
+---Called when a turn ends: the next reply is a new answer, not more of this.
+---@param chat table
+function M.close(chat)
+  chat.open = nil
+end
+
+---Assistant text and reasoning, which both arrive in PIECES.
 ---
 ---A reply delivered as "READ" + "Y" must render as READY. The old code
 ---concatenated onto the last BUFFER line, which was fine when the transcript
 ---was nothing but messages and silently corrupts a tool card that arrived
----mid-reply. Here it appends to the open text block's own data and re-renders
----just that block.
+---mid-reply. Here it appends to the open block's own data and re-renders just
+---that block.
+---
+---REASONING TOO, and that was the bug. Only text came through here; every
+---reasoning delta went through `upsert`, which appends, so one thought drew as
+---`I'm` / `looking at what` / `the` -- a block per chunk, fourteen for a slow
+---one -- while a reopened chat showed it whole, because history is fetched
+---projected and the daemon had merged it there.
+---
+---The rule is the daemon's projection and the app's reducer (`appendThought`
+---in packages/app/src/types/stream.ts): a chunk extends the block it follows
+---while nothing else has come in between. A tool card, a todo, a notice -- any
+---whole item -- or a chunk of the OTHER kind closes it, so a thought that
+---resumes after a tool call is a second thought, below the card, exactly as
+---the projection draws it.
 ---@param chat table
 ---@param text string
-function M.stream(chat, text)
+---@param kind? "text"|"thinking"  Default "text".
+function M.stream(chat, text, kind)
   if text == "" then
     return
   end
+  kind = kind or "text"
 
-  local block = chat.open_text and chat.blocks[chat.open_text]
+  local open = chat.open
+  local block = open and open.kind == kind and chat.blocks and chat.blocks[open.id]
   if not block then
-    block = M.append(chat, { kind = "text", text = text })
-    chat.open_text = block.id
+    M.ensure(chat)
+    block = M.append(chat, { kind = kind, text = text })
+    chat.open = block.id and { id = block.id, kind = kind } or nil
     return
   end
 
