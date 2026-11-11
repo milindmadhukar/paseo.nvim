@@ -106,8 +106,9 @@ Tests never assert how something looks. If the fix is visual, look at it.
   composer. `probe.sh 'require("paseo.ui.permission").reopen(require("paseo.ui.chat").current()) and "" or ""'`
   does what `gp` does.
 - A second `main` workspace row on the rail: an agent was spawned without
-  `--workspace`. `spawn.sh` remembers the sandbox's workspace id after the
-  first run; if the run directory was deleted, the next spawn records a fresh one.
+  `--workspace`. `spawn.sh` remembers the sandbox's workspace id in
+  `<sandbox>/.git/paseo-workspace` and passes it every time; delete that file
+  if the workspace was archived, and the next spawn records a fresh one.
 - The CLI answered but nothing reached Neovim: the sidecar only follows a
   timeline for an agent with an initialised chat. That gap is real behaviour,
   not a harness bug — it is exactly how the Paseo-subagent permission got stuck.
