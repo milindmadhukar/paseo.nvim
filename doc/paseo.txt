@@ -1503,6 +1503,10 @@ Three things it deliberately does not do:
     the sidebar does not.
   - It does not change the surface. The chat lands on the one it left, even
     when the workspace you moved to has a chat this session already opened.
+  - It does not lose your place in the OTHER sense: a draft you left in a
+    workspace's composer is there when you come back. The conversation itself
+    opens at its END -- the newest thing said -- rather than wherever you last
+    scrolled to.
 
 `<C-r>` re-points the chat too, but never takes focus -- the cursor belongs in
 whatever |paseo-review-autocmd| opens.

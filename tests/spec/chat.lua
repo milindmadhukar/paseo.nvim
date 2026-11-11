@@ -493,6 +493,35 @@ local function test_surface_memory()
     -- `<C-f>` from the sidebar goes back to the dashboard you came from.
     chat.fullscreen()
     eq("surface memory: <C-f> from the sidebar returns to the buffer dashboard", float.mount(), "buffer")
+
+    -- COMING BACK TO A WORKSPACE: the draft you left in its composer is still
+    -- there, and the conversation is at its END, not wherever you had last
+    -- scrolled to.
+    local mine = chat.current()
+    local lines = {}
+    for i = 1, 200 do
+      lines[i] = "line " .. i
+    end
+    vim.bo[mine.conversation].modifiable = true
+    vim.api.nvim_buf_set_lines(mine.conversation, 0, -1, false, lines)
+    vim.bo[mine.conversation].modifiable = false
+    vim.api.nvim_buf_set_lines(mine.composer, 0, -1, false, { "half a thought", "about the auth flow" })
+    vim.api.nvim_win_set_cursor(mine.win_conversation, { 20, 0 })
+    chat.follow(there)
+    truthy("surface memory: away", on(there))
+    chat.follow(here)
+    truthy("surface memory: and back", on(here))
+    eq("surface memory: it is the same chat", chat.current(), mine)
+    eq(
+      "surface memory: the draft came back with it",
+      vim.api.nvim_buf_get_lines(mine.composer, 0, -1, false),
+      { "half a thought", "about the auth flow" }
+    )
+    eq(
+      "surface memory: and the conversation is at its end",
+      vim.api.nvim_win_get_cursor(mine.win_conversation)[1],
+      vim.api.nvim_buf_line_count(mine.conversation)
+    )
     chat.close()
   end)
 

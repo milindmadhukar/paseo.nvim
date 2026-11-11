@@ -907,6 +907,12 @@ local function layout(chat, explicit)
   else
     sidebar.open(chat)
   end
+  -- AT THE END, NOT WHERE YOU LEFT IT. A window put back on a conversation
+  -- buffer gets that buffer's last cursor position, so coming back to a
+  -- workspace -- or reopening a chat at all -- showed whatever you had last
+  -- scrolled to, and the newest thing the agent said was a scroll away.
+  -- Opening a chat is asking what is happening NOW.
+  transcript.to_bottom(chat)
 end
 
 -- ------------------------------------------------------------------- history
