@@ -63,7 +63,8 @@ local function test_terminals()
   -- them, and the surface is `:Paseo term`. A seventh tab holding a list is
   -- the thing that was replaced, so its absence is the assertion.
   local float = require "paseo.ui.float"
-  eq("terminals: the dashboard is back to six tabs", #float.TABS, 6)
+  eq("terminals: the dashboard has five tabs", #float.TABS, 5)
+  truthy("terminals: and none of them is the Sessions tab -- the tree is", not vim.tbl_contains(float.TABS, "Sessions"))
   truthy(
     "terminals: and none of them is a Terminals tab",
     not vim.tbl_contains(float.TABS, "Terminals")
@@ -118,149 +119,78 @@ local function test_terminals()
   apply { kind = "snapshot", cwd = root, entries = {} }
   truthy("terminals: the registry cases ran", ok_registry, registry_err)
 
-  -- The merged list. Selection is held BY ID, so what has to survive is not a
-  -- line number but the list moving under it -- which, for a directory fed by
-  -- push, it does constantly.
-  local panel = require "paseo.ui.panels.sessions"
+  -- THE SESSION TREE: agents and terminals in one column, each agent with
+  -- its subagents under it, and the session on screen marked.
+  local tree = require "paseo.ui.tree"
   local agents = require "paseo.agents"
-  local old_for_root, old_watch = agents.for_root, agents.watch
-  agents.watch = function() end
-  agents.for_root = function()
-    return { { id = "a1", title = "reviewer", provider = "claude", status = "idle" } }
+  local subagents = require "paseo.subagents"
+  local old = { for_root = agents.for_root, get = agents.get, list = subagents.list }
+  agents.get = function()
+    return nil
   end
-  local ok_merged, merged_err = pcall(function()
+  agents.for_root = function()
+    return {
+      { id = "a1", title = "reviewer", provider = "claude/opus", status = "idle", createdAt = "1" },
+      {
+        id = "a2",
+        title = "child",
+        status = "running",
+        createdAt = "2",
+        labels = { [subagents.PARENT_LABEL] = "a1" },
+      },
+    }
+  end
+  subagents.list = function(parent)
+    if parent == "a1" then
+      return {
+        { kind = "provider", id = "task", parent = "a1", title = "Map the auth flow", status = "running", running = true },
+        { kind = "paseo", id = "a2", parent = "a1", title = "child", status = "running", running = true },
+      }
+    end
+    return {}
+  end
+  local ok_tree, tree_err = pcall(function()
     apply {
       kind = "snapshot",
       cwd = root,
-      entries = { { id = "t1", name = "shell" }, { id = "t2", name = "zzz-last" } },
+      entries = { { id = "t1", name = "shell" } },
     }
-    local chat = { root = root, agent_id = nil }
+    local chat = { root = root, agent_id = "a1" }
+    local lines, rows = tree.lines(chat, 40)
     local text = {}
-    for _, line in ipairs(panel.lines(chat, 80)) do
+    for i, line in ipairs(lines) do
       local parts = {}
       for _, cell in ipairs(line) do
         parts[#parts + 1] = cell[1]
       end
-      text[#text + 1] = table.concat(parts)
+      text[i] = table.concat(parts)
     end
     local joined = table.concat(text, "\n")
-    truthy("sessions: agents are listed", joined:find("reviewer", 1, true) ~= nil)
-    truthy("sessions: and terminals beside them", joined:find("shell", 1, true) ~= nil)
+    truthy("tree: agents are listed", joined:find("reviewer", 1, true) ~= nil, joined)
+    truthy("tree: and terminals below them", joined:find("shell", 1, true) ~= nil, joined)
 
-    -- Focus lands on a row without anyone moving first: arriving at a tab
-    -- whose first <CR> does nothing is the bug this panel actually had.
-    local view = panel._view(chat)
-    local focused = view:resolve()
-    truthy("sessions: focus is seeded on a real row", focused ~= nil and focused.id ~= nil)
-
-    -- Walk to the terminal and stand on it.
-    for _ = 1, 8 do
-      if (view:resolve()).id == "terminal.t1" then
-        break
-      end
-      view:move(1)
-    end
-    eq("sessions: and the keyboard reaches a terminal row", (view:resolve()).id, "terminal.t1")
-
-    -- REORDER, REDRAW, AND FOCUS MUST NOT WANDER. Sorted by name, so renaming
-    -- `shell` to `aaa` moves `t1` below `t2` -- a row that held selection by
-    -- position would now be pointing at the other terminal, silently, while
-    -- you were reading.
-    apply {
-      kind = "snapshot",
-      cwd = root,
-      entries = { { id = "t1", title = "zzz-renamed" }, { id = "t2", name = "aaa" } },
-    }
-    panel.lines(chat, 80)
-    eq(
-      "sessions: a reordered list keeps focus on the same session",
-      (view:resolve()).id,
-      "terminal.t1"
-    )
-
-    -- THE WAY BACK TO THE AGENT, from a terminal. The agent row asked
-    -- `agent.id == chat.agent_id` -- true whatever the Chat tab is actually
-    -- showing -- and the row you are "already in" is deliberately not an
-    -- action, so while a PTY was on screen the conversation was the one thing
-    -- in the session list you could not open.
-    local float = require "paseo.ui.float"
-    local old_session = float.session
-    float.session = function()
-      return { kind = "terminal", id = "t2" }
-    end
-    local chat_on_agent = { root = root, agent_id = "a1" }
-    ---@param id string
-    ---@return table|nil
-    local function row_for(id)
-      for _, section in ipairs(panel._view(chat_on_agent).source:sections()) do
-        for _, row in ipairs(section.rows or {}) do
-          if row.id == id then
-            return row
-          end
-        end
+    local order = {}
+    for line = 1, #lines do
+      local node = rows[line]
+      if node then
+        order[#order + 1] = ("%s:%s:%d"):format(node.kind, node.item.id, node.depth)
       end
     end
-    local from_terminal = row_for "agent.a1"
-    truthy(
-      "sessions: in a terminal, the agent row is not the active one",
-      from_terminal.active == false
-    )
-    truthy("sessions: and it opens", type(from_terminal.activate) == "function")
-
-    float.session = function()
-      return { kind = "agent", id = "a1" }
-    end
-    local on_agent = row_for "agent.a1"
-    truthy("sessions: standing on the agent, its row is the active one", on_agent.active == true)
-    eq("sessions: and opening what you are in is not an action", on_agent.activate, nil)
-    float.session = old_session
-
-    -- FUZZY, ACROSS BOTH HALVES. The search is |paseo.ui.list|'s, over the
-    -- title rather than over the drawn row: the cells lead with two glyphs,
-    -- and a query ranked against a console icon is worse than no search.
-    local search_view = panel._view(chat_on_agent)
-    search_view:set_query "rev"
-    local kept = {}
-    for _, section in ipairs(search_view:sections()) do
-      for _, row in ipairs(section.rows or {}) do
-        kept[#kept + 1] = row.id
-      end
-    end
-    eq("sessions: a search narrows to what matches", kept, { "agent.a1" })
-    truthy(
-      "sessions: and focus lands inside the narrowed list",
-      (search_view:resolve()).id == "agent.a1"
-    )
-    search_view:set_query "aaa"
-    local terminals_left = {}
-    for _, section in ipairs(search_view:sections()) do
-      for _, row in ipairs(section.rows or {}) do
-        terminals_left[#terminals_left + 1] = row.id
-      end
-    end
-    eq("sessions: and it reaches the terminals too", terminals_left, { "terminal.t2" })
-    search_view:set_query "qqqqq"
-    eq("sessions: a search that matches nothing drops every section", search_view:sections(), {})
-    search_view:set_query ""
-    truthy(
-      "sessions: and clearing it gives the whole list back",
-      #(search_view:sections())[1].rows == 1
-    )
-
-    -- And a row that DIES hands focus on rather than dropping it.
-    apply { kind = "snapshot", cwd = root, entries = { { id = "t2", name = "aaa" } } }
-    panel.lines(chat, 80)
-    local after = view:resolve()
-    truthy("sessions: killing the focused row leaves focus somewhere real", after ~= nil, after)
-    truthy(
-      "sessions: and not on the row that went",
-      after and after.id ~= "terminal.t1",
-      after and after.id
-    )
+    -- The Paseo subagent is listed ONCE, under its parent, not again at the
+    -- top level beside it.
+    eq("tree: subagents hang off their parent", order, {
+      "agent:a1:0",
+      "subagent:task:1",
+      "subagent:a2:1",
+      "terminal:t1:0",
+    })
+    truthy("tree: drawn as a tree", joined:find("├", 1, true) and joined:find("└", 1, true), joined)
+    truthy("tree: the parent says how many are running", joined:find("2/2", 1, true) ~= nil, joined)
+    truthy("tree: and its provider, short", joined:find("claude", 1, true) and not joined:find("opus", 1, true), joined)
   end)
-  agents.for_root, agents.watch = old_for_root, old_watch
+  agents.for_root, agents.get, subagents.list = old.for_root, old.get, old.list
   apply { kind = "snapshot", cwd = root, entries = {} }
-  truthy("sessions: the merged-list cases ran", ok_merged, merged_err)
+  truthy("tree: the cases ran", ok_tree, tree_err)
 end
 
 return {

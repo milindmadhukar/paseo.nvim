@@ -451,6 +451,27 @@ local defaults = {
           focus = "<C-h>",
         },
       },
+      -- Everything running in the workspace on screen -- each agent with its
+      -- subagents under it, then the terminals -- down the right of the body.
+      -- `enabled`, like the rail's, is only where it starts.
+      tree = {
+        enabled = true,
+        -- Cells. Never more than a quarter of the surface, and no tree at all
+        -- on one narrower than 110.
+        width = 32,
+        keys = {
+          toggle = "<M-s>",
+          -- `<C-s>` is "the session list" everywhere else too: in the
+          -- composer, and out of a terminal.
+          focus = "<C-s>",
+        },
+      },
+      keys = {
+        -- An agent here, an agent in a new workspace, or a terminal -- asked.
+        -- On every buffer of the dashboard, in normal mode; the footer's
+        -- first hint is the same thing as a button.
+        new = "<C-n>",
+      },
     },
 
     -- The same dashboard, in a window of its own rather than floating over
@@ -720,6 +741,18 @@ function M.setup(opts)
     vim.validate(("ui.float.rail.keys.%s"):format(name), key, function(v)
       return v == false or type(v) == "string"
     end, "a key, or false to leave it unbound")
+  end
+  vim.validate("ui.float.tree", config.ui.float.tree, "table")
+  vim.validate("ui.float.tree.width", config.ui.float.tree.width, "number")
+  for _, group in ipairs {
+    { "ui.float.tree.keys", config.ui.float.tree.keys },
+    { "ui.float.keys", config.ui.float.keys },
+  } do
+    for name, key in pairs(group[2] or {}) do
+      vim.validate(("%s.%s"):format(group[1], name), key, function(v)
+        return v == false or type(v) == "string"
+      end, "a key, or false to leave it unbound")
+    end
   end
   vim.validate("ui.terminal.presets", config.ui.terminal.presets, "table")
   for name, key in pairs(config.ui.terminal.keys) do

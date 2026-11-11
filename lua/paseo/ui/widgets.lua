@@ -336,7 +336,8 @@ end
 ---One builder, because this row was copy-pasted verbatim into five files and
 ---they had already drifted -- the float advertised `1-5` while there were six
 ---tabs.
----@param pairs_ table[]  `{ { "h l", "move" }, … }`
+---@param pairs_ table[]  `{ { "h l", "move" }, … }`, and a third element --
+---                       a function -- makes that hint clickable.
 ---@param hl? string  Background for the gaps, when drawn inside a card.
 ---@param w? integer  Stop before overflowing this many columns.
 ---@return table[]
@@ -349,6 +350,13 @@ function M.hints(pairs_, hl, w)
     end
     part[#part + 1] = M.keycap(pair[1])
     part[#part + 1] = { " " .. pair[2], hl or "PaseoDim" }
+    -- A hint with an action is a BUTTON too: a click on the key or its label
+    -- does what pressing the key does. Volt reads the third element.
+    if type(pair[3]) == "function" then
+      local action = { click = pair[3] }
+      part[#part - 1][3] = action
+      part[#part][3] = action
+    end
 
     -- DEGRADES RATHER THAN TRUNCATES, the way the tab bar does, and for the
     -- same reason: the hint that falls off the end is the least important

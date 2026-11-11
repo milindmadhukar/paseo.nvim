@@ -368,126 +368,61 @@ local function test_surfaces()
 
   float.open(surface_chat)
 
-  -- The agent-session list used to map CURSOR ROWS to sessions, and the only thing
-  -- between a panel's own line numbering and the buffer's was a constant it
-  -- had to agree with. It holds focus by ID now, so the thing worth checking
-  -- against a REAL open dashboard is different: that the row reaches the
-  -- chrome buffer at all, and that exactly one of them is lit.
+  -- THE SESSION TREE, down the right of the body: the workspace's agents,
+  -- the one on screen marked, and an archived one gone without anyone moving.
+  -- It replaced the Sessions tab, so what that tab's tests held is held here.
   do
     local agents = require "paseo.agents"
-    local old_for_root, old_watch = agents.for_root, agents.watch
+    local tree = require "paseo.ui.tree"
+    local old = { for_root = agents.for_root, watch = agents.watch, get = agents.get, columns = vim.o.columns }
     agents.watch = function() end
+    agents.get = function()
+      return nil
+    end
+    local listed = {
+      { id = surface_chat.agent_id or "row-probe", title = "row-probe", status = "idle", createdAt = "1" },
+      { id = "row-other", title = "row-other", status = "running", createdAt = "2" },
+    }
     agents.for_root = function()
-      return {
-        { id = "row-probe", title = "row-probe", status = "idle" },
-        { id = "row-other", title = "row-other", status = "idle" },
-      }
+      return vim.deepcopy(listed)
     end
-    float.select "Sessions"
+    vim.o.columns = 160
+    float.relayout(true)
 
-    local chrome
-    for _, win in ipairs(vim.api.nvim_list_wins()) do
-      local buf = vim.api.nvim_win_get_buf(win)
-      if require("volt.state")[buf] then
-        chrome = buf
-      end
+    local win = tree.win()
+    truthy("ui: the session tree is up on a wide surface", win ~= nil)
+    local function text()
+      return win and table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(win), 0, -1, false), "\n") or ""
     end
-
-    local drawn, lit = {}, 0
-    if chrome then
-      for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(chrome, -1, 0, -1, { details = true })) do
-        local row, banded = {}, false
-        for _, cell in ipairs(mark[4].virt_text or {}) do
-          row[#row + 1] = cell[1]
-          if cell[2] == "PaseoRowHover" then
-            banded = true
-          end
-        end
-        drawn[#drawn + 1] = table.concat(row)
-        if banded then
-          lit = lit + 1
-        end
-      end
-    end
-    local joined = table.concat(drawn, "\n")
+    truthy("ui: it lists the workspace's agents", text():find("row-probe", 1, true) and text():find("row-other", 1, true), text())
+    local tree_cfg = win and vim.api.nvim_win_get_config(win)
+    local composer_cfg = vim.api.nvim_win_get_config(surface_chat.win_composer)
     truthy(
-      "ui: an agent-session row reaches the chrome buffer",
-      joined:find("row-probe", 1, true) ~= nil,
-      joined
+      "ui: right of the conversation",
+      tree_cfg and composer_cfg.col + composer_cfg.width < tree_cfg.col,
+      vim.inspect { tree_cfg and tree_cfg.col, composer_cfg.col, composer_cfg.width }
     )
 
-    -- THE BUG THIS TAB HAD. The keys were bound and the rows were reachable,
-    -- and nothing on screen said which one you were on -- so it read as a tab
-    -- you could only click. Arriving at it now lands focus on a row and paints
-    -- it, without anyone having to move first.
-    truthy("ui: and arriving on the tab lights exactly one of them", lit == 1, lit)
-    local function bound(lhs)
-      local found
-      vim.api.nvim_buf_call(chrome, function()
-        found = vim.fn.maparg(lhs, "n", false, true)
-      end)
-      return type(found) == "table" and found.buffer == 1
-    end
-    truthy("ui: the list takes the movement keys", chrome and bound "j")
-    truthy("ui: and its per-row verbs", chrome and bound "d")
-    truthy("ui: and the search key", chrome and bound "/")
+    float.focus_tree()
+    eq("ui: the focus key lands in it", vim.api.nvim_get_current_win(), win)
+    local here = tree.current()
+    eq("ui: on the session on screen", here and here.item.id, listed[1].id)
+    vim.api.nvim_feedkeys("j", "x", false)
+    eq("ui: j moves to the next session", tree.current() and tree.current().item.id, "row-other")
+    float.focus_main()
 
-    -- `<Esc>` IS ONLY OURS WHILE THERE IS A FILTER TO DROP. On the float it
-    -- dismisses the dashboard, so a panel that held the key for the whole
-    -- visit would turn the surface's own way out into a no-op on this tab.
-    ---@return string
-    local function esc_desc()
-      local found
-      vim.api.nvim_buf_call(chrome, function()
-        found = vim.fn.maparg("<Esc>", "n", false, true)
-      end)
-      return (type(found) == "table" and found.desc) or ""
-    end
-    local CLEAR = "paseo: clear the search"
-    truthy("ui: <Esc> belongs to the surface with no search running", esc_desc() ~= CLEAR)
-    local sessions_view = require("paseo.ui.panels.sessions")._view(surface_chat)
-    sessions_view:set_query "row-probe"
-    eq("ui: a search takes it", esc_desc(), CLEAR)
-    sessions_view:set_query ""
-    truthy("ui: and clearing gives it straight back", esc_desc() ~= CLEAR)
-
-    -- THE ROW YOU ARCHIVED IS GONE BEFORE YOU MOVE. Both directories are
-    -- push-fed, and the surface used to redraw for none of it: archiving a
-    -- session left its row on screen until something else caused a repaint,
-    -- which in practice was the next `j`. The data was right and the picture
-    -- was a second-hand copy of it.
-    ---@return string
-    local function drawn_chrome()
-      local out = {}
-      for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(chrome, -1, 0, -1, { details = true })) do
-        for _, cell in ipairs(mark[4].virt_text or {}) do
-          out[#out + 1] = cell[1]
-        end
-      end
-      return table.concat(out)
-    end
-
-    agents.for_root = function()
-      return { { id = "row-other", title = "row-other", status = "idle" } }
-    end
-    -- What the daemon sends when an agent is archived -- verified against a
-    -- live one, which emits `remove` three times for the same archive, which
-    -- is why the repaint is coalesced rather than immediate.
-    agents._apply { kind = "remove", id = "row-probe" }
+    -- What the daemon sends when an agent is archived.
+    listed = { listed[1] }
+    agents._apply { kind = "remove", id = "row-other" }
     vim.wait(600, function()
-      return drawn_chrome():find("row-probe", 1, true) == nil
+      return text():find("row-other", 1, true) == nil
     end, 20)
-    truthy(
-      "ui: an archived session leaves the list without anyone moving",
-      drawn_chrome():find("row-probe", 1, true) == nil,
-      drawn_chrome()
-    )
-    truthy(
-      "ui: and the sessions that are still there stay",
-      drawn_chrome():find("row-other", 1, true) ~= nil
-    )
+    truthy("ui: an archived session leaves the tree without anyone moving", text():find("row-other", 1, true) == nil, text())
+    truthy("ui: and the sessions that are still there stay", text():find("row-probe", 1, true) ~= nil)
 
-    agents.for_root, agents.watch = old_for_root, old_watch
+    agents.for_root, agents.watch, agents.get = old.for_root, old.watch, old.get
+    vim.o.columns = old.columns
+    float.relayout(true)
   end
 
   float.select "Usage"
@@ -792,9 +727,9 @@ local function test_terminal_session()
     -- to the Chat tab still pointed at the PTY: the screen did not change, and
     -- the key read as broken.
     float.show_session { kind = "terminal", id = "t1" }
-    float.select "Sessions"
+    float.select "Usage"
     float.open(chat)
-    eq("terminal: the session list is the way back to the chat", float.tab(), "Chat")
+    eq("terminal: opening the chat is the way back to it", float.tab(), "Chat")
     eq("terminal: which is the agent, not the terminal", float.session().kind, "agent")
     truthy(
       "terminal: with its composer on screen",
@@ -1159,7 +1094,7 @@ local function test_buffer_surface()
   float.open(chat, { mount = "buffer" })
   require("paseo.ui.chat").sessions(chat)
   eq("buffer: the session list keeps the buffer mount", float.mount(), "buffer")
-  eq("buffer: and is the tab it says it is", float.tab(), "Sessions")
+  eq("buffer: and stays on the conversation -- the list is the tree", float.tab(), "Chat")
   -- And what it recorded as this chat's home is the buffer mount, not the
   -- float it used to be dragged onto.
   eq("buffer: and records the buffer as where the chat lives", chat.surface, "buffer")

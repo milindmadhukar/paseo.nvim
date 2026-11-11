@@ -107,12 +107,18 @@ require("paseo").setup {
       composer_min = 3,           -- ...and the fewest it rests at
       zindex = 30,                -- BELOW the 50 a float gets by default
       backdrop = true,
-      tab_keys = true,            -- bare 1-6 switch tabs; see below
+      tab_keys = true,            -- bare 1-5 switch tabs; see below
       rail = {                    -- the workspaces down the left; see below
         enabled = true,           -- where it starts — the toggle is remembered
         width = 28,               -- cells, at most a quarter of the surface
         keys = { toggle = "<C-b>", focus = "<C-h>" },
       },
+      tree = {                    -- the sessions down the right; see below
+        enabled = true,
+        width = 32,               -- cells; no tree below 110 columns
+        keys = { toggle = "<M-s>", focus = "<C-s>" },
+      },
+      keys = { new = "<C-n>" },   -- start an agent or a terminal, from anywhere
     },
 
     buffer = {                    -- the same dashboard, in a window of its own
@@ -216,7 +222,7 @@ whichever dashboard you came from.
 | `:Paseo agents` | Agent sessions in this workspace |
 | `:Paseo subagents` | Subagents of the chat's agent (`gs` in the chat), in a live list: a spinner and a clock on each running one, updated as they start and finish. A Paseo one opens as a chat you can message, a provider one (Claude's Task tool) opens read-only, live |
 | `:Paseo sessions` | Compatibility alias for `agents` |
-| `:Paseo term` | Terminals in this workspace, on the Sessions tab |
+| `:Paseo term` | Into the session tree, where this workspace's terminals are |
 | `:Paseo ws …` | Manifest-level: `init` · `edit` · `create <name> [repos]` · `rm` · `ls` · `status` |
 | `:Paseo agent [stop]` | Sidecar and agent status |
 | `:Paseo repos` | The repos in the current unit of work |
@@ -421,15 +427,16 @@ swaps to the sidebar and back. `<C-c>` stops the turn — from the composer or
 the conversation, normal mode or insert.
 
 ```
-   1 󰀄 Chat   2 󱙺 Sessions   3 󱕂 Settings   4 󰘬 Changes   5 󰄨 Usage   6 󰙅 Workspaces      󰆍 lazygit
+   1 󰀄 Chat   2 󱕂 Settings   3 󰘬 Changes   4 󰄨 Usage   5 󰙅 Workspaces      󰆍 lazygit
 ```
 
 **One navigation bar.** There used to be two: the tabs, and a strip of session
 chips on the row directly under them — two rows of things to click, stacked,
 disagreeing about which of them you navigate with, and the lower one could hold
 about four names before it started dropping them for a `+3`. Moving between
-sessions happens on the `Sessions` tab now, where there is room for all of them
-and a search over them. What the strip alone could say — **which** session the
+sessions happens in [the session tree](#the-session-tree) down the right, which
+is on every tab, so there is no `Sessions` tab to leave the conversation for.
+What the strip alone could say — **which** session the
 `Chat` tab is showing, which for a terminal nothing else says — is the label at
 the right-hand end of the tab bar. It takes whatever the pills leave and is cut
 to fit, because the pills are the navigation and it is a readout.
@@ -444,7 +451,7 @@ you need — to keep `close`. Four levels, widest that fits:
 |---|---|
 | `1 󰀄 Chat` | number, icon and name |
 | `1 Chat` | the icon goes first: the name is what you read, the icon is what you recognise |
-| `1 󰀄` | six of these fit in 36 columns |
+| `1 󰀄` | five of these fit in 30 columns |
 | `1` | and at the last level the active tab alone keeps its name |
 
 The row count never changes at any level, because the body height and the
@@ -453,36 +460,22 @@ composer geometry are both measured against it.
 | | |
 |---|---|
 | `Chat` | the conversation and the composer, real buffers floated on top |
-| `Sessions` | the agent sessions **and terminals** here, live; open one, `/` to fuzzy-search them, or `y` to copy an agent ID |
 | `Settings` | mode, thinking level, model, feature toggles — keyboard or click |
 | `Changes` | what is changed on disk, per repo; open one |
 | `Usage` | context window, tokens, cost — and this provider's 5-hour and weekly limits |
 | `Workspaces` | every workspace Paseo knows, grouped by project with a rule between groups; each row says what it is doing — `⠙` working, `󰀦` needs you, `󰗠` opened and idle, `󰄰` never opened. Archive one, or forget a project |
 
-`Sessions`, `Workspaces` and `Changes` are one kind of screen and
-take one set of keys — `j`/`k` to move, `h`/`l` by section, `g`/`G` to the
-ends, `<CR>` to open, `r` to re-fetch — plus their own verbs:
-`c`/`a`/`y`/`R`/`d` on `Sessions`, `n`/`o`/`d` on Workspaces. On `Sessions`,
-`/` opens a one-row box at the foot of the list and **filters it as you type** —
-`matchfuzzy`, against the titles rather than the drawn row, across the agents
-and the terminals together; `<CR>` keeps the filter, `<Esc>` in the box cancels
-it and `<Esc>` on the narrowed list clears it. **The focused row is painted**, in the colour hover
-uses, and arriving at a tab puts focus on a row so the first `<CR>` does
-something.
+`Workspaces` and `Changes` are one kind of screen and take one set of keys —
+`j`/`k` to move, `h`/`l` by section, `g`/`G` to the ends, `<CR>` to open, `r`
+to re-fetch — plus their own verbs: `n`/`o`/`d` on Workspaces. **The focused
+row is painted**, in the colour hover uses, and arriving at a tab puts focus on
+a row so the first `<CR>` does something.
 
 **Where the cursor is and which one is open are two different marks.** The
-focus band is one flat sweep across the row, so "this is the session you are
-in" — which used to be a coloured bar and a coloured title *inside* that sweep
-— said nothing the moment you pointed at the row, and the two states were
-indistinguishable whenever they were the same row. Both marks live in a
-two-column gutter the band never paints over now: a caret for the keyboard, a
-bar for the live one.
-
-```
-   ▌ 󱙺 󰦖 fix the archive redraw                            claude/opus     ← open, not focused
-     󱙺 󰧞 sidebar perf                                    claude/sonnet
-  ▸  󱙺 󰀦 voice dictation                     needs you      codex/gpt     ← focused, not open
-```
+focus band is one flat sweep across the row, so "this is the one you are in"
+said nothing the moment you pointed at the row if it was drawn inside that
+sweep. Both marks live in a two-column gutter the band never paints over: a
+caret for the keyboard, a bar for the live one.
 
 **A push repaints the surface.** Both directories are fed by the daemon rather
 than polled, and nothing used to ask the screen to draw them again — so
@@ -495,13 +488,24 @@ and it is not what changed.
 
 None of that was true before. Selection lived on the **cursor**, which volt
 resets to line 1 after every click, nothing was drawn to say where it was, and
-the cursor was never put on a row — so Sessions had working keymaps and read as
-a tab you could only click, and Workspaces had no keymaps at all. Focus is held
+the cursor was never put on a row — so the list tabs read as tabs you could
+only click, and Workspaces had no keymaps at all. Focus is held
 by **id** now, so a list that moves under you — and these are push-fed, so they
 do — does not take it with it.
 
-`1`–`6` jump, `<M-1>`–`<M-6>` and `<Tab>`/`<S-Tab>` do the same, and
+`1`–`5` jump, `<M-1>`–`<M-5>` and `<Tab>`/`<S-Tab>` do the same, and
 everything that does something responds to a click as well.
+
+**`<C-n>` starts something**, from any buffer of the dashboard in normal mode
+— the composer, the conversation, the rail, the tree, a terminal's normal mode
+— and it is the first hint on the footer, where a click does the same: *new
+agent* (in this workspace), *new agent in a new workspace*, or *new terminal*.
+Both agent choices go through the settings screen and then open **the
+ordinary conversation view, empty**: nothing is created until you send the
+first message, which creates the agent — and, for a new workspace, the
+workspace with it — with your message as its first prompt, so the daemon names
+the workspace from it. The first message is written in the real composer, so
+it can be dictated (`<C-t>`), carry pasted images, or be recalled.
 
 #### The workspace rail
 
@@ -544,10 +548,52 @@ The list refetches the moment the daemon says a workspace changed (created,
 archived, pinned, or **titled**), so a generated title appears when it is
 written rather than on the next poll.
 
+#### The session tree
+
+Down the right of the body, on every tab: everything running in **the
+workspace on screen** — its agents, each with its subagents nested under it,
+then its terminals. It replaced the `Sessions` tab.
+
+```
+ sessions  4
+
+▌• Fix the invoice rounding     2/3 claude
+   ├ ⠋ Map the auth flow
+   ├ • Explore billing tests
+   └ ⠋ lint-fixer
+ • Add a regression test          codex
+
+ 󰆍 terminals
+ • zsh
+
+ a agent  w workspace  t term
+```
+
+An agent shows the rail's status glyph (spinner working, yellow `!` waiting
+on you, red failed, blue finished unseen, green done), its title, and on the
+right how many subagents it has — `running/total` while any run — and its
+provider. Both kinds of subagent hang off their parent: a **provider**
+subagent (Claude's Task tool) opens read-only, a **Paseo** subagent (an agent
+another agent started) is an ordinary agent and opens as one, and is listed
+once, under its parent, rather than again beside it. The bar marks the session
+on screen.
+
+The workspace is the agent's own — by workspace id — so two workspaces on one
+checkout do not mix their agents.
+
+`<C-s>` moves into it (from the composer in either mode, and out of a
+terminal), and puts the cursor on the session on screen. Inside, `j`/`k` move,
+`<CR>` opens the session on the dashboard, `a` starts an agent here, `w` an
+agent in a new workspace, `t` (or `c`) a terminal, `y` copies an agent's ID,
+`R` renames a terminal, `d` archives an agent or kills a terminal, and `q`,
+`<Esc>` or `<C-s>` go back. `<M-s>` shows and hides it, remembered across
+restarts. It is 32 cells wide by default, at most a quarter of the dashboard,
+and left out below 110 columns (`ui.float.tree`).
+
 ### The dashboard, on its buffer mount
 
 `:Paseo buf` — or `ui.surface = "buffer"` — puts everything above in a **real
-window** instead of a float: same chrome, same six tabs, same panes, same
+window** instead of a float: same chrome, same five tabs, same panes, same
 keys. It takes over the window you were standing in, hides the editor's
 tabline and statusline, and fills what is left, so it gets the whole screen
 rather than the 94% a centred float leaves itself. This is nvdash's
@@ -644,7 +690,7 @@ that speak the kitty keyboard protocol; the ones that do not simply never send
 it.) **`<C-s>` is not either of them.** It means *the session list* on the
 chrome and in every terminal — so a composer that quietly sent on it was one
 key with two meanings, both advertised on screen at once. From the composer it now does what it does
-everywhere else: takes you to the session list.
+everywhere else: takes you into [the session tree](#the-session-tree).
 
 **While the agent is working**, the hint changes to say what sending will
 *do*: `󰌑 steer · g󰌑 queue`. Mid-turn, the daemon's own default is to
@@ -764,7 +810,7 @@ lands on the next one, so there is one traversal rather than one per card.
 `m` `t` `f` `s` jump to a group, and the letter is printed **on the card** so
 the key is where you are already looking. `<CR>` applies.
 
-On **Sessions**, `y` copies the selected agent's complete ID to the
+In **the session tree**, `y` copies the selected agent's complete ID to the
 unnamed register and, when available, the system clipboard. The agent picker
 uses `<C-y>`. Terminal rows deliberately have no copy-agent-ID action. To ask
 one agent to contact another, copy the receiving agent's ID, paste it into the
@@ -845,10 +891,12 @@ same request**, and moves the editor there. The name picks the directory and
 the branch; the title comes from the message, the same way as above. Forking
 into a new workspace (`f`) sends its prompt with the workspace too. **new
 terminal** opens the [terminal picker](#terminals) and points the Chat tab at
-the PTY. `a` on the `Sessions` tab has already answered the first
-question and asks only the second — *here* or *a new workspace*. Either way the
-agent is a draft until its first message, and *here* joins the workspace you
-are in.
+the PTY.
+
+The same three are on the dashboard at any time: `<C-n>` (or the footer's
+first hint) asks which, and the session tree's `a`, `w` and `t` go straight to
+one. An agent started *here* from there joins the workspace on screen — by its
+id — and, like every other start, is a draft until its first message.
 
 An *automatic* open never reaches any of this: following a workspace switch
 passes `create = false`, so a workspace with no agent says so rather than
@@ -901,19 +949,19 @@ applied, which is what two quick mode changes used to produce.
 
 Paseo runs terminals as well as agents — the `claude` and `codex` sessions you
 started in the app are PTYs on the daemon — and **a terminal is a session.** It
-lists on the `Sessions` tab beside the agent sessions, and opening
+lists in [the session tree](#the-session-tree) below the agents, and opening
 one shows it **on the Chat tab**, where the conversation would be:
 
 ```
  ╭──────────────────────────────────────────────────────────────────────╮
- │  1 󰀄 Chat   2 󱙺 Sessions   3 󱕂   4 󰘬   5 󰄨   6 󰙅       󰆍 lazygit    │
+ │  1 󰀄 Chat   2 󱕂   3 󰘬   4 󰄨   5 󰙅                     󰆍 lazygit    │
  │                                                                      │
  │  ▐▛███▜▌ Claude Code v2.1.263                                        │
  │  ▝▜█████▛▘ Opus 5 (1M context)                                       │
  │                                                                      │
  │  > _                                                                 │
  │                                                                      │
- │  Ctrl + g  tab bar   Ctrl + s  sessions   Ctrl + l  terminal   1-6 … │
+ │  Ctrl + g  tab bar   Ctrl + s  sessions   Ctrl + l  terminal   1-5 … │
  ╰──────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -931,7 +979,7 @@ conversation and its composer for an agent, the PTY outright for a terminal.
 on **every** tab — because "which session am I in" does not stop being worth
 answering when you look at Usage, and a terminal has no transcript and no
 composer, so without it the dashboard could be showing a PTY with nothing on
-screen naming it. Moving *between* sessions is the `Sessions` tab's job.
+screen naming it. Moving *between* sessions is the session tree's job.
 
 **A terminal takes every key, and that is what it is for** — so the handful it
 does not take are your whole way out, and they have to be enough to reach the
@@ -939,28 +987,23 @@ tab bar:
 
 | | |
 |---|---|
-| `<C-g>` | out of the PTY and **onto the tab bar**, without leaving the Chat tab or closing anything: the terminal stays on screen, the keystrokes stop going to it, and `1`–`6`, `<Tab>` and `q` work |
+| `<C-g>` | out of the PTY and **onto the tab bar**, without leaving the Chat tab or closing anything: the terminal stays on screen, the keystrokes stop going to it, and `1`–`5`, `<Tab>` and `q` work |
 | `<C-l>` | from the chrome back **into** the PTY — the other direction |
-| `<C-s>` | the `Sessions` tab: everything running here, and `/` to search it |
+| `<C-s>` | into the session tree: everything running here |
 | `<C-j>` / `<C-k>` | the next and previous session in this workspace |
-| `<M-1>`–`<M-6>` | the tabs, for the terminals that deliver an Alt chord |
+| `<M-1>`–`<M-5>` | the tabs, for the terminals that deliver an Alt chord |
 
 `<C-g>` is the answer to *"I can only switch tabs with the mouse"*. `<M-3>` is
 one key, and a great many terminal emulators, multiplexers and ssh sessions
-never deliver an Alt chord at all — and when that is true of yours, those six
-bindings are not a way out, they are six keys that do nothing.
+never deliver an Alt chord at all — and when that is true of yours, those five
+bindings are not a way out, they are five keys that do nothing.
 **Everything but the digits is bound in terminal mode too**, which is the only
 way any of it is worth having — otherwise each starts with `<C-\><C-n>`. That
 does take them from whatever is running inside, which is right for `claude` and
 wrong for `tmux`, so `ui.terminal.keys` renames or disables any of them.
 
-**And a chat picked out of the session list opens the chat** — which session
-the Chat tab is on survives a trip through the panels, so `<C-s>` out of a
-terminal and an agent chosen from the list used to land back on the same PTY, a
-keystroke that visibly did nothing. For the same reason the agent row in that
-list is openable *while a terminal is up*: it asked whether the row was this
-chat's agent rather than whether it was the session on screen, so the one row
-in the list that took you back to the conversation was the one that did nothing.
+**And an agent picked out of the session tree opens the agent** — even this
+chat's own while a terminal is up, which is the way back to the conversation.
 
 The **digits are bound in the PTY's normal mode** — after `<C-\><C-n>`, where
 they cost a count and the surface behaving differently in one buffer is worse
@@ -968,7 +1011,7 @@ they cost a count and the surface behaving differently in one buffer is worse
 `<C-c>` is not bound either: it is SIGINT and belongs to the program. `<Esc>`
 is never bound at all, so vim running inside one can still leave insert mode.
 
-On the `Sessions` tab, `c` starts a terminal, `R` renames one and `d` kills it
+In the session tree, `t` (or `c`) starts a terminal, `R` renames one and `d` kills it
 (asked first — something is usually running in there). `c` opens a **screen, not
 a prompt**: a shell, then one entry per provider the daemon has — read live, so
 enabling one in Paseo makes it appear without a config change — then anything in
@@ -1657,7 +1700,7 @@ is not a Paseo tab, and a terminal is not an agent session.
 | **Agent** | The AI worker identified by an agent ID. In UI text, its ongoing conversation is an **agent session**. |
 | **Agent session** | One agent's state and timeline inside a workspace. Several can share the same workspace and files. Bare “session” is retained only in compatibility command aliases and stable internal module/protocol names. |
 | **Tab** | A Paseo application surface that presents an agent session. It is distinct from a Neovim **tab page**. paseo.nvim's dashboard sections are also UI tabs, not isolation boundaries. |
-| **Dashboard** | paseo.nvim's full-screen surface: the six tabs, the panels and the panes. One thing, on one of two **mounts**. |
+| **Dashboard** | paseo.nvim's full-screen surface: the five tabs, the panels, the panes, the workspace rail and the session tree. One thing, on one of two **mounts**. |
 | **Mount** | Where the dashboard is drawn — `float`, over your code, or `buffer`, in a real window of its own. Same chrome, same tabs, same keys; only the window differs. |
 | **Sidebar** | The narrow surface beside your code. A different surface from the dashboard, not a third mount of it. |
 | **Terminal** | A daemon-owned PTY inside a workspace. It appears beside agent sessions but is not an agent. |
@@ -1971,6 +2014,7 @@ lua/paseo/          the plugin
     rail.lua        the workspace rail down the dashboard's left
     subagents.lua   the live subagent list `gs` opens
     surface.lua     which surface a chat goes on when nobody named one
+    tree.lua        the session tree down its right: agents, subagents, terminals
     sidebar.lua     the narrow pane beside your code, in two real splits
     animate.lua     motion, none of which may change a height
     render.lua      the cell/line alphabet and the three sinks

@@ -606,7 +606,8 @@ function M.sessions(chat)
   elseif not float.is_open(chat) then
     float.open(chat, { mount = mount })
   end
-  float.select "Sessions"
+  -- The session tree, down the right of every tab: there is no Sessions tab.
+  float.focus_tree()
 end
 
 -- ------------------------------------------------------------------- images
@@ -1534,7 +1535,7 @@ function M.open(opts, callback)
         -- says so. Asking again next time is correct: there is still no
         -- agent here.
         if result.kind == "terminal" then
-          notice(chat, "a terminal is running here — the Sessions tab lists it")
+          notice(chat, "a terminal is running here — the session tree lists it")
           return callback(nil, nil)
         end
 
