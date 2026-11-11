@@ -21,6 +21,7 @@ export class BridgeConnection {
   private cleanups = new Set<() => void | Promise<void>>();
   directory: {
     subscription?: { release: () => Promise<void> };
+    workspaces?: { release: () => Promise<void> };
     localUnsubscribe?: (() => void) | null;
   } | null = null;
 
@@ -80,6 +81,7 @@ export class BridgeConnection {
       this.directory = null;
       held.localUnsubscribe?.();
       await held.subscription?.release().catch(() => {});
+      await held.workspaces?.release().catch(() => {});
     }
     for (const entry of this.timelines.values()) {
       try {

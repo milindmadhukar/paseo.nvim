@@ -226,7 +226,37 @@ export async function followDirectory(ctx: BridgeConnection): Promise<void> {
     });
   }
 
-  ctx.directory = { subscription: result?.subscription, localUnsubscribe };
+  // WORKSPACES TOO, for one reason above all: a workspace's title is written
+  // AFTER it is created -- the daemon names it from the first prompt in the
+  // background -- so a list fetched at creation still says `main`. The rail
+  // used to find out on its next poll; this says so when it happens. Only the
+  // fact is forwarded: the Lua side refetches, and owns what a list means.
+  let workspaces: any = null;
+  try {
+    workspaces = await api.workspaces.list({
+      subscribe: {},
+      page: { limit: 1 },
+    });
+    workspaces?.subscription?.subscribe({
+      snapshot: () => {},
+      update: guarded("workspaces", (update: any) =>
+        emit("workspaces_changed", {
+          workspaceId:
+            update?.workspace?.id ?? update?.workspaceId ?? update?.id ?? null,
+        }),
+      ),
+      error: () => {},
+    });
+  } catch {
+    // A daemon that will not stream workspaces still polls fine.
+    workspaces = null;
+  }
+
+  ctx.directory = {
+    subscription: result?.subscription,
+    workspaces: workspaces?.subscription,
+    localUnsubscribe,
+  };
 }
 
 export function agentOps(ctx: BridgeConnection): Ops {

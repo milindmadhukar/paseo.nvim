@@ -1875,8 +1875,20 @@ asked before anything had established that an agent was what you came for,
 and with a terminal reachable only from a tab of a surface you had to create
 an agent in order to see.
 
-`new agent` goes on to the settings screen below and creates the agent in
-this directory. `new agent in a new workspace` asks for a name, creates the
+`new agent` goes on to the settings screen below, and then to the chat --
+as a DRAFT. Nothing exists on the daemon until your first message, and that
+message creates the agent and its workspace in one request, so the daemon
+names the workspace from it the way the app's New workspace does: the app's
+sidebar and the rail say `Fix flaky login test on CI`, not `main`. The daemon
+only names a workspace inside the request that creates it, and only when the
+prompt is part of that request, which is why the draft waits. Closing a draft
+with nothing sent leaves nothing behind.
+
+Where the first message lands depends on what is already there. A Paseo
+worktree, or a workspace somebody titled, keeps its name and the agent joins
+it. A plain checkout still called by its branch gets a fresh workspace beside
+it, in the same project, named from the prompt; the untitled one is left
+alone. `new agent in a new workspace` asks for a name, creates the
 appropriate assembled/worktree/local workspace (|paseo-workspace-kinds|),
 starts the agent in it and moves the editor there. `new terminal` opens the
 terminal picker (|paseo-terminals|) and points the Chat tab at the PTY; the
@@ -1917,7 +1929,8 @@ settings here and are not settings on a running agent: >
 
      h j k l  move   ⏎  apply   p s m t f  group   r  reload   c  create
 <
-`c` creates, `q` cancels, and nothing is created until you press one. There is
+`c` opens the chat on these settings, `q` cancels. Even `c` creates nothing:
+the first message does (see above). There is
 no Create card, because a card that is not a setting reads as one.
 
 The SCREEN IS THE PICKER. Choosing a provider used to be two `vim.ui.select`

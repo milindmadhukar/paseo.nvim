@@ -358,6 +358,7 @@ local function send(chat)
   -- a prompt typed in the Paseo app would appear only once. The timeline is
   -- the single source of truth for what was said, whoever said it.
   vim.api.nvim_buf_set_lines(chat.composer, 0, -1, false, { "" })
+  local attached = chat.images
   chat.pending = {}
   chat.images = {}
   -- The composer grew with the prompt, so it has to shrink back with it.
@@ -366,6 +367,36 @@ local function send(chat)
   -- leaves a four-line empty box behind after it is sent.
   M.fit_composer(chat)
   M.set_streaming(chat, true)
+
+  -- The first message of a draft STARTS the session: the agent, and a
+  -- workspace named from this prompt, in one request. See `chat.draft`.
+  if chat.draft and not chat.agent_id then
+    local draft = chat.draft
+    local settings = draft.settings
+    notice(chat, "starting…")
+    return bridge.request("agent.start", {
+      cwd = chat.root,
+      project = draft.project,
+      provider = settings.provider,
+      modeId = settings.modeId,
+      thinkingOptionId = settings.thinkingOptionId,
+      featureValues = settings.featureValues,
+      prompt = prompt,
+      images = #images > 0 and images or nil,
+    }, function(err, result)
+      vim.schedule(function()
+        if err or not (result and result.agentId) then
+          M.set_streaming(chat, false)
+          -- Give the words back: a failed start must not eat the prompt.
+          vim.api.nvim_buf_set_lines(chat.composer, 0, -1, false, vim.split(prompt, "\n"))
+          chat.images = attached
+          M.fit_composer(chat)
+          return notice(chat, "could not start: " .. tostring(err or "no agent"), "error")
+        end
+        draft.bind(result.agentId)
+      end)
+    end, chat.host_id)
+  end
 
   bridge.request("agent.send", {
     agentId = chat.agent_id,
@@ -915,11 +946,43 @@ local function fresh(chat, payload)
   return true
 end
 
+---Live events that arrive while the first history fetch is in flight WAIT
+---for it, and are then replayed through `fresh` like any other.
+---
+---Subscribing first and fetching second is right -- nothing said in between is
+---lost -- but rendering the in-between at once put it ABOVE the history that
+---arrived after it: a chat opened mid-turn, which is every chat whose first
+---message created its agent, showed a fragment of the thought over the
+---question that prompted it, and the whole thought again below. Held, the
+---replay lands after history, and `fresh` drops what history already covered.
+---@param chat paseo.Chat
+---@param handler fun(payload: table)
+---@param payload table
+---@return boolean held
+local function hold(chat, handler, payload)
+  if not chat.backlog then
+    return false
+  end
+  chat.backlog[#chat.backlog + 1] = { handler, payload }
+  return true
+end
+
+---@param chat paseo.Chat
+local function release(chat)
+  local backlog = chat.backlog
+  chat.backlog = nil
+  for _, held in ipairs(backlog or {}) do
+    held[1](held[2])
+  end
+end
+
 ---@param chat paseo.Chat
 local function load_history(chat)
   bridge.request("timeline.history", { agentId = chat.agent_id, limit = 60 }, function(err, result)
     if err or not result then
-      return
+      return vim.schedule(function()
+        release(chat)
+      end)
     end
     vim.schedule(function()
       -- History now carries the SAME item shape as the live subscription --
@@ -927,6 +990,15 @@ local function load_history(chat)
       -- work the agent did, not just the sentences it ended with.
       for _, item in ipairs(result.items or {}) do
         transcript.upsert(chat, item)
+      end
+      -- A chat opened MID-TURN -- which is every chat whose first message
+      -- just created its agent -- has history ending part-way through a
+      -- thought or an answer, and the rest of it arriving live. Leave that
+      -- last block open so the rest extends it, as the daemon's projection
+      -- would, rather than starting a second block under the first word.
+      local last = chat.order and chat.blocks[chat.order[#chat.order]]
+      if last and last.id and (last.item.kind == "text" or last.item.kind == "thinking") then
+        chat.open = { id = last.id, kind = last.item.kind }
       end
 
       -- Everything up to here is now on screen, so live events at or below this
@@ -946,6 +1018,7 @@ local function load_history(chat)
       -- reconnect, where the interesting news is usually the opposite -- a
       -- request we are still holding that was answered during the gap.
       require("paseo.ui.permission").reconcile(chat, result.pendingPermissions or {})
+      release(chat)
     end)
   end, chat.host_id)
 end
@@ -969,7 +1042,9 @@ initialise = function(chat)
   set_winbar(chat)
 
   -- Subscribe BEFORE fetching history, so nothing said in between is lost.
-  -- The seq comparison in `fresh` is what stops the overlap rendering twice.
+  -- The seq comparison in `fresh` is what stops the overlap rendering twice,
+  -- and `hold` is what keeps the overlap from drawing ABOVE the history.
+  chat.backlog = {}
   bridge.request("timeline.subscribe", { agentId = chat.agent_id }, function()
     load_history(chat)
   end, chat.host_id)
@@ -1123,6 +1198,12 @@ function M.open(opts, callback)
     end, chat.host_id)
   end
 
+  -- Still a draft: the settings were chosen and nothing has been sent. Back to
+  -- the composer, not through the start menu a second time.
+  if chat.draft then
+    return callback(chat, nil)
+  end
+
   notice(chat, "connecting…")
   bridge.ensure(function(err)
     if err then
@@ -1215,25 +1296,42 @@ function M.open(opts, callback)
           return stand_down(nil)
         end
 
+        -- A DRAFT, NOT AN AGENT. Nothing is created until the first message:
+        -- the daemon names a workspace from the first prompt, and only when
+        -- the prompt is part of the request that creates it -- so creating the
+        -- agent here, empty, is what left every workspace started from the
+        -- editor called `main`. `send` sees `chat.draft` and starts it.
         local draft = result.draft
-        bridge.request("agent.ensure", {
-          cwd = root,
-          -- An assembled workspace Paseo has not seen yet is registered inside
-          -- its project, not as one of its own.
+        -- What the bar shows until the agent exists and its own settings
+        -- arrive: the choices just made, rather than `…`.
+        chat.provider = draft.provider
+        chat.mode = draft.modeId
+        chat.draft = {
+          settings = draft,
           project = host.local_host and require("paseo.workspaces").parent_project(root) or nil,
-          provider = draft.provider,
-          modeId = draft.modeId,
-          thinkingOptionId = draft.thinkingOptionId,
-          featureValues = draft.featureValues,
-          title = "paseo.nvim · " .. vim.fs.basename(root),
-        }, function(agent_err, agent)
-          if agent_err then
-            notice(chat, agent_err, "error")
-            return callback(nil, agent_err)
+          ---Bind the agent the first message created. `adopt` without the
+          ---callback: M.open's caller was answered when the draft opened.
+          bind = function(agent_id)
+            chat.draft = nil
+            config.get().paseo.provider = draft.provider
+            chat.agent_id = agent_id
+            chat.provider = draft.provider
+            chats[key] = nil
+            chats[hosts.key(host.id, agent_id)] = chat
+            vim.schedule(function()
+              initialise(chat)
+            end)
+          end,
+        }
+        vim.schedule(function()
+          notice(chat, "new session — your first message starts it")
+          set_winbar(chat)
+          if chat.win_composer and vim.api.nvim_win_is_valid(chat.win_composer) then
+            vim.api.nvim_set_current_win(chat.win_composer)
+            vim.cmd.startinsert()
           end
-          config.get().paseo.provider = draft.provider
-          adopt(agent)
-        end, host.id)
+        end)
+        callback(chat, nil)
       end)
     end, host.id)
   end, host.id)
@@ -1591,28 +1689,33 @@ function M.attach_events()
   ---@param payload table
   local function ingest(payload)
     local chat = by_agent(payload.agentId, payload.hostId)
-    if chat and fresh(chat, payload) then
+    if not chat or hold(chat, ingest, payload) then
+      return
+    end
+    if fresh(chat, payload) then
       transcript.upsert(chat, payload)
     end
   end
 
   -- A user message, from wherever it was typed: here, the Paseo app, another
   -- client. This is what makes the two views the same conversation.
-  bridge.on("user", function(payload)
+  local function on_user(payload)
     local chat = by_agent(payload.agentId, payload.hostId)
-    if not chat or not fresh(chat, payload) then
+    if not chat or hold(chat, on_user, payload) or not fresh(chat, payload) then
       return
     end
     transcript.upsert(chat, { kind = "user", text = payload.text or "" })
     M.set_streaming(chat, true)
-  end)
+  end
+  bridge.on("user", on_user)
 
-  bridge.on("text", function(payload)
+  local function on_text(payload)
     local chat = by_agent(payload.agentId, payload.hostId)
-    if chat and fresh(chat, payload) then
+    if chat and not hold(chat, on_text, payload) and fresh(chat, payload) then
       transcript.stream(chat, payload.text or "")
     end
-  end)
+  end
+  bridge.on("text", on_text)
 
   -- THE MISSING HALF. Reasoning, tool calls, todos, notices and compaction all
   -- reach Neovim now; before this they were dropped at the sidecar and the
@@ -1623,12 +1726,13 @@ function M.attach_events()
 
   -- Reasoning streams in deltas exactly as the answer does, so it goes where
   -- the answer goes: into the open block, not a new one per chunk.
-  bridge.on("thinking", function(payload)
+  local function on_thinking(payload)
     local chat = by_agent(payload.agentId, payload.hostId)
-    if chat and fresh(chat, payload) then
+    if chat and not hold(chat, on_thinking, payload) and fresh(chat, payload) then
       transcript.stream(chat, payload.text or "", "thinking")
     end
-  end)
+  end
+  bridge.on("thinking", on_thinking)
 
   -- A subagent started, moved or finished: the header counts them.
   require("paseo.subagents").on_change(function(host_id, parent)

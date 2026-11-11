@@ -135,14 +135,42 @@ local function project_root()
   return require("paseo.workspaces").here()
 end
 
+local following = false
+
+---Refetch when the daemon says a workspace changed -- created, archived, or
+---TITLED, which happens after creation: the daemon names a workspace from its
+---first prompt in the background, so the list fetched when it was made still
+---says `main`. Debounced, because one creation is several updates.
+function M.follow()
+  if following then
+    return
+  end
+  following = true
+  local pending = false
+  require("paseo.bridge").on("workspaces_changed", function()
+    if pending then
+      return
+    end
+    pending = true
+    vim.defer_fn(function()
+      pending = false
+      if M.win() then
+        cache.loading = false
+        M.load()
+      end
+    end, 250)
+  end)
+end
+
 ---Fetch the project's workspaces, and draw them when they land.
 ---
----Not pushed: the daemon has no workspace subscription the sidecar follows,
----so the rail asks when it is shown and the float asks again every so often
----while it stays up. What is pushed -- what the agents are doing -- comes from
----|paseo.agents| and needs no fetch.
+---Asked when the rail is shown, again every so often while the float stays
+---up, and whenever the sidecar says a workspace changed (`M.follow`) -- the
+---daemon streams that, but only the FACT is forwarded; the list is refetched
+---here. What the agents are doing comes from |paseo.agents| and needs no fetch.
 ---@param done? fun()
 function M.load(done)
+  M.follow()
   -- NEVER THE ONE TO START THE BRIDGE. A dashboard is only ever open over a
   -- chat that has already asked for it, so a bridge that is not up yet is one
   -- that is on its way -- and the first agent snapshot it delivers asks again

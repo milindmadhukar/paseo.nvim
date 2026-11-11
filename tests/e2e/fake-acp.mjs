@@ -37,6 +37,13 @@ const MODES = {
   ],
 };
 
+// Advertised so Paseo's catalog probe has a model to list: a provider with
+// none is hidden from the new-agent screen.
+const MODELS = {
+  currentModelId: "scripted",
+  availableModels: [{ modelId: "scripted", name: "Scripted", description: "The e2e script" }],
+};
+
 function words(text) {
   return text.match(/\S+\s*/g) ?? [];
 }
@@ -123,7 +130,7 @@ const handlers = {
   "session/new": (id, params) => {
     const sessionId = `fake_${randomUUID().slice(0, 12)}`;
     sessions.set(sessionId, { cwd: params?.cwd ?? process.cwd(), cancelled: false });
-    reply(id, { sessionId, modes: MODES });
+    reply(id, { sessionId, modes: MODES, models: MODELS });
   },
   "session/prompt": (id, params) => {
     turn(id, params).catch((error) => fail(id, -32603, String(error)));
@@ -132,6 +139,7 @@ const handlers = {
     const session = sessions.get(params?.sessionId);
     if (session) session.cancelled = true;
   },
+  "session/set_model": (id) => reply(id, {}),
   "session/set_mode": (id, params) => {
     update(params.sessionId, { sessionUpdate: "current_mode_update", currentModeId: params.modeId });
     reply(id, {});

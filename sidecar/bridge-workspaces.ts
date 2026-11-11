@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
-import { need, type Ops } from "./bridge-io.ts";
+import { need, type Ops, type Request } from "./bridge-io.ts";
 import { BridgeConnection } from "./bridge-connection.ts";
+import { pictures } from "./bridge-normalize.ts";
 
 /** Trailing slashes and `..` segments, so two spellings of one path compare equal. */
 export function canonical(path: string): string {
@@ -36,15 +37,101 @@ export async function projectIdFor(
  */
 async function createInProject(
   ctx: BridgeConnection,
+  req: Request,
   cwd: string,
   project: string,
-  title?: string,
-): Promise<any> {
+): Promise<{ workspace: any; agentId: string | null }> {
   const projectId = await projectIdFor(ctx, project);
-  return await ctx.connected().workspaces.create({
-    source: { kind: "directory", path: canonical(cwd), projectId },
-    ...(title ? { title } : {}),
+  return await createWithFirstAgent(ctx, req, {
+    kind: "directory",
+    path: canonical(cwd),
+    projectId,
   });
+}
+
+/**
+ * `provider/model` into the daemon's two fields. The model may itself contain
+ * a slash (`openrouter/anthropic/claude-…`), so only the FIRST one splits.
+ */
+function splitProvider(value: string): { provider: string; model?: string } {
+  const at = value.indexOf("/");
+  return at < 0
+    ? { provider: value }
+    : { provider: value.slice(0, at), model: value.slice(at + 1) };
+}
+
+/**
+ * Create a workspace -- and, when the request carries a first prompt, its
+ * first agent with it, in the same request.
+ *
+ * THE SAME REQUEST IS THE POINT. The daemon generates a workspace's title (and
+ * a worktree's branch name) from the first prompt, and only inside
+ * `workspace.create`, and only when that request carries `firstAgentContext`.
+ * A later `agent.create` with a `workspaceId` never names anything, and no
+ * send ever does. This used to create the workspace bare and the agent after
+ * it, so every workspace started from the editor sat in the sidebar as `main`
+ * or as the slug typed for its directory.
+ *
+ * And no `title` when there is a prompt: an explicit title is permanent -- the
+ * generated one is only written over the provisional first line, never over a
+ * name somebody chose.
+ *
+ * Both `agent` and `firstAgentContext`, as the app sends them: a daemon without
+ * the creation lifecycle strips `agent` and still names from the context.
+ * Through the RAW client because the typed `workspaces.create` returns only the
+ * workspace handle and drops the agent it just created.
+ */
+async function createWithFirstAgent(
+  ctx: BridgeConnection,
+  req: Request,
+  source: any,
+): Promise<{ workspace: any; agentId: string | null }> {
+  const prompt = typeof req.prompt === "string" ? req.prompt.trim() : "";
+  const sourceCwd = String(source.path ?? source.cwd);
+  const images = pictures(req);
+  const attachments = Array.isArray(req.attachments) ? req.attachments : null;
+
+  let agent: Record<string, unknown> | undefined;
+  if (prompt && req.provider) {
+    agent = {
+      config: {
+        ...splitProvider(String(req.provider)),
+        cwd: sourceCwd,
+        ...(req.modeId ? { modeId: String(req.modeId) } : {}),
+        ...(req.thinkingOptionId
+          ? { thinkingOptionId: String(req.thinkingOptionId) }
+          : {}),
+        ...(req.featureValues &&
+        typeof req.featureValues === "object" &&
+        !Array.isArray(req.featureValues)
+          ? { featureValues: req.featureValues }
+          : {}),
+      },
+      initialPrompt: prompt,
+      ...(images ? { images } : {}),
+      ...(attachments ? { attachments } : {}),
+      labels: { "paseo.nvim": "review" },
+    };
+  }
+
+  const result: any = await ctx.raw().createWorkspace({
+    source,
+    ...(prompt
+      ? { firstAgentContext: { prompt } }
+      : req.title
+        ? { title: String(req.title) }
+        : {}),
+    ...(agent ? { agent } : {}),
+  });
+  if (result?.error || !result?.workspace) {
+    throw new Error(
+      String(result?.error ?? "the daemon did not create the workspace"),
+    );
+  }
+  return {
+    workspace: ctx.connected().workspaces.ref(result.workspace.id),
+    agentId: result.agent?.id ?? null,
+  };
 }
 
 /**
@@ -78,7 +165,9 @@ export async function workspaceFor(
   });
 
   if (owner) return api.workspaces.ref(owner.id);
-  if (project) return await createInProject(ctx, cwd, project);
+  if (project)
+    return (await createInProject(ctx, { op: "workspace.open" }, cwd, project))
+      .workspace;
   return await api.workspaces.open(cwd);
 }
 
@@ -143,31 +232,97 @@ export function workspaceOps(ctx: BridgeConnection): Ops {
     },
 
     async "workspace.create"(req) {
-      if (!req.worktree && req.project) {
-        const workspace = await createInProject(
-          ctx,
-          String(need(req.cwd, "cwd")),
-          String(req.project),
-          req.title ? String(req.title) : undefined,
-        );
-        return await createdWorkspace(workspace);
+      const cwd = String(need(req.cwd, "cwd"));
+      const created =
+        !req.worktree && req.project
+          ? await createInProject(ctx, req, cwd, String(req.project))
+          : await createWithFirstAgent(
+              ctx,
+              req,
+              req.worktree
+                ? {
+                    kind: "worktree",
+                    cwd,
+                    action: "branch-off",
+                    refName: String(req.base ?? "main"),
+                    branchName: String(need(req.branch, "branch")),
+                  }
+                : { kind: "directory", path: cwd },
+            );
+      return {
+        ...(await createdWorkspace(created.workspace)),
+        agentId: created.agentId,
+      };
+    },
+
+    /**
+     * Start the first agent in a directory, with its first prompt -- the
+     * moment a workspace can be NAMED.
+     *
+     * What "here" means depends on what is already here:
+     *   - a Paseo worktree or checkout, or a workspace somebody titled: the
+     *     agent joins it. It already has a name worth keeping, and a second
+     *     workspace on a worktree's path would register the worktree as a
+     *     project of its own (see `workspaceFor`).
+     *   - nothing, or a plain checkout still called by its branch (`main`):
+     *     a fresh directory workspace in the same project, created WITH the
+     *     prompt, so the daemon titles it the way the app's New workspace
+     *     does. The untitled one is left alone.
+     */
+    async "agent.start"(req) {
+      const cwd = canonical(String(need(req.cwd, "cwd")));
+      need(req.prompt, "prompt");
+      need(req.provider, "provider");
+      const api = connected();
+
+      const page: any = await api.workspaces.list({ page: { limit: 200 } });
+      const owner = (page.entries ?? []).find((ws: any) => {
+        if (ws.archivingAt) return false;
+        const dir = ws.workspaceDirectory ?? ws.project?.checkout?.cwd ?? null;
+        return dir ? canonical(String(dir)) === cwd : false;
+      });
+      const keeps =
+        owner &&
+        (owner.workspaceKind === "worktree" ||
+          owner.workspaceKind === "checkout" ||
+          (typeof owner.title === "string" && owner.title.trim() !== ""));
+
+      if (keeps) {
+        const images = pictures(req);
+        const agent = await api.workspaces.ref(owner.id).agents.create({
+          config: {
+            provider: String(req.provider),
+            ...(req.modeId ? { modeId: String(req.modeId) } : {}),
+            ...(req.thinkingOptionId
+              ? { thinkingOptionId: String(req.thinkingOptionId) }
+              : {}),
+            ...(req.featureValues && typeof req.featureValues === "object"
+              ? { featureValues: req.featureValues as Record<string, unknown> }
+              : {}),
+          },
+          prompt: String(req.prompt),
+          ...(images ? { images } : {}),
+          labels: { "paseo.nvim": "review" },
+        } as any);
+        return { agentId: agent.id, workspaceId: owner.id, created: false };
       }
 
-      const source: any = req.worktree
-        ? {
-            kind: "worktree",
-            cwd: String(need(req.cwd, "cwd")),
-            action: "branch-off",
-            refName: String(req.base ?? "main"),
-            branchName: String(need(req.branch, "branch")),
-          }
-        : { kind: "directory", path: String(need(req.cwd, "cwd")) };
-
-      const workspace: any = await connected().workspaces.create({
-        source,
-        ...(req.title ? { title: String(req.title) } : {}),
+      const projectId = owner?.projectId
+        ? String(owner.projectId)
+        : await projectIdFor(ctx, String(req.project ?? cwd));
+      const created = await createWithFirstAgent(ctx, req, {
+        kind: "directory",
+        path: cwd,
+        projectId,
       });
-      return await createdWorkspace(workspace);
+      if (!created.agentId) {
+        throw new Error("the daemon created the workspace but no agent in it");
+      }
+      return {
+        agentId: created.agentId,
+        workspaceId: created.workspace.id,
+        created: true,
+      };
     },
 
     /**

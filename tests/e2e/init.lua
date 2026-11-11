@@ -31,7 +31,7 @@ require("paseo").setup {
     url = url,
     home = vim.env.PASEO_E2E_HOME,
     autostart = false,
-    provider = vim.env.PASEO_E2E_PROVIDER or "fake",
+    provider = vim.env.PASEO_E2E_PROVIDER or "fake/scripted",
   },
   ui = {
     surface = vim.env.PASEO_E2E_SURFACE or "float",

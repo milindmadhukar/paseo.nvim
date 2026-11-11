@@ -763,6 +763,17 @@ asked before anything had established that an agent is what you came for, and
 with a terminal reachable only from a tab of a surface you had to create an
 agent in order to see.
 
+**new agent** goes to the settings screen and then to the chat, as a
+**draft**: nothing exists on the daemon until your first message. That message
+creates the agent and its workspace in one request, so the daemon names the
+workspace from it, the way the app's New workspace does. The app's sidebar and
+the rail say `Fix flaky login test on CI`, not `main`. The daemon only names a
+workspace inside the request that creates it, and only when the prompt is part
+of that request, which is why the draft waits. A Paseo worktree, or a
+workspace somebody titled, keeps its name and the agent joins it. A plain
+checkout still called by its branch gets a fresh, named workspace beside it in
+the same project.
+
 **new agent in a new workspace** asks for a name, creates the appropriate
 local/worktree/assembled workspace, starts the agent in it and moves the editor
 there. **new terminal** opens the [terminal picker](#terminals) and points the
@@ -801,7 +812,8 @@ settings here and are not settings on a running agent:
    h j k l  move   ⏎  apply   p s m t f  group   r  reload   c  create
 ```
 
-`c` creates, `q` cancels, and nothing exists until you press one. There is no
+`c` opens the chat on these settings, `q` cancels. Even `c` creates nothing;
+the first message does. There is no
 Create *card*, because a card that is not a setting reads as one.
 
 **The screen is the picker.** Choosing a provider used to be two

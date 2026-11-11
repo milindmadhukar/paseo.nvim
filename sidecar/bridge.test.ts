@@ -641,11 +641,14 @@ test("an assembled workspace is created inside its project, not as one of its ow
           entries: [{ id: "wks_old", workspaceDirectory: "/code/kora/.workspaces/old/" }],
         };
       },
-      ref: (id: string) => ({ id, directory: "/code/kora/.workspaces/old" }),
-      async create(input: any) {
-        created.push(input);
-        return { id: "wks_new", directory: input.source.path, projectId: input.source.projectId };
-      },
+      ref: (id: string) =>
+        id === "wks_old"
+          ? { id, directory: "/code/kora/.workspaces/old" }
+          : {
+              id,
+              directory: created.at(-1)?.source.path,
+              projectId: created.at(-1)?.source.projectId,
+            },
       async open(cwd: string) {
         opened.push(cwd);
         return { id: "wks_open", directory: cwd, projectId: "prj_invented" };
@@ -656,6 +659,16 @@ test("an assembled workspace is created inside its project, not as one of its ow
     async addProject(cwd: string) {
       added.push(cwd);
       return { project: { projectId: "prj_kora" }, error: null };
+    },
+    // Through the RAW client: the typed `workspaces.create` drops the agent a
+    // create-with-first-prompt makes.
+    async createWorkspace(input: any) {
+      created.push(input);
+      return {
+        workspace: { id: `wks_new${created.length}` },
+        agent: input.agent ? { id: "agent_first" } : undefined,
+        error: null,
+      };
     },
   })) as any;
   const ops = workspaceOps(ctx);
@@ -692,6 +705,30 @@ test("an assembled workspace is created inside its project, not as one of its ow
   });
   assert.equal(created[1].source.projectId, "prj_kora");
   assert.equal(created[1].title, "billing");
+
+  // WITH a first prompt: the agent and the naming context ride the same
+  // request, and the title is left off -- an explicit title is permanent and
+  // would stop the daemon naming the workspace from the prompt.
+  const withPrompt: any = await ops["workspace.create"]({
+    op: "workspace.create",
+    cwd: "/code/kora/.workspaces/billing",
+    project: "/code/kora",
+    title: "billing",
+    prompt: "  Fix the invoice rounding  ",
+    provider: "claude/opus",
+    modeId: "plan",
+  });
+  const sent = created[2];
+  assert.equal(sent.title, undefined, "no title beside a prompt");
+  assert.deepEqual(sent.firstAgentContext, { prompt: "Fix the invoice rounding" });
+  assert.equal(sent.agent.initialPrompt, "Fix the invoice rounding");
+  assert.deepEqual(sent.agent.config, {
+    provider: "claude",
+    model: "opus",
+    cwd: "/code/kora/.workspaces/billing",
+    modeId: "plan",
+  });
+  assert.equal(withPrompt.agentId, "agent_first");
 
   // No project: an ordinary directory, which the daemon places itself.
   await ops["workspace.open"]({ op: "workspace.open", cwd: "/code/tracker" });
