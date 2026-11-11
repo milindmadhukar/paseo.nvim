@@ -36,6 +36,11 @@ local attached = false
 ---@param s paseo.Subagent
 ---@return string glyph, string hl, string word
 function M.state(s)
+  -- Before running: a subagent blocked on you is technically still running,
+  -- and a spinner over it says the one thing that is not happening.
+  if s.waiting then
+    return icons.status.waiting, "PaseoBadge", "needs you"
+  end
   if s.running then
     return widgets.spinner(), "PaseoToolRunning", "running"
   end
@@ -100,7 +105,7 @@ function M.lines(parent, width)
     -- Three fixed columns on the right -- the state, how long, which kind --
     -- so they read down the list as columns. The kind says what <CR> does: a
     -- chat, or the read-only view.
-    local right_width = 8 + 1 + 7 + 2 + 8 + 1
+    local right_width = 9 + 1 + 7 + 2 + 8 + 1
     local left_width = math.max(8, width - right_width - 5)
     local label = { { s.title, "PaseoText" } }
     if s.detail then
@@ -109,7 +114,7 @@ function M.lines(parent, width)
     label = render.pad(render.truncate(label, left_width), left_width + 1)
     local line = { { "  " .. glyph .. " ", hl } }
     vim.list_extend(line, label)
-    line[#line + 1] = { ("%-8s"):format(word), hl }
+    line[#line + 1] = { ("%-9s"):format(word), hl }
     line[#line + 1] = { (" %7s  %-8s "):format(time or "", s.kind), "PaseoDim" }
     out[#out + 1] = line
     rows[#out] = s

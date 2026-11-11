@@ -304,6 +304,11 @@ panel, and that is exactly when nothing else on screen is moving.
 A pending permission shouts from the header itself — ` needs you` — because
 then the agent is not working, it is waiting for you.
 
+A **subagent's** request is answered in its parent's chat. A Paseo subagent (an
+agent another agent started through Paseo) has a timeline of its own that
+nobody has open, so its requests are relayed into the parent's chat, marked
+`asked by subagent <title>`, and the answer goes back to the subagent.
+
 **It is drawn against the box you type in**, one row above it, on both
 surfaces. That is a move: it used to live at the far top of the screen — a
 winbar over the transcript in the sidebar, the first row of the chrome on the

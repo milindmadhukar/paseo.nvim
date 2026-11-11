@@ -1053,6 +1053,10 @@ initialise = function(chat)
   M.load_settings(chat)
   -- Its subagents, both kinds: the count in the header and `gs`.
   require("paseo.subagents").follow(chat.agent_id, chat.host_id)
+  -- And any of them already blocked on a permission when the chat opened.
+  if M.relay_permissions then
+    M.relay_permissions(chat)
+  end
 end
 
 -- --------------------------------------------------------------------- API
@@ -1736,6 +1740,30 @@ function M.attach_events()
     end
   end
   bridge.on("thinking", on_thinking)
+
+  -- A Paseo subagent blocked on a permission: its request is answered HERE,
+  -- in the parent's chat, because nobody opens the subagent's own. A
+  -- subagent that does have an initialised chat keeps its requests.
+  local function has_own_chat(agent_id)
+    for _, other in pairs(chats) do
+      if other.agent_id == agent_id and other.initialised then
+        return true
+      end
+    end
+    return false
+  end
+  M.relay_permissions = function(chat)
+    require("paseo.ui.permission").relay(chat, has_own_chat)
+  end
+  require("paseo.agents").on_change(function()
+    vim.schedule(function()
+      for _, chat in pairs(chats) do
+        if chat.agent_id and chat.initialised then
+          M.relay_permissions(chat)
+        end
+      end
+    end)
+  end)
 
   -- A subagent started, moved or finished: the header counts them.
   require("paseo.subagents").on_change(function(host_id, parent)

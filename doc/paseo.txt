@@ -2749,6 +2749,25 @@ A request answered in the Paseo desktop app closes the dialog here too. To
 avoid being asked at all, set a more permissive mode with |:Paseo-mode|; to be
 asked about everything, set `default`.
 
+                                                *paseo-permission-subagents*
+A SUBAGENT'S REQUEST IS ANSWERED IN ITS PARENT'S CHAT. Both kinds:
+
+  - a provider subagent (Claude's Task tool) asks through its parent anyway,
+    so its request is the parent's;
+  - a Paseo subagent -- an agent another agent started through Paseo -- is
+    an agent of its own whose requests ride its own timeline. Nobody opens a
+    chat on it, so its request is RELAYED: offered in the parent's chat, the
+    dialog and the card saying `asked by subagent <title>`, and the answer
+    sent back to the subagent. A subagent you have opened a chat of its own
+    on keeps its requests there.
+
+In |:Paseo-subagents| a Paseo subagent blocked on you shows a yellow `!` and
+`needs you`, not a spinner.
+
+Over the dashboard the dialog floats on the dashboard itself; the dimmed
+backdrop is only drawn over your code. A dimmed float hides every float under
+it, and the dashboard is made of them.
+
                                                *paseo-permission-questions*
 When the agent asks YOU ~
 

@@ -79,6 +79,11 @@ local function build(request, width, view)
     { icons.status.permission .. "  ", "PaseoDanger" },
     { request.title or request.name or "Permission required", "PaseoDanger" },
   }
+  if request.via then
+    -- Relayed: say WHO is asking. "Bash" alone, over the parent's chat, reads
+    -- as the parent wanting to run it.
+    lines[#lines + 1] = { { ("  %s asked by subagent %s"):format(icons.tool.sub_agent, request.via), "PaseoDim" } }
+  end
   if request.kind and request.kind ~= "tool" then
     lines[#lines + 1] = { { "  " .. request.kind, "PaseoDim" } }
   end
@@ -154,7 +159,9 @@ function M.respond(chat, request, opts)
   M.close()
 
   bridge.request("agent.respondToPermission", {
-    agentId = chat.agent_id,
+    -- The agent that ASKED, which for a request relayed from a Paseo subagent
+    -- is not the agent whose chat it is answered in. See `M.relay`.
+    agentId = request.agentId or chat.agent_id,
     requestId = request.id,
     behavior = opts.behavior,
     selectedActionId = opts.selectedActionId,
@@ -359,19 +366,30 @@ local function open(chat, request)
 
   -- A dimmed backdrop, so the dialog reads as modal. typr does the same for
   -- its stats window.
-  local backdrop = api.nvim_create_buf(false, true)
-  local backdrop_win = api.nvim_open_win(backdrop, false, {
-    relative = "editor",
-    row = 0,
-    col = 0,
-    width = vim.o.columns,
-    height = vim.o.lines,
-    focusable = false,
-    style = "minimal",
-    border = "none",
-    zindex = 190,
-  })
-  vim.wo[backdrop_win].winblend = 30
+  --
+  -- NOT OVER THE DASHBOARD. A blended float only shows the base grid through
+  -- it, never other floats -- and every pane of the dashboard is a float. So
+  -- the "dimmed" dashboard was no dashboard at all: the conversation, the
+  -- rail and the card for this very request vanished behind it, and the
+  -- dialog sat over an empty editor, which reads as the dashboard having
+  -- crashed. The dashboard is already the modal context; the dialog over it
+  -- needs no second one.
+  local backdrop, backdrop_win
+  if not require("paseo.ui.float").mount() then
+    backdrop = api.nvim_create_buf(false, true)
+    backdrop_win = api.nvim_open_win(backdrop, false, {
+      relative = "editor",
+      row = 0,
+      col = 0,
+      width = vim.o.columns,
+      height = vim.o.lines,
+      focusable = false,
+      style = "minimal",
+      border = "none",
+      zindex = 190,
+    })
+    vim.wo[backdrop_win].winblend = 30
+  end
 
   local buf = api.nvim_create_buf(false, true)
   local win = api.nvim_open_win(buf, true, {
@@ -557,8 +575,9 @@ function M.offer(chat, request)
     open(chat, request)
   else
     vim.notify(
-      ("paseo: %s needs permission — `gp` in the chat to answer"):format(
-        request.title or request.name or "the agent"
+      ("paseo: %s needs permission%s — `gp` in the chat to answer"):format(
+        request.title or request.name or "the agent",
+        request.via and (" (subagent %s)"):format(request.via) or ""
       ),
       vim.log.levels.WARN
     )
@@ -577,6 +596,9 @@ end
 ---@param resolution table|nil
 function M.resolved(chat, request_id, resolution)
   chat.permissions = chat.permissions or {}
+  if chat.relayed then
+    chat.relayed[request_id] = nil
+  end
   for i, request in ipairs(chat.permissions) do
     if request.id == request_id then
       table.remove(chat.permissions, i)
@@ -665,10 +687,13 @@ function M.reconcile(chat, list)
     end
   end
 
-  -- Gone: answered by somebody, somewhere, and we never heard.
+  -- Gone: answered by somebody, somewhere, and we never heard. Only this
+  -- agent's OWN requests -- one relayed from a subagent is in the subagent's
+  -- list, never in this one, and `M.relay` reconciles those.
   for i = #chat.permissions, 1, -1 do
     local request = chat.permissions[i]
-    if not authoritative[request.id] then
+    local own = not request.agentId or request.agentId == chat.agent_id
+    if own and not authoritative[request.id] then
       M.resolved(chat, request.id, { label = "answered elsewhere" })
     end
   end
@@ -678,6 +703,106 @@ function M.reconcile(chat, list)
   -- already de-duplicates, so a list that agrees with us costs nothing.
   for _, request in ipairs(list) do
     M.offer(chat, request)
+  end
+end
+
+-- ----------------------------------------------------------------- the relay
+
+---Fetches in flight, by subagent id, so a burst of directory updates asks once.
+---@type table<string, boolean>
+local fetching = {}
+
+---Take `child`'s pending list as the truth for what is relayed from it.
+---@param chat table
+---@param child table  The subagent's agent-directory entry.
+---@param requests table[]
+local function adopt(chat, child, requests)
+  chat.relayed = chat.relayed or {}
+  local live = {}
+  for _, request in ipairs(requests) do
+    if request.id then
+      live[request.id] = true
+      request.agentId = child.id
+      request.via = child.title or "subagent"
+      chat.relayed[request.id] = child.id
+      M.offer(chat, request)
+    end
+  end
+  for request_id, from in pairs(chat.relayed) do
+    if from == child.id and not live[request_id] then
+      M.resolved(chat, request_id, { label = "answered elsewhere" })
+    end
+  end
+end
+
+---Bring a PASEO subagent's permission requests to its parent's chat.
+---
+---THE STUCK PERMISSION. A Paseo subagent -- an agent another agent started
+---through Paseo -- is an ordinary agent, and its requests ride ITS timeline,
+---which Neovim only follows for an agent with a chat of its own. Nobody opens
+---one: you are watching the parent. So the subagent blocked on a tool call
+---with nothing on screen anywhere -- no dialog, no card, no notification --
+---and `:Paseo chat` in that worktree found the parent, not it. The workspace
+---rail knew (`!`), and nothing it led to could answer.
+---
+---The agent directory carries a pending COUNT per agent; when a subagent of
+---this chat's agent has one, its list is fetched and each request is offered
+---here, tagged with who asked, and answered back to the subagent. A subagent
+---with an initialised chat of its own is left to it.
+---@param chat table
+---@param has_own_chat fun(agent_id: string): boolean
+function M.relay(chat, has_own_chat)
+  if not chat.agent_id then
+    return
+  end
+  chat.relayed = chat.relayed or {}
+  chat.relay_seen = chat.relay_seen or {}
+  local label = require("paseo.subagents").PARENT_LABEL
+
+  local children = {}
+  for _, agent in ipairs(require("paseo.agents").all(chat.host_id)) do
+    if agent.labels and agent.labels[label] == chat.agent_id and not has_own_chat(agent.id) then
+      children[agent.id] = agent
+    end
+  end
+
+  for id, child in pairs(children) do
+    local held = 0
+    for _, from in pairs(chat.relayed) do
+      if from == id then
+        held = held + 1
+      end
+    end
+    local pending = child.pendingPermissionCount or 0
+    -- What changed is the question, not merely "is anything pending": a
+    -- request answered and another arriving leaves the count where it was.
+    local seen = ("%d:%s:%s"):format(pending, tostring(child.updatedAt), tostring(child.status))
+    if (pending > 0 or held > 0) and chat.relay_seen[id] ~= seen and not fetching[id] then
+      chat.relay_seen[id] = seen
+      if pending == 0 then
+        adopt(chat, child, {})
+      else
+        fetching[id] = true
+        bridge.request("agent.pendingPermissions", { agentId = id }, function(err, result)
+          vim.schedule(function()
+            fetching[id] = nil
+            if err then
+              -- Try again on the next directory update rather than never.
+              chat.relay_seen[id] = nil
+              return
+            end
+            adopt(chat, child, result and result.requests or {})
+          end)
+        end, chat.host_id)
+      end
+    end
+  end
+
+  -- A subagent that left the directory takes its requests with it.
+  for request_id, from in pairs(chat.relayed) do
+    if not children[from] then
+      M.resolved(chat, request_id, { label = "answered elsewhere" })
+    end
   end
 end
 

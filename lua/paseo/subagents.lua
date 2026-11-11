@@ -30,6 +30,7 @@ M.PARENT_LABEL = "paseo.parent-agent-id"
 ---@field detail string|nil       What it was asked to do, when that differs.
 ---@field status string
 ---@field running boolean
+---@field waiting boolean|nil     A Paseo subagent blocked on a permission.
 ---@field provider string|nil
 ---@field createdAt string|nil
 ---@field updatedAt string|nil   For a finished one, roughly when it finished.
@@ -196,6 +197,9 @@ function M.list(parent, host_id)
         title = line(a.title) or "agent",
         status = a.status or "idle",
         running = agents.working(a.status),
+        -- Blocked on a permission: answered in the parent's chat, which
+        -- relays it (|paseo.ui.permission|.relay).
+        waiting = (a.pendingPermissionCount or 0) > 0 or nil,
         provider = a.provider,
         createdAt = a.createdAt,
         updatedAt = a.updatedAt,
