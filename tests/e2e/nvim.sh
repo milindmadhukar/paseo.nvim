@@ -23,7 +23,7 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "$here/../.." && pwd)"
 eval "$("$here/daemon.sh" env)"
-session="paseo-e2e"
+session="${PASEO_E2E_SESSION:-paseo-e2e}"
 sock="$PASEO_E2E_ROOT/nvim.sock"
 shots="$PASEO_E2E_ROOT/shots"
 deps="${PASEO_TEST_DEPS:-${XDG_CACHE_HOME:-$HOME/.cache}/paseo-nvim/test-deps}"
