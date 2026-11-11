@@ -490,11 +490,11 @@ function M.sessions(chat)
   local mount = float.mount()
   if not mount then
     -- Nothing up at all, so there is no mount to inherit and one has to be
-    -- named. The configured dashboard mount, not a literal `"float"` -- and
-    -- the sidebar's answer is still the dashboard, because that is the only
-    -- place this list exists.
-    mount = require("paseo.config").get().ui.surface == "buffer" and "buffer" or "float"
-    chat.surface = mount
+    -- named: the dashboard you last used, not a literal `"float"` -- and the
+    -- sidebar's answer is still the dashboard, because that is the only place
+    -- this list exists.
+    mount = require("paseo.ui.surface").dashboard()
+    sidebar.close(chat)
     float.open(chat, { mount = mount })
   elseif not float.is_open(chat) then
     float.open(chat, { mount = mount })
@@ -884,29 +884,20 @@ function M.showing(chat)
   return chat.surface == "sidebar" and sidebar.is_open(chat)
 end
 
----Put the chat on screen, on whichever surface it belongs to.
+---Put the chat on screen, on the surface |paseo.ui.surface| resolves: the one
+---asked for, else the one on screen, else the one you last used, else
+---`ui.surface`.
 ---
----Three answers, in order, and the middle one is the whole of the fix for
----"I opened a session from the buffer dashboard and got a float":
----
----  * `chat.surface` -- where this chat WAS. Reopening keeps the surface you
----    switched it to.
----  * THE MOUNT ALREADY ON SCREEN. Opening a different agent keys a brand-new
----    chat table, so `chat.surface` is nil for it however long you have been
----    standing in the buffer dashboard -- and falling straight to the default
----    tore that dashboard down and built a float in its place. The surface you
----    are looking at belongs to the WINDOW, not to the conversation you are
----    switching to, which is what every panel row, picker and session strip
----    was getting wrong by saying nothing at all.
----  * the configured default, when nothing is up. That is the full-screen
----    dashboard: the surface with everything on it, and `<C-f>` is how you get
----    the narrow one beside your code.
+---It used to read `chat.surface` first and the default last, and `chat.surface`
+---is cleared whenever the dashboard closes -- so every path that closes one
+---chat's surface and opens another's (following you to a workspace you had
+---been to, adopting an agent `agent.find` already knew) fell through to the
+---default and turned the buffer dashboard or the sidebar into a float.
 ---@param chat paseo.Chat
-local function layout(chat)
+---@param explicit? "float"|"sidebar"|"buffer"
+local function layout(chat, explicit)
   make_buffers(chat)
-  local surface = chat.surface
-    or require("paseo.ui.float").mount()
-    or require("paseo.config").get().ui.surface
+  local surface = require("paseo.ui.surface").resolve(explicit)
   -- Two mounts of ONE module. The dashboard is the same surface floating over
   -- your code or sitting in a window of its own -- same chrome, same tabs,
   -- same panes -- so the name goes in as the mount rather than picking
@@ -1160,13 +1151,10 @@ function M.open(opts, callback)
     chats[key] = chat
   end
   current = chat
-  if opts.surface then
-    chat.surface = opts.surface
-  end
 
   -- Already up where it should be: laying it out again is the churn above.
   if not (reused and not opts.surface) then
-    layout(chat)
+    layout(chat, opts.surface)
   end
   if opts.focus ~= false and chat.win_composer and vim.api.nvim_win_is_valid(chat.win_composer) then
     -- Not unconditional: the dashboard on any tab but Chat has no composer
@@ -1537,7 +1525,9 @@ function M.follow(root, opts)
     return false
   end
 
-  local surface = chat.surface or config.get().ui.surface
+  -- Read BEFORE the close: what is on screen is the answer, and in a moment
+  -- nothing will be.
+  local surface = require("paseo.ui.surface").resolve()
   local focus = opts.focus
   if focus == nil then
     -- Anything but the sidebar takes the cursor: both dashboard mounts cover
@@ -1652,11 +1642,13 @@ function M.fullscreen()
   -- wrong.
   local pending = require("paseo.ui.answer").showing()
 
+  -- From the sidebar, back to the dashboard you came from -- the buffer one
+  -- if that is where you were -- rather than always to the float.
   local result
   if chat and require("paseo.ui.float").is_open(chat) then
     result = M.surface "sidebar"
   else
-    result = M.surface "float"
+    result = M.surface(require("paseo.ui.surface").dashboard())
   end
 
   if chat and pending then

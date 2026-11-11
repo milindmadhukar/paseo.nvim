@@ -424,8 +424,94 @@ local function test_stop()
   vim.api.nvim_buf_delete(buf, { force = true })
 end
 
+--- The surface is yours, not the conversation's.
+---
+--- The bug: from the buffer dashboard, switching to a workspace whose chat had
+--- been open before landed you on a float. `float.close` clears
+--- `chat.surface`, and the chat `agent.find` handed back -- one this session
+--- already knew -- was laid out with nothing to go on but `ui.surface`.
+local function test_surface_memory()
+  local bridge = require "paseo.bridge"
+  local chat = require "paseo.ui.chat"
+  local float = require "paseo.ui.float"
+  local sidebar = require "paseo.ui.sidebar"
+  local surface = require "paseo.ui.surface"
+  local config = require "paseo.config"
+
+  local old_ensure, old_request = bridge.ensure, bridge.request
+  local old_settings = chat.load_settings
+  local here, there = vim.fn.tempname(), vim.fn.tempname()
+  vim.fn.mkdir(here, "p")
+  vim.fn.mkdir(there, "p")
+  local tabs = #vim.api.nvim_list_tabpages()
+
+  local ok, err = pcall(function()
+    config.setup {}
+    surface.reset()
+    chat.load_settings = function() end
+    bridge.ensure = function(callback)
+      callback(nil)
+    end
+    bridge.request = function(op, args, callback)
+      if op == "agent.find" then
+        return callback(nil, { id = "mem-" .. vim.fs.basename(args.cwd), provider = "test" })
+      end
+      if op == "timeline.history" then
+        return callback(nil, { items = {} })
+      end
+      callback(nil, {})
+    end
+    local function on(root)
+      return vim.wait(1000, function()
+        return chat.current() ~= nil and chat.current().agent_id == "mem-" .. vim.fs.basename(root)
+      end)
+    end
+
+    chat.open { root = here, surface = "buffer" }
+    truthy("surface memory: opened on the buffer dashboard", on(here) and float.mount() == "buffer")
+    chat.follow(there)
+    truthy("surface memory: a new workspace keeps the buffer dashboard", on(there) and float.mount() == "buffer")
+    -- The reported one: back to a chat this session has already seen.
+    chat.follow(here)
+    truthy("surface memory: so does one you have been to before", on(here))
+    eq("surface memory: and it is still the buffer dashboard", float.mount(), "buffer")
+
+    -- Closed and reopened: the surface you left on, not the default.
+    chat.close()
+    chat.forget()
+    chat.open { root = there }
+    truthy("surface memory: reopening comes back on the buffer dashboard", on(there) and float.mount() == "buffer")
+
+    -- The sidebar is remembered the same way, through a follow to a known chat.
+    chat.surface "sidebar"
+    truthy("surface memory: onto the sidebar", sidebar.is_open(chat.current()) and float.mount() == nil)
+    chat.follow(here)
+    truthy("surface memory: a workspace switch keeps the sidebar", on(here))
+    eq("surface memory: and is not a dashboard", float.mount(), nil)
+    truthy("surface memory: but the sidebar", sidebar.is_open(chat.current()))
+
+    -- `<C-f>` from the sidebar goes back to the dashboard you came from.
+    chat.fullscreen()
+    eq("surface memory: <C-f> from the sidebar returns to the buffer dashboard", float.mount(), "buffer")
+    chat.close()
+  end)
+
+  chat.close()
+  chat.forget()
+  surface.reset()
+  bridge.ensure, bridge.request = old_ensure, old_request
+  chat.load_settings = old_settings
+  while #vim.api.nvim_list_tabpages() > tabs do
+    vim.cmd "tabclose!"
+  end
+  if not ok then
+    error(err, 0)
+  end
+end
+
 return {
   { "chat follows", test_chat_follow },
+  { "surface memory", test_surface_memory },
   { "follow", test_follow },
   { "stop", test_stop },
 }

@@ -185,6 +185,12 @@ it in the window you are standing in, and everything on it is identical either
 way. The third is the **sidebar**, which is a different surface. The rest of
 this document uses those four words and no others for it.
 
+`ui.surface` only decides where the first chat of a session opens. After that
+the surface is yours, not the conversation's: switching workspace, picking a
+session, `<C-s>` and reopening after a close all land on the surface that is on
+screen, or else the one you last used. From the sidebar, `<C-f>` goes back to
+whichever dashboard you came from.
+
 | | |
 |---|---|
 | `:Paseo chat` | Open/close the chat, on whichever surface `ui.surface` names |

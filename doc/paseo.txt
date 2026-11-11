@@ -187,10 +187,18 @@ ui.surface                                        string, default `"float"`
                  own, taking over the window you are standing in and using
                  the whole screen rather than 94% of it.
 
-    `<C-f>` switches between the float and the sidebar at any time, and a chat
-    REMEMBERS the surface you last put it on. `<C-f>` does NOT reach the
-    buffer surface and nothing about that is an oversight -- see
-    |paseo-chat-buffer|. Use |:Paseo-buf|.
+    `<C-f>` switches between the dashboard and the sidebar at any time. From
+    the float it goes to the sidebar; from the sidebar it goes back to the
+    dashboard you came from -- the buffer mount, if that is where you were.
+    `<C-f>` on the buffer mount itself does nothing, and that is not an
+    oversight -- see |paseo-chat-buffer|. Use |:Paseo-buf|.
+
+    `ui.surface` is only where the FIRST chat of a session opens. After that
+    the surface is yours, not the conversation's: a chat opens on the one that
+    is on screen, or else the one you last put a chat on. Switching workspace,
+    picking a session, `<C-s>` and reopening after a close all keep it -- the
+    buffer dashboard stays the buffer dashboard, and the sidebar stays the
+    sidebar.
 
     See |paseo-chat-float|, |paseo-chat-buffer| and |paseo-chat-sidebar|.
 
@@ -1486,6 +1494,8 @@ Three things it deliberately does not do:
   - It does not move your cursor out of your code. The full-screen surface
     takes focus, because it covers the screen and you need to type into it;
     the sidebar does not.
+  - It does not change the surface. The chat lands on the one it left, even
+    when the workspace you moved to has a chat this session already opened.
 
 `<C-r>` re-points the chat too, but never takes focus -- the cursor belongs in
 whatever |paseo-review-autocmd| opens.

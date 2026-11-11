@@ -2128,6 +2128,7 @@ function M.open(chat, opts)
     session = { kind = "agent", id = chat.agent_id },
   }
   chat.surface = mount
+  require("paseo.ui.surface").remember(mount)
 
   M.rebuild()
 

@@ -479,6 +479,7 @@ function M.open(chat)
   vim.wo[chat.win_composer].winfixheight = true
 
   chat.surface = "sidebar"
+  require("paseo.ui.surface").remember "sidebar"
   M.refresh(chat)
   -- Cards were drawn at whatever width was current when they arrived, which for
   -- history fetched before the split existed is the fallback width.
