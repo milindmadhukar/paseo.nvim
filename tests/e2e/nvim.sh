@@ -33,7 +33,9 @@ remote() {
 case "${1:-}" in
   start)
     cwd="${2:-$PASEO_E2E_ROOT/repo}"
-    "$repo/tests/deps.sh" "$deps" >/dev/null
+    # Fetched once; every scenario starts a Neovim, and a network round trip
+    # per start is both slow and a way to fail for reasons that are not ours.
+    [ -d "$deps/volt" ] || "$repo/tests/deps.sh" "$deps" >/dev/null
     tmux kill-session -t "$session" 2>/dev/null || true
     rm -f "$sock"
     tmux new-session -d -s "$session" -x "$cols" -y "$rows" -c "$cwd" \

@@ -839,6 +839,20 @@ local function make_buffers(chat)
   end
 end
 
+---Is this chat on screen, on any surface?
+---
+---The float/buffer mounts answer through `float.showing`, which also notices a
+---chrome window that went away without us. The sidebar has no state object, so
+---its answer is the conversation window itself.
+---@param chat paseo.Chat
+---@return boolean
+function M.showing(chat)
+  if require("paseo.ui.float").showing(chat) then
+    return true
+  end
+  return chat.surface == "sidebar" and sidebar.is_open(chat)
+end
+
 ---Put the chat on screen, on whichever surface it belongs to.
 ---
 ---Three answers, in order, and the middle one is the whole of the fix for
@@ -1037,6 +1051,21 @@ function M.open(opts, callback)
 
   local key = hosts.key(host.id, opts.agent_id or root)
   local chat = chats[key]
+
+  -- THE CHAT ALREADY ON SCREEN, when the caller named no agent and it is for
+  -- this directory. Chats are re-keyed by agent id the moment one is bound
+  -- (see `adopt` below), so a lookup by directory -- which is what `:Paseo
+  -- image`, `ask` and `explain` all do -- missed the chat you were looking
+  -- at, built a second one on the default surface, and then `adopt` found the
+  -- real one, closed the surface and laid it out again. On the buffer mount
+  -- that round trip landed you in the float: paste an image, lose the tab.
+  local reused = false
+  if not chat and not opts.agent_id and current and current.agent_id
+    and current.host_id == host.id and current.root == root and M.showing(current)
+  then
+    chat, reused = current, true
+  end
+
   if not chat then
     chat = {
       root = root,
@@ -1055,7 +1084,10 @@ function M.open(opts, callback)
     chat.surface = opts.surface
   end
 
-  layout(chat)
+  -- Already up where it should be: laying it out again is the churn above.
+  if not (reused and not opts.surface) then
+    layout(chat)
+  end
   if opts.focus ~= false and chat.win_composer and vim.api.nvim_win_is_valid(chat.win_composer) then
     -- Not unconditional: the dashboard on any tab but Chat has no composer
     -- window at all, and `nvim_set_current_win(nil)` is an error rather than a
