@@ -618,6 +618,12 @@ sent as one message when the turn **completes**. It is kept, with a warning,
 when the turn fails or is stopped. While the agent is waiting on a permission,
 a queued message would never go, so queue interrupts instead.
 
+**`<Up>` in an empty composer** brings back the last prompt you sent this
+agent, and again for the one before. `<Down>` walks back to an empty box.
+Prompts sent from the Paseo app are recalled too, because the list is read
+from the transcript. In a box where you are writing, they are just the arrow
+keys.
+
 A bare digit is also a **count**, and the two panes these are bound on are
 ordinary buffers — so while the dashboard is open, `3p` and `5j` in the
 conversation and the composer go to the tab bar. That is the right default for

@@ -2022,6 +2022,10 @@ In the composer ~
     g<CR>     send THE OTHER WAY while a turn runs: queue it when sending
               steers, send it now when sending queues (|paseo-send-behavior|)
     <S-CR>    the same, where the terminal can send it
+    <Up>      in an EMPTY box: the last prompt you sent this agent, then the
+              one before. <Down> walks back to an empty box. In a box with a
+              prompt being written they are just the arrow keys. Prompts sent
+              from the Paseo app are recalled too: it reads the transcript.
     <C-s>     the session list
     p  P      paste -- an image if the clipboard has one, text otherwise
     1-6       jump to a tab (full screen; see ui.float.tab_keys)

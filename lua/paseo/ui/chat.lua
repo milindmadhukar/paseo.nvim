@@ -350,6 +350,23 @@ local function deliver(chat, prompt, images, behavior)
   end, chat.host_id)
 end
 
+---What you have said to this agent, oldest first, as the transcript shows it.
+---Read from the blocks rather than kept on the side, so prompts sent from the
+---Paseo app or another client are recalled too.
+---@param chat paseo.Chat
+---@return string[]
+function M.sent_prompts(chat)
+  local out = {}
+  for _, id in ipairs(chat.order or {}) do
+    local block = chat.blocks[id]
+    local text = block and block.item.kind == "user" and block.item.text
+    if text and text ~= "" and out[#out] ~= text then
+      out[#out + 1] = text
+    end
+  end
+  return out
+end
+
 ---What a send does while the agent is mid-turn. See |paseo-config.ui|'s
 ---`send_behavior`; `alternate` is the other key, which does the opposite --
 ---the app's long-press on Send.
@@ -396,6 +413,7 @@ local function send(chat, alternate)
   if text == "" and #chat.pending == 0 and #chat.images == 0 then
     return
   end
+  chat.recall = nil
 
   -- Context blocks queued by `attach` go BEFORE the prose, so the agent reads
   -- the code first and the question second.
@@ -816,6 +834,35 @@ local function make_buffers(chat)
       vim.keymap.set("n", key, function()
         send(chat)
       end, vim.tbl_extend("force", opts, { desc = "paseo: send" }))
+    end
+
+    -- RECALL, as the app's composer does it: `<Up>` in an EMPTY box brings
+    -- back the last thing you sent this agent, again for the one before, and
+    -- `<Down>` walks forward to an empty box. Only while the box is empty or
+    -- still holds exactly what was recalled -- otherwise these are just the
+    -- arrow keys, moving through a prompt you are writing.
+    local function recall(step)
+      return function()
+        local lines = vim.api.nvim_buf_get_lines(chat.composer, 0, -1, false)
+        local text = table.concat(lines, "\n")
+        local walking = chat.recall and text == chat.recall.shown
+        if text ~= "" and not walking then
+          return vim.api.nvim_feedkeys(vim.keycode(step < 0 and "<Up>" or "<Down>"), "n", false)
+        end
+        local sent = M.sent_prompts(chat)
+        local at = walking and chat.recall.at or (#sent + 1)
+        at = math.max(1, math.min(#sent + 1, at + step))
+        local shown = sent[at] or ""
+        chat.recall = { at = at, shown = shown }
+        vim.api.nvim_buf_set_lines(chat.composer, 0, -1, false, vim.split(shown, "\n"))
+        M.fit_composer(chat)
+        local last = vim.api.nvim_buf_line_count(chat.composer)
+        pcall(vim.api.nvim_win_set_cursor, 0, { last, #(vim.api.nvim_buf_get_lines(chat.composer, last - 1, last, false)[1] or "") })
+      end
+    end
+    for _, mode in ipairs { "n", "i" } do
+      vim.keymap.set(mode, "<Up>", recall(-1), vim.tbl_extend("force", opts, { desc = "paseo: recall an earlier prompt" }))
+      vim.keymap.set(mode, "<Down>", recall(1), vim.tbl_extend("force", opts, { desc = "paseo: recall a later prompt" }))
     end
 
     -- THE OTHER SEND, the app's long-press: queue it behind the running turn
