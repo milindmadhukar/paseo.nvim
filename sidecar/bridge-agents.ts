@@ -29,50 +29,6 @@ function agentProvider(agent: any): string | null {
     : null;
 }
 
-const MAX_PROVISIONAL_AGENT_TITLE_CHARS = 60;
-
-function provisionalAgentTitle(prompt: string): string | null {
-  const firstContentLine = prompt
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find((line) => line.length > 0);
-  if (!firstContentLine) return null;
-
-  const normalized = firstContentLine.replace(/\s+/g, " ").trim();
-  if (!normalized) return null;
-
-  const clamped = normalized
-    .slice(0, MAX_PROVISIONAL_AGENT_TITLE_CHARS)
-    .trim();
-  return clamped.length > 0 ? clamped : null;
-}
-
-/**
- * Paseo 0.8 derives a title only when the first prompt is part of create().
- * paseo.nvim deliberately creates an idle session first, so mirror the newer
- * daemon behavior when that session receives its first prompt later.
- */
-async function nameAgentFromFirstPrompt(
-  ctx: BridgeConnection,
-  agent: any,
-  agentId: string,
-  prompt: string,
-): Promise<void> {
-  const title = provisionalAgentTitle(prompt);
-  if (!title) return;
-
-  try {
-    await agent.refresh();
-    const snapshot = agent.current();
-    if (snapshot && !snapshot.title && !snapshot.lastUserMessageAt) {
-      await ctx.raw().updateAgent(agentId, { name: title });
-    }
-  } catch {
-    // Naming is cosmetic. A transient fetch/update failure must never eat the
-    // prompt the user was trying to send.
-  }
-}
-
 /**
  * The agent `:Paseo chat` should open in a directory, out of everything the
  * daemon has there.
@@ -183,48 +139,25 @@ export async function followDirectory(ctx: BridgeConnection): Promise<void> {
     }
   });
 
-  // TWO SDK GENERATIONS, and the installed one is the older.
-  //
-  // 0.9+ returns an owned `subscription` from list({ subscribe: {} }) whose
-  // snapshot callback fires before updates. 0.8 has no such object:
-  // `agents.subscribe(handler)` registers a LOCAL listener and the list call
-  // is what asks the daemon to start streaming. Writing only the documented
-  // 0.9 form failed at runtime with "undefined is not an object (evaluating
-  // 'result.subscription.subscribe')", so both are handled and the difference
-  // is confined here.
-  let localUnsubscribe: (() => void) | null = null;
-  if (typeof (api.agents as any).subscribe === "function") {
-    localUnsubscribe = (api.agents as any).subscribe(applyUpdate);
-  }
-
+  // The owned subscription delivers its snapshot first and every update
+  // after it, and releasing it is what tells the daemon to stop. (There was a
+  // second path here for SDK 0.8, whose list result had no subscription; the
+  // pinned SDK has had one since 0.9.)
   const result: any = await api.agents.list({
     filter: { includeArchived: false },
     subscribe: {},
   });
-
-  if (result?.subscription?.subscribe) {
-    // 0.9+: the owned subscription supersedes the local listener, and delivers
-    // its own snapshot first.
-    localUnsubscribe?.();
-    localUnsubscribe = null;
-    result.subscription.subscribe({
-      snapshot: guarded("agents snapshot", ({ entries }: any) =>
-        emit("agents", {
-          kind: "snapshot",
-          entries: entries.map((e: any) => describeAgent(e.agent)),
-        }),
-      ),
-      update: applyUpdate,
-      error: (error: unknown) =>
-        emit("agents", { kind: "error", error: String(error) }),
-    });
-  } else {
-    // 0.8: the list result IS the snapshot.
-    emit("agents", {
-      kind: "snapshot",
-      entries: (result.entries ?? []).map((e: any) => describeAgent(e.agent)),
-    });
-  }
+  result.subscription.subscribe({
+    snapshot: guarded("agents snapshot", ({ entries }: any) =>
+      emit("agents", {
+        kind: "snapshot",
+        entries: entries.map((e: any) => describeAgent(e.agent)),
+      }),
+    ),
+    update: applyUpdate,
+    error: (error: unknown) =>
+      emit("agents", { kind: "error", error: String(error) }),
+  });
 
   // WORKSPACES TOO, for one reason above all: a workspace's title is written
   // AFTER it is created -- the daemon names it from the first prompt in the
@@ -253,9 +186,8 @@ export async function followDirectory(ctx: BridgeConnection): Promise<void> {
   }
 
   ctx.directory = {
-    subscription: result?.subscription,
+    subscription: result.subscription,
     workspaces: workspaces?.subscription,
-    localUnsubscribe,
   };
 }
 
@@ -371,7 +303,10 @@ export function agentOps(ctx: BridgeConnection): Ops {
       const prompt = String(need(req.prompt, "prompt"));
       const agent = connected().agents.ref(agentId);
       const images = pictures(req);
-      await nameAgentFromFirstPrompt(ctx, agent, agentId, prompt);
+      // No naming here. The daemon titles an untitled, unused agent from its
+      // first prompt itself (verified against 0.15.3), which this used to do
+      // by hand -- a fetch and an update in front of every send, for a 0.8
+      // daemon nobody runs any more.
       await agent.send(prompt, images ? { images } : undefined);
       return { sent: true, images: images?.length ?? 0 };
     },
@@ -381,7 +316,6 @@ export function agentOps(ctx: BridgeConnection): Ops {
       const prompt = String(need(req.prompt, "prompt"));
       const agent = connected().agents.ref(agentId);
       const images = pictures(req);
-      await nameAgentFromFirstPrompt(ctx, agent, agentId, prompt);
       const result = await agent.run(prompt, {
         timeoutMs: Number(req.timeoutMs ?? 10 * 60_000),
         ...(images ? { images } : {}),
@@ -422,8 +356,8 @@ export function agentOps(ctx: BridgeConnection): Ops {
         return { unsubscribed: false, heldBy: ctx.timelines.size };
       const held = ctx.directory;
       ctx.directory = null;
-      held.localUnsubscribe?.();
       await held.subscription?.release();
+      await held.workspaces?.release().catch(() => {});
       return { unsubscribed: true };
     },
 

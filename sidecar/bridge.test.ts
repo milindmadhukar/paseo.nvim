@@ -303,82 +303,16 @@ function agentSendHarness(
   return { calls, send: agentOps(ctx)["agent.send"] };
 }
 
-test("the first prompt gives an unused untitled agent a normalized title", async () => {
-  const { calls, send } = agentSendHarness({
-    title: null,
-    lastUserMessageAt: null,
-  });
-  const firstLine = `Name\t  this ${"session ".repeat(12)}`;
-  const prompt = `\n   \n  ${firstLine}\nignore this later line`;
-  const normalized = firstLine.replace(/\s+/g, " ").trim();
-
-  assert.deepEqual(await send({ op: "agent.send", agentId: "a1", prompt }), {
-    sent: true,
-    images: 0,
-  });
-  assert.deepEqual(calls, [
-    { kind: "refresh", agentId: "a1" },
-    {
-      kind: "update",
-      agentId: "a1",
-      updates: { name: normalized.slice(0, 60).trim() },
-    },
-    { kind: "send", prompt },
-  ]);
-});
-
-test("an explicit agent title is preserved on first send", async () => {
-  const { calls, send } = agentSendHarness({
-    title: "Chosen by the user",
-    lastUserMessageAt: null,
-  });
-  await send({ op: "agent.send", agentId: "a2", prompt: "Do the work" });
-  assert.deepEqual(calls, [
-    { kind: "refresh", agentId: "a2" },
-    { kind: "send", prompt: "Do the work" },
-  ]);
-});
-
-test("an untitled agent with prior activity is not renamed from a follow-up", async () => {
-  const { calls, send } = agentSendHarness({
-    title: null,
-    lastUserMessageAt: "2026-09-22T10:00:00.000Z",
-  });
-  await send({ op: "agent.send", agentId: "a3", prompt: "A later prompt" });
-  assert.deepEqual(calls, [
-    { kind: "refresh", agentId: "a3" },
-    { kind: "send", prompt: "A later prompt" },
-  ]);
-});
-
-test("an empty prompt does not trigger provisional naming", async () => {
-  const { calls, send } = agentSendHarness({
-    title: null,
-    lastUserMessageAt: null,
-  });
-  const prompt = " \n\t \n";
-  await send({ op: "agent.send", agentId: "a4", prompt });
-  assert.deepEqual(calls, [{ kind: "send", prompt }]);
-});
-
-test("a provisional-title failure does not prevent prompt delivery", async () => {
-  const { calls, send } = agentSendHarness(
-    { title: null, lastUserMessageAt: null },
-    { updateError: new Error("rename failed") },
-  );
+test("a send is only a send: naming an agent is the daemon's job", async () => {
+  // The sidecar used to fetch the agent and rename it from the first prompt
+  // before every send -- a 0.8 workaround. The daemon does it now, so a send
+  // must not touch the title, whatever the snapshot says.
+  const { calls, send } = agentSendHarness({ title: null, lastUserMessageAt: null });
   assert.deepEqual(
-    await send({ op: "agent.send", agentId: "a5", prompt: "Still deliver me" }),
+    await send({ op: "agent.send", agentId: "a1", prompt: "Name this session" }),
     { sent: true, images: 0 },
   );
-  assert.deepEqual(calls, [
-    { kind: "refresh", agentId: "a5" },
-    {
-      kind: "update",
-      agentId: "a5",
-      updates: { name: "Still deliver me" },
-    },
-    { kind: "send", prompt: "Still deliver me" },
-  ]);
+  assert.deepEqual(calls, [{ kind: "send", prompt: "Name this session" }]);
 });
 
 test("fork context is capability-gated and snapshots the complete conversation", async () => {
@@ -609,7 +543,9 @@ test("a workspace carries its project id, and a project can be forgotten", async
   ctx.raw = (() => ({
     async removeProject(id: string) {
       removed.push(id);
-      return { removed: true };
+      // The daemon's real answer. This mock used to return `{ removed: true }`
+      // -- the shape the op wrongly expected, so the test agreed with the bug.
+      return { removedWorkspaceIds: ["wks_billing"] };
     },
   })) as any;
 
@@ -621,7 +557,7 @@ test("a workspace carries its project id, and a project can be forgotten", async
       op: "project.remove",
       projectId: "prj_billing",
     }),
-    { removed: true },
+    { removed: true, removedWorkspaceIds: ["wks_billing"] },
   );
   assert.deepEqual(removed, ["prj_billing"]);
 
@@ -901,21 +837,18 @@ test("terminal input survives the trip as bytes, and output coalesces", async ()
   let handler: ((event: any) => void) | null = null;
   const ctx = new BridgeConnection();
   (ctx as any).daemon = {
-    onTerminalStreamEvent(fn: (event: any) => void) {
-      handler = fn;
-      return () => {};
+    // The 0.15 shape: an observation handed the receiver, released by handle.
+    observeTerminal(_id: string, receive: (event: any) => void) {
+      handler = receive;
+      return { ready: Promise.resolve({ error: null, slot: 1 }), release: async () => {} };
     },
     getLastServerInfoMessage: () => ({ features: {} }),
-    async subscribeTerminal() {
-      return { error: null, slot: 1 };
-    },
     async captureTerminal() {
       return { lines: [] };
     },
     sendTerminalInput(id: string, message: any) {
       sent.push({ id, message });
     },
-    unsubscribeTerminal() {},
   };
   const ops = terminalOps(ctx);
 
@@ -934,7 +867,12 @@ test("terminal input survives the trip as bytes, and output coalesces", async ()
 
   // Many small PTY writes must reach Neovim as few lines, not thousands.
   const lines = await captureStdoutAsync(async () => {
-    handler!({ terminalId: "t", type: "restore", data: new TextEncoder().encode("a") });
+    // The scrollback replay, as SDK 0.15 delivers it: begin, data, end. Only
+    // the data is bytes for the screen. Reading only the pre-0.15 `restore`
+    // drew a blank terminal until the next byte of live output.
+    handler!({ terminalId: "t", type: "replay", replay: { type: "begin", rows: 10, cols: 40 } });
+    handler!({ terminalId: "t", type: "replay", replay: { type: "data", data: new TextEncoder().encode("a") } });
+    handler!({ terminalId: "t", type: "replay", replay: { type: "end" } });
     handler!({ terminalId: "t", type: "output", data: new TextEncoder().encode("b") });
     // A cell grid for clients that render their own terminal. We do not.
     handler!({ terminalId: "t", type: "snapshot", state: {} });

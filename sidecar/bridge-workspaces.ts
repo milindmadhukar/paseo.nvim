@@ -341,7 +341,12 @@ export function workspaceOps(ctx: BridgeConnection): Ops {
       const result: any = await ctx
         .raw()
         .removeProject(String(need(req.projectId, "projectId")));
-      return { removed: result?.removed ?? true };
+      // The daemon answers with the workspaces it took with the project. This
+      // read `result.removed`, which no version has ever sent.
+      return {
+        removed: true,
+        removedWorkspaceIds: result?.removedWorkspaceIds ?? [],
+      };
     },
 
     async "workspace.archive"(req) {

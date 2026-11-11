@@ -37,7 +37,7 @@ if (result.status === "idle") console.log(result.lastMessage);
 await client.close();                          // does NOT stop the agent
 ```
 
-## The seven things that bite
+## The things that bite
 
 1. **`create()` resolves when the session exists, not when the prompt is done.**
    Await `waitForFinish()` or `run()` for the turn.
@@ -58,6 +58,22 @@ await client.close();                          // does NOT stop the agent
    use `run()` and read `lastMessage` when you only want the final reply.
 7. **`config.options` is strictly validated per provider.** A misspelled key
    fails agent creation rather than being ignored — which is a feature.
+8. **Reasoning arrives in pieces too.** `reasoning` items stream as deltas just
+   like `assistant_message`; merge a chunk into the one before it while
+   nothing else has come in between. History fetched with
+   `projection: "projected"` is already merged, so a live view that does not
+   merge looks different from a reopened one.
+9. **A workspace is named only by the request that creates it.** The daemon
+   generates a workspace's title from `firstAgentContext: { prompt }` on
+   `workspaces.create`, and never afterwards. Send the prompt there (with
+   `agent: { config, initialPrompt }` for the first agent) and send **no
+   `title`**, because an explicit title is permanent. The typed
+   `workspaces.create` returns only the workspace handle. Use the raw
+   `createWorkspace` when you need the agent it made.
+10. **Terminal scrollback is a `replay`.** `observeTerminal` delivers it as
+    `{ type: "replay", replay: { type: "begin" | "data" | "end" } }`; only
+    `data` carries bytes. Clients written against 0.9's single `restore`
+    event attach to a blank screen.
 
 ## Streaming instead of waiting
 
@@ -123,4 +139,5 @@ Two things do not come from paseo.sh:
   newer than the one this plugin has installed.
 
 The gotchas above were distilled from those pages against Paseo 0.7.2 on
-2026-09-18. If a fetched page contradicts one, the page wins.
+2026-09-18; 8–10 were learned against 0.15.3 (SDK 0.15.4) on 2026-11-11. If a
+fetched page contradicts one, the page wins.

@@ -31,7 +31,6 @@ export function terminalOps(ctx: BridgeConnection): Ops {
     string,
     { release: () => Promise<void>; unregister: () => void }
   >();
-  let legacyStreamOff: (() => void) | null = null;
   // Output arrives in many small writes -- a build log is thousands of them.
   // Emitting a JSON line per write puts that whole flood through stdin parsing
   // and `vim.schedule` one chunk at a time, so it is coalesced per terminal
@@ -61,25 +60,30 @@ export function terminalOps(ctx: BridgeConnection): Ops {
     }
   }
 
+  /**
+   * One terminal stream event, as Neovim's libvterm wants it: bytes.
+   *
+   * `output` is live. The scrollback the daemon sends on attach arrives as a
+   * `replay` -- begin, then data, then end -- and only its data is bytes for
+   * the screen. Before SDK 0.15 that replay was a single `restore` event; it is
+   * still handled for a client that predates the change, but on 0.15 an
+   * attach that only knew `restore` drew a blank screen until the next byte
+   * of new output.
+   */
+  function receive(event: any): void {
+    if (!attached.has(event.terminalId)) return;
+    if (event.type === "output" || event.type === "restore") {
+      queue(event.terminalId, event.data);
+    } else if (event.type === "replay" && event.replay?.type === "data") {
+      queue(event.terminalId, event.replay.data);
+    }
+  }
+
   function queue(terminalId: string, data: Uint8Array): void {
     const held = pending.get(terminalId);
     if (held) held.push(data);
     else pending.set(terminalId, [data]);
     if (!timer) timer = setTimeout(flush, FLUSH_MS);
-  }
-
-  function followLegacyStream(): void {
-    if (legacyStreamOff) return;
-    legacyStreamOff = raw().onTerminalStreamEvent((event: any) => {
-      if (!attached.has(event.terminalId)) return;
-      if (event.type === "output" || event.type === "restore") {
-        queue(event.terminalId, event.data);
-      }
-    });
-    ctx.addCleanup(() => {
-      legacyStreamOff?.();
-      legacyStreamOff = null;
-    });
   }
 
   /** What the daemon says it can do, so a missing feature degrades rather than throws. */
@@ -124,27 +128,18 @@ export function terminalOps(ctx: BridgeConnection): Ops {
             entries: payload?.terminals ?? [],
           });
         };
-        if (typeof (raw() as any).observeTerminals === "function") {
-          const observation = raw().observeTerminals({ cwd });
-          const unsubscribe = observation.subscribe({
-            snapshot: publish,
-            update: publish,
-          });
-          const release = async () => {
-            unsubscribe();
-            await observation.release();
-          };
-          const unregister = ctx.addCleanup(release);
-          directorySubscriptions.set(cwd, { release, unregister });
-          publish(await observation.ready);
-        } else {
-          const off = raw().on("terminals_changed", publish);
-          await (raw() as any).subscribeTerminals({ cwd });
-          const release = async () => off();
-          const unregister = ctx.addCleanup(release);
-          directorySubscriptions.set(cwd, { release, unregister });
-          publish(await raw().listTerminals(cwd));
-        }
+        const observation = raw().observeTerminals({ cwd });
+        const unsubscribe = observation.subscribe({
+          snapshot: publish,
+          update: publish,
+        });
+        const release = async () => {
+          unsubscribe();
+          await observation.release();
+        };
+        const unregister = ctx.addCleanup(release);
+        directorySubscriptions.set(cwd, { release, unregister });
+        publish(await observation.ready);
       }
       return { watching: true };
     },
@@ -215,15 +210,6 @@ export function terminalOps(ctx: BridgeConnection): Ops {
       }
 
       const restores = features()["terminal-restore-modes"] === true;
-      const receive = (event: any) => {
-        if (!attached.has(event.terminalId)) return;
-        // `output` is live; `restore` is the scrollback replay the daemon
-        // sends on subscribe. `snapshot` is a cell grid for clients that
-        // render terminals themselves, so Neovim's libvterm ignores it.
-        if (event.type === "output" || event.type === "restore") {
-          queue(event.terminalId, event.data);
-        }
-      };
       const restoreOptions = {
         ...(restores
           ? {
@@ -236,32 +222,17 @@ export function terminalOps(ctx: BridgeConnection): Ops {
           : {}),
       };
 
-      const observation =
-        typeof (raw() as any).observeTerminal === "function"
-          ? raw().observeTerminal(
-        id,
-              receive,
-              restoreOptions,
-            )
-          : null;
-      let result: any;
-      if (observation) {
-        result = await observation.ready;
-      } else {
-        followLegacyStream();
-        result = await raw().subscribeTerminal(id, restoreOptions);
-      }
+      const observation = raw().observeTerminal(id, receive, restoreOptions);
+      const result: any = await observation.ready;
       if (result?.error) {
         attached.delete(id);
-        await observation?.release().catch(() => {});
+        await observation.release().catch(() => {});
         throw new Error(String(result.error));
       }
       const release = async () => {
         attached.delete(id);
         pending.delete(id);
-        if (observation) await observation.release();
-        else if (typeof (raw() as any).unsubscribeTerminal === "function")
-          await (raw() as any).unsubscribeTerminal(id);
+        await observation.release();
       };
       const unregister = ctx.addCleanup(release);
       terminalSubscriptions.set(id, { release, unregister });

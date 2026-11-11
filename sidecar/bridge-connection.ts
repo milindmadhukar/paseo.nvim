@@ -22,7 +22,6 @@ export class BridgeConnection {
   directory: {
     subscription?: { release: () => Promise<void> };
     workspaces?: { release: () => Promise<void> };
-    localUnsubscribe?: (() => void) | null;
   } | null = null;
 
   connected() {
@@ -79,7 +78,6 @@ export class BridgeConnection {
     if (this.directory) {
       const held = this.directory;
       this.directory = null;
-      held.localUnsubscribe?.();
       await held.subscription?.release().catch(() => {});
       await held.workspaces?.release().catch(() => {});
     }

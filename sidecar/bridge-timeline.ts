@@ -215,9 +215,6 @@ export function timelineOps(ctx: BridgeConnection): Ops {
       // the snapshot. Without this the header shows whatever we last set from
       // here and quietly lies.
       //
-      // Guarded like `agents.subscribe` is: the installed SDK may be 0.8, where
-      // the handle has no `subscribe`.
-      //
       // It needs DEMAND to say anything, and that comes from the directory
       // subscription rather than from registering here -- see followDirectory.
       // Without this call the listener below is silent and the header goes on
@@ -229,38 +226,35 @@ export function timelineOps(ctx: BridgeConnection): Ops {
       // setting. Emitting regardless would put a line on stdout and a header
       // repaint behind every one of them for the length of a turn.
       let last = "";
-      const stateOff =
-        typeof (agent as any).subscribe === "function"
-          ? (agent as any).subscribe(
-              guarded("settings", (update: any) => {
-                const snap: any =
-                  update?.payload?.agent ??
-                  update?.agent ??
-                  (agent as any).current?.() ??
-                  null;
-                if (!snap) return;
-                const settings = describeSettings(snap);
-                // The pending list is hashed by ID, not by value. The request
-                // objects are large and carry fields that move on their own,
-                // so hashing them whole would defeat the deduplication this
-                // exists for -- while hashing nothing about them would swallow
-                // the one update that matters: a request appearing or being
-                // answered.
-                const { pendingPermissions, ...rest } = settings as any;
-                const seen = JSON.stringify([
-                  rest,
-                  (pendingPermissions ?? []).map((r: any) => r?.id).sort(),
-                ]);
-                if (seen === last) return;
-                last = seen;
-                emit("settings", { agentId: id, ...settings });
-              }),
-            )
-          : null;
+      const stateOff = (agent as any).subscribe(
+        guarded("settings", (update: any) => {
+          const snap: any =
+            update?.payload?.agent ??
+            update?.agent ??
+            (agent as any).current?.() ??
+            null;
+          if (!snap) return;
+          const settings = describeSettings(snap);
+          // The pending list is hashed by ID, not by value. The request
+          // objects are large and carry fields that move on their own,
+          // so hashing them whole would defeat the deduplication this
+          // exists for -- while hashing nothing about them would swallow
+          // the one update that matters: a request appearing or being
+          // answered.
+          const { pendingPermissions, ...rest } = settings as any;
+          const seen = JSON.stringify([
+            rest,
+            (pendingPermissions ?? []).map((r: any) => r?.id).sort(),
+          ]);
+          if (seen === last) return;
+          last = seen;
+          emit("settings", { agentId: id, ...settings });
+        }),
+      );
 
       ctx.timelines.set(id, { timeline: unsubscribe as any, state: stateOff });
       await (unsubscribe as any).ready;
-      return { subscribed: true, settings: stateOff !== null };
+      return { subscribed: true, settings: true };
     },
 
     async "timeline.history"(req) {

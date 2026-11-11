@@ -79,3 +79,15 @@ repo_with_agent() {
   "$E" start "$repo"
   echo "$repo"
 }
+
+# Press `c` on the new-agent screen until it takes. The screen ignores it
+# while the model's features are still loading (its footer says so), and how
+# long that takes is the provider's business, not something to sleep for.
+#   create_from_review '<lua expr true once created>'
+create_from_review() {
+  for _ in $(seq 1 15); do
+    "$E" keys c
+    "$E" wait "$1" 2 2>/dev/null && return 0
+  done
+  fail "the new-agent screen never took \`c\`"
+}

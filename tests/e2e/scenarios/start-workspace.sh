@@ -16,9 +16,7 @@ sleep 5 # the start menu is a vim.ui.select prompt, which nothing can wait on
 sleep 1
 "$E" keys C-u 'billing-fix' Enter
 "$E" wait 'vim.api.nvim_win_get_config(0).relative ~= ""' 10 || fail "no review"
-sleep 2
-"$E" keys c
-"$E" wait 'vim.bo.buftype == "nofile" and vim.api.nvim_win_get_config(0).relative ~= ""' 10 || fail "no prompt box"
+create_from_review 'vim.api.nvim_buf_get_name(0):find("paseo://ask/", 1, true) ~= nil'
 sleep 1
 "$E" keys 'Fix the invoice rounding in billing' Escape Enter
 
