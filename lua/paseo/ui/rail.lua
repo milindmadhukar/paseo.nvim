@@ -42,6 +42,20 @@ local at_line = {}
 ---@type integer|nil
 local current_line
 
+---What was drawn under each EXPANDED workspace: its sessions, by buffer line
+----- a |paseo.ui.tree| node, which knows its workspace.
+---@type table<integer, table>
+local session_at = {}
+
+---The buffer line of the session on screen, when its workspace is expanded.
+---@type integer|nil
+local session_line
+
+---Which workspaces you opened or closed, by id. Absent means the default:
+---the workspace on screen open, every other one closed.
+---@type table<string, boolean>
+local expanded = {}
+
 ---The last fetch. `root` is the project it was scoped to, so a fetch that
 ---lands after you have moved project is not drawn as this one's.
 local cache = { root = nil, list = nil, err = nil, loading = false }
@@ -127,6 +141,7 @@ end
 ---For the tests: forget what was read, so the next `visible` reads again.
 function M.reset()
   shown = nil
+  expanded = {}
   cache = { root = nil, list = nil, err = nil, loading = false }
 end
 
@@ -384,11 +399,26 @@ function M.current_index(list)
   return nil
 end
 
----The lines, as |paseo.ui.render| means a line, and what is on each.
+---Is `ws` drawn open, its sessions under it?
+---@param ws table
+---@param here boolean  It is the workspace on screen.
+---@return boolean
+function M.is_expanded(ws, here)
+  local key = ws.id or ws.directory or ws.name
+  local set = key and expanded[key]
+  if set == nil then
+    return here
+  end
+  return set
+end
+
+---The lines, as |paseo.ui.render| means a line, and what is on each:
+---`rows` the workspace rows, `sessions` the session rows under the open ones.
 ---@param width integer
----@return table[][] lines, table<integer, table> rows
+---@return table[][] lines, table<integer, table> rows, table<integer, table> sessions
 function M.lines(width)
-  current_line = nil
+  current_line, session_line = nil, nil
+  local sessions = {}
   local out, rows = {}, {}
   local name = cache.root and vim.fs.basename(cache.root) or "workspaces"
   local count = cache.list and ("  " .. #cache.list) or ""
@@ -399,25 +429,32 @@ function M.lines(width)
 
   if not cache.list then
     out[3] = { { cache.err and "unavailable" or "loading…", cache.err and "PaseoToolFail" or "PaseoDim" } }
-    return out, rows
+    return out, rows, sessions
   end
   if #cache.list == 0 then
     out[3] = { { "no workspaces", "PaseoDim" } }
-    return out, rows
+    return out, rows, sessions
   end
+
+  local float = package.loaded["paseo.ui.float"]
+  local chat = float and float.chat() or nil
+  local tree = require "paseo.ui.tree"
 
   local current = M.current_index(cache.list)
   for i, ws in ipairs(cache.list) do
     local here = i == current
     local glyph, hl = M.status(M.bucket(ws))
+    local open = M.is_expanded(ws, here)
     local line = {
       -- The bar that says "you are in this one", in the same glyph the list
       -- tabs use, so the two read as one vocabulary.
       { here and icons.marker.mine or " ", "PaseoAgent" },
+      -- Open or closed: `<Tab>` (or `l`/`h`) on the row says which.
+      { open and "▾ " or "▸ ", "PaseoDim" },
       { glyph .. " ", hl },
     }
     local badge = M.subagent_badge(ws)
-    local name_width = math.max(1, width - 3 - (badge and render.width(badge) + 1 or 0))
+    local name_width = math.max(1, width - 5 - (badge and render.width(badge) + 1 or 0))
     -- The pin is part of the name cell, so it truncates with the name rather
     -- than pushing the badge off the row.
     local pin = ws.pinned and (icons.ui.pin .. " ") or ""
@@ -436,8 +473,40 @@ function M.lines(width)
     if here then
       current_line = #out
     end
+
+    -- ITS SESSIONS, UNDER IT: agents, their subagents nested under them, then
+    -- its terminals. One sidebar, the way the app's is -- the workspaces and
+    -- what is running in each, rather than a second column for the second
+    -- question.
+    if open then
+      local drafting = here and chat and chat.draft ~= nil
+      local tree_lines, nodes = tree.lines(ws, chat, width, drafting)
+      local base = #out
+      for i, tline in ipairs(tree_lines) do
+        out[base + i] = tline
+        local node = nodes[i]
+        if node then
+          sessions[base + i] = node
+          if not session_line and tree.is_on_screen(node, tree.on_screen(chat)) then
+            session_line = base + i
+          end
+        end
+      end
+    end
   end
-  return out, rows
+
+  -- THE KEYS, where you are looking when you want them: this is where things
+  -- start from, and a list that does not say how is a dead end.
+  out[#out + 1] = {}
+  out[#out + 1] = {
+    { "a", "PaseoBlue1" },
+    { " agent  ", "PaseoDim" },
+    { "w", "PaseoBlue1" },
+    { " workspace  ", "PaseoDim" },
+    { "t", "PaseoBlue1" },
+    { " term", "PaseoDim" },
+  }
+  return out, rows, sessions
 end
 
 ---The agent directory moved. Repaint, and fetch the list if there is none
@@ -481,8 +550,8 @@ function M.draw()
   if not (buf and api.nvim_buf_is_valid(buf)) then
     return
   end
-  local width = M.win() and api.nvim_win_get_width(win) or 28
-  local lines, rows = M.lines(width)
+  local width = M.win() and api.nvim_win_get_width(win) or 32
+  local lines, rows, sessions = M.lines(width)
   local text = {}
   for i, line in ipairs(lines) do
     local parts = {}
@@ -513,22 +582,28 @@ function M.draw()
     end
   end
   at_line = rows
+  session_at = sessions
 
-  -- KEEP THE CURSOR ON A WORKSPACE. Rewriting the lines leaves it where it
-  -- was by number, which is right while the list is the same list -- and on
-  -- the heading the first time, which is not.
+  -- KEEP THE CURSOR ON A ROW. Rewriting the lines leaves it where it was by
+  -- number, which is right while the list is the same list -- and on the
+  -- heading the first time, which is not.
   if M.win() then
     local line = api.nvim_win_get_cursor(win)[1]
-    if not at_line[line] then
+    if not (at_line[line] or session_at[line]) then
       M.seat()
     end
   end
 end
 
----Put the cursor on the workspace you are in, or the first one.
-function M.seat()
+---Put the cursor on the workspace you are in, or the first one -- or, with
+---`session`, on the session on screen when its workspace is open.
+---@param opts? { session?: boolean }
+function M.seat(opts)
   if not M.win() then
     return
+  end
+  if opts and opts.session and session_line then
+    return pcall(api.nvim_win_set_cursor, win, { session_line, 0 })
   end
   local first
   for line = 1, api.nvim_buf_line_count(buf) do
@@ -543,7 +618,7 @@ function M.seat()
   end
 end
 
----The workspace under the cursor.
+---The workspace under the cursor -- nil on a session row.
 ---@return table|nil
 function M.current()
   if not M.win() then
@@ -552,7 +627,63 @@ function M.current()
   return at_line[api.nvim_win_get_cursor(win)[1]]
 end
 
----Step to the next workspace row, skipping the heading.
+---The session under the cursor, a |paseo.ui.tree| node, or nil.
+---@return table|nil
+function M.current_session()
+  if not M.win() then
+    return nil
+  end
+  return session_at[api.nvim_win_get_cursor(win)[1]]
+end
+
+---The workspace the cursor is in: its own row, or the row of the session
+---under it.
+---@return table|nil
+function M.current_workspace()
+  local node = M.current_session()
+  return node and node.ws or M.current()
+end
+
+---Open the workspace on screen, if you had closed it: `<C-s>` lands on the
+---session on screen, which has to be drawn to be landed on.
+function M.reveal()
+  if not cache.list then
+    return
+  end
+  local i = M.current_index(cache.list)
+  local ws = i and cache.list[i]
+  if ws then
+    expanded[ws.id or ws.directory or ws.name] = true
+  end
+end
+
+---Open or close a workspace's sessions.
+---@param want? boolean  Nil toggles.
+function M.expand(want)
+  local ws = M.current_workspace()
+  if not ws then
+    return
+  end
+  local key = ws.id or ws.directory or ws.name
+  local here = cache.list and M.current_index(cache.list) and cache.list[M.current_index(cache.list)] == ws
+  local now = M.is_expanded(ws, here or false)
+  if want == nil then
+    want = not now
+  end
+  expanded[key] = want
+  M.draw()
+  -- Closing from a session row leaves the cursor on the workspace it was in.
+  if not want and M.win() then
+    for line, row_ws in pairs(at_line) do
+      if row_ws == ws then
+        pcall(api.nvim_win_set_cursor, win, { line, 0 })
+        break
+      end
+    end
+  end
+end
+
+---Step to the next row -- a workspace or a session -- skipping the rest.
 ---@param step integer
 local function move(step)
   if not M.win() then
@@ -562,16 +693,25 @@ local function move(step)
   local last = api.nvim_buf_line_count(buf)
   local at = line + step
   while at >= 1 and at <= last do
-    if at_line[at] then
+    if at_line[at] or session_at[at] then
       return pcall(api.nvim_win_set_cursor, win, { at, 0 })
     end
     at = at + step
   end
 end
 
----Open the workspace under the cursor: the full switch, tab and `tcd` and
----all, exactly as the picker does it. The chat follows you there by itself.
+---Open what is under the cursor. A session opens on the dashboard; a
+---workspace gets the full switch, tab and `tcd` and all, exactly as the
+---picker does it, and the chat follows you there by itself.
 function M.open_current()
+  local node = M.current_session()
+  if node then
+    local chat = package.loaded["paseo.ui.float"] and require("paseo.ui.float").chat()
+    if chat then
+      require("paseo.ui.tree").open(node, chat)
+    end
+    return
+  end
   local ws = M.current()
   if not ws then
     return
@@ -579,11 +719,39 @@ function M.open_current()
   require("paseo.workspaces").open(ws)
 end
 
+---Start something in the workspace under the cursor.
+---@param kind "here"|"workspace"|"terminal"
+function M.start(kind)
+  local chat = package.loaded["paseo.ui.float"] and require("paseo.ui.float").chat()
+  if not chat then
+    return
+  end
+  local ws = M.current_workspace()
+  local showing = false
+  if ws and cache.list then
+    local i = M.current_index(cache.list)
+    showing = i ~= nil and cache.list[i] == ws
+  end
+  require("paseo.start").new(require("paseo.ui.tree").context(ws, chat, showing), kind)
+end
+
+---Act on the session under the cursor, if there is one.
+---@param fn fun(node: table, chat: table)
+local function on_session(fn)
+  return function()
+    local node = M.current_session()
+    local chat = package.loaded["paseo.ui.float"] and require("paseo.ui.float").chat()
+    if node and chat then
+      fn(node, chat)
+    end
+  end
+end
+
 -- ----------------------------------------------------------------- buffer
 
 ---The rail's buffer, made once and kept: it outlives the dashboard so the
 ---list is there the moment the next one opens.
----@param keys { back: fun(), toggle?: string|false, focus?: string|false, on_toggle: fun() }
+---@param keys { back: fun(), toggle?: string|false, focus?: string|false, sessions?: string|false, on_toggle: fun() }
 ---@return integer
 function M.buf(keys)
   if buf and api.nvim_buf_is_valid(buf) then
@@ -602,19 +770,68 @@ function M.buf(keys)
   end
   map("j", function()
     move(1)
-  end, "next workspace")
+  end, "next row")
   map("k", function()
     move(-1)
-  end, "previous workspace")
+  end, "previous row")
   map("<Down>", function()
     move(1)
-  end, "next workspace")
+  end, "next row")
   map("<Up>", function()
     move(-1)
-  end, "previous workspace")
-  map("<CR>", M.open_current, "open this workspace")
-  map("o", M.open_current, "open this workspace")
-  map("<2-LeftMouse>", M.open_current, "open this workspace")
+  end, "previous row")
+  map("<CR>", M.open_current, "open this workspace or session")
+  map("o", M.open_current, "open this workspace or session")
+  map("<2-LeftMouse>", M.open_current, "open this workspace or session")
+  map("<Tab>", function()
+    M.expand()
+  end, "open or close this workspace's sessions")
+  map("za", function()
+    M.expand()
+  end, "open or close this workspace's sessions")
+  map("l", function()
+    M.expand(true)
+  end, "open this workspace's sessions")
+  map("h", function()
+    M.expand(false)
+  end, "close this workspace's sessions")
+  map("a", function()
+    M.start "here"
+  end, "new agent in this workspace")
+  map("w", function()
+    M.start "workspace"
+  end, "new agent in a new workspace")
+  map("t", function()
+    M.start "terminal"
+  end, "new terminal in this workspace")
+  map("c", function()
+    M.start "terminal"
+  end, "new terminal in this workspace")
+  map(
+    "y",
+    on_session(function(node)
+      if node.kind ~= "terminal" then
+        require("paseo.agents").copy_id { id = node.item.id, title = node.item.title }
+      end
+    end),
+    "copy the agent ID"
+  )
+  map(
+    "R",
+    on_session(function(node, chat)
+      if node.kind == "terminal" then
+        require("paseo.terminals").rename(node.item.id, node.item.hostId or chat.host_id)
+      end
+    end),
+    "rename this terminal"
+  )
+  map(
+    "d",
+    on_session(function(node, chat)
+      require("paseo.ui.tree").remove(node, chat)
+    end),
+    "archive this agent / kill this terminal"
+  )
   map("r", function()
     M.load()
   end, "refetch the workspaces")
@@ -625,6 +842,7 @@ function M.buf(keys)
   map("<Esc>", keys.back, "back to the conversation")
   map("q", keys.back, "back to the conversation")
   map(keys.focus, keys.back, "back to the conversation")
+  map(keys.sessions, keys.back, "back to the conversation")
   map(keys.toggle, keys.on_toggle, "hide the workspace rail")
   api.nvim_create_autocmd({ "WinEnter", "WinLeave" }, {
     group = api.nvim_create_augroup("paseo.rail", { clear = true }),

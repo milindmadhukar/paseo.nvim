@@ -98,13 +98,8 @@ Defaults: >lua
           tab_keys = true,
           rail = {                -- the workspaces, down the left
             enabled = true,       -- where it STARTS; your toggle is remembered
-            width = 28,           -- cells; at most a quarter of the surface
-            keys = { toggle = "<C-b>", focus = "<C-h>" },
-          },
-          tree = {                -- the sessions, down the right
-            enabled = true,
-            width = 32,           -- cells; no tree below 110 columns
-            keys = { toggle = "<M-s>", focus = "<C-s>" },
+            width = 32,           -- cells; at most a quarter of the surface
+            keys = { toggle = "<C-b>", focus = "<C-h>", sessions = "<C-s>" },
           },
           keys = { new = "<C-n>" }, -- start an agent or a terminal
         },
@@ -453,8 +448,8 @@ ui.float.rail                                                       table
     The workspace rail down the left of the dashboard -- see |paseo-rail|. >lua
         rail = {
           enabled = true,
-          width = 28,
-          keys = { toggle = "<C-b>", focus = "<C-h>" },
+          width = 32,
+          keys = { toggle = "<C-b>", focus = "<C-h>", sessions = "<C-s>" },
         }
 <
     `enabled` is only where the rail STARTS. The toggle is remembered across
@@ -463,21 +458,8 @@ ui.float.rail                                                       table
     surface; below 90 columns there is no rail at all. Each key is bound in
     NORMAL mode on every buffer the dashboard owns, or `false` to leave it
     unbound. `ui.buffer.rail` overrides any of it on the buffer mount.
-
-                                                  *paseo-config.ui.float.tree*
-ui.float.tree                                                       table
-
-    The session tree down the right of the dashboard -- see |paseo-tree|. >lua
-        tree = {
-          enabled = true,
-          width = 32,
-          keys = { toggle = "<M-s>", focus = "<C-s>" },
-        }
-<
-    The same rules as |paseo-config.ui.float.rail|: `enabled` is where it
-    starts and your toggle is remembered, `width` is cells capped at a quarter
-    of the surface, and below 110 columns there is no tree. `ui.buffer.tree`
-    overrides any of it on the buffer mount.
+    `sessions` goes into the rail ON THE SESSION ON SCREEN -- see
+    |paseo-rail-sessions|.
 
                                                   *paseo-config.ui.float.keys*
 ui.float.keys                                                       table
@@ -579,8 +561,8 @@ ui.terminal                                                         table
                   terminal only works with the mouse -- `<M-1>`-`<M-5>` are
                   bound in terminal mode too, but plenty of emulators,
                   multiplexers and ssh sessions never deliver an Alt chord
-        sessions  into the session tree (|paseo-tree|) -- everything
-                  running here
+        sessions  into the rail, on this terminal's row
+                  (|paseo-rail-sessions|) -- everything running here
         terminal  from the chrome back into the PTY: the other direction
 
     All are bound in TERMINAL mode as well as normal, which is what makes
@@ -947,8 +929,8 @@ skills.method                                       `"link"`|`"copy"`, default `
 :Paseo terminals                                        *:Paseo-terminals*
 
     The terminals in this workspace: the dashboard, with the cursor in the
-    session tree, which lists them below the agents. Opening one shows it on
-    the Chat tab. See |paseo-terminals| and |paseo-tree|.
+    rail, which lists them under the workspace. Opening one shows it on the
+    Chat tab. See |paseo-terminals| and |paseo-rail-sessions|.
 
     It used to open a surface of its own -- a rail of names beside a terminal,
     over the top of everything. `terminals` is the older name still and also
@@ -1741,7 +1723,7 @@ same header, plus a tab for every other thing Paseo knows: >
     5 Workspaces            every workspace, and this unit of work's repos
 <
 There is no Sessions tab: the sessions of the workspace on screen are in the
-session tree down the right of every tab (|paseo-tree|).
+rail, under each workspace (|paseo-rail-sessions|).
 
 `1`-`5` jump, `<M-1>`-`<M-5>` and `<Tab>`/`<S-Tab>` do the same, and
 everything on screen that does something responds to a CLICK as well -- the
@@ -1788,47 +1770,49 @@ shows them. The list refetches the moment the daemon says a workspace changed
 -- created, archived, pinned or TITLED -- so a generated title appears when it
 is written, not on the next poll.
 
-                                                                  *paseo-tree*
-THE SESSION TREE is the column down the right of the body: everything running
-in the workspace on screen -- its agents, each with its subagents nested under
-it, then its terminals. It replaced the Sessions tab. >
+                                            *paseo-rail-sessions* *paseo-tree*
+EACH WORKSPACE OPENS INTO ITS SESSIONS on the rail, the way the app's sidebar
+nests them: its agents, each with its subagents under it, then its terminals.
+It replaced the Sessions tab. >
 
-    sessions  4
+    paseo.nvim  3
 
-    ▌• Fix the invoice rounding     2/3 claude
-       ├ ⠋ Map the auth flow
-       ├ • Explore billing tests
-       └ ⠋ lint-fixer
-     • Add a regression test          codex
-
-     󰆍 terminals
-     • zsh
+    ▌▾ ⠋ Fix the invoice rounding
+         • Fix the invoice rounding  2/3
+           ├ ⠋ Map the auth flow
+           ├ • Explore billing tests
+           └ ⠋ lint-fixer
+         • Add a regression test
+         󰆍 zsh
+     ▸ • main
+     ▸ ○ otp-rate-limit
 <
-An agent row carries the rail's status glyph, its title, and on the right how
-many subagents it has (`running/total` while any run) and its provider. Both
-kinds of subagent hang off their parent: a PROVIDER subagent (Claude's Task
-tool) opens read-only, a PASEO subagent -- an agent another agent started --
-opens as an ordinary agent, and is listed once, under its parent. The bar
-marks the session on screen. The workspace is the agent's own, by id, so two
-workspaces on one checkout do not mix their agents.
+The workspace on screen is open and the rest closed until you open them. An
+agent row has the same status glyph a workspace has, its title, and how many
+subagents it has (`running/total` while any run). Both kinds of subagent hang
+off their parent: a PROVIDER subagent (Claude's Task tool) opens read-only, a
+PASEO subagent -- an agent another agent started -- opens as an ordinary
+agent, and is listed once, under its parent. The bar marks the session on
+screen. A workspace's agents are its own, by id, so two workspaces on one
+checkout do not mix them.
 
-`<C-s>` goes into it -- from the composer in either mode, from a terminal, or
-from any other buffer of the dashboard -- and puts the cursor on the session
-on screen. In it: >
+`<C-s>` goes into the rail ON THE SESSION ON SCREEN, opening its workspace if
+you had closed it -- from the composer in either mode, from a terminal, or
+from any other buffer of the dashboard. In the rail: >
 
-    j k       move
-    <CR>      open the session on the dashboard (also `o`, a double click)
-    a         new agent in this workspace            see |paseo-new|
+    j k       move, over workspaces and sessions alike
+    <CR>      a workspace: open it as the picker does. A session: show it
+              on the dashboard (also `o`, a double click)
+    <Tab> za  open or close the workspace's sessions; `l` opens, `h` closes
+    a         new agent in the workspace under the cursor    |paseo-new|
     w         new agent in a new workspace
-    t  c      new terminal
+    t  c      new terminal in the workspace under the cursor
     y         copy the agent's ID
     R         rename the terminal
     d         archive the agent / kill the terminal (asked first)
-    q <Esc> <C-s>   back to where you were typing
+    P  r      pin the workspace / refetch the list
+    q <Esc> <C-h> <C-s>   back to where you were typing
 <
-`<M-s>` shows and hides it, remembered across restarts. See
-|paseo-config.ui.float.tree|. There is no tree below 110 columns.
-
                                                                    *paseo-new*
 STARTING SOMETHING from the dashboard is `<C-n>`, from any of its buffers in
 normal mode, or a click on the footer's first hint: new agent (here), new
@@ -2024,8 +2008,8 @@ terminal picker (|paseo-terminals|) and points the Chat tab at the PTY; the
 directory still has no agent, so asking again later asks again.
 
 The same three are on the dashboard at any time -- `<C-n>`, the footer, and
-the session tree's `a`, `w` and `t`: see |paseo-new|. Switching between the
-sessions of a workspace is the tree: |paseo-tree|.
+the rail's `a`, `w` and `t`: see |paseo-new|. Switching between the sessions
+of a workspace is the rail: |paseo-rail-sessions|.
 
 An AUTOMATIC open never reaches any of this. |paseo-chat-follows| passes
 `create = false`, so a workspace with no agent says so rather than putting a
@@ -2116,7 +2100,7 @@ settings supported by the target model, using target defaults for the rest.
                                                     *paseo-cross-agent-prompt*
 Cross-agent communication ~
 
-In the session tree, `y` copies the selected agent's complete ID to the
+In the rail, `y` on an agent copies the selected agent's complete ID to the
 unnamed register and the system clipboard when available. In the agent picker,
 use `<C-y>`. Paste that receiving ID into the sending agent's chat and ask it
 to use Paseo's cross-agent prompt tool. Terminal rows do not offer this action.
@@ -2149,7 +2133,7 @@ In the composer ~
               one before. <Down> walks back to an empty box. In a box with a
               prompt being written they are just the arrow keys. Prompts sent
               from the Paseo app are recalled too: it reads the transcript.
-    <C-s>     into the session tree. See |paseo-tree|
+    <C-s>     the session on screen, in the rail. See |paseo-rail-sessions|
     p  P      paste -- an image if the clipboard has one, text otherwise
     1-5       jump to a tab (full screen; see ui.float.tab_keys)
     <M-1>..5  the same, without taking the count keys
@@ -2159,7 +2143,6 @@ In the composer ~
     <C-b>     show or hide the workspace rail (normal mode). See |paseo-rail|
     <C-h>     into the workspace rail (normal mode)
     <C-n>     start an agent or a terminal (normal mode). See |paseo-new|
-    <M-s>     show or hide the session tree (normal mode)
     <C-c>     stop the turn -- normal or insert. See |paseo-chat-stop|
     <C-t>     speak instead of typing. See |paseo-dictation|
     f         fork the complete conversation. See |paseo-fork|
@@ -2181,7 +2164,7 @@ In the conversation ~
     <C-f>     switch surface
     <C-b>     show or hide the workspace rail. See |paseo-rail|
     <C-h>     into the workspace rail
-    <C-s>     into the session tree. See |paseo-tree|
+    <C-s>     the session on screen, in the rail. See |paseo-rail-sessions|
     <C-n>     start an agent or a terminal. See |paseo-new|
     <C-c>     stop the turn. See |paseo-chat-stop|
     q         close the chat
@@ -2211,7 +2194,7 @@ Plus, per tab: >
                  x  forget the project this row is in -- see below
 <
 `r` is re-fetch on ALL of them, and on the Settings tab, which is why the
-session tree renames a terminal with `R`: one key meaning "ask the daemon
+rail renames a terminal with `R`: one key meaning "ask the daemon
 again" in one place and "rename this terminal" in another is the kind of
 near-miss that makes one surface feel like several. A key the panel claims for itself wins over the built-in, binds
 once, and the hint bar says which -- a bar advertising one key for two things
@@ -2224,8 +2207,8 @@ the one you are in, else the first -- so the first `<CR>` does something.
                                                       *paseo-chat-sessions*
 THERE IS NO SESSIONS TAB. It was the list of everything running in the
 workspace, and moving between two agents meant leaving the conversation to
-find the other one. That list is the session tree now, down the right of every
-tab, with each agent's subagents under it: |paseo-tree|.
+find the other one. That list is the rail now: each workspace opens into its
+sessions, with each agent's subagents under it -- |paseo-rail-sessions|.
 
                                                         *paseo-chat-gutter*
 WHERE THE CURSOR IS AND WHICH ONE IS OPEN ARE TWO DIFFERENT MARKS. The focus
@@ -2659,7 +2642,7 @@ toggled by hand is yours from then on and is never folded back under you.
                           *paseo-terminals* *paseo-chat-terminals*
 Paseo runs TERMINALS as well as agents -- the `claude` or `codex` sessions you
 started in the app are PTYs on the daemon -- and A TERMINAL IS A SESSION. It
-lists in the session tree (|paseo-tree|) below the agents, and opening one
+lists on the rail under its workspace (|paseo-rail-sessions|), and opening one
 shows it on the CHAT TAB, where the conversation would be. |:Paseo-term| goes
 into that tree.
 
@@ -2688,8 +2671,8 @@ its glyph: the pills are the navigation, the label is a readout.
 THERE USED TO BE A STRIP OF SESSION CHIPS on the row under the tabs doing
 both jobs. Two rows of things to click, stacked, disagreeing about which of
 them you navigate with -- and the lower one could hold about four names before
-it began dropping them for a `+3`. Moving between sessions is the session
-tree's job now (|paseo-tree|), where there is room for all of them.
+it began dropping them for a `+3`. Moving between sessions is the rail's
+job now (|paseo-rail-sessions|), where there is room for all of them.
 
 In a terminal ~
 
@@ -2700,7 +2683,7 @@ reach the tab bar: >
     <C-g>     out of the PTY and ONTO THE TAB BAR, without leaving the Chat
               tab or closing anything. `1`-`5`, <Tab> and `q` work from there
     <C-l>     from the chrome back INTO the PTY -- the other direction
-    <C-s>     into the session tree -- everything running here
+    <C-s>     into the rail, on this terminal -- everything running here
     <C-j>     the next session here, <C-k> the previous
     <M-1>..5  jump to a tab
     q         close the dashboard, from normal mode
@@ -2728,9 +2711,9 @@ they cost a count and the surface behaving differently in one buffer is worse
 `<Esc>` is never bound. It belongs to the PTY, so vim running inside one can
 still leave insert mode, and `<C-\><C-n>` is Neovim's own way out.
 
-In the session tree, `t` (or `c`) starts a terminal, `R` renames one and `d`
+On the rail, `t` (or `c`) starts a terminal, `R` renames one and `d`
 kills it (asked first -- something is usually running in there). See
-|paseo-tree|.
+|paseo-rail-sessions|.
 
                                                      *paseo-terminals-presets*
 `c` opens a SCREEN, not a prompt -- the same card renderer every other choice

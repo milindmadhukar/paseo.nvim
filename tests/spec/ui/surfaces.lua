@@ -368,62 +368,6 @@ local function test_surfaces()
 
   float.open(surface_chat)
 
-  -- THE SESSION TREE, down the right of the body: the workspace's agents,
-  -- the one on screen marked, and an archived one gone without anyone moving.
-  -- It replaced the Sessions tab, so what that tab's tests held is held here.
-  do
-    local agents = require "paseo.agents"
-    local tree = require "paseo.ui.tree"
-    local old = { for_root = agents.for_root, watch = agents.watch, get = agents.get, columns = vim.o.columns }
-    agents.watch = function() end
-    agents.get = function()
-      return nil
-    end
-    local listed = {
-      { id = surface_chat.agent_id or "row-probe", title = "row-probe", status = "idle", createdAt = "1" },
-      { id = "row-other", title = "row-other", status = "running", createdAt = "2" },
-    }
-    agents.for_root = function()
-      return vim.deepcopy(listed)
-    end
-    vim.o.columns = 160
-    float.relayout(true)
-
-    local win = tree.win()
-    truthy("ui: the session tree is up on a wide surface", win ~= nil)
-    local function text()
-      return win and table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(win), 0, -1, false), "\n") or ""
-    end
-    truthy("ui: it lists the workspace's agents", text():find("row-probe", 1, true) and text():find("row-other", 1, true), text())
-    local tree_cfg = win and vim.api.nvim_win_get_config(win)
-    local composer_cfg = vim.api.nvim_win_get_config(surface_chat.win_composer)
-    truthy(
-      "ui: right of the conversation",
-      tree_cfg and composer_cfg.col + composer_cfg.width < tree_cfg.col,
-      vim.inspect { tree_cfg and tree_cfg.col, composer_cfg.col, composer_cfg.width }
-    )
-
-    float.focus_tree()
-    eq("ui: the focus key lands in it", vim.api.nvim_get_current_win(), win)
-    local here = tree.current()
-    eq("ui: on the session on screen", here and here.item.id, listed[1].id)
-    vim.api.nvim_feedkeys("j", "x", false)
-    eq("ui: j moves to the next session", tree.current() and tree.current().item.id, "row-other")
-    float.focus_main()
-
-    -- What the daemon sends when an agent is archived.
-    listed = { listed[1] }
-    agents._apply { kind = "remove", id = "row-other" }
-    vim.wait(600, function()
-      return text():find("row-other", 1, true) == nil
-    end, 20)
-    truthy("ui: an archived session leaves the tree without anyone moving", text():find("row-other", 1, true) == nil, text())
-    truthy("ui: and the sessions that are still there stay", text():find("row-probe", 1, true) ~= nil)
-
-    agents.for_root, agents.watch, agents.get = old.for_root, old.watch, old.get
-    vim.o.columns = old.columns
-    float.relayout(true)
-  end
 
   float.select "Usage"
   eq("ui: the panels do not keep a conversation window", surface_chat.win_conversation, nil)

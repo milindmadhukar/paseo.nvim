@@ -116,25 +116,6 @@ function M.rail_width(width, want)
   return math.max(12, math.min(math.floor(want), math.floor(width / 4)))
 end
 
----The session tree's surface floor: below this there is no tree, because a
----rail, a tree and a conversation do not all fit and the conversation is the
----one that cannot go.
-M.TREE_MIN_SURFACE = 110
-
----How wide the session tree down the right is, or 0 for none.
----
----Never more than a quarter of the surface, like the rail -- the two together
----leave the conversation at least half.
----@param width integer  The surface's width.
----@param want integer   The configured width.
----@return integer
-function M.tree_width(width, want)
-  if width < M.TREE_MIN_SURFACE or want <= 0 then
-    return 0
-  end
-  return math.max(16, math.min(math.floor(want), math.floor(width / 4)))
-end
-
 ---Screen geometry for the panes floated over the body.
 ---
 ---`body` is the whole of it, which is what a session with no composer gets --
@@ -176,24 +157,11 @@ function M.panes(g, composer_h, opts)
   -- and get the narrower answer without having to know there is a rail.
   local rail = g.rail or 0
   local shift = rail > 0 and rail + M.RAIL_GAP or 0
-  -- The tree takes its cells off the RIGHT, with the same gap and rule.
-  local tree = g.tree or 0
-  local right = tree > 0 and tree + M.RAIL_GAP or 0
-  local col, width = g.col + 2 + shift, g.width - 4 - shift - right
-  local tree_col = g.col + g.width - 2 - tree
+  local col, width = g.col + 2 + shift, g.width - 4 - shift
   return {
     top = top,
     col = col,
     width = width,
-    -- `rule` is in the chrome's TEXT columns, as the rail's is: where the
-    -- body row draws the bar between the conversation and the tree.
-    tree = tree > 0 and {
-      row = top,
-      col = tree_col,
-      width = tree,
-      height = rows.body_height,
-      rule = tree_col - 2 - (g.col + (g.border and 1 or 0) + 1),
-    } or nil,
     rail = rail > 0 and {
       row = top,
       col = g.col + 2,

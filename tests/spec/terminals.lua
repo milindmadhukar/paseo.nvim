@@ -119,8 +119,8 @@ local function test_terminals()
   apply { kind = "snapshot", cwd = root, entries = {} }
   truthy("terminals: the registry cases ran", ok_registry, registry_err)
 
-  -- THE SESSION TREE: agents and terminals in one column, each agent with
-  -- its subagents under it, and the session on screen marked.
+  -- A WORKSPACE'S SESSIONS, as the rail nests them under it: agents and
+  -- terminals, each agent with its subagents under it.
   local tree = require "paseo.ui.tree"
   local agents = require "paseo.agents"
   local subagents = require "paseo.subagents"
@@ -156,7 +156,7 @@ local function test_terminals()
       entries = { { id = "t1", name = "shell" } },
     }
     local chat = { root = root, agent_id = "a1" }
-    local lines, rows = tree.lines(chat, 40)
+    local lines, rows = tree.lines({ directory = root }, chat, 40)
     local text = {}
     for i, line in ipairs(lines) do
       local parts = {}
@@ -186,7 +186,6 @@ local function test_terminals()
     })
     truthy("tree: drawn as a tree", joined:find("├", 1, true) and joined:find("└", 1, true), joined)
     truthy("tree: the parent says how many are running", joined:find("2/2", 1, true) ~= nil, joined)
-    truthy("tree: and its provider, short", joined:find("claude", 1, true) and not joined:find("opus", 1, true), joined)
   end)
   agents.for_root, agents.get, subagents.list = old.for_root, old.get, old.list
   apply { kind = "snapshot", cwd = root, entries = {} }

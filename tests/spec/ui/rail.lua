@@ -223,9 +223,145 @@ local function test_current()
   end
 end
 
+local function test_sessions()
+  local float = require "paseo.ui.float"
+  local rail = require "paseo.ui.rail"
+  local bridge = require "paseo.bridge"
+  local agents = require "paseo.agents"
+  local subagents = require "paseo.subagents"
+  local terminals = require "paseo.terminals"
+  local workspaces = require "paseo.workspaces"
+  local transcript = require "paseo.ui.transcript"
+
+  local saved = {
+    columns = vim.o.columns,
+    lines = vim.o.lines,
+    running = bridge.running,
+    watch = agents.watch,
+    get = agents.get,
+    all = agents.all,
+    for_root = agents.for_root,
+    sub_list = subagents.list,
+    track = subagents.track,
+    term_watch = terminals.watch,
+    list = workspaces.list,
+    here = workspaces.here,
+    state = vim.env.XDG_STATE_HOME,
+  }
+  vim.env.XDG_STATE_HOME = vim.fn.tempname()
+  rail.reset()
+
+  local root = vim.fn.tempname()
+  local host = require("paseo.hosts").selected()
+  local listed = {
+    { id = "s-1", title = "first agent", status = "idle", workspaceId = "ws-a", cwd = root .. "/a", createdAt = "1" },
+    { id = "s-2", title = "second agent", status = "idle", workspaceId = "ws-a", cwd = root .. "/a", createdAt = "2" },
+    { id = "s-3", title = "other agent", status = "idle", workspaceId = "ws-b", cwd = root .. "/b", createdAt = "3" },
+  }
+  local ok, failure = pcall(function()
+    vim.o.columns, vim.o.lines = 160, 50
+    bridge.running = function()
+      return true
+    end
+    agents.watch = function() end
+    terminals.watch = function() end
+    subagents.track = function() end
+    agents.get = function(id)
+      for _, a in ipairs(listed) do
+        if a.id == id then
+          return a
+        end
+      end
+    end
+    agents.all = function()
+      return listed
+    end
+    agents.for_root = function(dir)
+      return vim.tbl_filter(function(a)
+        return a.cwd == dir
+      end, listed)
+    end
+    subagents.list = function(parent)
+      if parent == "s-1" then
+        return { { kind = "provider", id = "task", parent = "s-1", title = "child task", status = "running", running = true } }
+      end
+      return {}
+    end
+    workspaces.here = function()
+      return root
+    end
+    workspaces.list = function(cb)
+      cb({
+        { id = "ws-a", name = "alpha", directory = root .. "/a", projectRoot = root, hostId = host },
+        { id = "ws-b", name = "beta", directory = root .. "/b", projectRoot = root, hostId = host },
+      }, nil)
+    end
+
+    local chat = {
+      root = root .. "/a",
+      host_id = host,
+      agent_id = "s-1",
+      provider = "test",
+      streaming = false,
+      pending = {},
+      conversation = api.nvim_create_buf(false, true),
+      composer = api.nvim_create_buf(false, true),
+    }
+    transcript.reset(chat)
+    float.open(chat)
+    local function text()
+      return rail.win() and table.concat(api.nvim_buf_get_lines(api.nvim_win_get_buf(rail.win()), 0, -1, false), "\n") or ""
+    end
+    vim.wait(300, function()
+      return text():find("first agent", 1, true) ~= nil
+    end)
+    local drawn = text()
+    truthy("rail: the workspace on screen is open, its agents under it", drawn:find("first agent", 1, true) and drawn:find("second agent", 1, true), drawn)
+    truthy("rail: with each agent's subagents nested under it", drawn:find("child task", 1, true), drawn)
+    truthy("rail: and the others closed", not drawn:find("other agent", 1, true), drawn)
+    local alpha_at, child_at = drawn:find("alpha", 1, true), drawn:find("child task", 1, true)
+    truthy("rail: the sessions come after their workspace's row", alpha_at < child_at, drawn)
+
+
+    -- <C-s>: into the rail, on the session on screen.
+    float.focus_sessions()
+    eq("rail: the sessions key lands in the rail", api.nvim_get_current_win(), rail.win())
+    eq("rail: on the agent on screen", rail.current_session() and rail.current_session().item.id, "s-1")
+    vim.api.nvim_feedkeys("j", "x", false)
+    eq("rail: j walks into its subagents", rail.current_session() and rail.current_session().item.id, "task")
+    eq("rail: which belong to the workspace", rail.current_workspace() and rail.current_workspace().id, "ws-a")
+
+    -- Open the other workspace from its row.
+    local _, rows = rail.lines(32)
+    for line, ws in pairs(rows) do
+      if ws.id == "ws-b" then
+        api.nvim_win_set_cursor(rail.win(), { line, 0 })
+      end
+    end
+    rail.expand(true)
+    truthy("rail: l opens another workspace's sessions", text():find("other agent", 1, true), text())
+    rail.expand(false)
+    truthy("rail: and h closes them", not text():find("other agent", 1, true), text())
+    float.close()
+  end)
+
+  vim.o.columns, vim.o.lines = saved.columns, saved.lines
+  bridge.running, agents.watch = saved.running, saved.watch
+  agents.get, agents.all, agents.for_root = saved.get, saved.all, saved.for_root
+  subagents.list, subagents.track, terminals.watch = saved.sub_list, saved.track, saved.term_watch
+  workspaces.list, workspaces.here = saved.list, saved.here
+  vim.env.XDG_STATE_HOME = saved.state
+  rail.reset()
+  pcall(float.close)
+  if not ok then
+    error(failure, 0)
+  end
+end
+
 return {
   { "ui.rail.buckets", test_buckets },
   { "ui.rail.layout", test_layout },
   { "ui.rail.toggle", test_toggle },
   { "ui.rail.current", test_current },
+  { "ui.rail.sessions", test_sessions },
 }

@@ -442,28 +442,18 @@ local defaults = {
         enabled = true,
         show_background = false,
         -- Cells. Never more than a quarter of the surface, and no rail at
-        -- all on one narrower than 90.
-        width = 28,
+        -- all on one narrower than 90. Wide enough for a workspace's
+        -- sessions, nested under it.
+        width = 32,
         keys = {
           toggle = "<C-b>",
           -- Into the rail and back out. `<C-h>` because the rail is the
           -- window to the left -- the key a split user already presses.
           focus = "<C-h>",
-        },
-      },
-      -- Everything running in the workspace on screen -- each agent with its
-      -- subagents under it, then the terminals -- down the right of the body.
-      -- `enabled`, like the rail's, is only where it starts.
-      tree = {
-        enabled = true,
-        -- Cells. Never more than a quarter of the surface, and no tree at all
-        -- on one narrower than 110.
-        width = 32,
-        keys = {
-          toggle = "<M-s>",
-          -- `<C-s>` is "the session list" everywhere else too: in the
-          -- composer, and out of a terminal.
-          focus = "<C-s>",
+          -- Into the rail ON THE SESSION ON SCREEN, its workspace opened.
+          -- `<C-s>` is "the session list" in the composer and out of a
+          -- terminal too.
+          sessions = "<C-s>",
         },
       },
       keys = {
@@ -742,10 +732,7 @@ function M.setup(opts)
       return v == false or type(v) == "string"
     end, "a key, or false to leave it unbound")
   end
-  vim.validate("ui.float.tree", config.ui.float.tree, "table")
-  vim.validate("ui.float.tree.width", config.ui.float.tree.width, "number")
   for _, group in ipairs {
-    { "ui.float.tree.keys", config.ui.float.tree.keys },
     { "ui.float.keys", config.ui.float.keys },
   } do
     for name, key in pairs(group[2] or {}) do

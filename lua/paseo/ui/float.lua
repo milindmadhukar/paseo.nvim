@@ -44,8 +44,8 @@ local ns = api.nvim_create_namespace "paseo.float"
 local state
 
 -- NO SESSIONS TAB. Moving between the sessions of a workspace -- its agents,
--- their subagents, its terminals -- is the session tree's job, down the right
--- of every tab (|paseo.ui.tree|). A tab for it meant leaving the conversation
+-- their subagents, its terminals -- happens on the rail, where each workspace
+-- opens into its sessions (|paseo.ui.rail|). A tab for it meant leaving the conversation
 -- to change conversation.
 M.TABS = { "Chat", "Settings", "Changes", "Usage", "Workspaces" }
 
@@ -95,7 +95,7 @@ local function spinner_wanted()
   end
   -- The rail is on every tab, so a workspace spinning on it wants the clock
   -- whichever panel is under it.
-  if require("paseo.ui.rail").spinning() or require("paseo.ui.tree").spinning() then
+  if require("paseo.ui.rail").spinning() then
     return true
   end
   return state.tab == "Workspaces" and require("paseo.agents").busy()
@@ -135,7 +135,6 @@ local function sync_spinner()
       end
       -- A dozen short lines rewritten in place; no volt, no row offsets.
       pcall(require("paseo.ui.rail").draw)
-      pcall(require("paseo.ui.tree").draw)
     end)
   )
 end
@@ -179,10 +178,6 @@ local function directory_changed()
     pcall(require("volt").redraw, state.buf, sections)
     -- The rail draws what the agents are doing, on every tab.
     pcall(require("paseo.ui.rail").directory_changed)
-    -- And the tree draws every session in the workspace.
-    if require("paseo.ui.tree").win() then
-      pcall(require("paseo.ui.tree").draw)
-    end
     -- An agent that just STARTED is the event that makes a spinner necessary,
     -- and one that just finished is the event that makes it stop.
     sync_spinner()
@@ -208,10 +203,6 @@ local function watch_directories()
   require("paseo.subagents").on_change(function(_, parent)
     if parent ~= nil and state then
       pcall(require("paseo.ui.rail").draw)
-      -- And the session tree, where each agent's subagents hang under it.
-      if require("paseo.ui.tree").win() then
-        pcall(require("paseo.ui.tree").draw)
-      end
       -- A running subagent spins its workspace's row, so starting one starts
       -- the clock and the last one finishing stops it.
       sync_spinner()
@@ -716,11 +707,7 @@ end
 ---@return table
 local function with_rail(g)
   local rail = require "paseo.ui.rail"
-  local tree = require "paseo.ui.tree"
-  g.rail = rail.visible() and layout.rail_width(g.width, rail.options(g.mount).width or 28) or 0
-  -- The session tree on the right, the same way: on the geometry, so every
-  -- pane narrows for it without asking.
-  g.tree = tree.visible() and layout.tree_width(g.width, tree.options(g.mount).width or 32) or 0
+  g.rail = rail.visible() and layout.rail_width(g.width, rail.options(g.mount).width or 32) or 0
   return g
 end
 
@@ -981,27 +968,12 @@ local function body_lines()
   -- edge on either side of a tab switch.
   local panes = layout.panes(g)
   local rail = panes.rail
-  local tree = panes.tree
-  local width = (rail or tree) and panes.width or g.width - 4
+  local width = rail and panes.width or g.width - 4
   local function lead()
     if not rail then
       return { { "  ", nil } }
     end
     return { { string.rep(" ", rail.rule), nil }, { style.BAR.thin, "PaseoBorder" }, { " ", nil } }
-  end
-  ---The row, padded out to the tree's rule and the rule drawn.
-  ---@param row table[]
-  ---@return table[]
-  local function trail(row)
-    if not tree then
-      return row
-    end
-    local pad = tree.rule - render.width(row)
-    if pad > 0 then
-      row[#row + 1] = { string.rep(" ", pad), nil }
-    end
-    row[#row + 1] = { style.BAR.thin, "PaseoBorder" }
-    return row
   end
 
   if state.tab ~= "Chat" then
@@ -1016,7 +988,7 @@ local function body_lines()
     for _, line in ipairs(body) do
       local row = lead()
       vim.list_extend(row, render.truncate(vim.deepcopy(line), width))
-      lines[#lines + 1] = trail(row)
+      lines[#lines + 1] = row
     end
   end
   -- On the Chat tab there is nothing to draw but the rule: the conversation
@@ -1026,7 +998,7 @@ local function body_lines()
   -- and clears nothing first, so a panel that shrank leaves the previous
   -- draw's rows behind with nothing to overwrite them.
   while #lines < height do
-    lines[#lines + 1] = trail((rail or tree) and lead() or {})
+    lines[#lines + 1] = rail and lead() or {}
   end
   while #lines > height do
     table.remove(lines)
@@ -1123,14 +1095,14 @@ local function footer_lines()
   if rail_keys.toggle then
     pairs_[#pairs_ + 1] = { rail_keys.toggle, "workspaces" }
   end
-  -- And into the session tree, which is where moving between sessions is.
-  local tree_keys = require("paseo.ui.tree").options(state and state.mount).keys or {}
-  if tree_keys.focus then
+  -- And onto the session on screen, in the rail, which is where moving
+  -- between sessions is.
+  if rail_keys.sessions then
     pairs_[#pairs_ + 1] = {
-      tree_keys.focus,
+      rail_keys.sessions,
       "sessions",
       function()
-        M.focus_tree()
+        M.focus_sessions()
       end,
     }
   end
@@ -1345,17 +1317,11 @@ local function bind_rail(buf)
       M.focus_rail()
     end, { buffer = buf, nowait = true, silent = true, desc = "paseo: into the workspace rail" })
   end
-  -- The session tree's pair, on the same buffers for the same reason.
-  local tree_keys = require("paseo.ui.tree").options(state and state.mount).keys or {}
-  if tree_keys.toggle then
-    vim.keymap.set("n", tree_keys.toggle, function()
-      M.toggle_tree()
-    end, { buffer = buf, nowait = true, silent = true, desc = "paseo: show or hide the session tree" })
-  end
-  if tree_keys.focus then
-    vim.keymap.set("n", tree_keys.focus, function()
-      M.focus_tree()
-    end, { buffer = buf, nowait = true, silent = true, desc = "paseo: into the session tree" })
+  -- Onto the session on screen, in the rail: the session list's key.
+  if keys.sessions then
+    vim.keymap.set("n", keys.sessions, function()
+      M.focus_sessions()
+    end, { buffer = buf, nowait = true, silent = true, desc = "paseo: the sessions, in the rail" })
   end
   -- START SOMETHING, from wherever the cursor is: an agent here, an agent in
   -- a new workspace, or a terminal. It used to take a trip to the Sessions
@@ -1374,9 +1340,8 @@ local function unbind_rail(buf)
     return
   end
   local keys = require("paseo.ui.rail").options().keys or {}
-  local tree_keys = require("paseo.ui.tree").options().keys or {}
   local new = (dash_option "keys" or {}).new
-  for _, lhs in ipairs { keys.toggle, keys.focus, tree_keys.toggle, tree_keys.focus, new or false } do
+  for _, lhs in ipairs { keys.toggle or false, keys.focus or false, keys.sessions or false, new or false } do
     if lhs then
       pcall(vim.keymap.del, "n", lhs, { buffer = buf })
     end
@@ -1645,8 +1610,8 @@ local function bind_terminal(buf)
 
   map({ "n", "t" }, keys.chrome, M.focus_chrome, "paseo: out to the tab bar")
   map({ "n", "t" }, keys.sessions, function()
-    M.focus_tree()
-  end, "paseo: into the session tree")
+    M.focus_sessions()
+  end, "paseo: the sessions, in the rail")
   map({ "n", "t" }, keys.next, function()
     M.cycle_session(1)
   end, "paseo: next session")
@@ -1775,69 +1740,18 @@ local function stop_rail_timer()
   end
 end
 
----Float the session tree over the right of the body, or take it down.
-local function show_tree()
-  local tree = require "paseo.ui.tree"
-  if not state then
-    return tree.hide()
-  end
-  local g = state.geometry
-  local area = layout.panes(g).tree
-  if not area then
-    return tree.hide()
-  end
-  local keys = tree.options(g.mount).keys or {}
-  tree.show(
-    placed(g, {
-      row = area.row,
-      col = area.col,
-      width = area.width,
-      height = area.height,
-      zindex = g.z_panes,
-    }),
-    {
-      chat = function()
-        return state and state.chat
-      end,
-      session = function()
-        return state and state.session
-      end,
-      back = M.focus_main,
-      on_toggle = M.toggle_tree,
-      toggle = keys.toggle,
-      focus = keys.focus,
-    }
-  )
-  local buf = tree.buf()
-  bind_tabs(buf, true)
-  -- `<C-n>` and the rail's keys from the tree as well; `a`/`w`/`t` are its own.
-  local new = (dash_option "keys" or {}).new
-  if new then
-    vim.keymap.set("n", new, function()
-      M.new_session()
-    end, { buffer = buf, nowait = true, silent = true, desc = "paseo: start an agent or a terminal" })
-  end
-  local rail_keys = require("paseo.ui.rail").options(g.mount).keys or {}
-  if rail_keys.focus then
-    vim.keymap.set("n", rail_keys.focus, M.focus_rail, { buffer = buf, nowait = true, silent = true, desc = "paseo: into the workspace rail" })
-  end
-  sync_spinner()
-end
-
 ---Float the rail over the left of the body, or take it down when the
 ---geometry has no room for one -- hidden by you, or a surface too narrow.
 local function show_rail()
   local rail = require "paseo.ui.rail"
   if not state then
-    require("paseo.ui.tree").hide()
     return rail.hide()
   end
   local g = state.geometry
   local area = layout.panes(g).rail
   if not area then
     stop_rail_timer()
-    rail.hide()
-    return show_tree()
+    return rail.hide()
   end
   rail.on_change = sync_spinner
   rail.show(
@@ -1853,11 +1767,21 @@ local function show_rail()
       on_toggle = M.toggle_rail,
       toggle = (rail.options(g.mount).keys or {}).toggle,
       focus = (rail.options(g.mount).keys or {}).focus,
+      sessions = (rail.options(g.mount).keys or {}).sessions,
     }
   )
-  -- The tabs from the rail too: it is a buffer the cursor can be in.
-  bind_tabs(rail.buf {}, true)
-  show_tree()
+  -- The tabs from the rail too: it is a buffer the cursor can be in. NOT
+  -- `<Tab>`, which opens and closes a workspace's sessions there.
+  local rail_buf = rail.buf {}
+  bind_tabs(rail_buf, false)
+  -- `<C-n>` from the rail as well; `a`/`w`/`t` are its own, and start in the
+  -- workspace under the cursor.
+  local new = (dash_option "keys" or {}).new
+  if new then
+    vim.keymap.set("n", new, function()
+      M.new_session()
+    end, { buffer = rail_buf, nowait = true, silent = true, desc = "paseo: start an agent or a terminal" })
+  end
   if not rail_timer then
     rail_timer = vim.uv.new_timer()
     rail_timer:start(
@@ -2044,7 +1968,6 @@ function M.close()
   -- ml_get: Invalid lnum` or takes the process down outright.
   doom(state.term_win)
   doom(require("paseo.ui.rail").win())
-  doom(require("paseo.ui.tree").win())
   reseat(doomed)
   -- Before `state` goes: `panel_keys` reads it, and a panel left attached
   -- would have its mappings outlive the buffer they were bound to. So does
@@ -2060,7 +1983,6 @@ function M.close()
   stop_rail_timer()
   -- The window goes; the buffer stays, with the list in it, for the next one.
   require("paseo.ui.rail").hide()
-  require("paseo.ui.tree").hide()
 
   -- A list's search box is a window of OURS floated over the body, and the
   -- ordinary way it closes is losing focus -- which does not happen when the
@@ -2344,7 +2266,7 @@ function M.open(chat, opts)
   local term_keys = require("paseo.config").get().ui.terminal.keys
   if term_keys.sessions then
     map(term_keys.sessions, function()
-      M.focus_tree()
+      M.focus_sessions()
     end)
   end
   -- And `<C-n>` from the chrome, as from every other buffer of ours.
@@ -2691,7 +2613,6 @@ function M.relayout(force)
     force ~= true
     and old
     and old.rail == g.rail
-    and old.tree == g.tree
     and old.host == g.host
     and old.row == g.row
     and old.col == g.col
@@ -2820,44 +2741,21 @@ function M.focus_main()
   end
 end
 
----Show or hide the session tree, and remember which across restarts.
-function M.toggle_tree()
-  local tree = require "paseo.ui.tree"
-  local had_focus = tree.win() and api.nvim_get_current_win() == tree.win()
-  tree.set_visible(not tree.visible())
+---Onto the session on screen, in the rail: its workspace opened if it was
+---closed, and the cursor on the row of the agent or terminal you are looking
+---at. The session list's key, `<C-s>`, everywhere.
+function M.focus_sessions()
   if not state then
     return
   end
-  M.relayout(true)
-  if had_focus and not tree.win() then
-    M.focus_main()
-  end
-end
-
----Into the session tree, showing it first if it is hidden.
-function M.focus_tree()
-  if not state then
+  M.focus_rail()
+  local rail = require "paseo.ui.rail"
+  if not rail.win() or api.nvim_get_current_win() ~= rail.win() then
     return
   end
-  local tree = require "paseo.ui.tree"
-  if not tree.win() then
-    if tree.visible() then
-      return vim.notify("paseo: the dashboard is too narrow for the session tree", vim.log.levels.INFO)
-    end
-    M.toggle_tree()
-  end
-  local win = tree.win()
-  if not win then
-    return
-  end
-  if api.nvim_get_mode().mode ~= "n" then
-    pcall(vim.cmd.stopinsert)
-  end
-  -- Arriving puts you on the session you are looking at, wherever the
-  -- cursor was left last time.
-  tree.draw()
-  tree.seat()
-  pcall(api.nvim_set_current_win, win)
+  rail.reveal()
+  rail.draw()
+  rail.seat { session = true }
 end
 
 ---Start an agent or a terminal from the dashboard: asks which.
