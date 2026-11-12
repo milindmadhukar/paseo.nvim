@@ -23,7 +23,8 @@ package.path = ("%s/?.lua;%s"):format(root, package.path)
 
 local deps = assert(vim.env.PASEO_TEST_DEPS, "PASEO_TEST_DEPS is not set; run tests/run.sh")
 for name, kind in vim.fs.dir(deps) do
-  if kind == "directory" then
+  -- PASEO_TEST_NOVOLT=1 leaves volt OFF the runtimepath, to prove what runs without it.
+  if kind == "directory" and not (name == "volt" and vim.env.PASEO_TEST_NOVOLT == "1") then
     vim.opt.runtimepath:append(vim.fs.joinpath(deps, name))
   end
 end

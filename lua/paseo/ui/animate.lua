@@ -147,7 +147,11 @@ function M.tween(o)
         end
       end
 
-      require("volt").redraw(o.buf, o.section)
+      -- A tween on a plain buffer has no section to repaint: the caller's
+      -- next draw picks the value up. Only volt's sections redraw here.
+      pcall(function()
+        require("volt").redraw(o.buf, o.section)
+      end)
     end)
   )
 
@@ -180,7 +184,9 @@ local function clock(o)
     if o.on_frame then
       return o.on_frame()
     end
-    require("volt").redraw(o.buf, o.section)
+    pcall(function()
+      require("volt").redraw(o.buf, o.section)
+    end)
   end
 
   state.timer:start(

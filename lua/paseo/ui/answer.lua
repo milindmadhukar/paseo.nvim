@@ -1230,7 +1230,9 @@ function M.open(chat, request, view, handlers)
     handlers = handlers,
     kind = view.state and "question" or "plan",
     focus = {},
-    volt = true,
+    -- Without volt, the `render.to_buffer` fallback in `paint` is the
+    -- renderer from the first frame; the keys below are ours either way.
+    volt = require("paseo.ui.widgets").has_volt(),
     augroup = api.nvim_create_augroup("paseo.answer", { clear = true }),
   }
 

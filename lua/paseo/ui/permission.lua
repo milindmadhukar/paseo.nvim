@@ -34,11 +34,11 @@ local ns = api.nvim_create_namespace "paseo.permission"
 ---|paseo.ui.answer|, if it can be loaded.
 ---
 ---Required lazily, and not because of a cycle -- `answer` requires nothing of
----this module, which is the point of it taking callbacks. It is because it draws
----with `paseo.ui.widgets`, which requires `volt.ui` outright, and neither the
----sidebar nor the dashboard does. So a tree without volt still gets this file,
----and still gets the plain allow/deny float below, rather than failing to load
----the module that answers permissions at all.
+---this module, which is the point of it taking callbacks. It is so that a
+---broken overlay still leaves this file loadable, with the plain allow/deny
+---float below, rather than failing to load the module that answers permissions
+---at all. Volt is optional for both: each paints with `render.to_buffer` when
+---volt is not installed.
 ---@return table|nil
 local function overlay()
   local ok, module = pcall(require, "paseo.ui.answer")
@@ -350,12 +350,14 @@ local function open(chat, request)
     if overlay_ then
       return overlay_.open(chat, request, view, handlers(chat, request, view))
     end
-    -- No overlay means no volt. It does NOT mean fall through to the float
-    -- below: that answers with a bare allow, which for a question is the exact
-    -- bug this whole path exists to avoid. So say so and leave it pending --
-    -- still answerable in the Paseo app, and still in the transcript.
+    -- No overlay means the module failed to load. It does NOT mean fall
+    -- through to the float below: that answers with a bare allow, which for a
+    -- question is the exact bug this whole path exists to avoid. So say so and
+    -- leave it pending -- still answerable in the Paseo app, and still in the
+    -- transcript. (Volt is not the reason any more: the overlay paints with
+    -- `render.to_buffer` when volt is absent.)
     return vim.notify(
-      "paseo: answering a question needs nvzone/volt; the request is still pending",
+      "paseo: the question overlay failed to load; the request is still pending",
       vim.log.levels.ERROR
     )
   end

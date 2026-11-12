@@ -56,20 +56,19 @@ local function check_core()
     end
   end
 
-  -- volt is REQUIRED, not recommended. Every surface but the transcript is
-  -- drawn as volt extmarks -- the dashboard chrome, the seven panels, the
-  -- settings popup and the permission dialog -- and there is no longer a
-  -- plain-text fallback behind them, because a fallback that has to be kept in
-  -- step with the real renderer is a second renderer nobody tests.
+  -- volt is OPTIONAL. It draws the dashboard (`:Paseo dash`/`buf`) -- the
+  -- chrome, its tabs and panels -- and gives popups and dialogs mouse
+  -- support. The sidebar and the native surface (`:Paseo native`) are plain
+  -- buffers, and popups and dialogs fall back to plain lines without it.
   if not pcall(require, "volt") then
-    err "nvzone/volt is not installed -- it is a hard dependency; no UI will open"
+    warn "nvzone/volt is not installed -- the float/buffer dashboard is unavailable; `:Paseo native` and the sidebar work without it"
   elseif not pcall(require, "volt.ui") then
     -- A partial volt install is its own failure mode: `volt` resolves but
     -- `volt.ui` does not, and every panel comes up empty with no error anyone
     -- sees. Probe the submodule the panels actually use.
-    err "volt is present but volt.ui is not -- update nvzone/volt; the panels cannot draw"
+    err "volt is present but volt.ui is not -- update nvzone/volt; the dashboard panels cannot draw"
   else
-    ok "volt is available (every surface but the transcript is drawn with it)"
+    ok "volt is available (draws the float/buffer dashboard)"
   end
 
   -- Where the palette comes from, because it changes what everything looks

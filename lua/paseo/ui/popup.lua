@@ -62,7 +62,11 @@ end
 ---@param opts { view: paseo.AgentSettingsView, width: fun(): integer, title: fun(handle: paseo.Popup): table[][], filetype?: string, zindex?: integer, keys?: table[], on_close?: fun() }
 ---@return paseo.Popup
 function M.open(opts)
-  local volt = require "volt"
+  -- VOLT IS OPTIONAL. Without it the popup is the same window drawn as real
+  -- lines by `render.to_buffer`; every view's keys are its own (|paseo.ui.keys|)
+  -- so nothing but the mouse is lost.
+  local volt = require("paseo.ui.widgets").has_volt() and require "volt" or nil
+  local plain_ns = require("paseo.ui.hl").ns
 
   require("paseo.ui.hl").setup()
 
@@ -92,8 +96,25 @@ function M.open(opts)
     return lines
   end
 
+  ---The whole popup as one list of lines, for the plain path.
+  local function all_lines()
+    local lines = {}
+    local pad = { string.rep(" ", XPAD) }
+    for _, list in ipairs { title_lines(), body_lines() } do
+      for _, line in ipairs(list) do
+        local row = { pad }
+        vim.list_extend(row, render.flatten(line))
+        lines[#lines + 1] = row
+      end
+    end
+    return lines
+  end
+
   ---Measure the layout into volt and report the height it wants.
   local function measure()
+    if not volt then
+      return math.max(6, #all_lines())
+    end
     volt.gen_data {
       {
         buf = handle.buf,
@@ -151,6 +172,12 @@ function M.open(opts)
       end
     end
 
+    if not volt then
+      render.to_buffer(handle.buf, plain_ns, 0, -1, all_lines())
+      vim.bo[handle.buf].modifiable = false
+      return
+    end
+
     vim.bo[handle.buf].modifiable = true
     volt.set_empty_lines(handle.buf, handle.h, handle.w)
     vim.bo[handle.buf].modifiable = false
@@ -172,12 +199,22 @@ function M.open(opts)
     -- takes them off the global key handler's list. Doing that by hand is
     -- what leaked clickable tables for the session before.
     pcall(function()
-      require("volt.utils").close { bufs = { handle.buf, handle.backdrop } }
+      if volt then
+        require("volt.utils").close { bufs = { handle.buf, handle.backdrop } }
+      end
     end)
 
     for _, win in ipairs { handle.win, handle.backdrop_win } do
       if win and api.nvim_win_is_valid(win) then
         pcall(api.nvim_win_close, win, true)
+      end
+    end
+
+    if not volt then
+      for _, buf in ipairs { handle.buf, handle.backdrop } do
+        if buf and api.nvim_buf_is_valid(buf) then
+          pcall(api.nvim_buf_delete, buf, { force = true })
+        end
       end
     end
 
@@ -226,7 +263,12 @@ function M.open(opts)
   api.nvim_set_hl(handle.ns, "NormalFloat", { link = "PaseoNormal" })
   api.nvim_set_hl(handle.ns, "FloatBorder", { link = "PaseoNormalBorder" })
 
-  volt.run(handle.buf, { h = handle.h, w = handle.w })
+  if volt then
+    volt.run(handle.buf, { h = handle.h, w = handle.w })
+  else
+    render.to_buffer(handle.buf, plain_ns, 0, -1, all_lines())
+    vim.bo[handle.buf].modifiable = false
+  end
   -- After `volt.run`, which sets `VoltWindow`.
   vim.bo[handle.buf].filetype = opts.filetype or "paseo-settings"
 
@@ -234,16 +276,31 @@ function M.open(opts)
   -- `volt.utils.close`, which force-deletes the buffer -- so the close path
   -- has to hang off `after_close` rather than off our own keymaps, or a `q`
   -- would take the window away without ever answering the caller.
-  volt.mappings {
-    bufs = { handle.buf, handle.backdrop },
-    winclosed_event = true,
-    after_close = handle.close,
-  }
+  if volt then
+    volt.mappings {
+      bufs = { handle.buf, handle.backdrop },
+      winclosed_event = true,
+      after_close = handle.close,
+    }
 
-  -- The half that makes a cell clickable with a mouse: `events.add` binds
-  -- `<CR>` and `<Tab>`, and `enable` -- which `volt.run` already called -- is
-  -- what routes `LeftMouse` and `MouseMove` here.
-  require("volt.events").add(handle.buf)
+    -- The half that makes a cell clickable with a mouse: `events.add` binds
+    -- `<CR>` and `<Tab>`, and `enable` -- which `volt.run` already called -- is
+    -- what routes `LeftMouse` and `MouseMove` here.
+    require("volt.events").add(handle.buf)
+  else
+    -- What `volt.mappings` gave us: `q`/`<Esc>` close, and so does closing
+    -- the window any other way.
+    for _, lhs in ipairs { "q", "<Esc>" } do
+      vim.keymap.set("n", lhs, handle.close, { buffer = handle.buf, nowait = true, silent = true })
+    end
+    api.nvim_create_autocmd("WinClosed", {
+      pattern = tostring(handle.win),
+      once = true,
+      callback = function()
+        vim.schedule(handle.close)
+      end,
+    })
+  end
 
   handle.view:bind(handle.buf)
 

@@ -22,17 +22,141 @@
 local render = require "paseo.ui.render"
 local icons = require "paseo.ui.icons"
 local style = require "paseo.ui.style"
-local voltui = require "volt.ui"
+
+local api_strwidth = vim.api.nvim_strwidth
 
 local M = {}
 
--- Straight through from volt: these already do the job.
-M.grid_col = voltui.grid_col
-M.grid_row = voltui.grid_row
-M.separator = voltui.separator
-M.progressbar = voltui.progressbar
-M.checkbox = voltui.checkbox
-M.line_w = voltui.line_w
+-- VOLT IS OPTIONAL. This module used to `require "volt.ui"` at the top, and
+-- since `chat.lua` requires this one, a missing volt meant nothing loaded at
+-- all -- not the sidebar, not the native surface, neither of which draws a
+-- single volt section. The helpers below are the small part of `volt.ui` the
+-- panels lean on, written here so they need nothing; `table` and `chart` still
+-- prefer volt's when it is installed, and degrade when it is not.
+
+---Is nvzone/volt on the runtimepath? Asked once: it does not appear mid-session.
+---@type boolean|nil
+local has_volt
+
+---@return boolean
+function M.has_volt()
+  if has_volt == nil then
+    has_volt = pcall(require, "volt")
+  end
+  return has_volt
+end
+
+---volt's `ui` module, or nil.
+---@return table|nil
+local function voltui()
+  if not M.has_volt() then
+    return nil
+  end
+  local ok, mod = pcall(require, "volt.ui")
+  return ok and mod or nil
+end
+
+---Display width of a line, NOT counting a `"_pad_"` sentinel cell.
+---@param line table[]
+---@return integer
+function M.line_w(line)
+  local w = 0
+  for _, cell in ipairs(line) do
+    local text = cell[1]
+    if text ~= "_pad_" then
+      w = w + api_strwidth(tostring(text or ""))
+    end
+  end
+  return w
+end
+
+---Expand every `"_pad_"` cell of `line` so the whole line is `w` columns.
+---Mutates and returns `line`, the way the callers expect.
+---@param line table[]
+---@param w integer
+---@return table[]
+function M.hpad(line, w)
+  local fill = string.rep(" ", math.max(0, w - M.line_w(line)))
+  for _, cell in ipairs(line) do
+    if cell[1] == "_pad_" then
+      cell[1] = fill
+    end
+  end
+  return line
+end
+
+---One rule, `w` columns of `char`.
+---@param char? string
+---@param w integer
+---@param hl? string
+---@return table[]
+function M.separator(char, w, hl)
+  return { { string.rep(char or "─", math.max(0, w)), hl or "PaseoTextFaint" } }
+end
+
+---Two cells: the filled share of `w` and the rest.
+---@param o { w: integer, val: number, icon?: { on?: string, off?: string }, hl?: { on?: string, off?: string } }
+---@return table[]
+function M.progressbar(o)
+  local icon = o.icon or {}
+  local hl = o.hl or {}
+  local on = math.max(0, math.min(o.w, math.floor(o.w * ((o.val or 0) / 100))))
+  return {
+    { string.rep(icon.on or "-", on), hl.on or "PaseoAgent" },
+    { string.rep(icon.off or "-", o.w - on), hl.off or "PaseoTextFaint" },
+  }
+end
+
+---A checkbox as one cell: glyph, two spaces, label.
+---@param o { active: boolean, txt: string, check?: string, uncheck?: string, hlon?: string, hloff?: string, actions?: table }
+---@return table
+function M.checkbox(o)
+  local glyph = o.active and (o.check or "") or (o.uncheck or "")
+  return {
+    glyph .. "  " .. o.txt,
+    o.active and (o.hlon or "String") or (o.hloff or "Comment"),
+    o.actions,
+  }
+end
+
+---Stack blocks of lines vertically: a list of line lists into one list.
+---@param blocks table[][][]
+---@return table[][]
+function M.grid_row(blocks)
+  local out = {}
+  for _, block in ipairs(blocks) do
+    vim.list_extend(out, block)
+  end
+  return out
+end
+
+---Lay blocks out SIDE BY SIDE. Each column is `{ lines, w, pad? }`; every row
+---of a column is padded to `w + pad`, and a column shorter than its
+---neighbours is filled with blank rows of the same width.
+---@param columns { lines: table[][], w: integer, pad?: integer }[]
+---@return table[][]
+function M.grid_col(columns)
+  local h = 0
+  for _, column in ipairs(columns) do
+    h = math.max(h, #column.lines)
+  end
+  local out = {}
+  for row = 1, h do
+    local line = {}
+    for _, column in ipairs(columns) do
+      local width = column.w + (column.pad or 0)
+      local src = column.lines[row]
+      if src then
+        vim.list_extend(line, src)
+        line[#line + 1] = { string.rep(" ", math.max(0, width - M.line_w(src))) }
+      else
+        line[#line + 1] = { string.rep(" ", width) }
+      end
+    end
+    out[row] = line
+  end
+  return out
+end
 
 ---Highlight for each chip state.
 ---
@@ -71,7 +195,7 @@ function M.row(left, right, w, hl)
   vim.list_extend(line, left)
   line[#line + 1] = { "_pad_", hl or "PaseoCardText" }
   vim.list_extend(line, right)
-  return voltui.hpad(line, w)
+  return M.hpad(line, w)
 end
 
 ---How many columns of a card's width the content actually gets.
@@ -403,7 +527,7 @@ end
 ---@return table[]
 function M.bar(opts)
   local glyph = opts.thin and style.BAR.thin or style.BAR.thick
-  return voltui.progressbar {
+  return M.progressbar {
     w = math.max(1, math.floor(opts.w)),
     -- Clamped rather than trusted: a context window can report over 100% once
     -- the overhead is counted, and `string.rep` with a negative count is an
@@ -501,6 +625,67 @@ function M.tile(opts)
   return lines
 end
 
+---A ruled table without volt: same shape as volt's -- a top rule, one row per
+---entry with a rule between, a bottom rule, the title above -- every column
+---as wide as its widest cell (plus padding), each cell centred.
+---@param rows table[]
+---@param w integer|string
+---@param header_hl string
+---@param title? table
+---@return table[][]
+function M.plain_table(rows, w, header_hl, title)
+  local function cell_w(v)
+    return type(v) == "table" and M.line_w(v) or api_strwidth(tostring(v))
+  end
+  local ncol = #(rows[1] or {})
+  local widths = {}
+  for c = 1, ncol do
+    local m = 0
+    for _, row in ipairs(rows) do
+      m = math.max(m, cell_w(row[c] or ""))
+    end
+    widths[c] = m + 2
+  end
+  if type(w) == "number" and ncol > 0 then
+    local used = ncol + 1
+    for _, cw in ipairs(widths) do
+      used = used + cw
+    end
+    widths[ncol] = widths[ncol] + math.max(0, w - used)
+  end
+  local function rule(l, m, r)
+    local parts = {}
+    for c = 1, ncol do
+      parts[c] = string.rep("─", widths[c])
+    end
+    return { { l .. table.concat(parts, m) .. r, "linenr" } }
+  end
+  local lines = { rule("┌", "┬", "┐") }
+  for i, row in ipairs(rows) do
+    local line = {}
+    for c = 1, ncol do
+      local v = row[c] or ""
+      local left = math.floor((widths[c] - cell_w(v)) / 2)
+      local right = widths[c] - cell_w(v) - left
+      line[#line + 1] = { "│", "linenr" }
+      line[#line + 1] = { string.rep(" ", left) }
+      if type(v) == "table" then
+        vim.list_extend(line, v)
+      else
+        line[#line + 1] = { tostring(v), i == 1 and header_hl or "Normal" }
+      end
+      line[#line + 1] = { string.rep(" ", right) }
+    end
+    line[#line + 1] = { "│", "linenr" }
+    lines[#lines + 1] = line
+    lines[#lines + 1] = i == #rows and rule("└", "┴", "┘") or rule("├", "┼", "┤")
+  end
+  if title then
+    table.insert(lines, 1, { title })
+  end
+  return lines
+end
+
 ---A ruled table. Straight through to volt's, which is a real one.
 ---
 ---`w` may be the string `"fit"`, which shrinks to content -- measure the
@@ -517,7 +702,9 @@ end
 ---@return table[][]
 function M.table(rows, w, opts)
   opts = opts or {}
-  local lines = voltui.table(rows, w, opts.header or "PaseoCardTitle", opts.title)
+  local volt = voltui()
+  local lines = volt and volt.table(rows, w, opts.header or "PaseoCardTitle", opts.title)
+    or M.plain_table(rows, w, opts.header or "PaseoCardTitle", opts.title)
 
   -- volt draws its rules in `linenr`, which on most themes is the same weight
   -- as the numbers inside the table. Repainted faint, so the grid recedes and
@@ -571,7 +758,19 @@ function M.chart(values, opts)
 
   local data =
     { val = values, baropts = baropts, format_labels = opts.labels, footer_label = opts.footer }
-  return opts.dot and voltui.graphs.dot(data) or voltui.graphs.bar(data)
+  local volt = voltui()
+  if not volt then
+    -- No chart without volt: one row of the values as a ramp, which still says
+    -- which way the series went.
+    local ramp = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" }
+    local cells = {}
+    for _, v in ipairs(values) do
+      local i = math.max(1, math.min(8, math.floor((v or 0) / 12.5) + 1))
+      cells[#cells + 1] = { ramp[i], type(opts.hl) == "string" and opts.hl or "PaseoAgent" }
+    end
+    return { cells }
+  end
+  return opts.dot and volt.graphs.dot(data) or volt.graphs.bar(data)
 end
 
 -- ---------------------------------------------------------------- accents
