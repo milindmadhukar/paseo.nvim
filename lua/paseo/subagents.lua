@@ -30,8 +30,10 @@ M.PARENT_LABEL = "paseo.parent-agent-id"
 ---@field detail string|nil       What it was asked to do, when that differs.
 ---@field status string
 ---@field running boolean
+---@field waiting boolean|nil     A Paseo subagent blocked on a permission.
 ---@field provider string|nil
 ---@field createdAt string|nil
+---@field updatedAt string|nil   For a finished one, roughly when it finished.
 
 --- Provider descriptors, per parent: `provider[host:parent][id] = descriptor`.
 local provider = {}
@@ -89,6 +91,11 @@ local function attach()
   end)
 end
 
+---Parents whose provider list has been asked for on this connection, so the
+---rail can call `track` on every agent it draws, every redraw, for free.
+---@type table<string, boolean>
+local tracked = {}
+
 ---Start tracking `parent`'s subagents: the live stream, the agent directory
 ---the Paseo kind is read from, and the provider list as it stands now -- the
 ---stream only reports what CHANGES, and a subagent already running when the
@@ -97,6 +104,7 @@ end
 ---@param host_id? string
 function M.follow(parent, host_id)
   attach()
+  tracked[key(host_id, parent)] = true
   require("paseo.agents").watch(nil, host_id)
   bridge.request("subagents.follow", {}, function(err)
     if err then
@@ -116,6 +124,27 @@ function M.follow(parent, host_id)
       end)
     end, host_id)
   end, host_id)
+end
+
+---`follow`, once per parent per connection. For the callers that count the
+---subagents of agents nobody has opened a chat on -- the workspace rail -- and
+---would otherwise only ever see the Paseo kind, which needs no asking.
+---@param parent string
+---@param host_id? string
+function M.track(parent, host_id)
+  if not parent or tracked[key(host_id, parent)] then
+    return
+  end
+  if not require("paseo.bridge").running() then
+    return
+  end
+  M.follow(parent, host_id)
+end
+
+---Forget what was asked: the bridge reconnected, and the next `track` has to
+---ask the new connection.
+function M.untrack()
+  tracked = {}
 end
 
 ---@param text string|nil
@@ -155,6 +184,7 @@ function M.list(parent, host_id)
       running = s.status == "running",
       provider = s.provider,
       createdAt = s.createdAt,
+      updatedAt = s.updatedAt,
     }
   end
 
@@ -167,8 +197,12 @@ function M.list(parent, host_id)
         title = line(a.title) or "agent",
         status = a.status or "idle",
         running = agents.working(a.status),
+        -- Blocked on a permission: answered in the parent's chat, which
+        -- relays it (|paseo.ui.permission|.relay).
+        waiting = (a.pendingPermissionCount or 0) > 0 or nil,
         provider = a.provider,
         createdAt = a.createdAt,
+        updatedAt = a.updatedAt,
         cwd = a.cwd,
       }
     end
@@ -196,6 +230,86 @@ function M.counts(parent, host_id)
     end
   end
   return running, total
+end
+
+---Subagents of every agent working under `root`: what the workspace rail
+---badges a row with. A Paseo subagent working in the same workspace as its
+---parent is ONE subagent, not also an agent with subagents of its own counted
+---twice -- the parent's list is what it is counted in.
+---@param root string
+---@param host_id? string
+---@return integer running, integer total
+function M.counts_under(root, host_id)
+  local running, total = 0, 0
+  for _, agent in ipairs(require("paseo.agents").for_root(root, host_id)) do
+    M.track(agent.id, host_id)
+    local r, t = M.counts(agent.id, host_id)
+    running, total = running + r, total + t
+  end
+  return running, total
+end
+
+---Seconds since an ISO-8601 UTC stamp, or nil when it is not one.
+---
+---Both sides are read as local time on purpose -- see the usage panel's
+---`until_text` -- so the zone offset cancels in the subtraction.
+---@param iso string|nil
+---@param to? string|nil  Measure to this stamp rather than to now.
+---@return integer|nil
+function M.seconds(iso, to)
+  local function epoch(stamp)
+    if type(stamp) ~= "string" then
+      return nil
+    end
+    local y, mo, d, h, mi, sec = stamp:match "^(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)"
+    if not y then
+      return nil
+    end
+    return os.time {
+      year = tonumber(y),
+      month = tonumber(mo),
+      day = tonumber(d),
+      hour = tonumber(h),
+      min = tonumber(mi),
+      sec = tonumber(sec),
+      isdst = false,
+    }
+  end
+  local from = epoch(iso)
+  if not from then
+    return nil
+  end
+  local upto = epoch(to)
+  if not upto then
+    local utc = os.date "!*t"
+    utc.isdst = false
+    upto = os.time(utc)
+  end
+  return math.max(0, upto - from)
+end
+
+---`42s`, `3m 05s`, `1h 12m`.
+---@param seconds integer|nil
+---@return string|nil
+function M.duration(seconds)
+  if not seconds then
+    return nil
+  end
+  if seconds < 60 then
+    return ("%ds"):format(seconds)
+  end
+  if seconds < 3600 then
+    return ("%dm %02ds"):format(math.floor(seconds / 60), seconds % 60)
+  end
+  return ("%dh %02dm"):format(math.floor(seconds / 3600), math.floor((seconds % 3600) / 60))
+end
+
+---For the tests: listen again on the next `follow`, so a suite that stubs
+---the bridge gets the handler -- the rail tracks parents as it draws, so an
+---earlier suite may already have attached to the real one.
+function M._reset()
+  attached = false
+  tracked = {}
 end
 
 -- Exposed for deterministic tests; production updates arrive from the bridge.

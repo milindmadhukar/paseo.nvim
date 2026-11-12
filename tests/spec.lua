@@ -149,6 +149,10 @@ function M.run(filter)
             results.lines[#results.lines + 1] = ("  FAIL  %s threw\n          %s"):format(name, err)
           end
           sweep(name)
+          -- Where the last suite put a chat is not where the next one starts:
+          -- |paseo.ui.surface| remembers it for the session, which here would
+          -- mean one suite's `:Paseo sidebar` deciding the next one's default.
+          require("paseo.ui.surface").reset()
           flush()
         end
       end

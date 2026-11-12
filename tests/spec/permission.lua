@@ -94,7 +94,117 @@ local function test_permission_held()
   vim.api.nvim_win_close(chat.win_conversation, true)
 end
 
+--- A Paseo subagent's request is answered in its parent's chat.
+---
+--- The bug, reproduced against a real daemon: an agent started by another
+--- agent through Paseo blocked on a Bash call and NOTHING in Neovim showed it.
+--- Its requests ride its own timeline, which is only followed for an agent with
+--- a chat of its own, and nobody opens one -- you are watching the parent.
+local function test_permission_relay()
+  local permission = require "paseo.ui.permission"
+  local transcript = require "paseo.ui.transcript"
+  local agents = require "paseo.agents"
+  local bridge = require "paseo.bridge"
+  local label = require("paseo.subagents").PARENT_LABEL
+  local old_request = bridge.request
+
+  local pending = {
+    { id = "child-req", kind = "tool", name = "Bash", title = "Bash", actions = { { id = "allow", behavior = "allow", label = "Allow" } } },
+  }
+  local asked, answered = {}, nil
+  local ok, err = pcall(function()
+    bridge.request = function(op, args, callback)
+      asked[#asked + 1] = op .. ":" .. tostring(args.agentId)
+      if op == "agent.pendingPermissions" then
+        return callback(nil, { requests = vim.deepcopy(pending) })
+      end
+      if op == "agent.respondToPermission" then
+        answered = args
+      end
+      callback(nil, {})
+    end
+
+    local chat = { agent_id = "parent", conversation = vim.api.nvim_create_buf(false, true) }
+    transcript.reset(chat)
+    local function directory(count, extra)
+      local entries = {
+        { id = "parent", status = "idle" },
+        { id = "child", title = "write the tests", status = "running", pendingPermissionCount = count, updatedAt = tostring(count), labels = { [label] = "parent" } },
+      }
+      vim.list_extend(entries, extra or {})
+      agents._apply { kind = "snapshot", entries = entries }
+    end
+    local function none()
+      return false
+    end
+
+    directory(1)
+    permission.relay(chat, none)
+    vim.wait(500, function()
+      return #(chat.permissions or {}) == 1
+    end, 10)
+    eq("relay: the subagent's pending list is asked for", asked[1], "agent.pendingPermissions:child")
+    eq("relay: its request is held in the parent's chat", chat.permissions[1].id, "child-req")
+    eq("relay: tagged with who asked", chat.permissions[1].via, "write the tests")
+    truthy("relay: and drawn in the parent's conversation", chat.permission_blocks["child-req"] ~= nil)
+
+    -- The parent's own snapshot does not list it, and must not drop it.
+    permission.reconcile(chat, {})
+    eq("relay: the parent's own reconcile leaves it alone", #chat.permissions, 1)
+
+    -- Answered to the agent that ASKED.
+    permission.respond(chat, chat.permissions[1], { behavior = "allow", selectedActionId = "allow" })
+    eq("relay: the answer goes to the subagent", answered and answered.agentId, "child")
+    eq("relay: and it is no longer held", #chat.permissions, 0)
+
+    -- Answered elsewhere: the count drops, and the card says so.
+    pending = {
+      { id = "child-req-2", kind = "tool", name = "Edit", title = "Edit", actions = {} },
+    }
+    directory(1, nil)
+    agents._apply { kind = "snapshot", entries = {
+      { id = "parent", status = "idle" },
+      { id = "child", title = "write the tests", status = "running", pendingPermissionCount = 1, updatedAt = "again", labels = { [label] = "parent" } },
+    } }
+    permission.relay(chat, none)
+    vim.wait(500, function()
+      return #(chat.permissions or {}) == 1
+    end, 10)
+    eq("relay: a second request is relayed too", chat.permissions[1] and chat.permissions[1].id, "child-req-2")
+    pending = {}
+    agents._apply { kind = "snapshot", entries = {
+      { id = "parent", status = "idle" },
+      { id = "child", title = "write the tests", status = "running", pendingPermissionCount = 0, updatedAt = "done", labels = { [label] = "parent" } },
+    } }
+    permission.relay(chat, none)
+    eq("relay: answered elsewhere, it is dropped", #chat.permissions, 0)
+    eq(
+      "relay: and the card says so",
+      chat.blocks[chat.permission_blocks["child-req-2"]].item.resolution,
+      "answered elsewhere"
+    )
+
+    -- A subagent with a chat of its own answers there, not here.
+    asked = {}
+    agents._apply { kind = "snapshot", entries = {
+      { id = "parent", status = "idle" },
+      { id = "child", title = "write the tests", status = "running", pendingPermissionCount = 1, updatedAt = "own", labels = { [label] = "parent" } },
+    } }
+    permission.relay(chat, function(id)
+      return id == "child"
+    end)
+    eq("relay: not for a subagent with its own chat", #asked, 0)
+  end)
+  bridge.request = old_request
+  permission.close()
+  agents._apply { kind = "snapshot", entries = {} }
+  if not ok then
+    error(err, 0)
+  end
+end
+
 return {
+  { "relay", test_permission_relay },
   { "sync", test_permission_sync },
   { "held", test_permission_held },
 }

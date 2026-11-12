@@ -530,6 +530,11 @@ local function card_lines(item, opts)
       { "", group },
       { " " .. render.plain(heading), group },
     }
+    if request.via then
+      -- Relayed from a Paseo subagent: who is asking, or it reads as the
+      -- parent reaching for the tool. See |paseo.ui.permission|.relay.
+      header[#header + 1] = { "  " .. icons.tool.sub_agent .. " " .. render.plain(request.via), "PaseoDim" }
+    end
     if item.resolution then
       header[#header + 1] = { "  " .. render.plain(item.resolution), "PaseoToolOk" }
     else

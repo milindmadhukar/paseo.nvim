@@ -193,6 +193,17 @@ local function watch_directories()
   watching = true
   require("paseo.agents").on_change(directory_changed)
   require("paseo.terminals").on_change(directory_changed)
+  -- A subagent started or finished: the rail's rows end with the count. Its
+  -- own lines only -- the panels do not draw subagents, and the agent
+  -- directory moving already reaches the rail by the path above.
+  require("paseo.subagents").on_change(function(_, parent)
+    if parent ~= nil and state then
+      pcall(require("paseo.ui.rail").draw)
+      -- A running subagent spins its workspace's row, so starting one starts
+      -- the clock and the last one finishing stops it.
+      sync_spinner()
+    end
+  end)
 end
 
 -- ----------------------------------------------------------------- the mount
@@ -2128,6 +2139,7 @@ function M.open(chat, opts)
     session = { kind = "agent", id = chat.agent_id },
   }
   chat.surface = mount
+  require("paseo.ui.surface").remember(mount)
 
   M.rebuild()
 

@@ -574,11 +574,11 @@ function M.sessions(chat)
   local mount = float.mount()
   if not mount then
     -- Nothing up at all, so there is no mount to inherit and one has to be
-    -- named. The configured dashboard mount, not a literal `"float"` -- and
-    -- the sidebar's answer is still the dashboard, because that is the only
-    -- place this list exists.
-    mount = require("paseo.config").get().ui.surface == "buffer" and "buffer" or "float"
-    chat.surface = mount
+    -- named: the dashboard you last used, not a literal `"float"` -- and the
+    -- sidebar's answer is still the dashboard, because that is the only place
+    -- this list exists.
+    mount = require("paseo.ui.surface").dashboard()
+    sidebar.close(chat)
     float.open(chat, { mount = mount })
   elseif not float.is_open(chat) then
     float.open(chat, { mount = mount })
@@ -1010,29 +1010,20 @@ function M.showing(chat)
   return chat.surface == "sidebar" and sidebar.is_open(chat)
 end
 
----Put the chat on screen, on whichever surface it belongs to.
+---Put the chat on screen, on the surface |paseo.ui.surface| resolves: the one
+---asked for, else the one on screen, else the one you last used, else
+---`ui.surface`.
 ---
----Three answers, in order, and the middle one is the whole of the fix for
----"I opened a session from the buffer dashboard and got a float":
----
----  * `chat.surface` -- where this chat WAS. Reopening keeps the surface you
----    switched it to.
----  * THE MOUNT ALREADY ON SCREEN. Opening a different agent keys a brand-new
----    chat table, so `chat.surface` is nil for it however long you have been
----    standing in the buffer dashboard -- and falling straight to the default
----    tore that dashboard down and built a float in its place. The surface you
----    are looking at belongs to the WINDOW, not to the conversation you are
----    switching to, which is what every panel row, picker and session strip
----    was getting wrong by saying nothing at all.
----  * the configured default, when nothing is up. That is the full-screen
----    dashboard: the surface with everything on it, and `<C-f>` is how you get
----    the narrow one beside your code.
+---It used to read `chat.surface` first and the default last, and `chat.surface`
+---is cleared whenever the dashboard closes -- so every path that closes one
+---chat's surface and opens another's (following you to a workspace you had
+---been to, adopting an agent `agent.find` already knew) fell through to the
+---default and turned the buffer dashboard or the sidebar into a float.
 ---@param chat paseo.Chat
-local function layout(chat)
+---@param explicit? "float"|"sidebar"|"buffer"
+local function layout(chat, explicit)
   make_buffers(chat)
-  local surface = chat.surface
-    or require("paseo.ui.float").mount()
-    or require("paseo.config").get().ui.surface
+  local surface = require("paseo.ui.surface").resolve(explicit)
   -- Two mounts of ONE module. The dashboard is the same surface floating over
   -- your code or sitting in a window of its own -- same chrome, same tabs,
   -- same panes -- so the name goes in as the mount rather than picking
@@ -1042,6 +1033,12 @@ local function layout(chat)
   else
     sidebar.open(chat)
   end
+  -- AT THE END, NOT WHERE YOU LEFT IT. A window put back on a conversation
+  -- buffer gets that buffer's last cursor position, so coming back to a
+  -- workspace -- or reopening a chat at all -- showed whatever you had last
+  -- scrolled to, and the newest thing the agent said was a scroll away.
+  -- Opening a chat is asking what is happening NOW.
+  transcript.to_bottom(chat)
 end
 
 -- ------------------------------------------------------------------- history
@@ -1182,6 +1179,10 @@ initialise = function(chat)
   M.load_settings(chat)
   -- Its subagents, both kinds: the count in the header and `gs`.
   require("paseo.subagents").follow(chat.agent_id, chat.host_id)
+  -- And any of them already blocked on a permission when the chat opened.
+  if M.relay_permissions then
+    M.relay_permissions(chat)
+  end
 end
 
 -- --------------------------------------------------------------------- API
@@ -1286,13 +1287,10 @@ function M.open(opts, callback)
     chats[key] = chat
   end
   current = chat
-  if opts.surface then
-    chat.surface = opts.surface
-  end
 
   -- Already up where it should be: laying it out again is the churn above.
   if not (reused and not opts.surface) then
-    layout(chat)
+    layout(chat, opts.surface)
   end
   if opts.focus ~= false and chat.win_composer and vim.api.nvim_win_is_valid(chat.win_composer) then
     -- Not unconditional: the dashboard on any tab but Chat has no composer
@@ -1663,7 +1661,9 @@ function M.follow(root, opts)
     return false
   end
 
-  local surface = chat.surface or config.get().ui.surface
+  -- Read BEFORE the close: what is on screen is the answer, and in a moment
+  -- nothing will be.
+  local surface = require("paseo.ui.surface").resolve()
   local focus = opts.focus
   if focus == nil then
     -- Anything but the sidebar takes the cursor: both dashboard mounts cover
@@ -1778,11 +1778,13 @@ function M.fullscreen()
   -- wrong.
   local pending = require("paseo.ui.answer").showing()
 
+  -- From the sidebar, back to the dashboard you came from -- the buffer one
+  -- if that is where you were -- rather than always to the float.
   local result
   if chat and require("paseo.ui.float").is_open(chat) then
     result = M.surface "sidebar"
   else
-    result = M.surface "float"
+    result = M.surface(require("paseo.ui.surface").dashboard())
   end
 
   if chat and pending then
@@ -1864,6 +1866,30 @@ function M.attach_events()
     end
   end
   bridge.on("thinking", on_thinking)
+
+  -- A Paseo subagent blocked on a permission: its request is answered HERE,
+  -- in the parent's chat, because nobody opens the subagent's own. A
+  -- subagent that does have an initialised chat keeps its requests.
+  local function has_own_chat(agent_id)
+    for _, other in pairs(chats) do
+      if other.agent_id == agent_id and other.initialised then
+        return true
+      end
+    end
+    return false
+  end
+  M.relay_permissions = function(chat)
+    require("paseo.ui.permission").relay(chat, has_own_chat)
+  end
+  require("paseo.agents").on_change(function()
+    vim.schedule(function()
+      for _, chat in pairs(chats) do
+        if chat.agent_id and chat.initialised then
+          M.relay_permissions(chat)
+        end
+      end
+    end)
+  end)
 
   -- A subagent started, moved or finished: the header counts them.
   require("paseo.subagents").on_change(function(host_id, parent)
@@ -2020,6 +2046,8 @@ function M.attach_events()
       load_history(chat)
       -- The subagent stream belonged to the old socket. Follow again, and
       -- re-list: one that started or finished in the gap was never pushed.
+      -- The rail's parents too, which it re-tracks as it next draws.
+      require("paseo.subagents").untrack()
       require("paseo.subagents").follow(chat.agent_id, chat.host_id)
     end
   end)

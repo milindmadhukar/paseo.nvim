@@ -187,6 +187,12 @@ it in the window you are standing in, and everything on it is identical either
 way. The third is the **sidebar**, which is a different surface. The rest of
 this document uses those four words and no others for it.
 
+`ui.surface` only decides where the first chat of a session opens. After that
+the surface is yours, not the conversation's: switching workspace, picking a
+session, `<C-s>` and reopening after a close all land on the surface that is on
+screen, or else the one you last used. From the sidebar, `<C-f>` goes back to
+whichever dashboard you came from.
+
 | | |
 |---|---|
 | `:Paseo chat` | Open/close the chat, on whichever surface `ui.surface` names |
@@ -208,7 +214,7 @@ this document uses those four words and no others for it.
 | `:Paseo workspaces [all]` | Workspace picker for this project (`<C-a>` or `all`: every project's) — open, inspect agent sessions, create, archive |
 | `:Paseo wcreate` | Create a workspace here — the shape is worked out for you |
 | `:Paseo agents` | Agent sessions in this workspace |
-| `:Paseo subagents` | Subagents of the chat's agent (`gs` in the chat) — a Paseo one opens as a chat you can message, a provider one (Claude's Task tool) opens read-only, live |
+| `:Paseo subagents` | Subagents of the chat's agent (`gs` in the chat), in a live list: a spinner and a clock on each running one, updated as they start and finish. A Paseo one opens as a chat you can message, a provider one (Claude's Task tool) opens read-only, live |
 | `:Paseo sessions` | Compatibility alias for `agents` |
 | `:Paseo term` | Terminals in this workspace, on the Sessions tab |
 | `:Paseo ws …` | Manifest-level: `init` · `edit` · `create <name> [repos]` · `rm` · `ls` · `status` |
@@ -314,6 +320,11 @@ panel, and that is exactly when nothing else on screen is moving.
 
 A pending permission shouts from the header itself — ` needs you` — because
 then the agent is not working, it is waiting for you.
+
+A **subagent's** request is answered in its parent's chat. A Paseo subagent (an
+agent another agent started through Paseo) has a timeline of its own that
+nobody has open, so its requests are relayed into the parent's chat, marked
+`asked by subagent <title>`, and the answer goes back to the subagent.
 
 **It is drawn against the box you type in**, one row above it, on both
 surfaces. That is a move: it used to live at the far top of the screen — a
@@ -500,7 +511,7 @@ sidebar, and it uses the same rule to decide the state:
 
 | | |
 |---|---|
-| spinner | an agent is working |
+| spinner | an agent is working — or a subagent of one is, after its parent's turn has ended |
 | yellow `!` | one is waiting on you: a permission, or a question |
 | red dot | a turn failed |
 | blue dot | a turn finished while you were elsewhere |
@@ -510,6 +521,10 @@ sidebar, and it uses the same rule to decide the state:
 A workspace shows its **most urgent** agent, so one waiting on you among three
 running shows the `!`. The bar and the green name mark the workspace you are
 in.
+
+A row ends with its agents' subagents when they have any: a robot and the
+count, `1/3` (running/total) in the running colour while some work, or just `3`
+once they are done.
 
 `<C-b>` shows and hides the rail, and the choice is remembered across restarts.
 `<C-h>` moves into it, showing it first if it was hidden. Inside it, `j`/`k`
@@ -1949,6 +1964,8 @@ lua/paseo/          the plugin
     float.lua       the dashboard, on either mount: floating over your code,
                     or a real buffer taking over the window you are in
     rail.lua        the workspace rail down the dashboard's left
+    subagents.lua   the live subagent list `gs` opens
+    surface.lua     which surface a chat goes on when nobody named one
     sidebar.lua     the narrow pane beside your code, in two real splits
     animate.lua     motion, none of which may change a height
     render.lua      the cell/line alphabet and the three sinks
@@ -1964,7 +1981,9 @@ lua/paseo/          the plugin
   skills.lua        installing the bundled skills where an agent can see them
 sidecar/            paseo-bridge.ts entry point, bridge-*.ts modules, SDK deps
 .agents/skills/     the bundled agent skills -- the source of truth
-.claude/skills/     symlinks into .agents/skills, for Claude Code
+.claude/skills/     symlinks into .agents/skills, for Claude Code -- plus
+                    paseo-e2e, the dev-only skill for driving this checkout
+                    against real test agents (not shipped)
 tests/              fixtures + suites, run by tests/run.sh
 doc/                :help paseo
 ```

@@ -278,6 +278,40 @@ function M.status(bucket)
   return icons.status.pending, "PaseoDim"
 end
 
+---A workspace's state, SUBAGENTS INCLUDED.
+---
+---|paseo.agents|.workspace_bucket reads the agents and nothing else, and a
+---parent whose turn has handed work to a subagent can be idle while the
+---subagent is still going -- so the row went green, "done", over work that was
+---still running. A running subagent makes a quiet workspace a running one.
+---What outranks running still does: a request waiting on you, a failure.
+---@param ws table
+---@return string
+function M.bucket(ws)
+  local bucket = require("paseo.agents").workspace_bucket(ws.directory or "", ws.hostId)
+  if bucket == "done" or bucket == "attention" or bucket == "none" then
+    local running = require("paseo.subagents").counts_under(ws.directory or "", ws.hostId)
+    if running > 0 then
+      return "running"
+    end
+  end
+  return bucket
+end
+
+---The subagent count a row ends with, or nil when the workspace's agents have
+---none: the robot and `2`, or `1/3` while some run -- running first, because
+---that is the news, in the colour a running tool card is.
+---@param ws table
+---@return table[]|nil
+function M.subagent_badge(ws)
+  local running, total = require("paseo.subagents").counts_under(ws.directory or "", ws.hostId)
+  if total == 0 then
+    return nil
+  end
+  local numbers = running > 0 and ("%d/%d"):format(running, total) or tostring(total)
+  return { { icons.tool.sub_agent .. " " .. numbers, running > 0 and "PaseoToolRunning" or "PaseoDim" } }
+end
+
 ---@param ws table
 ---@return boolean
 local function is_here(ws)
@@ -290,7 +324,6 @@ end
 ---@param width integer
 ---@return table[][] lines, table<integer, table> rows
 function M.lines(width)
-  local agents = require "paseo.agents"
   local out, rows = {}, {}
   local name = cache.root and vim.fs.basename(cache.root) or "workspaces"
   local count = cache.list and ("  " .. #cache.list) or ""
@@ -310,21 +343,28 @@ function M.lines(width)
 
   for _, ws in ipairs(cache.list) do
     local here = is_here(ws)
-    local glyph, hl = M.status(agents.workspace_bucket(ws.directory or "", ws.hostId))
+    local glyph, hl = M.status(M.bucket(ws))
     local line = {
       -- The bar that says "you are in this one", in the same glyph the list
       -- tabs use, so the two read as one vocabulary.
       { here and icons.marker.mine or " ", "PaseoAgent" },
       { glyph .. " ", hl },
     }
+    local badge = M.subagent_badge(ws)
+    local name_width = math.max(1, width - 3 - (badge and render.width(badge) + 1 or 0))
+    -- The pin is part of the name cell, so it truncates with the name rather
+    -- than pushing the badge off the row.
     local pin = ws.pinned and (icons.ui.pin .. " ") or ""
-    vim.list_extend(
-      line,
-      render.truncate(
-        { { pin, "PaseoDim" }, { ws.name or "", here and "PaseoAgent" or "PaseoText" } },
-        math.max(1, width - 3)
-      )
+    local name = render.truncate(
+      { { pin, "PaseoDim" }, { ws.name or "", here and "PaseoAgent" or "PaseoText" } },
+      name_width
     )
+    if badge then
+      -- Right-aligned, so a column of them reads as a column.
+      name = render.pad(name, name_width + 1)
+      vim.list_extend(name, badge)
+    end
+    vim.list_extend(line, name)
     out[#out + 1] = line
     rows[#out] = ws
   end
@@ -349,9 +389,8 @@ function M.spinning()
   if not (M.win() and cache.list) then
     return false
   end
-  local agents = require "paseo.agents"
   for _, ws in ipairs(cache.list) do
-    if agents.workspace_bucket(ws.directory or "", ws.hostId) == "running" then
+    if M.bucket(ws) == "running" then
       return true
     end
   end
