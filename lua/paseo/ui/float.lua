@@ -1158,6 +1158,11 @@ function M.chrome_buf()
 end
 
 function M.rebuild()
+  -- The panels ask for a redraw through here, whichever surface draws them.
+  local native = package.loaded["paseo.ui.native"]
+  if native then
+    native.redraw_panels()
+  end
   if not state or not api.nvim_buf_is_valid(state.buf) then
     return
   end
@@ -2506,6 +2511,11 @@ end
 ----- the agent we already have, or any terminal -- is a repaint.
 ---@param session { kind: "agent"|"terminal", id: string|nil, hostId?: string }
 function M.show_session(session)
+  -- On a native tab a session opens in a tab of its own.
+  local native = package.loaded["paseo.ui.native"]
+  if native and native.chat() and not (state and M.is_open(state.chat)) then
+    return native.show_session(session)
+  end
   if not state then
     return
   end

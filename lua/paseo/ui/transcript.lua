@@ -210,18 +210,20 @@ end
 ---two.
 ---@param block table
 ---@param width integer
+---@param markdown? boolean  Prose as raw markdown -- see |paseo.ui.native|.
 ---@return { key: string, lines: table[][], collapsible: boolean }
-local function card_for(block, width)
+local function card_for(block, width, markdown)
   local flashing = require("paseo.ui.animate").flash_stop(timeline.flash_key(block.item)) ~= nil
   -- `stacked` is in the key because it changes the card's FIRST LINE -- it is
   -- the leading blank, present or not -- and a key that ignored it would serve
   -- a stale rendering to the one block whose spacing had just been decided.
-  local key = ("%d|%s|%d|%s|%s"):format(
+  local key = ("%d|%s|%d|%s|%s|%s"):format(
     width,
     tostring(block.expanded),
     block.rev or 0,
     tostring(flashing),
-    tostring(block.stacked)
+    tostring(block.stacked),
+    tostring(markdown == true)
   )
 
   local cache = block.cards
@@ -243,6 +245,7 @@ local function card_for(block, width)
     width = width,
     expanded = block.expanded,
     gap = not block.stacked,
+    markdown = markdown,
   })
   local entry = { key = key, lines = card.lines, collapsible = card.collapsible }
   -- Safe to hold on to: `render.to_buffer` flattens its input into fresh
@@ -285,7 +288,7 @@ end
 ---@param row integer
 ---@param old_height integer
 local function draw(chat, block, row, old_height)
-  local card = card_for(block, M.width(chat))
+  local card = card_for(block, M.width(chat), chat.markdown)
   block.collapsible = card.collapsible
 
   -- Already on screen, byte for byte. This is what makes a settle flash free

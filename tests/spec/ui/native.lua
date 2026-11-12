@@ -1,0 +1,228 @@
+--- The native surface: a tab page per agent, out of plain splits.
+
+local t = require "tests.spec.helpers"
+local eq, truthy = t.eq, t.truthy
+
+local api = vim.api
+
+local transcript = require "paseo.ui.transcript"
+
+---@param id string
+---@return table
+local function new_chat(id)
+  local chat = {
+    root = vim.uv.cwd(),
+    agent_id = id,
+    title = id,
+    provider = "test",
+    streaming = false,
+    pending = {},
+    images = {},
+    conversation = api.nvim_create_buf(false, true),
+    composer = api.nvim_create_buf(false, true),
+  }
+  vim.bo[chat.conversation].filetype = "markdown"
+  transcript.reset(chat)
+  transcript.upsert(chat, { kind = "user", text = "hello" })
+  return chat
+end
+
+local function settle()
+  for _ = 1, 10 do
+    vim.wait(10)
+  end
+end
+
+---@param buf integer
+---@return string[]
+local function text(buf)
+  return api.nvim_buf_get_lines(buf, 0, -1, false)
+end
+
+---@param lines string[]
+---@param want string
+---@return boolean
+local function has(lines, want)
+  for _, line in ipairs(lines) do
+    if line == want then
+      return true
+    end
+  end
+  return false
+end
+
+local function test_layout()
+  local native = require "paseo.ui.native"
+  local chat_mod = require "paseo.ui.chat"
+  local saved_current = chat_mod.current()
+
+  local tabs_before = #api.nvim_list_tabpages()
+  local a = new_chat "native-a"
+  native.open(a)
+
+  eq("native: an agent opens on a tab page of its own", #api.nvim_list_tabpages(), tabs_before + 1)
+  eq("native: rail, conversation and composer", #api.nvim_tabpage_list_wins(0), 3)
+  eq("native: the conversation window holds the conversation", api.nvim_win_get_buf(a.win_conversation), a.conversation)
+  eq("native: the composer window holds the composer", api.nvim_win_get_buf(a.win_composer), a.composer)
+  eq("native: every window is a split, not a float", api.nvim_win_get_config(a.win_conversation).relative, "")
+  eq("native: the cursor lands in the box", api.nvim_get_current_win(), a.win_composer)
+  eq("native: and it is the current chat", chat_mod.current(), a)
+  truthy("native: the conversation has a winbar", (vim.wo[a.win_conversation].winbar or "") ~= "")
+  truthy("native: naming the agent", vim.wo[a.win_conversation].winbar:find("native-a", 1, true) ~= nil)
+  eq("native: and the surface knows it is on screen", require("paseo.ui.surface").on_screen(), "native")
+
+  -- A SECOND AGENT IS A SECOND TAB.
+  local b = new_chat "native-b"
+  native.open(b)
+  eq("native: a second agent gets a second tab", #api.nvim_list_tabpages(), tabs_before + 2)
+  eq("native: which is now current", chat_mod.current(), b)
+  truthy("native: the two do not share a tab", a.native_tab ~= b.native_tab)
+
+  -- Opening the first again goes BACK to its tab rather than making a third.
+  native.open(a)
+  eq("native: reopening an agent goes to its tab", #api.nvim_list_tabpages(), tabs_before + 2)
+  eq("native: and lands on it", api.nvim_get_current_tabpage(), a.native_tab)
+
+  -- WHAT IS CURRENT FOLLOWS THE TAB. Plain `gt` -- not our own open -- has to
+  -- move it, or `:Paseo mode` changes the agent you are not looking at.
+  vim.cmd("tabnext " .. api.nvim_tabpage_get_number(b.native_tab))
+  settle()
+  eq("native: entering a tab makes its agent current", chat_mod.current(), b)
+  vim.cmd("tabnext " .. api.nvim_tabpage_get_number(a.native_tab))
+  settle()
+  eq("native: and back", chat_mod.current(), a)
+
+  -- `<C-b>` takes the rail away and brings it back.
+  native.toggle_rail()
+  eq("native: the rail hides", #api.nvim_tabpage_list_wins(0), 2)
+  native.toggle_rail()
+  eq("native: and comes back", #api.nvim_tabpage_list_wins(0), 3)
+
+  -- CLOSING takes the tab and leaves the chat.
+  native.close(b)
+  eq("native: closing takes its tab", #api.nvim_list_tabpages(), tabs_before + 1)
+  eq("native: and forgets its windows", b.win_conversation, nil)
+  truthy("native: but not its buffers", api.nvim_buf_is_valid(b.conversation))
+
+  -- `:q` in the conversation takes the whole tab, not half of it.
+  api.nvim_set_current_win(a.win_conversation)
+  vim.cmd "quit"
+  settle()
+  eq("native: :q in the conversation closes the tab", #api.nvim_list_tabpages(), tabs_before)
+  eq("native: and leaves nothing claiming to be on screen", native.has(a), false)
+
+  native.reset()
+  chat_mod.set_current(saved_current)
+end
+
+local function test_markdown()
+  local native = require "paseo.ui.native"
+  local chat_mod = require "paseo.ui.chat"
+  local saved_current = chat_mod.current()
+
+  local chat = new_chat "native-md"
+  native.open(chat)
+  eq("native: the conversation is markdown here", chat.markdown, true)
+
+  transcript.upsert(chat, {
+    kind = "text",
+    text = "# A heading\n\nSome **bold** words.\n\n```lua\n    local x = 1\n",
+  })
+  local lines = text(chat.conversation)
+  truthy("native: prose is written as RAW markdown", has(lines, "# A heading"))
+  truthy("native: emphasis markers kept for treesitter", has(lines, "Some **bold** words."))
+  truthy("native: code keeps its indentation", has(lines, "    local x = 1"))
+  truthy("native: and an unclosed fence is closed on screen", has(lines, "```"))
+
+  -- Off the native surface it is drawn as it always was.
+  native.close(chat)
+  eq("native: closing turns markdown mode off", chat.markdown, nil)
+  lines = text(chat.conversation)
+  -- `render.wrap` reflows by word, so the code's indentation is what goes.
+  truthy("native: so the other surfaces get their own rendering back", not has(lines, "    local x = 1"))
+
+  native.reset()
+  chat_mod.set_current(saved_current)
+end
+
+local function test_panels()
+  local native = require "paseo.ui.native"
+  local chat_mod = require "paseo.ui.chat"
+  local saved_current = chat_mod.current()
+
+  local chat = new_chat "native-panel"
+  native.open(chat)
+  local base = #api.nvim_tabpage_list_wins(0)
+
+  local seen = {}
+  for _, want in ipairs(native.PANELS) do
+    native.cycle_panel()
+    eq("native: " .. want .. " opens a split", #api.nvim_tabpage_list_wins(0), base + 1)
+    for _, win in ipairs(api.nvim_tabpage_list_wins(0)) do
+      local buf = api.nvim_win_get_buf(win)
+      if vim.bo[buf].filetype == "paseo-panel" then
+        seen[#seen + 1] = api.nvim_buf_get_name(buf):match "panel/(%a+)/"
+        truthy("native: the " .. want .. " panel has lines", api.nvim_buf_line_count(buf) >= 1)
+      end
+    end
+  end
+  eq("native: the panels cycle in order", seen, { "settings", "changes", "usage" })
+  native.cycle_panel()
+  eq("native: and a fourth press closes it", #api.nvim_tabpage_list_wins(0), base)
+
+  native.close(chat)
+  native.reset()
+  chat_mod.set_current(saved_current)
+end
+
+---The whole UI LOADS with volt off the runtimepath, and the native surface
+---opens: in a child Neovim, since this one already has volt loaded.
+local function test_without_volt()
+  local script = vim.fn.tempname() .. ".lua"
+  local out = vim.fn.tempname()
+  local f = assert(io.open(script, "w"))
+  f:write(([[
+local ok_all, failures = true, {}
+assert(not pcall(require, "volt"), "volt is on the runtimepath")
+for _, path in ipairs(vim.fn.globpath(%q, "lua/paseo/ui/**/*.lua", false, true)) do
+  local mod = path:match("lua/(paseo/ui/.*)%%.lua$"):gsub("/", ".")
+  local ok, err = pcall(require, mod)
+  if not ok then ok_all = false; failures[#failures + 1] = mod .. ": " .. tostring(err) end
+end
+local chat = { root = vim.uv.cwd(), agent_id = "nv", title = "nv", streaming = false, pending = {}, images = {},
+  conversation = vim.api.nvim_create_buf(false, true), composer = vim.api.nvim_create_buf(false, true) }
+require("paseo.ui.transcript").reset(chat)
+require("paseo.ui.transcript").upsert(chat, { kind = "text", text = "# hi" })
+local ok, err = pcall(require("paseo.ui.native").open, chat)
+if not ok then ok_all = false; failures[#failures + 1] = "native.open: " .. tostring(err) end
+local w = require "paseo.ui.widgets"
+local ok2, err2 = pcall(w.table, { { "a", "b" }, { "1", "2" } }, "fit", {})
+if not ok2 then ok_all = false; failures[#failures + 1] = "widgets.table: " .. tostring(err2) end
+local fh = io.open(%q, "w")
+fh:write(ok_all and "OK" or table.concat(failures, "\n"))
+fh:close()
+vim.cmd "qa!"
+]]):format(t.repo_root, out))
+  f:close()
+
+  local env = vim.fn.environ()
+  env.PASEO_TEST_NOVOLT = "1"
+  local result = vim
+    .system({ "nvim", "--headless", "-i", "NONE", "-u", vim.fs.joinpath(t.repo_root, "tests", "minimal_init.lua"), "-c", "luafile " .. script }, { env = env, text = true })
+    :wait(60000)
+  local fh = io.open(out)
+  local said = fh and fh:read "*a" or ("no output; exit " .. tostring(result.code) .. "\n" .. (result.stderr or ""))
+  if fh then
+    fh:close()
+  end
+  eq("native: every paseo.ui module loads, and native opens, without volt", said, "OK")
+  os.remove(script)
+  os.remove(out)
+end
+
+return {
+  { "ui.native.layout", test_layout },
+  { "ui.native.markdown", test_markdown },
+  { "ui.native.panels", test_panels },
+  { "ui.native.novolt", test_without_volt },
+}

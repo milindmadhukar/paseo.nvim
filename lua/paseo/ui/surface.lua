@@ -38,7 +38,7 @@ local last_dashboard
 ---Record that a chat was just put on `name`.
 ---@param name paseo.SurfaceName
 function M.remember(name)
-  if name == "float" or name == "sidebar" or name == "buffer" then
+  if name == "float" or name == "sidebar" or name == "buffer" or name == "native" then
     last = name
   end
   if name == "float" or name == "buffer" then
@@ -58,6 +58,11 @@ function M.on_screen()
   local mount = require("paseo.ui.float").mount()
   if mount then
     return mount
+  end
+  -- A native tab is on screen when it is the tab you are on.
+  local native = package.loaded["paseo.ui.native"]
+  if native and native.chat() then
+    return "native"
   end
   -- No dashboard is up, so a live conversation window is the sidebar's: the
   -- dashboard's panes use the same field and are gone with it. Only the

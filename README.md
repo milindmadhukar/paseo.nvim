@@ -49,7 +49,7 @@ which reads like a broken install.
 | Needed for | |
 |---|---|
 | Everything | Neovim 0.11+, `git`, a Nerd Font |
-| The chat UI | nvzone/volt |
+| The dashboard (`:Paseo dash`/`buf`) | nvzone/volt — optional: the sidebar and the experimental [native surface](#the-native-surface-experimental) need nothing |
 | The workspace and agent-session pickers | telescope.nvim |
 | The hunk under the cursor | gitsigns.nvim |
 | Agents | the Paseo daemon running, and `bun` or node ≥ 22 |
@@ -197,6 +197,7 @@ whichever dashboard you came from.
 | | |
 |---|---|
 | `:Paseo chat` | Open/close the chat, on whichever surface `ui.surface` names |
+| `:Paseo native` | **Experimental.** Toggle the chat as plain splits, one tab page per agent — see [below](#the-native-surface-experimental) |
 | `:Paseo explain [kind]` | Explain the hunk/selection/file, using the rubric |
 | `:Paseo ask [kind]` | Ask about the hunk/selection/file — a box takes the question |
 | `:Paseo qfask` | Ask about every entry in the quickfix list — whoever built it |
@@ -584,6 +585,53 @@ plugins make for themselves, are hidden the way the app hides them unless
 The list refetches the moment the daemon says a workspace changed (created,
 archived, pinned, or **titled**), so a generated title appears when it is
 written rather than on the next poll.
+
+### The native surface (experimental)
+
+`:Paseo native` — or `ui.surface = "native"` — is the chat with **no volt
+and no floats**: every pane is a real split, and **each agent gets a tab page
+of its own**, so two agents in one workspace are two tabs and `gt`/`gT` move
+between them.
+
+```
+┌ rail ┬ conversation  (winbar: agent · ⠹ 14s · keys) ┬ panel ┐
+│      ├ composer      (its bar: model, mode, spinner)  │       │
+```
+
+- **The conversation is markdown.** With `ui.native.markdown` (the default)
+  the agent's prose is written as raw markdown and soft-wrapped, so
+  treesitter, and render-markdown.nvim if you have it, draw headings, code
+  fences, lists and tables. Tool cards, thinking and permissions keep their
+  usual look. Code keeps its indentation, which the hard-wrapping surfaces
+  lose.
+- **The rail** is the dashboard's workspace rail in a split on the left.
+  `<CR>` on an agent opens it in its own tab, and `<CR>` on a workspace opens
+  that workspace's agent. `<C-b>` toggles the rail, `<C-h>`/`<C-s>` go into it.
+- **`<C-p>`** cycles a split on the right through Settings, Changes and Usage,
+  then closes it. They are the dashboard's panels drawn as real lines, with the
+  same keys.
+- **`<C-n>`** starts an agent or a terminal. A new agent's draft opens in a new
+  tab.
+- **What is current follows the tab.** Entering a tab makes its agent the
+  one `:Paseo mode`, `:Paseo stop` and the rest act on.
+- `q`, or `:q` in the conversation or the box, closes the tab. The agent and
+  your draft live on.
+
+Without volt, `:Paseo dash` and `:Paseo buf` open this instead. Popups,
+questions and the permission dialog are drawn as plain lines, with the same
+keys and no mouse.
+
+```lua
+ui = {
+  native = {
+    markdown = true,   -- prose as raw markdown
+    rail = 32,         -- rail width; 0 starts hidden
+    panel = 56,        -- the Settings/Changes/Usage split
+    composer = 10,     -- the box's ceiling …
+    composer_min = 3,  -- … and floor
+  },
+}
+```
 
 ### The dashboard, on its buffer mount
 

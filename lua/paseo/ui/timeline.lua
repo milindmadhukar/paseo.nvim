@@ -412,9 +412,44 @@ end
 ---@param item table
 ---@param opts { width: integer, expanded?: boolean }
 ---@return { lines: table[][], collapsible: boolean }
+---Prose as RAW MARKDOWN lines: no hard wrap, no emphasis stripped, no
+---highlight of ours -- treesitter (and render-markdown.nvim, if you have it)
+---draw it, and soft wrap fits it to the window. The native surface's mode;
+---see |paseo.ui.native|.
+---
+---A fence left open -- mid-stream, or an odd count in what was said -- is
+---closed on screen, or every card below it would be drawn as code.
+---@param text string
+---@param prefix? table[]
+---@return table[][]
+local function markdown_lines(text, prefix)
+  local lines = {}
+  local open_fence = false
+  for _, raw in ipairs(vim.split(text or "", "\n", { plain = true })) do
+    if raw:match "^%s*```" or raw:match "^%s*~~~" then
+      open_fence = not open_fence
+    end
+    local line = prefix and vim.deepcopy(prefix) or {}
+    line[#line + 1] = { raw }
+    lines[#lines + 1] = line
+  end
+  if open_fence then
+    local line = prefix and vim.deepcopy(prefix) or {}
+    line[#line + 1] = { "```" }
+    lines[#lines + 1] = line
+  end
+  return lines
+end
+
 local function card_lines(item, opts)
   local width = opts.width
   local kind = item.kind
+
+  if kind == "user" and opts.markdown then
+    local lines = { { { "▌ you", "PaseoYou" } } }
+    vim.list_extend(lines, markdown_lines(item.text or ""))
+    return { lines = lines, collapsible = false }
+  end
 
   if kind == "user" then
     local lines = { { { "▌ you", "PaseoYou" } } }
@@ -440,6 +475,10 @@ local function card_lines(item, opts)
       vim.list_extend(lines, render.wrap(item.text, width, nil, { { "▌ ", "PaseoAgent" } }))
     end
     return { lines = lines, collapsible = false }
+  end
+
+  if kind == "text" and opts.markdown then
+    return { lines = markdown_lines(item.text or ""), collapsible = false }
   end
 
   if kind == "text" then

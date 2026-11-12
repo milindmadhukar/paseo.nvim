@@ -350,6 +350,19 @@ local function contains(ws, path)
   return path == dir or vim.startswith(path, dir .. "/")
 end
 
+---The chat whose surface the rail is drawn beside: the dashboard's, else the
+---native tab's (|paseo.ui.native|).
+---@return table|nil
+function M.host_chat()
+  local float = package.loaded["paseo.ui.float"]
+  local chat = float and float.chat()
+  if chat then
+    return chat
+  end
+  local native = package.loaded["paseo.ui.native"]
+  return native and native.chat() or nil
+end
+
 ---The workspace the dashboard is showing, as a key into the list.
 ---
 ---BY WORKSPACE ID when the agent on screen has one, and only then by
@@ -359,8 +372,7 @@ end
 ---no way to tell which one the conversation beside it belonged to.
 ---@return { id: string|nil, dir: string|nil }
 function M.showing()
-  local float = package.loaded["paseo.ui.float"]
-  local chat = float and float.chat()
+  local chat = M.host_chat()
   if chat then
     local agent = chat.agent_id and require("paseo.agents").get(chat.agent_id, chat.host_id)
     return {
@@ -538,6 +550,10 @@ end
 ---@type integer|nil
 local win
 
+---`win` is a native tab's split (see `M.adopt`), not a float of ours: the
+---dashboard must neither move it nor close it.
+local adopted = false
+
 ---The rail's window, if it is up.
 ---@return integer|nil
 function M.win()
@@ -706,7 +722,7 @@ end
 function M.open_current()
   local node = M.current_session()
   if node then
-    local chat = package.loaded["paseo.ui.float"] and require("paseo.ui.float").chat()
+    local chat = M.host_chat()
     if chat then
       require("paseo.ui.tree").open(node, chat)
     end
@@ -716,13 +732,19 @@ function M.open_current()
   if not ws then
     return
   end
+  -- On a native tab a workspace is somewhere to OPEN AN AGENT, in a tab of
+  -- its own -- not a directory to switch this tab into.
+  local native = package.loaded["paseo.ui.native"]
+  if native and native.chat() then
+    return native.open_workspace(ws)
+  end
   require("paseo.workspaces").open(ws)
 end
 
 ---Start something in the workspace under the cursor.
 ---@param kind "here"|"workspace"|"terminal"
 function M.start(kind)
-  local chat = package.loaded["paseo.ui.float"] and require("paseo.ui.float").chat()
+  local chat = M.host_chat()
   if not chat then
     return
   end
@@ -740,7 +762,7 @@ end
 local function on_session(fn)
   return function()
     local node = M.current_session()
-    local chat = package.loaded["paseo.ui.float"] and require("paseo.ui.float").chat()
+    local chat = M.host_chat()
     if node and chat then
       fn(node, chat)
     end
@@ -864,6 +886,9 @@ end
 ---@param keys table  See `M.buf`.
 function M.show(config, keys)
   local b = M.buf(keys)
+  if adopted then
+    win, adopted = nil, false
+  end
   if M.win() then
     pcall(api.nvim_win_set_config, win, config)
   else
@@ -872,22 +897,7 @@ function M.show(config, keys)
       false,
       vim.tbl_extend("force", { style = "minimal", border = "none", focusable = true }, config)
     )
-    for option, value in pairs {
-      -- `EndOfBuffer` too: under a light theme like `morning` it carries a
-      -- background of its own, and every row below the list came out grey.
-      winhl = "Normal:PaseoNormal,NormalFloat:PaseoNormal,EndOfBuffer:PaseoNormal,CursorLine:PaseoRowHover",
-      -- Off until you are IN it. The row you are standing in already has
-      -- the bar and the green; a band on it as well, while the cursor is in
-      -- the composer, says the rail has focus when it does not.
-      cursorline = api.nvim_get_current_win() == win,
-      wrap = false,
-      scrolloff = 2,
-      sidescrolloff = 0,
-    } do
-      pcall(function()
-        vim.wo[win][option] = value
-      end)
-    end
+    M.style(win)
   end
   M.draw()
   M.seat()
@@ -897,7 +907,57 @@ function M.show(config, keys)
   M.load()
 end
 
+---The rail's window options, on a window that shows its buffer.
+---@param w integer
+function M.style(w)
+    for option, value in pairs {
+      -- `EndOfBuffer` too: under a light theme like `morning` it carries a
+      -- background of its own, and every row below the list came out grey.
+      winhl = "Normal:PaseoNormal,NormalFloat:PaseoNormal,EndOfBuffer:PaseoNormal,CursorLine:PaseoRowHover",
+      -- Off until you are IN it. The row you are standing in already has
+      -- the bar and the green; a band on it as well, while the cursor is in
+      -- the composer, says the rail has focus when it does not.
+      cursorline = api.nvim_get_current_win() == w,
+      wrap = false,
+      scrolloff = 2,
+      sidescrolloff = 0,
+    } do
+      pcall(function()
+        vim.wo[w][option] = value
+      end)
+    end
+end
+
+---Make `w` THE rail window: the native surface's split, which this module
+---did not open and must not move. One per native tab, so whichever tab is
+---entered adopts its own.
+---@param w integer
+function M.adopt(w)
+  win, adopted = w, true
+  M.style(w)
+  -- `minimal` is a float style; a split has to be told.
+  for option, value in pairs {
+    number = false,
+    relativenumber = false,
+    signcolumn = "no",
+    foldcolumn = "0",
+    spell = false,
+    list = false,
+    fillchars = "eob: ",
+  } do
+    pcall(function()
+      vim.wo[w][option] = value
+    end)
+  end
+  M.draw()
+  M.seat()
+end
+
 function M.hide()
+  if adopted then
+    win, adopted = nil, false
+    return
+  end
   if M.win() then
     pcall(api.nvim_win_close, win, true)
   end

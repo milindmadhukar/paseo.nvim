@@ -325,6 +325,13 @@ commands.buf = {
 -- Same precedent as `sessions`/`agents` and `ws`/`workspaces`.
 commands.tab = commands.buf
 
+commands.native = {
+  desc = "EXPERIMENTAL: the chat in plain splits, one tab page per agent (no volt)",
+  run = function()
+    require("paseo.ui.chat").surface("native", { toggle = true })
+  end,
+}
+
 commands.stop = {
   desc = "Interrupt the turn the current chat's agent is running",
   run = function()

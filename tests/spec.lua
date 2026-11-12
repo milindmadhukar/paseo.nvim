@@ -43,6 +43,7 @@ local files = {
   "ui.theme",
   "ui.invariants",
   "ui.rail",
+  "ui.native",
   "provider",
   "questions",
   "plan",

@@ -44,6 +44,9 @@ local function style(win)
   end
 end
 
+-- The native surface styles its composer the same way.
+M.style = style
+
 -- -------------------------------------------------------------------- header
 
 ---How much of the context window is LEFT.
@@ -383,6 +386,12 @@ function M.refresh(chat)
     return float.refresh_live(chat)
   end
 
+  -- The native surface's conversation carries its own winbar.
+  local native = package.loaded["paseo.ui.native"]
+  if native and native.has(chat) then
+    return native.refresh(chat)
+  end
+
   -- What is left for the top of the sidebar: WHICH session this is, and
   -- whether it is working. The settings cluster that used to be here has moved
   -- down to the composer's bar -- see |paseo.ui.composer| -- and the status
@@ -528,7 +537,7 @@ function M.fit_composer(chat)
     return
   end
 
-  local ui = require("paseo.config").get().ui.sidebar
+  local ui = require("paseo.config").get().ui[chat.surface == "native" and "native" or "sidebar"]
   local bar = (vim.wo[win].winbar or "") ~= "" and 1 or 0
   local total = api.nvim_win_get_height(win)
     + ((conv and api.nvim_win_is_valid(conv)) and api.nvim_win_get_height(conv) or 0)

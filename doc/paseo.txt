@@ -47,7 +47,9 @@ Hard:
   - a Nerd Font -- every surface draws glyphs from one; see |paseo-glyphs|
   - telescope.nvim, for the workspace and agent-session pickers
   - gitsigns.nvim, for finding the hunk under the cursor (|:Paseo-ask|)
-  - nvzone/volt, for the chat chrome, the panels and the permission dialog
+  - nvzone/volt, for the dashboard's chrome and panels -- OPTIONAL: the
+    sidebar and |paseo-native| need nothing, and popups and dialogs draw as
+    plain lines without it
 
 Optional, for the agent half:
   - the `paseo` daemon, running
@@ -188,6 +190,8 @@ ui.surface                                        string, default `"float"`
                  tabs, same panes -- in a real window with a buffer of its
                  own, taking over the window you are standing in and using
                  the whole screen rather than 94% of it.
+      `"native"`   EXPERIMENTAL. Plain splits, one tab page per agent, no
+                 volt -- see |paseo-native|.
 
     `<C-f>` switches between the dashboard and the sidebar at any time. From
     the float it goes to the sidebar; from the sidebar it goes back to the
@@ -821,6 +825,11 @@ skills.method                                       `"link"`|`"copy"`, default `
     are standing in, so the key that opened it is the obvious way back to the
     file it covered; `q` does the same. Where the dashboard goes is
     |paseo-config.ui.buffer| `open`.
+
+:Paseo native                                              *:Paseo-native*
+
+    EXPERIMENTAL. Toggle the chat on the native surface: plain splits, one
+    tab page per agent. See |paseo-native|.
 
 :Paseo sidebar                                            *:Paseo-sidebar*
 
@@ -3122,3 +3131,44 @@ a side effect of a command about worktrees. The most you will see is one line
 after assembling a workspace, once per session, naming the command.
 
 `vim:tw=78:ts=8:ft=help:norl:`
+
+==============================================================================
+THE NATIVE SURFACE (EXPERIMENTAL)                               *paseo-native*
+
+`:Paseo native`, or `ui.surface = "native"`. The chat with no volt and no
+floats: every pane is a real split, and EACH AGENT GETS A TAB PAGE OF ITS
+OWN, so `gt`/`gT` move between agents.
+>
+    ┌ rail ┬ conversation  (winbar: agent · ⠹ 14s · keys) ┬ panel ┐
+    │      ├ composer      (its bar: model, mode, spinner)  │       │
+<
+    The conversation   raw markdown when `ui.native.markdown` is on (the
+                       default): treesitter and render-markdown.nvim draw it,
+                       and it soft-wraps. Tool cards, thinking and permission
+                       cards keep their usual look.
+    The rail           |paseo.ui.rail|, in a split. <CR> on an agent opens it
+                       in its own tab; on a workspace, that workspace's agent.
+    <C-b>              the rail on or off.
+    <C-h>  <C-s>       into the rail.
+    <C-p>              a split on the right: Settings, Changes, Usage, off.
+    <C-n>              start an agent or a terminal; a draft opens in a new
+                       tab.
+    q                  close the tab. So does `:q` in the conversation or the
+                       box. The agent lives on.
+
+Entering a native tab makes its agent the current chat, so |:Paseo-mode|,
+|:Paseo-stop| and the rest act on the agent you are looking at.
+
+Without nvzone/volt, |:Paseo-dash| and |:Paseo-buf| open this instead.
+
+                                                  *paseo-config.ui.native*
+ui.native                                                           table
+>lua
+    native = {
+      markdown = true,   -- prose as raw markdown
+      rail = 32,         -- rail width; 0 starts hidden
+      panel = 56,        -- the Settings/Changes/Usage split
+      composer = 10,     -- the box's ceiling
+      composer_min = 3,  -- and its floor
+    },
+<

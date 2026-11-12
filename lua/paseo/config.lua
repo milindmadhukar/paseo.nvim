@@ -488,6 +488,23 @@ local defaults = {
       end,
     },
 
+    -- EXPERIMENTAL. The volt-free surface (`:Paseo native`): one tab page per
+    -- agent, every pane a real split -- the workspace rail on the left, the
+    -- conversation over the composer, a panel on the right when you ask for
+    -- one. See |paseo.ui.native|.
+    native = {
+      -- The agent's prose as raw markdown, drawn by treesitter (and
+      -- render-markdown.nvim if you have it) rather than hard-wrapped here.
+      markdown = true,
+      -- Columns for the workspace rail; 0 starts with it hidden.
+      rail = 32,
+      -- Columns for the Settings/Changes/Usage split, when it is up.
+      panel = 56,
+      -- A ceiling and a floor for the box you type in, as `sidebar`'s.
+      composer = 10,
+      composer_min = 3,
+    },
+
     sidebar = {
       width = 40,
       min_width = 60,
@@ -636,8 +653,11 @@ function M.setup(opts)
     return v == "steer" or v == "interrupt" or v == "queue"
   end, '"steer", "interrupt" or "queue"')
   vim.validate("ui.surface", config.ui.surface, function(v)
-    return v == "float" or v == "sidebar" or v == "buffer"
-  end, '"float", "sidebar" or "buffer"')
+    return v == "float" or v == "sidebar" or v == "buffer" or v == "native"
+  end, '"float", "sidebar", "buffer" or "native"')
+  vim.validate("ui.native.markdown", config.ui.native.markdown, "boolean")
+  vim.validate("ui.native.rail", config.ui.native.rail, "number")
+  vim.validate("ui.native.panel", config.ui.native.panel, "number")
   vim.validate("ui.buffer.open", config.ui.buffer.open, function(v)
     return v == "here" or v == "tab"
   end, '"here" or "tab"')

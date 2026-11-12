@@ -593,6 +593,11 @@ end
 ---was also the key that moved you off the buffer mount for good.
 ---@param chat paseo.Chat
 function M.sessions(chat)
+  local native = require "paseo.ui.native"
+  if native.is_open(chat) then
+    -- The rail IS the session list here.
+    return native.focus_rail()
+  end
   local float = require "paseo.ui.float"
   local mount = float.mount()
   if not mount then
@@ -1031,6 +1036,9 @@ function M.showing(chat)
   if require("paseo.ui.float").showing(chat) then
     return true
   end
+  if require("paseo.ui.native").has(chat) then
+    return true
+  end
   return chat.surface == "sidebar" and sidebar.is_open(chat)
 end
 
@@ -1047,7 +1055,19 @@ end
 ---@param explicit? "float"|"sidebar"|"buffer"
 local function layout(chat, explicit)
   make_buffers(chat)
-  local surface = require("paseo.ui.surface").resolve(explicit)
+  local surface = M._drawable(require("paseo.ui.surface").resolve(explicit))
+  if surface == "native" then
+    local native = require "paseo.ui.native"
+    -- `sidebar.close` closes the chat's windows WHEREVER they are, and on a
+    -- native tab they are the tab.
+    if not native.has(chat) then
+      require("paseo.ui.float").close()
+      sidebar.close(chat)
+    end
+    native.open(chat)
+    transcript.to_bottom(chat)
+    return
+  end
   -- Two mounts of ONE module. The dashboard is the same surface floating over
   -- your code or sitting in a window of its own -- same chrome, same tabs,
   -- same panes -- so the name goes in as the mount rather than picking
@@ -1649,6 +1669,10 @@ function M.close()
     require("paseo.voice").cancel()
     require("paseo.ui.composer").dictating(chat, false)
   end
+  local native = require "paseo.ui.native"
+  if native.has(chat) then
+    return native.close(chat)
+  end
   require("paseo.ui.float").close()
   sidebar.close(chat)
 end
@@ -1665,6 +1689,9 @@ local function visible(chat)
   -- Already tab-aware.
   if require("paseo.ui.float").is_open(chat) then
     return true
+  end
+  if require("paseo.ui.native").has(chat) then
+    return require("paseo.ui.native").is_open(chat)
   end
   local win = chat.win_conversation
   if not (win and vim.api.nvim_win_is_valid(win)) then
@@ -1739,6 +1766,14 @@ function M.follow(root, opts)
   -- of moving a surface off the tab you just left, so the one moment it
   -- matters is the moment a tab-aware test says "nothing open".
   local float = require "paseo.ui.float"
+  local native = require "paseo.ui.native"
+  -- A native tab is the agent's own, not a window onto "wherever you are": a
+  -- workspace switch opens that workspace's agent in a tab of ITS own and
+  -- leaves this one where it is.
+  if native.has(chat) then
+    M.open { root = root, surface = "native", focus = opts.focus ~= false, create = opts.offer == true }
+    return true
+  end
   if not (float.showing(chat) or sidebar.is_open(chat)) then
     -- Declining to OPEN a window is not the same as keeping a pointer to the
     -- workspace you just left. `current` is what `toggle`, `close` and
@@ -1804,6 +1839,11 @@ end
 ---@param name "float"|"sidebar"|"buffer"
 ---@param opts? { toggle?: boolean }
 function M.surface(name, opts)
+  local wanted = name
+  name = M._drawable(name)
+  if name ~= wanted then
+    vim.notify("paseo: the dashboard needs nvzone/volt; opening the native surface", vim.log.levels.INFO)
+  end
   local chat = current
   if not chat then
     -- ON THE SURFACE THAT WAS ASKED FOR, not on the default one first. Opening
@@ -1830,6 +1870,22 @@ function M.surface(name, opts)
   end
   if opts and opts.toggle and name == "sidebar" and sidebar.is_open(chat) then
     return M.close()
+  end
+
+  local native = require "paseo.ui.native"
+  if name == "native" then
+    if opts and opts.toggle and native.is_open(chat) then
+      return M.close()
+    end
+    if not native.has(chat) then
+      float.close()
+      sidebar.close(chat)
+    end
+    native.open(chat)
+    return
+  end
+  if native.has(chat) then
+    native.close(chat)
   end
 
   if name == "sidebar" then
@@ -1861,6 +1917,11 @@ function M.fullscreen()
   -- key people press by reflex.
   local mounted = require("paseo.ui.float").mount()
   if chat and mounted == "buffer" and require("paseo.ui.float").showing(chat) then
+    return
+  end
+  -- Nor on the native surface, which is a tab page of its own for the same
+  -- reason the buffer mount is.
+  if chat and require("paseo.ui.native").has(chat) then
     return
   end
   -- The answer overlay is anchored to the conversation WINDOW, and the swap closes
@@ -2203,5 +2264,30 @@ end
 function M.current()
   return current
 end
+
+---Make `chat` the current one. For |paseo.ui.native|, whose tab pages each
+---hold a chat: entering one is choosing which agent the commands act on.
+---@param chat paseo.Chat|nil
+function M.set_current(chat)
+  current = chat
+end
+
+---Is nvzone/volt available? The dashboard cannot be drawn without it.
+---@return boolean
+local function has_volt()
+  return require("paseo.ui.widgets").has_volt()
+end
+
+---The surface to use instead of a dashboard that cannot be drawn.
+---@param name string
+---@return string
+local function drawable(name)
+  if (name == "float" or name == "buffer") and not has_volt() then
+    return "native"
+  end
+  return name
+end
+
+M._drawable = drawable
 
 return M

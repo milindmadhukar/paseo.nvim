@@ -1,0 +1,799 @@
+--- EXPERIMENTAL. The native surface: the chat out of real splits and nothing
+--- else -- no volt, no floats, no chrome.
+---
+--- ONE TAB PAGE PER AGENT. A tab page is Neovim's own answer to "a separate
+--- arrangement of windows", so two agents in one workspace are two tabs and
+--- `gt`/`gT` move between them. Each tab is:
+---
+---   ┌ rail ┬ conversation (winbar: agent · status · keys) ┬ panel ┐
+---   │      ├ composer (its own bar: model, mode, the spinner) │       │
+---
+--- The rail is |paseo.ui.rail|'s buffer -- one buffer, shown in a window on
+--- every native tab. The conversation and composer are the chat's own buffers,
+--- exactly as the sidebar shows them. The panel is the dashboard's Settings,
+--- Changes or Usage, drawn as real lines by |paseo.ui.render|. `<C-p>` cycles it.
+---
+--- WHAT IS CURRENT FOLLOWS THE TAB. `:Paseo mode`, `:Paseo stop` and every
+--- other command act on |paseo.ui.chat|'s current chat, so entering a native
+--- tab makes its agent the current one.
+---
+--- In MARKDOWN mode (`ui.native.markdown`, on by default) the agent's prose
+--- is written as raw markdown and soft-wrapped, so treesitter -- and
+--- render-markdown.nvim, if it is installed -- draws headings, fences, lists and
+--- tables. Tool cards keep their box drawing.
+
+local render = require "paseo.ui.render"
+local transcript = require "paseo.ui.transcript"
+
+local api = vim.api
+
+local M = {}
+
+local ns = api.nvim_create_namespace "paseo.native"
+
+---Per tab page: the chat it shows and the windows it made.
+---@class paseo.NativeTab
+---@field chat table
+---@field rail integer|nil
+---@field panel_win integer|nil
+---@field panel_buf integer|nil
+---@field panel string|nil
+
+---@type table<integer, paseo.NativeTab>
+local tabs = {}
+
+---The panels `<C-p>` steps through, and the module that draws each one.
+M.PANELS = { "Settings", "Changes", "Usage" }
+
+---Not `gp`, which the chat's buffers already give to reopening a question.
+local PANEL_KEY = "<C-p>"
+
+local function config()
+  return require("paseo.config").get().ui.native
+end
+
+local function valid_win(win)
+  return win and api.nvim_win_is_valid(win)
+end
+
+---The entry for a tab page, only while its conversation is still up.
+---@param tab integer
+---@return paseo.NativeTab|nil
+local function entry(tab)
+  local t = tabs[tab]
+  if not t then
+    return nil
+  end
+  if not api.nvim_tabpage_is_valid(tab) or not valid_win(t.chat.win_conversation) then
+    return nil
+  end
+  if api.nvim_win_get_tabpage(t.chat.win_conversation) ~= tab then
+    return nil
+  end
+  return t
+end
+
+---The chat on the tab page you are looking at, if it is a native one.
+---@return table|nil
+function M.chat()
+  local t = entry(api.nvim_get_current_tabpage())
+  return t and t.chat or nil
+end
+
+---Does `chat` have a native tab, on any tab page?
+---@param chat table
+---@return boolean
+function M.has(chat)
+  return chat.native_tab ~= nil and entry(chat.native_tab) ~= nil and tabs[chat.native_tab].chat == chat
+end
+
+---Is `chat` on the native tab you are looking at?
+---@param chat table
+---@return boolean
+function M.is_open(chat)
+  return M.has(chat) and chat.native_tab == api.nvim_get_current_tabpage()
+end
+
+---Is any native tab up?
+---@return boolean
+function M.any()
+  for tab in pairs(tabs) do
+    if entry(tab) then
+      return true
+    end
+  end
+  return false
+end
+
+-- ------------------------------------------------------------------ windows
+
+local CONVERSATION = {
+  wrap = true,
+  linebreak = true,
+  breakindent = true,
+  number = false,
+  relativenumber = false,
+  signcolumn = "no",
+  scrolloff = 0,
+  foldcolumn = "0",
+  cursorline = false,
+  list = false,
+  -- render-markdown conceals the markers it replaces; treesitter alone hides
+  -- link targets and the backticks round code.
+  conceallevel = 2,
+  concealcursor = "",
+  -- No `~` down an empty conversation.
+  fillchars = "eob: ",
+}
+
+local function set_options(win, options)
+  for option, value in pairs(options) do
+    pcall(function()
+      vim.wo[win][option] = value
+    end)
+  end
+end
+
+---Focus the box you type in, on this tab.
+function M.back()
+  local chat = M.chat()
+  if chat and valid_win(chat.win_composer) then
+    api.nvim_set_current_win(chat.win_composer)
+  end
+end
+
+---Keys the rail's buffer is built with, when native builds it first.
+local function rail_keys()
+  local keys = require("paseo.config").get().ui.float.rail.keys or {}
+  return {
+    back = M.back,
+    toggle = keys.toggle,
+    focus = keys.focus,
+    sessions = keys.sessions,
+    on_toggle = function()
+      M.toggle_rail()
+    end,
+  }
+end
+
+---Point |paseo.ui.rail| at this tab's rail window.
+---@param t paseo.NativeTab
+local function adopt_rail(t)
+  if valid_win(t.rail) then
+    require("paseo.ui.rail").adopt(t.rail)
+  end
+end
+
+---Open the rail on the tab you are on.
+---@param t paseo.NativeTab
+local function open_rail(t)
+  if valid_win(t.rail) then
+    return
+  end
+  local rail = require "paseo.ui.rail"
+  local width = math.max(16, config().rail > 0 and config().rail or 32)
+  local from = api.nvim_get_current_win()
+  api.nvim_set_current_win(t.chat.win_conversation)
+  vim.cmd(("topleft %dvsplit"):format(width))
+  t.rail = api.nvim_get_current_win()
+  api.nvim_win_set_buf(t.rail, rail.buf(rail_keys()))
+  vim.wo[t.rail].winfixwidth = true
+  rail.adopt(t.rail)
+  rail.load()
+  if valid_win(from) then
+    api.nvim_set_current_win(from)
+  end
+end
+
+---`<C-s>`: into the rail, on the session on screen -- opening it first.
+function M.focus_rail()
+  local t = entry(api.nvim_get_current_tabpage())
+  if not t then
+    return
+  end
+  open_rail(t)
+  if valid_win(t.rail) then
+    local rail = require "paseo.ui.rail"
+    rail.reveal()
+    rail.draw()
+    api.nvim_set_current_win(t.rail)
+    rail.seat { session = true }
+  end
+end
+
+---`<C-b>`: the rail on this tab, on or off.
+function M.toggle_rail()
+  local t = entry(api.nvim_get_current_tabpage())
+  if not t then
+    return
+  end
+  if valid_win(t.rail) then
+    local win = t.rail
+    t.rail = nil
+    pcall(api.nvim_win_close, win, true)
+    M.back()
+    return
+  end
+  open_rail(t)
+end
+
+-- ------------------------------------------------------------------- panels
+
+---Write the panel's lines into its buffer.
+---@param t paseo.NativeTab
+local function draw_panel(t)
+  if not (t.panel and valid_win(t.panel_win) and t.panel_buf and api.nvim_buf_is_valid(t.panel_buf)) then
+    return
+  end
+  local panel = require("paseo.ui.panels." .. t.panel:lower())
+  local width = api.nvim_win_get_width(t.panel_win) - 1
+  local height = api.nvim_win_get_height(t.panel_win)
+  local ok, lines = pcall(panel.lines, t.chat, width, height)
+  if not ok then
+    lines = { { { "  " .. tostring(lines), "PaseoToolFail" } } }
+  end
+  local cursor = api.nvim_win_get_cursor(t.panel_win)
+  api.nvim_buf_clear_namespace(t.panel_buf, ns, 0, -1)
+  render.to_buffer(t.panel_buf, ns, 0, -1, lines or {})
+  vim.bo[t.panel_buf].modifiable = false
+  pcall(api.nvim_win_set_cursor, t.panel_win, cursor)
+end
+
+---Repaint every panel that is up. The panels' own views ask for this through
+---|paseo.ui.float|'s `rebuild`, which forwards here.
+function M.redraw_panels()
+  for tab in pairs(tabs) do
+    local t = entry(tab)
+    if t then
+      draw_panel(t)
+    end
+  end
+end
+
+---Close this tab's panel.
+---@param t paseo.NativeTab
+local function close_panel(t)
+  if t.panel then
+    local panel = require("paseo.ui.panels." .. t.panel:lower())
+    if t.panel_buf and type(panel.detach) == "function" then
+      pcall(panel.detach, t.chat, t.panel_buf)
+    end
+  end
+  if valid_win(t.panel_win) then
+    pcall(api.nvim_win_close, t.panel_win, true)
+  end
+  if t.panel_buf and api.nvim_buf_is_valid(t.panel_buf) then
+    pcall(api.nvim_buf_delete, t.panel_buf, { force = true })
+  end
+  t.panel, t.panel_win, t.panel_buf = nil, nil, nil
+end
+
+---Show `name` in this tab's panel split.
+---@param t paseo.NativeTab
+---@param name string
+local function show_panel(t, name)
+  close_panel(t)
+  local from = api.nvim_get_current_win()
+  api.nvim_set_current_win(t.chat.win_conversation)
+  vim.cmd(("botright %dvsplit"):format(math.max(30, config().panel)))
+  t.panel_win = api.nvim_get_current_win()
+  t.panel_buf = api.nvim_create_buf(false, true)
+  t.panel = name
+  vim.bo[t.panel_buf].bufhidden = "wipe"
+  vim.bo[t.panel_buf].filetype = "paseo-panel"
+  pcall(api.nvim_buf_set_name, t.panel_buf, ("paseo://panel/%s/%d"):format(name:lower(), t.panel_buf))
+  api.nvim_win_set_buf(t.panel_win, t.panel_buf)
+  set_options(t.panel_win, {
+    wrap = false,
+    number = false,
+    relativenumber = false,
+    signcolumn = "no",
+    cursorline = true,
+    winfixwidth = true,
+    fillchars = "eob: ",
+    winhl = "Normal:PaseoNormal,EndOfBuffer:PaseoNormal",
+  })
+  vim.wo[t.panel_win].winbar = render.to_winbar {
+    { "  " .. name, "PaseoHeader" },
+    { "   " .. PANEL_KEY .. " next · r reload · q close", "PaseoDim" },
+  }
+
+  local panel = require("paseo.ui.panels." .. name:lower())
+  if type(panel.load) == "function" then
+    pcall(panel.load, t.chat)
+  end
+  draw_panel(t)
+  if type(panel.attach) == "function" then
+    pcall(panel.attach, t.chat, t.panel_buf)
+  end
+
+  local function map(lhs, fn, desc)
+    vim.keymap.set("n", lhs, fn, { buffer = t.panel_buf, nowait = true, silent = true, desc = "paseo: " .. desc })
+  end
+  map(PANEL_KEY, M.cycle_panel, "next panel")
+  map("q", function()
+    close_panel(t)
+    M.back()
+  end, "close the panel")
+  -- The panels that take `r` themselves have already bound it, and win;
+  -- this is the reload for the ones that do not.
+  if vim.fn.maparg("r", "n", false, true).buffer ~= 1 then
+    map("r", function()
+      if type(panel.invalidate) == "function" then
+        pcall(panel.invalidate)
+      end
+      if type(panel.load) == "function" then
+        pcall(panel.load, t.chat)
+      end
+      draw_panel(t)
+    end, "reload the panel")
+  end
+
+  if valid_win(from) then
+    api.nvim_set_current_win(from)
+  end
+end
+
+---`<C-p>`: Settings, then Changes, then Usage, then nothing.
+function M.cycle_panel()
+  local t = entry(api.nvim_get_current_tabpage())
+  if not t then
+    return
+  end
+  local at = 0
+  for i, name in ipairs(M.PANELS) do
+    if name == t.panel then
+      at = i
+    end
+  end
+  local focus_panel = valid_win(t.panel_win) and api.nvim_get_current_win() == t.panel_win
+  if at == #M.PANELS then
+    close_panel(t)
+    return M.back()
+  end
+  show_panel(t, M.PANELS[at + 1])
+  if focus_panel and valid_win(t.panel_win) then
+    api.nvim_set_current_win(t.panel_win)
+  end
+end
+
+---Open a panel by name and put the cursor in it.
+---@param name string
+function M.panel(name)
+  local t = entry(api.nvim_get_current_tabpage())
+  if not t then
+    return
+  end
+  show_panel(t, name)
+  if valid_win(t.panel_win) then
+    api.nvim_set_current_win(t.panel_win)
+  end
+end
+
+-- ------------------------------------------------------------------- header
+
+---The keys this surface adds, on the conversation's winbar.
+local HINTS = {
+  { PANEL_KEY, "panel" },
+  { "<C-b>", "rail" },
+  { "gt", "next agent" },
+  { "q", "close" },
+}
+
+---Repaint the conversation's winbar: which agent, what it is doing, and the
+---surface's keys. The composer's own bar is |paseo.ui.composer|'s.
+---@param chat table
+function M.refresh(chat)
+  local win = chat.win_conversation
+  if not valid_win(win) then
+    return
+  end
+  local widgets = require "paseo.ui.widgets"
+  local sidebar = require "paseo.ui.sidebar"
+  local width = api.nvim_win_get_width(win)
+
+  local agent = chat.agent_id and require("paseo.agents").get(chat.agent_id, chat.host_id)
+  local title = chat.title or (agent and agent.title)
+  local left = {
+    { "  ", "PaseoDim" },
+    { title or vim.fn.fnamemodify(chat.local_root or chat.root, ":~"), "PaseoHeader" },
+  }
+  local status = sidebar.status(chat)
+  if #status > 0 then
+    left[#left + 1] = { "  ", "PaseoDim" }
+    vim.list_extend(left, status)
+  elseif chat.permissions and next(chat.permissions) then
+    left[#left + 1] = { "  " .. require("paseo.ui.icons").status.waiting .. " waiting on you", "PaseoBadge" }
+  end
+
+  local right = widgets.hints(HINTS, nil, math.max(0, width - 30))
+  pcall(function()
+    vim.wo[win].winbar = render.to_winbar(
+      widgets.row(render.truncate(left, math.max(4, width - render.width(right) - 2)), right, width)
+    )
+  end)
+end
+
+-- ------------------------------------------------------------------ spinner
+
+---@type uv.uv_timer_t|nil
+local timer
+
+---One clock for every rail on screen: the rail's buffer is shared, so one
+---draw a tick repaints them all.
+local function sync_spinner()
+  local rail = require "paseo.ui.rail"
+  local want = M.any() and rail.spinning()
+  if want and not timer then
+    timer = vim.uv.new_timer()
+    timer:start(
+      100,
+      100,
+      vim.schedule_wrap(function()
+        if not (M.any() and rail.spinning()) then
+          if timer then
+            timer:stop()
+            timer:close()
+            timer = nil
+          end
+          return
+        end
+        rail.draw()
+      end)
+    )
+  elseif not want and timer then
+    timer:stop()
+    timer:close()
+    timer = nil
+  end
+end
+
+M.sync_spinner = sync_spinner
+
+-- ------------------------------------------------------------------- layout
+
+---The conversation is markdown on this surface; nowhere else is it.
+---@param chat table
+---@param on boolean
+---@return boolean redrew
+local function set_markdown(chat, on)
+  local want = on and config().markdown or nil
+  if chat.markdown == want then
+    return false
+  end
+  chat.markdown = want
+  transcript.redraw(chat, { force = true })
+  return true
+end
+
+---The surface's keys, on the chat's two buffers, while it is on this surface.
+---@param chat table
+local function bind(chat)
+  local keys = require("paseo.config").get().ui.float.rail.keys or {}
+  local new = (require("paseo.config").get().ui.float.keys or {}).new
+  local list = {
+    { keys.toggle, M.toggle_rail, "show or hide the workspace rail" },
+    { keys.focus, M.focus_rail, "into the workspace rail" },
+    { keys.sessions, M.focus_rail, "the sessions, in the rail" },
+    { PANEL_KEY, M.cycle_panel, "Settings / Changes / Usage" },
+    {
+      new,
+      function()
+        if api.nvim_get_mode().mode ~= "n" then
+          pcall(vim.cmd.stopinsert)
+        end
+        local start = require "paseo.start"
+        start.new(start.context(chat))
+      end,
+      "start an agent or a terminal",
+    },
+  }
+  chat.native_keys = {}
+  for _, buf in ipairs { chat.conversation, chat.composer } do
+    for _, item in ipairs(list) do
+      if item[1] and buf and api.nvim_buf_is_valid(buf) then
+        vim.keymap.set("n", item[1], item[2], { buffer = buf, nowait = true, silent = true, desc = "paseo: " .. item[3] })
+        chat.native_keys[#chat.native_keys + 1] = { buf, item[1] }
+      end
+    end
+  end
+end
+
+---@param chat table
+local function unbind(chat)
+  for _, pair in ipairs(chat.native_keys or {}) do
+    if api.nvim_buf_is_valid(pair[1]) then
+      pcall(vim.keymap.del, "n", pair[2], { buffer = pair[1] })
+    end
+  end
+  chat.native_keys = nil
+end
+
+---Drop a tab's bookkeeping.
+---@param tab integer
+local function forget(tab)
+  local t = tabs[tab]
+  tabs[tab] = nil
+  if t and t.chat.native_tab == tab then
+    t.chat.native_tab = nil
+  end
+end
+
+local augroup
+
+---The autocmds that keep `current`, the rail and the bookkeeping honest.
+local function watch()
+  if augroup then
+    return
+  end
+  augroup = api.nvim_create_augroup("paseo.native", { clear = true })
+
+  api.nvim_create_autocmd("TabEnter", {
+    group = augroup,
+    desc = "paseo: the agent on this native tab is the current one",
+    callback = function()
+      local t = entry(api.nvim_get_current_tabpage())
+      if not t then
+        return
+      end
+      require("paseo.ui.chat").set_current(t.chat)
+      adopt_rail(t)
+      require("paseo.ui.rail").draw()
+      M.refresh(t.chat)
+    end,
+  })
+
+  api.nvim_create_autocmd("TabClosed", {
+    group = augroup,
+    desc = "paseo: forget native tabs that are gone",
+    callback = function()
+      for tab, t in pairs(tabs) do
+        if not api.nvim_tabpage_is_valid(tab) then
+          forget(tab)
+          t.chat.win_conversation, t.chat.win_composer = nil, nil
+          if t.chat.surface == "native" then
+            t.chat.surface = nil
+          end
+          unbind(t.chat)
+          set_markdown(t.chat, false)
+        end
+      end
+      sync_spinner()
+    end,
+  })
+
+  -- `:q` in the conversation or the box takes the whole tab: half a chat is
+  -- not a layout anything here knows how to draw.
+  api.nvim_create_autocmd("WinClosed", {
+    group = augroup,
+    desc = "paseo: a native tab goes with its conversation",
+    callback = function(args)
+      local closed = tonumber(args.match)
+      for _, t in pairs(tabs) do
+        local chat = t.chat
+        if closed == chat.win_conversation or closed == chat.win_composer then
+          vim.schedule(function()
+            M.close(chat)
+          end)
+          return
+        end
+      end
+    end,
+  })
+
+  api.nvim_create_autocmd({ "VimResized", "WinResized" }, {
+    group = augroup,
+    desc = "paseo: refit native panels",
+    callback = function()
+      vim.schedule(function()
+        for tab in pairs(tabs) do
+          local t = entry(tab)
+          if t then
+            M.refresh(t.chat)
+          end
+        end
+        M.redraw_panels()
+      end)
+    end,
+  })
+
+  require("paseo.agents").on_change(function()
+    vim.schedule(function()
+      if M.any() then
+        require("paseo.ui.rail").directory_changed()
+        sync_spinner()
+      end
+    end)
+  end)
+end
+
+---Put `chat` on a native tab: its own if it has one, a new one if not.
+---@param chat table
+function M.open(chat)
+  watch()
+
+  if M.has(chat) then
+    api.nvim_set_current_tabpage(chat.native_tab)
+    if valid_win(chat.win_composer) then
+      api.nvim_set_current_win(chat.win_composer)
+    end
+    set_markdown(chat, true)
+    M.refresh(chat)
+    return
+  end
+
+  -- Windows left over from another surface's layout are not ours to reuse.
+  chat.win_conversation, chat.win_composer = nil, nil
+
+  vim.cmd "tabnew"
+  local tab = api.nvim_get_current_tabpage()
+  -- The tab is the agent's, so its directory is too: `:e`, telescope and
+  -- `:Paseo explain` from here start where the agent works.
+  local dir = chat.local_root or chat.root
+  if dir and vim.fn.isdirectory(dir) == 1 then
+    pcall(vim.cmd.tcd, vim.fn.fnameescape(dir))
+  end
+  local scratch = api.nvim_get_current_buf()
+  local conversation = api.nvim_get_current_win()
+  api.nvim_win_set_buf(conversation, chat.conversation)
+  -- `tabnew`'s empty buffer, which nothing else is showing now.
+  if
+    api.nvim_buf_is_valid(scratch)
+    and api.nvim_buf_get_name(scratch) == ""
+    and not vim.bo[scratch].modified
+    and #vim.fn.win_findbuf(scratch) == 0
+  then
+    pcall(api.nvim_buf_delete, scratch, {})
+  end
+  chat.win_conversation = conversation
+  set_options(conversation, CONVERSATION)
+
+  vim.cmd "belowright 1split"
+  chat.win_composer = api.nvim_get_current_win()
+  api.nvim_win_set_buf(chat.win_composer, chat.composer)
+  require("paseo.ui.sidebar").style(chat.win_composer)
+  vim.wo[chat.win_composer].fillchars = "eob: "
+  require("paseo.ui.composer").style(chat)
+  vim.wo[chat.win_composer].winfixheight = true
+
+  chat.native_tab = tab
+  chat.surface = "native"
+  bind(chat)
+  require("paseo.ui.surface").remember "native"
+  local t = { chat = chat }
+  tabs[tab] = t
+
+  if config().rail > 0 and require("paseo.ui.rail").visible() then
+    open_rail(t)
+  end
+
+  -- render-markdown.nvim attaches on `FileType`, which this buffer had long
+  -- before the plugin was loaded (it is lazy on `ft = markdown`, and the
+  -- event that loads it is the one it misses). Fire it again for that plugin
+  -- alone -- its group, nobody else's handlers -- now there is a window.
+  if config().markdown then
+    pcall(api.nvim_exec_autocmds, "FileType", { group = "RenderMarkdown", buffer = chat.conversation })
+  end
+
+  -- Prose is width-free in markdown mode, but the tool cards are not: draw
+  -- everything at this window's width.
+  if not set_markdown(chat, true) then
+    transcript.redraw(chat, { force = true })
+  end
+  require("paseo.ui.sidebar").fit_composer(chat)
+  require("paseo.ui.chat").set_current(chat)
+  M.refresh(chat)
+  require("paseo.ui.composer").refresh(chat)
+  sync_spinner()
+  api.nvim_set_current_win(chat.win_composer)
+end
+
+---Take `chat`'s tab down. The chat lives on, as it does when any surface
+---closes; reopening is `:Paseo native` again.
+---@param chat table
+function M.close(chat)
+  local tab = chat.native_tab
+  local t = tab and tabs[tab]
+  if t then
+    close_panel(t)
+  end
+  if tab then
+    forget(tab)
+  end
+  chat.win_conversation, chat.win_composer = nil, nil
+  if chat.surface == "native" then
+    chat.surface = nil
+  end
+  unbind(chat)
+  set_markdown(chat, false)
+
+  if tab and api.nvim_tabpage_is_valid(tab) then
+    if #api.nvim_list_tabpages() > 1 then
+      pcall(vim.cmd.tabclose, api.nvim_tabpage_get_number(tab))
+    else
+      -- The last tab cannot close: leave it holding one empty window.
+      local wins = api.nvim_tabpage_list_wins(tab)
+      local keep = wins[1]
+      api.nvim_set_current_win(keep)
+      vim.cmd "enew"
+      for _, win in ipairs(wins) do
+        if win ~= keep then
+          pcall(api.nvim_win_close, win, true)
+        end
+      end
+    end
+  end
+  sync_spinner()
+end
+
+---A session from the rail. An agent is a chat, so it gets a tab of its own; a
+---terminal gets one too, holding the PTY.
+---@param session { kind: string, id: string, hostId?: string }
+function M.show_session(session)
+  local here = M.chat()
+  local host_id = session.hostId or (here and here.host_id)
+  if session.kind == "agent" then
+    local agent = require("paseo.agents").get(session.id, host_id)
+    return require("paseo.ui.chat").open {
+      root = (agent and agent.cwd) or (here and here.root),
+      host_id = host_id,
+      remote = true,
+      agent_id = session.id,
+      title = agent and agent.title,
+      surface = "native",
+    }
+  end
+  if session.kind == "terminal" then
+    local terminal = require("paseo.terminals").get(session.id, host_id)
+      or { id = session.id, hostId = host_id }
+    local ui = require "paseo.ui.terminal"
+    vim.cmd "tabnew"
+    local win = api.nvim_get_current_win()
+    local scratch = api.nvim_get_current_buf()
+    local view = ui.ensure(terminal, win)
+    ui.show(view, win)
+    if api.nvim_buf_is_valid(scratch) and #vim.fn.win_findbuf(scratch) == 0 then
+      pcall(api.nvim_buf_delete, scratch, {})
+    end
+    vim.cmd "startinsert"
+  end
+end
+
+---A workspace from the rail: its agent, on a native tab. The workspace's
+---sessions are under it on the rail for picking one in particular.
+---@param ws table
+function M.open_workspace(ws)
+  local here = M.chat()
+  local host_id = ws.hostId or (here and here.host_id)
+  -- BY WORKSPACE ID. Several workspaces can share one directory -- every
+  -- `paseo run` in a repository makes its own -- so opening by directory
+  -- reused whichever chat was already on screen for it.
+  local newest
+  for _, agent in ipairs(require("paseo.agents").all(host_id)) do
+    if ws.id and agent.workspaceId == ws.id and (not newest or (agent.createdAt or "") > (newest.createdAt or "")) then
+      newest = agent
+    end
+  end
+  if newest then
+    return M.show_session { kind = "agent", id = newest.id, hostId = host_id }
+  end
+  require("paseo.ui.chat").open {
+    root = ws.directory,
+    local_root = ws.local_directory,
+    host_id = ws.hostId or (here and here.host_id),
+    remote = true,
+    surface = "native",
+  }
+end
+
+---Forget everything. For the test suite.
+function M.reset()
+  tabs = {}
+  if timer then
+    timer:stop()
+    timer:close()
+    timer = nil
+  end
+end
+
+return M
