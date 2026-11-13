@@ -276,13 +276,14 @@ local function test_fallback()
   end
 end
 
---- The keys: `<C-k>` on the surface and in a terminal, `prev` moved off it.
+--- The keys: unbound on the surface and in a terminal (`<C-k>` is window-up
+--- in most configs), `prev` too; the search is a global key of your own.
 local function test_keys()
   local config = require "paseo.config"
   config.setup {}
   local ui = config.get().ui
-  eq("keys: the surface searches on <C-k>", ui.native.keys.search, "<C-k>")
-  eq("keys: so does a terminal", ui.terminal.keys.search, "<C-k>")
+  eq("keys: the surface does not take <C-k>", ui.native.keys.search, false)
+  eq("keys: nor does a terminal", ui.terminal.keys.search, false)
   eq("keys: whose prev is unbound now", ui.terminal.keys.prev, false)
   eq("keys: and there is an API for your own", type(require("paseo").search), "function")
 end

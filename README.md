@@ -79,7 +79,7 @@ vim.keymap.set("n", "<leader>as", "<cmd>Paseo settings<cr>")        -- mode, mod
 | `:Paseo explain [kind]` | Explain code with the bundled review rubric, sent at once |
 | `:Paseo workspaces [all]` | This project's workspaces (`all`: every project's) |
 | `:Paseo agents` | The agents in this workspace |
-| `:Paseo search` | Search every workspace, agent, prompt you sent, and past chat (`<C-k>` on Paseo's buffers) |
+| `:Paseo search` | Search every workspace, agent, prompt you sent, and past chat (no default key: map it globally) |
 | `:Paseo settings [mode\|thinking\|model\|features]` | The chat agent's settings; `mode`, `thinking` and `model` open straight in your picker, on a new-session draft too |
 | `:Paseo stop` | Interrupt the agent's turn |
 | `:Paseo ws init\|edit\|create\|rm\|ls\|status` | Multi-repo workspaces |
@@ -103,7 +103,6 @@ Everything else is a key inside the chat or a Lua function.
 | `<C-b>` `<C-h>` | full screen | the rail: show or hide it / go into it (`<C-h>` in it stays: it is leftmost) |
 | `<C-p>` | full screen | the Settings / Changes / Usage panel |
 | `<C-n>` | full screen | a new session (Local or a new worktree) |
-| `<C-k>` | full screen, terminals | search workspaces, agents and chats |
 | `q` | chat | close it |
 
 The rail uses nvim-tree's keys: `l`/`h` unfold and fold, `a` starts a new
@@ -147,9 +146,15 @@ full screen and, from there, back beside the code. `review.surface =
 
 ### Search everything
 
-`:Paseo search`, or `<C-k>` on any of Paseo's buffers, works like the app's
-Ctrl+K, with one difference: it also searches what you said. It opens one
-telescope list of every workspace, every live agent, every prompt you have
+`:Paseo search` works like the app's Ctrl+K, with one difference: it also
+searches what you said. It has no default key, since `<C-k>` is window-up in
+most configs, so map it globally:
+
+```lua
+vim.keymap.set("n", "<leader>ps", "<cmd>Paseo search<cr>")
+```
+
+It opens one telescope list of every workspace, every live agent, every prompt you have
 sent in any chat, and your archived chats, so you can type at all of them at
 once. The preview shows the chat. `<CR>` on a prompt opens its chat with that
 message at the top, loading older history if it has to. Without telescope it

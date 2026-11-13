@@ -130,8 +130,8 @@ readers and the microphone.
                                                              *:Paseo-search*
 :Paseo search           Search every workspace, live agent, prompt you
                         sent, and archived chat in one picker, with a
-                        preview of the chat (|paseo-search|). `<C-k>` on
-                        Paseo's buffers.
+                        preview of the chat (|paseo-search|). No default
+                        key: map it globally (`<Plug>(paseo-search)`).
 
                                                            *:Paseo-settings*
 :Paseo settings [group] The chat agent's settings card: permission mode,
@@ -221,7 +221,6 @@ On the full screen, from any of its buffers (|paseo-config.ui.native|):
     <C-s>       into the rail, on the agent on screen
     <C-p>       the panel: Settings, Changes, Usage
     <C-n>       a new session (|paseo-new|)
-    <C-k>       search workspaces, agents and chats (|paseo-search|)
 
 Every one of these can be moved or unbound: |paseo-config.keys|.
 
@@ -420,7 +419,6 @@ the agents. It takes every key except these (|paseo-config.ui.terminal|):
     <C-l>       back into the terminal
     <C-j>       the next agent or terminal (`prev` is unbound by default)
     <C-s>       into the rail
-    <C-k>       search workspaces, agents and chats (|paseo-search|)
     q           (normal mode) back to the agent; the terminal keeps running
 
                                                             *paseo-subagents*
@@ -605,9 +603,12 @@ The settings themselves are cards (|paseo-settings|).
 
                                                                 *paseo-search*
 Search ~
-|:Paseo search| (`<C-k>` on Paseo's buffers, `<Plug>(paseo-search)`) is the
-app's Ctrl+K, with one addition: it also searches what you said. It shows one
-list of:
+|:Paseo search| (`<Plug>(paseo-search)`) is the app's Ctrl+K, with one
+addition: it also searches what you said. It has no default key (`<C-k>` is
+window-up in most configs), so give it a global one: >lua
+    vim.keymap.set("n", "<leader>ps", "<cmd>Paseo search<cr>")
+<
+It shows one list of:
 
     agent       every live agent, the ones waiting on you first; matched
                 on its title, workspace, branch and provider
@@ -665,7 +666,7 @@ is optional. >lua
           composer_min = 3,
           keys = { rail = "<C-b>", focus = "<C-h>", sessions = "<C-s>",
                    panel = "<C-p>", new = "<C-n>", new_agent = false,
-                   search = "<C-k>" },
+                   search = false },
           hints = { winbar = false, rail = false },
         },
         sidebar = { width = 40, min_width = 60, composer = 8,
@@ -673,7 +674,7 @@ is optional. >lua
         answer = { width = 96, min_width = 54, backdrop = true, zindex = 190 },
         terminal = {
           keys = { next = "<C-j>", prev = false, sessions = "<C-s>",
-                   search = "<C-k>", chrome = "<C-g>", terminal = "<C-l>" },
+                   search = false, chrome = "<C-g>", terminal = "<C-l>" },
           presets = {},
         },
         pr = { enabled = true, ttl = 60 },

@@ -1,4 +1,4 @@
-# <C-k> searches everything: an archived chat is found by its title, and a
+# The search finds everything: an archived chat is found by its title, and a
 # prompt sent long ago is found by what it said and opens its chat AT that
 # message -- older than the sixty items a chat loads, so history has to page
 # back to reach it.
@@ -30,11 +30,15 @@ PASEO_E2E_RTP="$lazy/plenary.nvim:$lazy/telescope.nvim" "$E" start "$repo"
 "$E" wait 'require("paseo.ui.native").chat() ~= nil and require("paseo.ui.chat").current().initialised' 20 \
   || fail "no Paseo tab"
 
+# No default key since <C-k> went back to being window-up: a config maps the
+# search globally, as this one does, on <Plug>(paseo-search).
+"$E" lua 'vim.keymap.set("n", "<F5>", "<Plug>(paseo-search)")'
+
 selected='(require("telescope.actions.state").get_selected_entry() or { value = {} }).value'
 search() {
   "$E" keys Escape
-  "$E" keys C-k
-  "$E" wait 'vim.bo.filetype == "TelescopePrompt"' 10 || fail "<C-k> did not open the search"
+  "$E" keys F5
+  "$E" wait 'vim.bo.filetype == "TelescopePrompt"' 10 || fail "the global search key did not open the search"
   "$E" keys "$1"
 }
 

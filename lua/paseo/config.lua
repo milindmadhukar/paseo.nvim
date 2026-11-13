@@ -492,9 +492,11 @@ local defaults = {
         -- someone's.
         new_agent = false,
         -- Search every workspace, agent and chat -- the prompts you sent
-        -- included -- in one picker: the app's Ctrl+K. Buffer-local like the
-        -- rest, so a global `<C-k>` (window up, say) is untouched outside.
-        search = "<C-k>",
+        -- included -- in one picker: the app's Ctrl+K. Unbound: `<C-k>` is
+        -- window-up in most configs and telescope's previous item, and the
+        -- search is not about this buffer, so it belongs on a global key of
+        -- your own -- `:Paseo search` or `<Plug>(paseo-search)`.
+        search = false,
       },
       -- KEY HINTS, off unless you ask: `winbar` is the `code  panel  rail
       -- close` at the right of the conversation's winbar, `rail` the `a session
@@ -529,11 +531,12 @@ local defaults = {
     terminal = {
       keys = {
         next = "<C-j>",
-        -- Unbound: `<C-k>` is the search, as on every Paseo buffer, and
-        -- `next` comes round to the previous one anyway.
+        -- Unbound: `next` comes round to the previous one anyway.
         prev = false,
         sessions = "<C-s>",
-        search = "<C-k>",
+        -- Unbound, as on the full-screen surface: map `:Paseo search`
+        -- globally instead.
+        search = false,
         -- `<C-g>` rather than anything more obvious, because every obvious
         -- chord is one a shell already uses: `<C-a>`/`<C-e>` are line ends,
         -- `<C-w>` deletes a word, `<C-l>` clears the screen. In readline
