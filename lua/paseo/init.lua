@@ -9,7 +9,16 @@ local M = {}
 
 M.config = require "paseo.config"
 
----@type table<string, { run: fun(args: string[]), desc: string }>
+---The full-screen surface's actions: `require("paseo").native.toggle_rail()`
+---and the rest, |paseo-native-api|. Loaded on first use.
+---@module "paseo.native"
+M.native = setmetatable({}, {
+  __index = function(_, key)
+    return require("paseo.native")[key]
+  end,
+})
+
+---@type table<string, { run: fun(args: string[]), desc: string, complete?: fun(lead: string, args: string[]): string[] }>
 local commands = {}
 
 commands.repos = {
@@ -311,10 +320,15 @@ commands.chat = {
   end,
 }
 
+-- With no action, the toggle it always was; with one, that action of
+-- |paseo-native-api| -- `:Paseo native panel changes`, `:Paseo native rail`.
 commands.native = {
-  desc = "Toggle the chat full screen: one Paseo tab, every agent a buffer",
-  run = function()
-    require("paseo.ui.chat").surface("native", { toggle = true })
+  desc = "Toggle the chat full screen; or an action: rail, focus, panel [name], new, next, prev, code, close…",
+  run = function(args)
+    require("paseo.native").command(args)
+  end,
+  complete = function(lead, args)
+    return require("paseo.native").complete(lead, args)
   end,
 }
 
@@ -593,18 +607,25 @@ function M.setup(opts)
   -- NO KEYS, only names for them: map these (or the `:Paseo` commands) to
   -- whatever you like. `<Plug>` mappings cannot be typed, so defining them
   -- takes nothing from anybody. See |paseo-keys|.
-  for name, run in pairs {
-    native = function()
-      require("paseo.ui.chat").surface("native", { toggle = true })
-    end,
-    new = function()
-      M.new_task()
-    end,
-    rail = function()
-      require("paseo.ui.native").toggle_rail()
-    end,
-  } do
-    vim.keymap.set({ "n", "t" }, ("<Plug>(paseo-%s)"):format(name), run, { desc = "paseo: " .. name })
+  --
+  -- One per action of |paseo-native-api|, and one per panel: `<Plug>(paseo-rail)`,
+  -- `<Plug>(paseo-panel-changes)`. `<Plug>(paseo-native)` is the toggle.
+  local native = require "paseo.native"
+  local plugs = { native = native.toggle }
+  for name, action in pairs(native.ACTIONS) do
+    if name ~= "toggle" then
+      plugs[name] = action.run
+    end
+    for _, arg in ipairs(action.args or {}) do
+      plugs[name .. "-" .. arg] = function()
+        action.run(arg)
+      end
+    end
+  end
+  for name, run in pairs(plugs) do
+    vim.keymap.set({ "n", "t" }, ("<Plug>(paseo-%s)"):format(name), function()
+      run()
+    end, { desc = "paseo: " .. name })
   end
 
   -- The sidecar is a child process; leaving it behind on :qa would leak one per
@@ -627,10 +648,24 @@ function M.setup(opts)
   end, {
     nargs = "*",
     desc = "paseo.nvim",
-    complete = function(lead)
-      return vim.tbl_filter(function(name)
-        return vim.startswith(name, lead)
-      end, vim.tbl_keys(commands))
+    complete = function(lead, line, pos)
+      -- The words after `:Paseo`, up to the cursor; the one being typed is
+      -- `lead` (empty right after a space).
+      local words = vim.split(line:sub(1, pos), "%s+", { trimempty = true })
+      table.remove(words, 1)
+      if lead == "" then
+        words[#words + 1] = ""
+      end
+      if #words <= 1 then
+        return vim.tbl_filter(function(name)
+          return vim.startswith(name, lead)
+        end, vim.tbl_keys(commands))
+      end
+      local cmd = commands[words[1]]
+      if cmd and cmd.complete then
+        return cmd.complete(lead, vim.list_slice(words, 2))
+      end
+      return {}
     end,
   })
 end

@@ -188,11 +188,32 @@ the `<Plug>` names that exist for it:
 ```lua
 vim.keymap.set({ "n", "t" }, [[<C-\>]], "<Plug>(paseo-native)") -- in and out, full screen
 vim.keymap.set("n", "<leader>an", "<Plug>(paseo-new)")           -- start something
--- also <Plug>(paseo-rail): the rail, on or off
+vim.keymap.set("n", "<leader>ap", "<Plug>(paseo-panel-changes)") -- straight to Changes
 ```
 
-A key you map to one of them is shown where it matters: the full-screen winbar
-names your `:Paseo native` key as the way back to your code. And the surface's
+**Every action of the Paseo tab is a function, a command and a `<Plug>`
+name**, and each works from anywhere: away from the tab it goes there first,
+and a toggle there *shows*.
+
+```lua
+local paseo = require("paseo.native") -- or require("paseo").native
+paseo.toggle()             -- in and out                :Paseo native
+paseo.open() / paseo.close() / paseo.code()  -- onto it, down, back to your code
+paseo.toggle_rail()        -- the rail (<C-b>)          :Paseo native rail
+paseo.focus_rail()         -- into it and out (<C-h>)   :Paseo native focus
+paseo.panel("changes")     -- straight to a panel       :Paseo native panel changes
+paseo.toggle_panel()       -- the panel (<C-p>)         :Paseo native panel
+paseo.new() / paseo.worktree()  -- start something      :Paseo native new
+paseo.next() / paseo.prev()     -- along the row        :Paseo native next
+paseo.stop()               -- stop the turn             :Paseo native stop
+```
+
+`<Plug>(paseo-<action>)` exists for each (`paseo-rail`, `paseo-focus`,
+`paseo-panel-usage`…). See `:help paseo-native-api`.
+
+With `ui.native.hints.winbar` on, a key you map to one of them is shown where
+it matters: the full-screen winbar names your `:Paseo native` key as the way
+back to your code. And the surface's
 own keys (`ui.native.keys`) take lists, so the rail can sit on your explorer
 key — only in here:
 

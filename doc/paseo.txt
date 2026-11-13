@@ -795,6 +795,31 @@ skills.method                                       `"link"`|`"copy"`, default `
     them keep working. That dashboard is gone, and the full-screen surface is
     what they meant.
 
+:Paseo native {action} [{arg}]                       *:Paseo-native-action*
+
+    One of the surface's actions, by name -- the same functions as
+    |paseo-native-api| and the `<Plug>` names (|paseo-keys|). Each works
+    from anywhere: away from the Paseo tab it goes there first (opening it if
+    need be), and a toggle SHOWS. <Tab> completes the actions and the panel
+    names.
+
+      `toggle`              in and out (what `:Paseo native` alone does)
+      `open`                onto the Paseo tab; never off it
+      `code`                back to your code, the Paseo tab left as it is
+      `close`               take the Paseo tab down (`q`)
+      `rail`                the workspace rail, on or off (`<C-b>`)
+      `focus`               into the rail and back out (`<C-h>`)
+      `panel` [{name}]      the panel on or off (`<C-p>`); with `settings`,
+                            `changes` or `usage`, straight to that one
+      `new`                 start something (`<C-n>`, |paseo-new|)
+      `worktree`            start something in a new worktree
+      `next` / `prev`       the next / previous agent or terminal on the row
+      `stop`                stop the turn (`<C-c>`)
+>vim
+        :Paseo native panel changes
+        :Paseo native rail
+<
+
 :Paseo dash                                                  *:Paseo-dash*
 
     Open the chat full screen. Not a toggle -- it asks for the surface, and
@@ -1058,6 +1083,75 @@ require("paseo.repos").invalidate()
 
     Drop the resolved-path cache. Called automatically on `DirChanged`; call it
     by hand after creating or removing a worktree under the current tree.
+
+                                                         *paseo-native-api*
+THE FULL-SCREEN SURFACE, AS FUNCTIONS. `require("paseo.native")`, also
+`require("paseo").native`. Every key the Paseo tab binds is one of these, and
+so is every |:Paseo-native-action| and every `<Plug>` name (|paseo-keys|).
+The plugin maps none of them globally; bind the ones you want: >lua
+    local paseo = require("paseo.native")
+    vim.keymap.set("n", "<leader>ap", function() paseo.panel("changes") end)
+    vim.keymap.set("n", "<leader>ae", paseo.toggle_rail)
+<
+SAFE FROM ANYWHERE: called away from the Paseo tab, an action that needs the
+tab goes there first, opening it if there is none, and then does what it says.
+A toggle called from away SHOWS: `toggle_rail()` from your code is "take me to
+the rail", never "hide a rail I cannot see".
+
+                                                    *paseo.native.toggle()*
+require("paseo.native").toggle()
+    In and out of the Paseo tab, as |:Paseo-native|.
+
+                                                      *paseo.native.open()*
+require("paseo.native").open()
+    Onto the Paseo tab, opening it if there is none. Never leaves it.
+
+                                                      *paseo.native.code()*
+require("paseo.native").code()
+    Back to your code -- the tab you came from -- with the Paseo tab left as
+    it is. Nothing if you are not on it.
+
+                                                     *paseo.native.close()*
+require("paseo.native").close()
+    Take the Paseo tab down. The agents, terminals and drafts live on.
+
+                                               *paseo.native.toggle_rail()*
+require("paseo.native").toggle_rail()
+    The workspace rail, on or off, the cursor with it. Remembered across
+    restarts.
+
+                                                *paseo.native.focus_rail()*
+require("paseo.native").focus_rail()
+    Into the rail on the session on screen, showing it if it is hidden; from
+    the rail, back to the window you came from.
+
+                                                     *paseo.native.panel()*
+require("paseo.native").panel({name})
+    Show a panel on the right with the cursor in it: `"settings"`,
+    `"changes"` or `"usage"` (any case), or the one you last looked at when
+    {name} is nil. `require("paseo.native").PANELS` lists them.
+
+                                              *paseo.native.toggle_panel()*
+require("paseo.native").toggle_panel()
+    The panel, on or off.
+
+                                                       *paseo.native.new()*
+require("paseo.native").new()
+    The new-task screen (|paseo-new|). On the Paseo tab it starts from the
+    agent on screen: its workspace, its provider.
+
+                                                  *paseo.native.worktree()*
+require("paseo.native").worktree()
+    The new-task screen, on a new worktree.
+
+                                                      *paseo.native.next()*
+require("paseo.native").next()
+require("paseo.native").prev()
+    The next or previous agent or terminal on the Paseo tab's row, wrapping.
+
+                                                      *paseo.native.stop()*
+require("paseo.native").stop()
+    Interrupt the turn the agent on screen is running.
 
                                                             *paseo.quit.guard*
 require("paseo.quit").guard(proceed, {opts})
@@ -2652,7 +2746,14 @@ the `:Paseo` commands, or these names, which exist for exactly that: >lua
 <
   `<Plug>(paseo-native)`  in and out of the chat, full screen (|:Paseo-native|)
   `<Plug>(paseo-new)`     start something (|paseo-new|)
-  `<Plug>(paseo-rail)`    the rail, on or off (on the Paseo tab)
+  `<Plug>(paseo-rail)`    the rail, on or off
+
+And one for every other action of |:Paseo-native-action|, by its name:
+`<Plug>(paseo-open)`, `(paseo-code)`, `(paseo-close)`, `(paseo-focus)`,
+`(paseo-panel)`, `(paseo-worktree)`, `(paseo-next)`, `(paseo-prev)`,
+`(paseo-stop)` -- and one per panel, `<Plug>(paseo-panel-settings)`,
+`(paseo-panel-changes)`, `(paseo-panel-usage)`. Each is defined in normal and
+terminal mode, and each works from anywhere (|paseo-native-api|).
 
 With |paseo-config.ui.native.hints| `winbar` on, a key you map to one of
 them is SHOWN where it matters: the full-screen winbar names your

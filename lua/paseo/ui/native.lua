@@ -884,13 +884,13 @@ end
 M.cycle_panel = M.toggle_panel
 
 ---Open a panel by name and put the cursor in it.
----@param name string
+---@param name? string  One of `M.PANELS`; nil is the one you last looked at.
 function M.panel(name)
   local t = here()
   if not t then
     return
   end
-  show_panel(t, name)
+  show_panel(t, name or last_panel)
   if valid_win(t.panel_win) then
     api.nvim_set_current_win(t.panel_win)
   end

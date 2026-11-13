@@ -693,6 +693,82 @@ local function test_toggle()
   chat_mod.set_current(saved_current)
 end
 
+local function test_api()
+  local native = require "paseo.ui.native"
+  local api_ = require "paseo.native"
+  local chat_mod = require "paseo.ui.chat"
+  local rail = require "paseo.ui.rail"
+  local saved_current = chat_mod.current()
+
+  -- The public names, through `require("paseo")` too.
+  eq("api: require(\"paseo\").native is the module", require("paseo").native.toggle_rail, api_.toggle_rail)
+
+  -- COMPLETION: the actions, then a panel's names.
+  truthy("api: the actions complete", vim.tbl_contains(api_.complete("", { "" }), "panel"))
+  eq("api: by prefix", api_.complete("pa", { "pa" }), { "panel" })
+  eq("api: and a panel's names after it", api_.complete("ch", { "panel", "ch" }), { "changes" })
+  local line = "Paseo native panel u"
+  eq(
+    "api: through :Paseo's own completion",
+    vim.fn.getcompletion(line, "cmdline"),
+    { "usage" }
+  )
+
+  -- EVERY ACTION A <Plug> NAME, and every panel one.
+  for _, name in ipairs { "native", "rail", "focus", "panel", "panel-changes", "new", "next", "code" } do
+    truthy(
+      "api: <Plug>(paseo-" .. name .. ") is defined",
+      vim.fn.maparg("<Plug>(paseo-" .. name .. ")", "n") ~= ""
+    )
+  end
+
+  local chat = new_chat "native-api"
+  native.open(chat)
+  settle()
+  local function panel_shown()
+    for _, win in ipairs(api.nvim_tabpage_list_wins(0)) do
+      local buf = api.nvim_win_get_buf(win)
+      if vim.bo[buf].filetype == "paseo-panel" then
+        return api.nvim_buf_get_name(buf):match "panel/(%a+)/"
+      end
+    end
+  end
+
+  -- `:Paseo native panel changes` goes straight to one, any case.
+  vim.cmd "Paseo native panel Changes"
+  eq("api: :Paseo native panel <name> shows that panel", panel_shown(), "changes")
+  vim.cmd "Paseo native panel"
+  eq("api: and with no name, toggles it", panel_shown(), nil)
+
+  -- FROM YOUR CODE: the action takes you there and SHOWS, never hides.
+  local shown_before = native.rail_shown() and true or false
+  if shown_before then
+    native.toggle_rail()
+  end
+  eq("api: the rail starts hidden here", native.rail_shown() and true or false, false)
+  api_.code()
+  eq("api: code() leaves the Paseo tab", native.on_tab(), false)
+  api_.toggle_rail()
+  eq("api: toggle_rail() from your code goes to the tab", native.on_tab(), true)
+  eq("api: and shows the rail", native.rail_shown() and true or false, true)
+  eq("api: remembered as shown", rail.visible(), true)
+  eq("api: with the cursor in it", api.nvim_get_current_win(), rail.win())
+  api_.focus_rail()
+  truthy("api: focus_rail() from the rail goes back out", api.nvim_get_current_win() ~= rail.win())
+  api_.code()
+  api_.panel "usage"
+  eq("api: panel(name) from your code shows it on the tab", panel_shown(), "usage")
+  api_.toggle_panel()
+  eq("api: toggle_panel() there closes it", panel_shown(), nil)
+  if not shown_before then
+    native.toggle_rail()
+  end
+
+  native.close(chat)
+  native.reset()
+  chat_mod.set_current(saved_current)
+end
+
 return {
   { "ui.native.layout", test_layout },
   { "ui.native.toggle", test_toggle },
@@ -704,4 +780,5 @@ return {
   { "ui.native.panels", test_panels },
   { "ui.native.uniform", test_uniform },
   { "ui.native.novolt", test_without_volt },
+  { "ui.native.api", test_api },
 }
