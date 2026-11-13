@@ -102,8 +102,11 @@ The rail uses nvim-tree's keys: `l`/`h` unfold and fold, `a` starts a new
 agent, `w` a new worktree, `t` a terminal, `d` archives, and `.` lists
 everything you can do to the row. `g?` shows them all.
 
-Every built-in key can be moved or unbound with the `keys` option
-(`:help paseo-config.keys`).
+These are defaults, and they are bound only in Paseo's own buffers. Every
+built-in key can be moved or unbound with the `keys` option
+(`:help paseo-config.keys`). The full-screen keys are set in `ui.native.keys`,
+so `rail = "<leader>e"` puts the rail on your explorer key in place of
+`<C-b>`, and `rail = { "<C-b>", "<leader>e" }` binds both.
 
 ### Images
 
