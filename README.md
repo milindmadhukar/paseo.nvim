@@ -480,66 +480,83 @@ talking to belongs to) has a green band across its row, a bar and a green
 name. It is matched by the agent's workspace, not the directory, so when
 several workspaces share one checkout only the right one is marked.
 
-A row ends with its agents' subagents when they have any: a robot and the
-count, `1/3` (running/total) in the running colour while some work, or just `3`
-once they are done.
-
-**Each workspace opens into its sessions**, the way the app's sidebar nests
-them: its agents, each with its subagents under it, then its terminals. It
-replaced the `Sessions` tab, and a second column for them on the right.
+**It is a file tree, and it is driven like nvim-tree.** A workspace is a
+folder; its agents and terminals are what is in it, and an agent with
+subagents is a folder too. What the app's sidebar row says goes on the row:
+the **lines the workspace has changed** against its base branch (`+120 -7`,
+right-aligned), and on a line under it, when there is one, its **pull
+request and CI** — `#128 · ● 3/5` while checks run, `✓ passed`, `✗ failed`,
+`approved` or `changes` from review, `merged` or `closed` once it is done.
+All of it is the daemon's, pushed as it changes: the diff stat on every save,
+the pull request every twenty seconds while a check is pending.
 
 ```
- paseo.nvim  3
-
-▌▾ ⠋ Fix the invoice rounding
-     • Fix the invoice rounding  2/3
-       ├ ⠋ Map the auth flow
-       ├ • Explore billing tests
-       └ ⠋ lint-fixer
-     • Add a regression test
+paseo.nvim                        4
+ ▸ !  rail-spinner-fix   +75 -51
+       #131 · ✗ failed · changes
+▌▾ ⠋ main              +1240 -386
+       #128 · ● 3/5
+▌  ▾ ⠋ nvim-tree style rail
+       • Study nvim-tree rendering
+       ⠋ Research Paseo app sidebar
+   ▸ • review the sidecar diff  󱙺 1
      󰆍 zsh
- ▸ • main
- ▸ ○ otp-rate-limit
+ ▸ • upstream-0.16          +12 -0
+       #120 merged
+ ▸ ○ voice-mode-experiment
 
- a agent  w workspace  t term
+ a agent  w workspace  g? keys
 ```
 
-The workspace on screen is open; the rest are closed until you open them. An
-agent row has the same status glyph a workspace has, its title, and how many
-subagents it has (`running/total` while any run). Both kinds of subagent hang
-off their parent: a **provider** subagent (Claude's Task tool) opens
-read-only, a **Paseo** subagent (an agent another agent started) is an
-ordinary agent and opens as one, and is listed once, under its parent, rather
-than again beside it. The bar marks the session on screen. A workspace's
-agents are its own, by workspace id, so two workspaces on one checkout do not
-mix them.
+The workspace on screen is open and the rest are closed until you open them;
+an agent's subagents are open while one of them runs, and folded once they
+are done, with how many on its row (`1/3` while some run, `3` after). Both
+kinds hang off their parent: a **provider** subagent (Claude's Task tool)
+opens read-only, a **Paseo** subagent (an agent another agent started) is an
+ordinary agent and opens as one, listed once, under its parent. The bar and
+the band mark the session on screen. A workspace's agents are its own, by
+workspace id, so two workspaces on one checkout do not mix them.
+
+**Every real line is a row.** The pull request line, "no sessions yet" and
+the hints are virtual lines, so `j`/`k`, counts, `gg`/`G` and `/` are Vim's
+own and never stop on decoration. The cursor sits on the name, as nvim-tree's
+`hijack_cursor` keeps it, and stays on the row it was on when rows above it
+come and go.
 
 `<C-b>` shows and hides the rail, and the choice is remembered across restarts.
 `<C-h>` moves into it, showing it first if it was hidden; **`<C-s>`** moves
-into it **on the session on screen**, opening its workspace if you had closed
-it — from the composer in either mode, from a terminal, and from every other
-buffer of the surface. Inside it:
+into it **on the session on screen**, unfolding what it is under — from the
+composer in either mode, from a terminal, and from every other buffer of the
+surface. Inside it, nvim-tree's keys where it has one for the job (`g?` lists
+them):
 
 | | |
 |---|---|
-| `j` / `k` | move, over workspaces and sessions alike |
-| `<CR>` | on a workspace, open its agent in a tab of its own; on a session, show it |
-| `<Tab>` / `za` | open or close the workspace's sessions; `l` opens, `h` closes |
+| `<CR>` / `o` | on a session, open it in a tab of its own; on a workspace, fold or unfold it |
+| `l` | unfold; on something open, step onto its first row; on a session, open it |
+| `h` / `<BS>` | fold; on a row that does not fold, fold the one it is in and land on it |
+| `<Tab>` / `za` | fold or unfold |
+| `O` | open the workspace as a place: its agent, in a tab of its own |
+| `P` / `<` `>` / `K` `J` | the parent; the previous and next sibling; the first and last |
+| `W` / `E` | fold everything (the cursor stays in its workspace); unfold everything |
 | `a` / `w` / `t` | start an agent in the workspace under the cursor, an agent in a new workspace, a terminal (`c` too) |
 | `y` / `R` / `d` | copy an agent's ID, rename a terminal, archive an agent or kill a terminal (asked first) |
-| `P` / `r` | pin a workspace, refetch the list |
+| `m` / `r` | pin a workspace, refetch the list |
+| `g?` | the keys |
 | `q` / `<Esc>` / `<C-h>` / `<C-s>` | back to where you were typing |
 
 It is 32 cells wide by default (`ui.native.rail`; `0` starts it hidden).
+`ui.float.rail.indent_markers = true` draws nvim-tree's `│ └` down the left
+of a workspace's sessions; `hints = false` drops the line of keys.
 
-**Pinned workspaces lead it**, with a pin. `P` pins or unpins the one under the
+**Pinned workspaces lead it**, with a pin. `m` pins or unpins the one under the
 cursor. The pin is the daemon's, so it is the same pin the app's sidebar
 shows, whichever side set it. **Background workspaces**, which agents and
 plugins make for themselves, are hidden the way the app hides them unless
 "Show background" is on. `ui.float.rail.show_background = true` shows them.
-The list refetches the moment the daemon says a workspace changed (created,
-archived, pinned, or **titled**), so a generated title appears when it is
-written rather than on the next poll.
+A pushed change to a workspace is written over its row in place; one that
+moves it (created, archived, pinned, or **titled**) refetches the list, so a
+generated title appears when it is written rather than on the next poll.
 
 #### The composer
 

@@ -169,40 +169,23 @@ local function test_terminals()
       entries = { { id = "t1", name = "shell" } },
     }
     local chat = { root = root, agent_id = "a1" }
-    local lines, rows = tree.lines({ directory = root }, chat, 40)
-    local text = {}
-    for i, line in ipairs(lines) do
-      local parts = {}
-      for _, cell in ipairs(line) do
-        parts[#parts + 1] = cell[1]
-      end
-      text[i] = table.concat(parts)
-    end
-    local joined = table.concat(text, "\n")
-    truthy("tree: agents are listed", joined:find("reviewer", 1, true) ~= nil, joined)
-    truthy("tree: and terminals below them", joined:find("shell", 1, true) ~= nil, joined)
-
+    local forest = tree.forest({ directory = root }, chat)
     local order = {}
-    for line = 1, #lines do
-      local node = rows[line]
-      if node then
-        order[#order + 1] = ("%s:%s:%d"):format(node.kind, node.item.id, node.depth)
-      end
+    for _, node in ipairs(tree.flatten(forest)) do
+      order[#order + 1] = ("%s:%s:%d"):format(node.kind, node.item.id, node.depth)
     end
     -- The Paseo subagent is listed ONCE, under its parent, not again at the
-    -- top level beside it.
+    -- top level beside it; the terminals come after the agents.
     eq("tree: subagents hang off their parent", order, {
       "agent:a1:0",
       "subagent:task:1",
       "subagent:a2:1",
       "terminal:t1:0",
     })
-    truthy(
-      "tree: drawn as a tree",
-      joined:find("├", 1, true) and joined:find("└", 1, true),
-      joined
-    )
-    truthy("tree: the parent says how many are running", joined:find("2/2", 1, true) ~= nil, joined)
+    eq("tree: the parent knows how many are running", forest[1].running, 2)
+    truthy("tree: and that it is busy", tree.busy(forest[1]))
+    eq("tree: a terminal is called by its name", tree.title(forest[#forest]), "shell")
+    truthy("tree: and holds no subagents", #forest[#forest].kids == 0)
   end)
   agents.for_root, agents.get, subagents.list = old.for_root, old.get, old.list
   apply { kind = "snapshot", cwd = root, entries = {} }

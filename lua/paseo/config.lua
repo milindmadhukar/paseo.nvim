@@ -404,6 +404,12 @@ local defaults = {
       rail = {
         enabled = true,
         show_background = false,
+        -- nvim-tree's `renderer.indent_markers`: `│ ├ └` down the left of a
+        -- workspace's sessions, rather than plain indentation. Off, as
+        -- nvim-tree has it.
+        indent_markers = false,
+        -- The `a agent  w workspace  g? keys` line under the last row.
+        hints = true,
         -- Cells, on the old float. The native surface's rail is as wide as
         -- `native.rail` says.
         width = 32,

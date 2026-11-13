@@ -231,8 +231,14 @@ local function test_toggle()
     truthy("rail: on a workspace, not the heading", first ~= nil)
     vim.api.nvim_feedkeys("j", "x", false)
     truthy("rail: j moves to the next workspace", rail.current() and rail.current() ~= first)
+    -- A workspace is a folder: <CR> folds it, as nvim-tree's does, and `O`
+    -- opens it as a place.
+    local was_open = rail.is_expanded(rail.current(), false)
     rail.open_current()
-    eq("rail: <CR> opens the one under the cursor", opened and opened.name, rail.current().name)
+    eq("rail: <CR> on a workspace folds it", rail.is_expanded(rail.current(), false), not was_open)
+    eq("rail: and opens nothing", opened, nil)
+    rail.open_workspace()
+    eq("rail: O opens the one under the cursor", opened and opened.name, rail.current().name)
     api.nvim_set_current_win(chat.win_composer)
 
     -- Toggle off: the window goes, the panes take the room back, and the
@@ -515,10 +521,308 @@ local function test_sessions()
   end
 end
 
+local function test_tree()
+  local native = require "paseo.ui.native"
+  local rail = require "paseo.ui.rail"
+  local bridge = require "paseo.bridge"
+  local agents = require "paseo.agents"
+  local subagents = require "paseo.subagents"
+  local terminals = require "paseo.terminals"
+  local workspaces = require "paseo.workspaces"
+  local transcript = require "paseo.ui.transcript"
+  local icons = require "paseo.ui.icons"
+
+  -- What a workspace's row and the line under it say, from the descriptor
+  -- the sidecar sends.
+  local function text_of(chunks)
+    return table.concat(vim.tbl_map(function(c)
+      return c[1]
+    end, chunks or {}))
+  end
+  eq(
+    "tree: lines changed, as the app writes them",
+    text_of(rail.diff_stat { diffStat = { additions = 120, deletions = 7 } }),
+    "+120 -7"
+  )
+  eq(
+    "tree: and nothing for nothing changed",
+    rail.diff_stat { diffStat = { additions = 0, deletions = 0 } },
+    {}
+  )
+  eq("tree: or no stat at all", rail.diff_stat {}, {})
+  eq("tree: no pull request, no line under the row", rail.meta {}, nil)
+  local meta = text_of(rail.meta {
+    pr = { number = 42, state = "open", checks = "running", checksDone = 1, checksTotal = 3 },
+  })
+  truthy("tree: the pull request's number", meta:find("#42", 1, true), meta)
+  truthy("tree: and how far CI has got", meta:find("1/3", 1, true), meta)
+  meta = text_of(rail.meta { pr = { number = 7, state = "open", checks = "failed" } })
+  truthy("tree: a failed run says so", meta:find("failed", 1, true), meta)
+  meta = text_of(rail.meta { pr = { number = 7, state = "merged", checks = "failed" } })
+  truthy("tree: a merged one says merged", meta:find("merged", 1, true), meta)
+  truthy("tree: and its CI is history", not meta:find("failed", 1, true), meta)
+
+  local saved = {
+    columns = vim.o.columns,
+    lines = vim.o.lines,
+    running = bridge.running,
+    watch = agents.watch,
+    get = agents.get,
+    all = agents.all,
+    for_workspace = agents.for_workspace,
+    sub_list = subagents.list,
+    track = subagents.track,
+    term_watch = terminals.watch,
+    list = workspaces.list,
+    here = workspaces.here,
+    state = vim.env.XDG_STATE_HOME,
+  }
+  vim.env.XDG_STATE_HOME = vim.fn.tempname()
+  rail.reset()
+
+  local root = vim.fn.tempname()
+  local host = require("paseo.hosts").selected()
+  local listed = {
+    {
+      id = "t-1",
+      title = "on screen",
+      status = "idle",
+      workspaceId = "ws-a",
+      cwd = root .. "/a",
+      createdAt = "1",
+    },
+    {
+      id = "t-2",
+      title = "finished parent",
+      status = "idle",
+      workspaceId = "ws-a",
+      cwd = root .. "/a",
+      createdAt = "2",
+    },
+  }
+  local kids = {
+    ["t-2"] = {
+      { kind = "provider", id = "k1", parent = "t-2", title = "kid one", status = "completed" },
+      { kind = "provider", id = "k2", parent = "t-2", title = "kid two", status = "completed" },
+    },
+  }
+  local ok, failure = pcall(function()
+    vim.o.columns, vim.o.lines = 160, 50
+    bridge.running = function()
+      return true
+    end
+    agents.watch = function() end
+    terminals.watch = function() end
+    subagents.track = function() end
+    agents.get = function(id)
+      for _, a in ipairs(listed) do
+        if a.id == id then
+          return a
+        end
+      end
+    end
+    agents.all = function()
+      return listed
+    end
+    agents.for_workspace = function(ws)
+      return vim.tbl_filter(function(a)
+        return a.workspaceId == ws.id
+      end, listed)
+    end
+    subagents.list = function(parent)
+      return kids[parent] or {}
+    end
+    workspaces.here = function()
+      return root
+    end
+    workspaces.list = function(cb)
+      cb({
+        {
+          id = "ws-a",
+          name = "alpha",
+          directory = root .. "/a",
+          projectRoot = root,
+          hostId = host,
+          diffStat = { additions = 5, deletions = 2 },
+          pr = { number = 9, state = "open", checks = "passed" },
+        },
+        { id = "ws-b", name = "beta", directory = root .. "/b", projectRoot = root, hostId = host },
+      }, nil)
+    end
+
+    local chat = {
+      root = root .. "/a",
+      host_id = host,
+      agent_id = "t-1",
+      provider = "test",
+      streaming = false,
+      pending = {},
+      conversation = api.nvim_create_buf(false, true),
+      composer = api.nvim_create_buf(false, true),
+    }
+    transcript.reset(chat)
+    native.open(chat)
+    vim.wait(300, function()
+      return rail.win() and api.nvim_buf_line_count(api.nvim_win_get_buf(rail.win())) >= 5
+    end)
+    local win = rail.win()
+    local buf = api.nvim_win_get_buf(win)
+    local function lines()
+      return api.nvim_buf_get_lines(buf, 0, -1, false)
+    end
+    local function line_of(needle)
+      for i, l in ipairs(lines()) do
+        if l:find(needle, 1, true) then
+          return i
+        end
+      end
+    end
+
+    -- EVERY REAL LINE IS A ROW, past the root: the PR line and the hints are
+    -- virtual, so plain `j` never lands on decoration.
+    eq("tree: the root, two workspaces, two agents -- and nothing else", #lines(), 5)
+    local virt = api.nvim_buf_get_extmarks(buf, -1, 0, -1, { details = true })
+    local right, below = {}, {}
+    for _, mark in ipairs(virt) do
+      local d = mark[4]
+      if d.virt_text_pos == "right_align" then
+        right[#right + 1] = text_of(d.virt_text)
+      end
+      if d.virt_lines then
+        for _, vl in ipairs(d.virt_lines) do
+          below[#below + 1] = text_of(vl)
+        end
+      end
+    end
+    truthy(
+      "tree: the diff stat is right-aligned on its row",
+      vim.tbl_contains(right, "+5 -2"),
+      vim.inspect(right)
+    )
+    truthy("tree: the pull request is a line under it", #vim.tbl_filter(function(l)
+      return l:find("#9", 1, true) ~= nil
+    end, below) == 1, vim.inspect(below))
+
+    -- A FINISHED AGENT'S SUBAGENTS ARE FOLDED, with how many on its row.
+    truthy(
+      "tree: folded, its subagents are not drawn",
+      not line_of "kid one",
+      table.concat(lines(), "\n")
+    )
+    truthy(
+      "tree: and the row has the closed arrow",
+      lines()[line_of "finished parent"]:find(icons.tree.closed, 1, true)
+    )
+
+    native.focus_rail()
+    eq(
+      "tree: <C-s> lands on the agent on screen",
+      rail.current_session() and rail.current_session().item.id,
+      "t-1"
+    )
+    -- On the name, as nvim-tree's hijack_cursor puts it.
+    local cur = api.nvim_win_get_cursor(win)
+    truthy(
+      "tree: the cursor sits on the name",
+      lines()[cur[1]]:sub(cur[2] + 1):find "^on screen",
+      lines()[cur[1]]
+    )
+
+    -- l unfolds, l again steps in, h from inside folds the parent and lands
+    -- on it.
+    api.nvim_win_set_cursor(win, { line_of "finished parent", 0 })
+    vim.api.nvim_feedkeys("l", "x", false)
+    truthy("tree: l unfolds", line_of "kid one", table.concat(lines(), "\n"))
+    vim.api.nvim_feedkeys("l", "x", false)
+    eq(
+      "tree: and l again steps onto the first one",
+      rail.current_session() and rail.current_session().item.id,
+      "k1"
+    )
+    vim.api.nvim_feedkeys(">", "x", false)
+    eq("tree: > is the next sibling", rail.current_session().item.id, "k2")
+    vim.api.nvim_feedkeys("P", "x", false)
+    eq("tree: P is the parent", rail.current_session().item.id, "t-2")
+    vim.api.nvim_feedkeys("j", "x", false)
+    vim.api.nvim_feedkeys("h", "x", false)
+    eq(
+      "tree: h on a leaf folds the one it is in and lands on it",
+      rail.current_session() and rail.current_session().item.id,
+      "t-2"
+    )
+    truthy("tree: folded again", not line_of "kid one")
+
+    -- THE CURSOR STAYS ON ITS ROW when the rows above it move.
+    api.nvim_win_set_cursor(win, { line_of "beta", 0 })
+    listed[#listed + 1] = {
+      id = "t-3",
+      title = "a new one",
+      status = "running",
+      workspaceId = "ws-a",
+      cwd = root .. "/a",
+      createdAt = "3",
+    }
+    rail.draw()
+    eq(
+      "tree: a row added above does not move the cursor off beta",
+      rail.current() and rail.current().id,
+      "ws-b"
+    )
+
+    -- W folds everything and leaves the cursor in the workspace it was in.
+    api.nvim_win_set_cursor(win, { line_of "on screen", 0 })
+    vim.api.nvim_feedkeys("W", "x", false)
+    eq("tree: W folds everything", #lines(), 3)
+    eq("tree: on the workspace the cursor was in", rail.current() and rail.current().id, "ws-a")
+    vim.api.nvim_feedkeys("E", "x", false)
+    truthy(
+      "tree: E unfolds everything, subagents too",
+      line_of "kid two",
+      table.concat(lines(), "\n")
+    )
+
+    -- <CR> on a workspace folds it.
+    api.nvim_win_set_cursor(win, { line_of "alpha", 0 })
+    rail.open_current()
+    truthy("tree: <CR> on a workspace folds it", not line_of "on screen")
+
+    -- A PUSHED UPSERT is written over its row; one that moves the row is not.
+    truthy(
+      "tree: an upsert patches its row",
+      rail.patch(
+        { id = "ws-a", name = "alpha", diffStat = { additions = 50, deletions = 1 } },
+        host
+      )
+    )
+    eq("tree: with the new stat", text_of(rail.diff_stat(rail.current())), "+50 -1")
+    eq("tree: and a field it no longer has is gone", rail.current().pr, nil)
+    eq("tree: a rename is a refetch", rail.patch({ id = "ws-a", name = "renamed" }, host), false)
+    eq(
+      "tree: so is a workspace that is not here",
+      rail.patch({ id = "ws-zzz", name = "x" }, host),
+      false
+    )
+    native.close(chat)
+  end)
+
+  vim.o.columns, vim.o.lines = saved.columns, saved.lines
+  bridge.running, agents.watch = saved.running, saved.watch
+  agents.get, agents.all, agents.for_workspace = saved.get, saved.all, saved.for_workspace
+  subagents.list, subagents.track, terminals.watch = saved.sub_list, saved.track, saved.term_watch
+  workspaces.list, workspaces.here = saved.list, saved.here
+  vim.env.XDG_STATE_HOME = saved.state
+  rail.reset()
+  pcall(native.reset)
+  if not ok then
+    error(failure, 0)
+  end
+end
+
 return {
   { "ui.rail.buckets", test_buckets },
   { "ui.rail.layout", test_layout },
   { "ui.rail.toggle", test_toggle },
   { "ui.rail.current", test_current },
   { "ui.rail.sessions", test_sessions },
+  { "ui.rail.tree", test_tree },
 }

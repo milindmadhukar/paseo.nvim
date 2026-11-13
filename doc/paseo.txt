@@ -421,6 +421,11 @@ ui.float.rail                                                       table
     make for themselves, which the app's sidebar hides unless "Show
     background" is on. Default false, as the app.
 
+    `indent_markers` draws nvim-tree's `│ └` down the left of a workspace's
+    sessions instead of plain indentation. Default false, as nvim-tree.
+    `hints` is the `a agent  w workspace  g? keys` line under the last row.
+    Default true.
+
     Each key is bound in NORMAL mode on the conversation, the composer and the
     rail, or `false` to leave it unbound. `sessions` goes into the rail ON THE
     SESSION ON SCREEN -- see |paseo-rail-sessions|.
@@ -1676,67 +1681,90 @@ and a green name. It is matched by the agent's workspace id, not by directory,
 so of several workspaces on one checkout only the right one is marked. The
 rail is one buffer, shown in a window on every agent's tab.
 
-A row ends with its agents' SUBAGENTS when they have any: a robot and the
-count, `󱙺 3` once they are done, or `󱙺 1/3` (running/total) in the running
-colour while some are working. Both kinds count -- see |:Paseo-subagents|.
+LINES CHANGED AND THE PULL REQUEST, as the app's sidebar row has them: a
+workspace that has changed anything against its base branch ends with
+`+120 -7`, right-aligned, and one with a pull request has a line under it --
+`#128 · ● 3/5` while CI runs, `✓ passed` or `✗ failed` once it has,
+`approved` or `changes` from review, `merged` or `closed` when it is over.
+All of it is the daemon's, pushed as it changes: the stat on every save, the
+pull request every twenty seconds while a check is pending. A pushed change
+is written over its row in place.
 
 `<C-b>` shows and hides it, and the choice is remembered across tabs and
 restarts: a rail you hid stays hidden on the next agent's tab and the next
 session. `<C-h>` goes into it -- showing it first if it was hidden -- and
 `<C-h>`, `q` or `<Esc>` go back to where you were typing. It is 32 cells wide
 by default (|paseo-config.ui.native| `rail`; `0` starts it hidden). See
-|paseo-config.ui.float.rail| for the keys.
+|paseo-config.ui.float.rail| for the keys and the look.
 
-PINNED workspaces lead the rail, with a pin; `P` pins or unpins the one
+PINNED workspaces lead the rail, with a pin; `m` pins or unpins the one
 under the cursor. The pin is the daemon's -- the same one the app's sidebar
 shows. BACKGROUND workspaces, which agents and plugins make for themselves,
 are hidden as the app hides them unless "Show background" is on;
-`ui.float.rail.show_background = true` shows them. The list refetches the
-moment the daemon says a workspace changed -- created, archived, pinned or
-TITLED -- so a generated title appears when it is written, not on the next
-poll.
+`ui.float.rail.show_background = true` shows them. A change that moves a
+row -- created, archived, pinned or TITLED -- refetches the list, so a
+generated title appears when it is written, not on the next poll.
 
                                             *paseo-rail-sessions* *paseo-tree*
-EACH WORKSPACE OPENS INTO ITS SESSIONS on the rail, the way the app's sidebar
-nests them: its agents, each with its subagents under it, then its terminals.
-It replaced the Sessions tab. >
+IT IS A FILE TREE, AND IT IS DRIVEN LIKE nvim-tree. A workspace is a folder
+and opens into its sessions, the way the app's sidebar nests them: its
+agents, then its terminals. An agent with subagents is a folder too. >
 
-    paseo.nvim  3
-
-    ▌▾ ⠋ Fix the invoice rounding
-         • Fix the invoice rounding  2/3
-           ├ ⠋ Map the auth flow
-           ├ • Explore billing tests
-           └ ⠋ lint-fixer
-         • Add a regression test
+    paseo.nvim                        4
+     ▸ !  rail-spinner-fix   +75 -51
+           #131 · ✗ failed · changes
+    ▌▾ ⠋ main              +1240 -386
+           #128 · ● 3/5
+    ▌  ▾ ⠋ nvim-tree style rail
+           • Study nvim-tree rendering
+           ⠋ Research Paseo app sidebar
+       ▸ • review the sidecar diff  󱙺 1
          󰆍 zsh
-     ▸ • main
-     ▸ ○ otp-rate-limit
+     ▸ • upstream-0.16          +12 -0
+           #120 merged
+
+     a agent  w workspace  g? keys
 <
 The workspace on screen is open and the rest closed until you open them. An
-agent row has the same status glyph a workspace has, its title, and how many
-subagents it has (`running/total` while any run). Both kinds of subagent hang
-off their parent: a PROVIDER subagent (Claude's Task tool) opens read-only, a
-PASEO subagent -- an agent another agent started -- opens as an ordinary
-agent, and is listed once, under its parent. The bar marks the session on
-screen. A workspace's agents are its own, by id, so two workspaces on one
-checkout do not mix them.
+agent's subagents are open while one of them runs and folded once they are
+done, with how many on its row (`1/3` while some run, `3` after). Both kinds
+hang off their parent: a PROVIDER subagent (Claude's Task tool) opens
+read-only, a PASEO subagent -- an agent another agent started -- opens as an
+ordinary agent, and is listed once, under its parent. The bar and the band
+mark the session on screen. A workspace's agents are its own, by id, so two
+workspaces on one checkout do not mix them.
 
-`<C-s>` goes into the rail ON THE SESSION ON SCREEN, opening its workspace if
-you had closed it -- from the composer in either mode, from a terminal, or
-from any other buffer of the surface. In the rail: >
+EVERY REAL LINE IS A ROW. The pull request line, "no sessions yet" and the
+hints are virtual lines, so `j` `k`, counts, `gg` `G` and `/` are Vim's own
+and never stop on decoration. The cursor sits on the name, as nvim-tree's
+`hijack_cursor` keeps it, and stays on its row when rows above it come and go.
 
-    j k       move, over workspaces and sessions alike
-    <CR>      a workspace: open its agent in a tab of its own. A session:
-              show it (also `o`, a double click)
-    <Tab> za  open or close the workspace's sessions; `l` opens, `h` closes
+`<C-s>` goes into the rail ON THE SESSION ON SCREEN, unfolding what it is
+under -- from the composer in either mode, from a terminal, or from any other
+buffer of the surface. In the rail, nvim-tree's keys where it has one for the
+job (`g?` lists them): >
+
+    <CR> o    a session: open it in a tab of its own (also a double click).
+              A workspace: fold or unfold it
+    l         unfold; on something open, step onto its first row; on a
+              session, open it
+    h <BS>    fold; on a row that does not fold, fold the one it is in and
+              land on it
+    <Tab> za  fold or unfold
+    O         open the workspace as a place: its agent, in a tab of its own
+    P         up to the parent
+    < >       previous / next sibling
+    K J       first / last sibling
+    W E       fold everything (the cursor stays in its workspace) / unfold
+              everything
     a         new agent in the workspace under the cursor    |paseo-new|
     w         new agent in a new workspace
     t  c      new terminal in the workspace under the cursor
     y         copy the agent's ID
     R         rename the terminal
     d         archive the agent / kill the terminal (asked first)
-    P  r      pin the workspace / refetch the list
+    m  r      pin the workspace / refetch the list
+    g?        these keys
     q <Esc> <C-h> <C-s>   back to where you were typing
 <
                                                                    *paseo-new*

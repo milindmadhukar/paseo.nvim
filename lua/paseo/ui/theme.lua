@@ -573,6 +573,32 @@ function M.groups(t)
     PaseoAdd = { fg = on_surface(c.green) },
     PaseoDel = { fg = on_surface(c.red) },
 
+    -- The workspace rail, which is a file tree and is coloured like one:
+    -- nvim-tree's roles (root, folder, arrow, indent marker) on Paseo's
+    -- palette. A workspace is the folder; its sessions are the files in it.
+    PaseoTreeRoot = { fg = on_surface(c.blue), bold = true },
+    PaseoTreeFolder = { fg = on_surface(c.blue) },
+    PaseoTreeArrow = { fg = c.grey },
+    PaseoTreeIndent = { fg = c.border },
+    PaseoTreeSession = { fg = c.text },
+    PaseoTreeSubagent = { fg = c.grey },
+    -- Where you are: the workspace and the session on screen.
+    PaseoTreeCurrent = { fg = on_surface(c.green), bold = true },
+    -- `+12 -3`, beside a workspace: the app's sidebar diff stat.
+    PaseoTreeAdded = { fg = on_surface(c.green) },
+    PaseoTreeRemoved = { fg = on_surface(c.red) },
+    -- The line under a workspace: its pull request and its CI.
+    PaseoTreeMeta = { fg = c.grey },
+    PaseoTreePrOpen = { fg = on_surface(c.green) },
+    -- Purple, as the app and GitHub both draw merged -- there is no purple
+    -- in the eight, so it is mixed from the two it sits between.
+    PaseoTreePrMerged = { fg = on_surface(M.blend(c.blue, c.red, 45) or c.blue) },
+    PaseoTreePrClosed = { fg = on_surface(c.red) },
+    PaseoTreePrDraft = { fg = c.grey },
+    PaseoTreeChecksPassed = { fg = on_surface(c.green) },
+    PaseoTreeChecksFailed = { fg = on_surface(c.red) },
+    PaseoTreeChecksRunning = { fg = on_surface(c.yellow) },
+
     -- The text ramp. Three weights, and the faint one is what every divider
     -- and disabled row is drawn in -- a rule at content weight is the single
     -- commonest way a terminal UI ends up looking busy.

@@ -2,27 +2,24 @@
 --- subagents nested under it, then its terminals.
 ---
 --- DRAWN BY THE RAIL, under the workspace's own row, the way the app's
---- sidebar nests a workspace's agents under it. This module owns no window:
---- it decides which sessions belong to a workspace, how each one's row reads,
---- and what opening or archiving one does. |paseo.ui.rail| decides which
---- workspaces are expanded and where the rows go.
+--- sidebar nests a workspace's agents under it. This module owns no window
+--- and draws nothing: it decides which sessions belong to a workspace, how
+--- they nest, what state each one is in, and what opening or archiving one
+--- does. |paseo.ui.rail| decides which nodes are open and where the rows go.
 ---
 --- A TREE because agents have children. A provider subagent (Claude's Task
 --- tool) and a Paseo subagent (an agent another agent started) both hang off
 --- their parent, as they do in the app's track above the composer, and a Paseo
---- subagent can have children of its own.
+--- subagent can have children of its own -- so an agent folds the way a
+--- directory does in a file tree.
 
 local icons = require "paseo.ui.icons"
-local render = require "paseo.ui.render"
 local widgets = require "paseo.ui.widgets"
 
 local M = {}
 
----How deep the tree is drawn. Past this the indent eats the title.
+---How deep the tree goes. Past this the indent eats the title.
 M.MAX_DEPTH = 3
-
----The indent a workspace's sessions sit at, under its row.
-M.INDENT = "    "
 
 -- -------------------------------------------------------------------- data
 
@@ -63,13 +60,29 @@ function M.workspace_terminals(ws, host_id)
   return terminals.for_root(dir, host_id)
 end
 
----The workspace's sessions as a tree: `{ kind, item, depth, last, prefix,
----children, running, ws }` nodes in drawing order, then its terminals.
+---@class paseo.TreeNode
+---@field kind "agent"|"subagent"|"terminal"
+---@field item table      The agent, subagent or terminal.
+---@field ws table        The workspace it is under.
+---@field depth integer   0 for a workspace's own sessions.
+---@field parent paseo.TreeNode|nil
+---@field kids paseo.TreeNode[]  Its subagents, in order. Empty for a leaf.
+---@field running integer How many of `kids` are running.
+
+---A stable key for a node, for remembering whether it is open.
+---@param node paseo.TreeNode
+---@return string
+function M.key(node)
+  return node.kind .. ":" .. tostring(node.item.id or node.item.title or "?")
+end
+
+---The workspace's sessions as a forest: its agents, each with its subagents
+---as `kids` (recursively), then its terminals.
 ---@param ws table
 ---@param chat? table  The chat on screen -- its own agent's subagents are
 ---                    already followed by the chat.
----@return table[] nodes, table[] terminals
-function M.nodes(ws, chat)
+---@return paseo.TreeNode[]
+function M.forest(ws, chat)
   local subagents = require "paseo.subagents"
   local host_id = ws.hostId or (chat and chat.host_id)
   local list = M.workspace_agents(ws, host_id)
@@ -80,86 +93,127 @@ function M.nodes(ws, chat)
   for _, agent in ipairs(list) do
     ids[agent.id] = true
   end
-  local top = {}
-  for _, agent in ipairs(list) do
-    local parent = agent.labels and agent.labels[subagents.PARENT_LABEL]
-    if not (parent and ids[parent]) then
-      top[#top + 1] = agent
+
+  local function build(kind, item, depth, parent)
+    local node =
+      { kind = kind, item = item, depth = depth, parent = parent, ws = ws, kids = {}, running = 0 }
+    local id = item.id
+    if depth >= M.MAX_DEPTH or not id then
+      return node
     end
+    local parent_kind = kind == "agent" or item.kind == "paseo"
+    if not parent_kind then
+      return node
+    end
+    -- Provider subagents are only known to a session that asked; `track`
+    -- asks once per connection, and never starts a bridge to do it.
+    if not (chat and id == chat.agent_id) then
+      pcall(subagents.track, id, host_id)
+    end
+    for _, child in ipairs(subagents.list(id, host_id) or {}) do
+      node.kids[#node.kids + 1] = build("subagent", child, depth + 1, node)
+      if child.running then
+        node.running = node.running + 1
+      end
+    end
+    return node
   end
 
   local out = {}
-  local function walk(kind, item, depth, last, prefix)
-    local node = { kind = kind, item = item, depth = depth, last = last, prefix = prefix, ws = ws }
+  for _, agent in ipairs(list) do
+    local parent = agent.labels and agent.labels[subagents.PARENT_LABEL]
+    if not (parent and ids[parent]) then
+      out[#out + 1] = build("agent", agent, 0, nil)
+    end
+  end
+  for _, item in ipairs(M.workspace_terminals(ws, host_id)) do
+    out[#out + 1] = { kind = "terminal", item = item, depth = 0, ws = ws, kids = {}, running = 0 }
+  end
+  return out
+end
+
+---Every node of a forest, depth first, whether or not it is drawn.
+---@param forest paseo.TreeNode[]
+---@return paseo.TreeNode[]
+function M.flatten(forest)
+  local out = {}
+  local function walk(node)
     out[#out + 1] = node
-    local id = item.id
-    if depth >= M.MAX_DEPTH or not id then
-      return
-    end
-    local parent_kind = kind == "agent" or item.kind == "paseo"
-    -- Provider subagents are only known to a session that asked; `track`
-    -- asks once per connection, and never starts a bridge to do it.
-    if parent_kind and not (chat and id == chat.agent_id) then
-      pcall(subagents.track, id, host_id)
-    end
-    local children = parent_kind and subagents.list(id, host_id) or {}
-    node.children = #children
-    local running = 0
-    for _, child in ipairs(children) do
-      if child.running then
-        running = running + 1
-      end
-    end
-    node.running = running
-    -- Every level's prefix carries the bar of the level above it unless that
-    -- level was the last of its siblings.
-    local below = depth == 0 and "" or (prefix .. (last and "  " or "│ "))
-    for i, child in ipairs(children) do
-      walk("subagent", child, depth + 1, i == #children, below)
+    for _, kid in ipairs(node.kids) do
+      walk(kid)
     end
   end
-  for _, agent in ipairs(top) do
-    walk("agent", agent, 0, false, "")
+  for _, node in ipairs(forest) do
+    walk(node)
   end
-
-  return out, M.workspace_terminals(ws, host_id)
+  return out
 end
 
--- ----------------------------------------------------------------- drawing
+-- ------------------------------------------------------------------- state
 
----@param agent table
+---A session's glyph and its colour: the rail's vocabulary for an agent, a
+---subagent's own for a subagent.
+---@param node paseo.TreeNode
 ---@return string glyph, string hl
-local function agent_glyph(agent)
-  return require("paseo.ui.rail").status(require("paseo.agents").bucket(agent))
-end
-
----@param s paseo.Subagent
----@return string glyph, string hl
-local function subagent_glyph(s)
-  if s.running then
+function M.glyph(node)
+  local item = node.item
+  if node.kind == "agent" then
+    return require("paseo.ui.rail").status(require("paseo.agents").bucket(item))
+  end
+  if node.kind == "terminal" then
+    local glyph = require("paseo.terminals").glyph(item)
+    return icons.panel.Terminals, glyph[2] == "PaseoDim" and "PaseoYellow1" or glyph[2]
+  end
+  if item.running then
     return widgets.spinner(), "PaseoBlue0"
   end
-  if s.status == "failed" or s.status == "error" then
+  if item.status == "failed" or item.status == "error" then
     return icons.status.idle, "PaseoToolFail"
   end
-  if s.status == "canceled" then
+  if item.status == "canceled" then
     return icons.status.canceled or icons.status.idle, "PaseoDim"
   end
   return icons.status.idle, "PaseoToolOk"
+end
+
+---What a session's row is called.
+---@param node paseo.TreeNode
+---@return string
+function M.title(node)
+  if node.kind == "terminal" then
+    return require("paseo.terminals").label(node.item)
+  end
+  if node.kind == "agent" then
+    return node.item.title or tostring(node.item.id):sub(1, 8)
+  end
+  return node.item.title or "subagent"
+end
+
+---Is anything at or under `node` running? A folded agent says so on its row.
+---@param node paseo.TreeNode
+---@return boolean
+function M.busy(node)
+  if node.running > 0 or (node.kind == "subagent" and node.item.running) then
+    return true
+  end
+  for _, kid in ipairs(node.kids) do
+    if M.busy(kid) then
+      return true
+    end
+  end
+  return false
 end
 
 ---Which session the native tab is showing.
 ---@param chat? table
 ---@return { kind?: string, id?: string }
 function M.on_screen(chat)
-  -- A native tab shows one agent: the chat's own.
-  local session = nil
-  -- An agent session with no id is the chat's own -- a draft whose first
-  -- message has since made it one.
-  if chat and (not session or (session.kind == "agent" and not session.id)) then
+  -- A native tab shows one agent: the chat's own -- a draft's too, once its
+  -- first message has made it one.
+  if chat then
     return { kind = "agent", id = chat.agent_id }
   end
-  return session or {}
+  return {}
 end
 
 ---Is `node` the session on screen?
@@ -179,94 +233,20 @@ function M.is_on_screen(node, here)
   return here.kind == "agent" and here.id == node.item.id
 end
 
----One session row: the bar for "on screen", the indent and tree prefix, the
----glyph, the title, and a right-hand count when there is room for one.
----@return table[]
-local function row(width, mine, prefix, glyph, glyph_hl, title, title_hl, right)
-  local left = {
-    { mine and icons.marker.mine or " ", "PaseoAgent" },
-    { M.INDENT .. prefix, "PaseoBorder" },
-    { glyph .. " ", glyph_hl },
-  }
-  local used = render.width(left)
-  local meta = right or {}
-  local meta_w = render.width(meta)
-  -- The title is what you read: the count goes before it does.
-  if used + meta_w + 6 > width then
-    meta, meta_w = {}, 0
+---Is the session on screen at or under `node`?
+---@param node paseo.TreeNode
+---@param here { kind?: string, id?: string }
+---@return boolean
+function M.holds(node, here)
+  if M.is_on_screen(node, here) then
+    return true
   end
-  local room = math.max(1, width - used - (meta_w > 0 and meta_w + 1 or 0))
-  vim.list_extend(
-    left,
-    render.truncate({ { title, mine and "PaseoAgent" or title_hl or "PaseoText" } }, room)
-  )
-  if meta_w > 0 then
-    -- Padded in the surface's own colour: the default pad is a card's.
-    return widgets.row(left, meta, width, "PaseoNormal")
-  end
-  return left
-end
-
----A workspace's session rows, as |paseo.ui.render| lines, and the node on
----each (by index into the lines returned).
----@param ws table
----@param chat? table
----@param width integer
----@param draft? boolean  The chat on screen is a draft in this workspace.
----@return table[][] lines, table<integer, table> nodes
-function M.lines(ws, chat, width, draft)
-  local out, at = {}, {}
-  local nodes, terms = M.nodes(ws, chat)
-  local here = M.on_screen(chat)
-
-  for _, node in ipairs(nodes) do
-    local item = node.item
-    local prefix = node.depth == 0 and "" or (node.prefix .. (node.last and "└ " or "├ "))
-    local mine = M.is_on_screen(node, here)
-    if node.kind == "agent" then
-      local glyph, hl = agent_glyph(item)
-      local right = {}
-      if (node.children or 0) > 0 then
-        local text = node.running > 0 and ("%d/%d"):format(node.running, node.children)
-          or tostring(node.children)
-        right[#right + 1] = { text, node.running > 0 and "PaseoToolRunning" or "PaseoDim" }
-      end
-      out[#out + 1] =
-        row(width, mine, prefix, glyph, hl, item.title or item.id:sub(1, 8), nil, right)
-    else
-      local glyph, hl = subagent_glyph(item)
-      out[#out + 1] = row(width, mine, prefix, glyph, hl, item.title or "subagent", "PaseoDim", nil)
+  for _, kid in ipairs(node.kids) do
+    if M.holds(kid, here) then
+      return true
     end
-    at[#out] = node
   end
-
-  -- A draft on this workspace: nothing is on the daemon yet, so say so where
-  -- the agent will appear.
-  if draft then
-    out[#out + 1] =
-      row(width, true, "", icons.status.pending, "PaseoDim", "new session", "PaseoText")
-  end
-
-  for _, item in ipairs(terms) do
-    local glyph = require("paseo.terminals").glyph(item)
-    local node = { kind = "terminal", item = item, depth = 0, ws = ws }
-    out[#out + 1] = row(
-      width,
-      M.is_on_screen(node, here),
-      "",
-      icons.panel.Terminals,
-      glyph[2] == "PaseoDim" and "PaseoYellow1" or glyph[2],
-      require("paseo.terminals").label(item),
-      nil,
-      nil
-    )
-    at[#out] = node
-  end
-
-  if #out == 0 then
-    out[1] = { { " " .. M.INDENT .. "no sessions yet", "PaseoDim" } }
-  end
-  return out, at
+  return false
 end
 
 -- ----------------------------------------------------------------- actions

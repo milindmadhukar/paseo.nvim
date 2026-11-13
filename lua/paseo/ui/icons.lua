@@ -157,6 +157,24 @@ M.ui = {
   mic = g(0xf036c), -- md-microphone
 }
 
+-- -------------------------------------------------------------------- tree
+--
+-- The workspace rail is a file tree, and folds like one: these are
+-- nvim-tree's own defaults for an open and a closed folder, so a rail beside
+-- an nvim-tree reads as the same kind of thing.
+
+M.tree = {
+  open = g(0xf47c), -- oct-chevron_down
+  closed = g(0xf460), -- oct-chevron_right
+  -- A pull request that is not merged, and the two ways it can be not open.
+  pr_closed = g(0xf4dc), -- oct-git_pull_request_closed
+  pr_draft = g(0xf4dd), -- oct-git_pull_request_draft
+  -- CI, as the app's sidebar summarises it.
+  passed = g(0xf42e), -- oct-check
+  failed = g(0xf467), -- oct-x
+  running = g(0xf444), -- oct-dot_fill
+}
+
 ---Braille spinner. Ten frames, so a full cycle is a round second at 100ms --
 ---which is what makes the elapsed counter beside it readable rather than
 ---strobing.
