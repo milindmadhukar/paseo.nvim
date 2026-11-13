@@ -3156,6 +3156,10 @@ OWN, so `gt`/`gT` move between agents.
     q                  close the tab. So does `:q` in the conversation or the
                        box. The agent lives on.
 
+Every pane sits on one background, the `PaseoBase` group: the editor's own
+under `ui.colors = "auto"`, the plugin's under `"fixed"`. Only the box you
+type in is a step raised.
+
 Entering a native tab makes its agent the current chat, so |:Paseo-mode|,
 |:Paseo-stop| and the rest act on the agent you are looking at.
 

@@ -175,6 +175,53 @@ local function test_panels()
   chat_mod.set_current(saved_current)
 end
 
+---ONE BACKGROUND for the whole tab, under either palette. The regression: the
+---rail, the panel and the box were on the plugin's tiers while the
+---conversation was on the editor's `Normal` -- under `ui.colors = "fixed"`, two
+---different colours side by side.
+local function test_uniform()
+  local native = require "paseo.ui.native"
+  local chat_mod = require "paseo.ui.chat"
+  local config = require "paseo.config"
+  local hl = require "paseo.ui.hl"
+  local theme = require "paseo.ui.theme"
+  local saved_current = chat_mod.current()
+
+  for _, mode in ipairs { "auto", "fixed" } do
+    config.setup { ui = { colors = mode } }
+    hl.setup()
+    local chat = new_chat("native-" .. mode)
+    native.open(chat)
+    native.cycle_panel()
+
+    local base = api.nvim_get_hl(0, { name = "PaseoBase" })
+    if mode == "auto" then
+      eq("native: under auto the base tier IS the editor's background", base.bg, api.nvim_get_hl(0, { name = "Normal" }).bg)
+    else
+      local want = theme.FIXED[vim.o.background == "light" and "light" or "dark"].bg
+      eq("native: under fixed it is the plugin's own", base.bg, tonumber(want:sub(2), 16))
+    end
+
+    for _, win in ipairs(api.nvim_tabpage_list_wins(0)) do
+      local what = vim.bo[api.nvim_win_get_buf(win)].filetype
+      if win ~= chat.win_composer then
+        truthy(
+          ("native: %s (%s) is on the base tier"):format(what, mode),
+          vim.wo[win].winhl:find("Normal:PaseoBase", 1, true) ~= nil,
+          vim.wo[win].winhl
+        )
+      end
+    end
+
+    native.close(chat)
+  end
+
+  config.setup {}
+  hl.setup()
+  native.reset()
+  chat_mod.set_current(saved_current)
+end
+
 ---The whole UI LOADS with volt off the runtimepath, and the native surface
 ---opens: in a child Neovim, since this one already has volt loaded.
 local function test_without_volt()
@@ -224,5 +271,6 @@ return {
   { "ui.native.layout", test_layout },
   { "ui.native.markdown", test_markdown },
   { "ui.native.panels", test_panels },
+  { "ui.native.uniform", test_uniform },
   { "ui.native.novolt", test_without_volt },
 }

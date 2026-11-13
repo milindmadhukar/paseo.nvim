@@ -107,6 +107,19 @@ end
 
 -- ------------------------------------------------------------------ windows
 
+---Every pane of this surface on the BASE tier (|paseo.ui.theme|'s
+---`PaseoBase`): the editor's own background under `ui.colors = "auto"`, the
+---plugin's under `"fixed"` -- the same one for every pane either way. The
+---box you type in is the one exception, a step raised (|paseo.ui.composer|).
+M.WINHL = table.concat({
+  "Normal:PaseoBase",
+  "NormalNC:PaseoBase",
+  "EndOfBuffer:PaseoBase",
+  "WinSeparator:PaseoBaseSeparator",
+  "WinBar:PaseoBase",
+  "WinBarNC:PaseoBase",
+}, ",")
+
 local CONVERSATION = {
   wrap = true,
   linebreak = true,
@@ -124,6 +137,7 @@ local CONVERSATION = {
   concealcursor = "",
   -- No `~` down an empty conversation.
   fillchars = "eob: ",
+  winhl = M.WINHL,
 }
 
 local function set_options(win, options)
@@ -291,7 +305,7 @@ local function show_panel(t, name)
     cursorline = true,
     winfixwidth = true,
     fillchars = "eob: ",
-    winhl = "Normal:PaseoNormal,EndOfBuffer:PaseoNormal",
+    winhl = M.WINHL .. ",CursorLine:PaseoRowHover",
   })
   vim.wo[t.panel_win].winbar = render.to_winbar {
     { "  " .. name, "PaseoHeader" },
@@ -451,6 +465,43 @@ end
 M.sync_spinner = sync_spinner
 
 -- ------------------------------------------------------------------- layout
+
+---Tell render-markdown.nvim the conversation changed.
+---
+---It redraws on `TextChanged`, `WinScrolled` and the like -- events that
+---never fire for a buffer written to from a callback while the cursor is in
+---the box. So a reply landed in the buffer and stayed raw until something
+---happened to scroll. One nudge per burst of writes, to its group alone.
+---@param chat table
+local function watch_markdown(chat)
+  local buf = chat.conversation
+  if chat.markdown_watched == buf or not (buf and api.nvim_buf_is_valid(buf)) then
+    return
+  end
+  chat.markdown_watched = buf
+  local pending = false
+  api.nvim_buf_attach(buf, false, {
+    on_lines = function()
+      if not chat.markdown then
+        chat.markdown_watched = nil
+        return true -- detach; reattached when markdown mode comes back
+      end
+      if pending then
+        return
+      end
+      pending = true
+      vim.defer_fn(function()
+        pending = false
+        if api.nvim_buf_is_valid(buf) then
+          pcall(api.nvim_exec_autocmds, "TextChanged", { group = "RenderMarkdown", buffer = buf })
+        end
+      end, 30)
+    end,
+    on_detach = function()
+      chat.markdown_watched = nil
+    end,
+  })
+end
 
 ---The conversation is markdown on this surface; nowhere else is it.
 ---@param chat table
@@ -673,6 +724,7 @@ function M.open(chat)
   -- alone -- its group, nobody else's handlers -- now there is a window.
   if config().markdown then
     pcall(api.nvim_exec_autocmds, "FileType", { group = "RenderMarkdown", buffer = chat.conversation })
+    watch_markdown(chat)
   end
 
   -- Prose is width-free in markdown mode, but the tool cards are not: draw

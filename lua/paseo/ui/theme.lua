@@ -625,6 +625,15 @@ function M.groups(t)
   end
 
   if t.opaque then
+    -- THE BASE TIER, for surfaces made of ordinary splits (|paseo.ui.native|).
+    -- With `ui.colors = "auto"` it IS the editor's `Normal`; with `"fixed"` it
+    -- is the plugin's own background -- and every pane of the surface is put on
+    -- it, the conversation included, so the panes agree with each other
+    -- whichever palette is in use. Without it the conversation sat on the
+    -- colourscheme's background beside panes on the plugin's.
+    groups.PaseoBase = { fg = c.text, bg = bg.bg0 }
+    groups.PaseoBaseSeparator = { fg = c.border, bg = bg.bg0 }
+
     groups.PaseoNormal = { bg = bg.bg1 }
     -- fg == bg is the whole trick: `nvim_open_win`'s border glyphs render as
     -- solid colour, so the border becomes a one-cell padding ring in the
@@ -750,6 +759,8 @@ function M.groups(t)
     -- card degrades to a drawn rule. Selection is then signalled by removing
     -- dimming rather than by adding a background, which is exactly what typr
     -- does on the same constraint.
+    groups.PaseoBase = { fg = c.text }
+    groups.PaseoBaseSeparator = { fg = c.border }
     groups.PaseoNormal = {}
     groups.PaseoNormalBorder = { fg = c.border }
     groups.PaseoSurfaceBorder = { fg = c.border }

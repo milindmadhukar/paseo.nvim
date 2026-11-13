@@ -935,6 +935,14 @@ end
 function M.adopt(w)
   win, adopted = w, true
   M.style(w)
+  -- On the native surface's base tier, like every other pane there, rather
+  -- than the dashboard's raised sheet.
+  local native = package.loaded["paseo.ui.native"]
+  if native and native.WINHL then
+    pcall(function()
+      vim.wo[w].winhl = native.WINHL .. ",CursorLine:PaseoRowHover"
+    end)
+  end
   -- `minimal` is a float style; a split has to be told.
   for option, value in pairs {
     number = false,

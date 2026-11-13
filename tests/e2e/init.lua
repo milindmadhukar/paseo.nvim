@@ -36,6 +36,8 @@ require("paseo").setup {
   },
   ui = {
     surface = vim.env.PASEO_E2E_SURFACE or "float",
+    -- PASEO_E2E_UI_COLORS=fixed checks the plugin's own palette.
+    colors = vim.env.PASEO_E2E_UI_COLORS or "auto",
   },
 }
 

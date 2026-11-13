@@ -45,7 +45,7 @@ case "${1:-}" in
     tmux new-session -d -s "$session" -x "$cols" -y "$rows" -c "$cwd" \
       "env PASEO_TEST_DEPS='$deps' PASEO_E2E_URL='$PASEO_E2E_URL' PASEO_E2E_HOME='$PASEO_E2E_HOME' \
        XDG_STATE_HOME='$PASEO_E2E_ROOT/xdg/state' XDG_DATA_HOME='$PASEO_E2E_ROOT/xdg/data' \
-       PASEO_E2E_SURFACE='${PASEO_E2E_SURFACE:-float}' PASEO_E2E_NOVOLT='${PASEO_E2E_NOVOLT:-}' PASEO_E2E_COLORS='${PASEO_E2E_COLORS:-habamax}' \
+       PASEO_E2E_SURFACE='${PASEO_E2E_SURFACE:-float}' PASEO_E2E_NOVOLT='${PASEO_E2E_NOVOLT:-}' PASEO_E2E_UI_COLORS='${PASEO_E2E_UI_COLORS:-auto}' PASEO_E2E_COLORS='${PASEO_E2E_COLORS:-habamax}' \
        nvim --listen '$sock' -i NONE -u '$here/init.lua'"
     for _ in $(seq 1 50); do
       [ -S "$sock" ] && remote '1' >/dev/null 2>&1 && exit 0

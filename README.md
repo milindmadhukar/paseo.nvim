@@ -616,6 +616,9 @@ between them.
   one `:Paseo mode`, `:Paseo stop` and the rest act on.
 - `q`, or `:q` in the conversation or the box, closes the tab. The agent and
   your draft live on.
+- **One background for every pane.** It is your editor's own with
+  `ui.colors = "auto"` and the plugin's with `"fixed"`, but the same
+  across the tab either way. Only the box you type in is a step raised.
 
 Without volt, `:Paseo dash` and `:Paseo buf` open this instead. Popups,
 questions and the permission dialog are drawn as plain lines, with the same
