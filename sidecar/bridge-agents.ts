@@ -109,6 +109,28 @@ export function describeAgent(agent: any): Record<string, unknown> {
 }
 
 /**
+ * History entries, archived only, as the search lists them: the directory's
+ * shape plus what the row matches on -- the branch, workspace and project names
+ * a live agent gets from its workspace, which an archived one may not have.
+ */
+export function describeHistory(entries: any[]): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  for (const { agent, project } of entries) {
+    if (!agent?.archivedAt || agent.internal) continue;
+    const checkout = project?.checkout ?? {};
+    out.push({
+      ...describeAgent(agent),
+      archivedAt: agent.archivedAt,
+      updatedAt: agent.updatedAt ?? null,
+      branch: checkout.currentBranch ?? null,
+      workspaceName: project?.workspaceName ?? null,
+      projectName: project?.projectName ?? null,
+    });
+  }
+  return out;
+}
+
+/**
  * Follow the agent directory, once.
  *
  * THIS IS ALSO THE DEMAND CHANNEL, which is not obvious and cost an afternoon.
@@ -249,6 +271,26 @@ export function agentOps(ctx: BridgeConnection): Ops {
       return {
         entries: req.cwd ? entries.filter((e) => e.cwd === req.cwd) : entries,
       };
+    },
+
+    // PAST chats, for the search. The directory above never carries an
+    // archived agent -- every list here passes `includeArchived: false` -- and
+    // history is the one request that does (the daemon defaults it on, and
+    // counts agents whose process is gone). Only the archived ones come back:
+    // the live ones are already in Lua's directory, fresher than this is.
+    //
+    // Never fatal. A host too old for history, or one that refuses, leaves the
+    // search with its live rows rather than with an error over all of them.
+    async "agents.history"(req) {
+      try {
+        const page: any = await ctx.raw().fetchAgentHistory({
+          sort: [{ key: "updated_at", direction: "desc" }],
+          page: { limit: Math.min(Number(req.limit ?? 200), 200) },
+        } as any);
+        return { entries: describeHistory(page?.entries ?? []) };
+      } catch {
+        return { entries: [] };
+      }
     },
 
     async "agent.find"(req) {

@@ -7,9 +7,10 @@ import {
   matchesReviewAgent,
   preferredAgent,
   creationConfig,
+  describeHistory,
 } from "./bridge-agents.ts";
 import { providerOps, describeSettings } from "./bridge-providers.ts";
-import { describeItem } from "./bridge-timeline.ts";
+import { describeItem, timelineOps } from "./bridge-timeline.ts";
 import { terminalOps } from "./bridge-terminals.ts";
 import {
   describePullRequest,
@@ -1242,4 +1243,100 @@ test("followDirectory: two at once subscribe once", async () => {
   assert.ok(ctx.directory);
   await followDirectory(ctx);
   assert.equal(lists, 1);
+});
+
+test("history lists only archived agents, with the names a search matches", () => {
+  const rows = describeHistory([
+    { agent: { id: "live", title: "Live", archivedAt: null }, project: {} },
+    {
+      agent: { id: "internal", title: "x", archivedAt: "2026-01-01", internal: true },
+      project: {},
+    },
+    {
+      agent: {
+        id: "old",
+        title: "Old chat",
+        status: "closed",
+        cwd: "/w/old",
+        archivedAt: "2026-01-02",
+        updatedAt: "2026-01-03",
+      },
+      project: {
+        projectName: "paseo.nvim",
+        workspaceName: "search",
+        checkout: { currentBranch: "feat/search" },
+      },
+    },
+  ]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, "old");
+  assert.equal(rows[0].branch, "feat/search");
+  assert.equal(rows[0].workspaceName, "search");
+  assert.equal(rows[0].projectName, "paseo.nvim");
+  assert.equal(rows[0].archivedAt, "2026-01-02");
+  assert.equal(rows[0].updatedAt, "2026-01-03");
+});
+
+test("history asks newest first and never fails the search", async () => {
+  let asked: any = null;
+  const ctx = new BridgeConnection();
+  (ctx as any).daemon = {
+    async fetchAgentHistory(options: any) {
+      asked = options;
+      return { entries: [] };
+    },
+  };
+  assert.deepEqual(
+    await agentOps(ctx)["agents.history"]({ op: "agents.history", limit: 500 }),
+    { entries: [] },
+  );
+  assert.deepEqual(asked.sort, [{ key: "updated_at", direction: "desc" }]);
+  assert.equal(asked.page.limit, 200);
+
+  (ctx as any).daemon = {
+    async fetchAgentHistory() {
+      throw new Error("unknown message");
+    },
+  };
+  assert.deepEqual(
+    await agentOps(ctx)["agents.history"]({ op: "agents.history" }),
+    { entries: [] },
+  );
+});
+
+test("prompt index is capability-gated without throwing", async () => {
+  let asked: string | null = null;
+  const ctx = new BridgeConnection();
+  (ctx as any).daemon = {
+    getLastServerInfoMessage: () => ({ features: {} }),
+    async listAgentTimelinePrompts(id: string) {
+      asked = id;
+      return { prompts: [] };
+    },
+  };
+  const ops = timelineOps(ctx);
+  assert.deepEqual(await ops["timeline.prompts"]({ op: "timeline.prompts", agentId: "a1" }), {
+    unsupported: true,
+    prompts: [],
+  });
+  assert.equal(asked, null);
+
+  (ctx as any).daemon = {
+    getLastServerInfoMessage: () => ({
+      features: { agentTimelinePromptIndex: true },
+    }),
+    async listAgentTimelinePrompts(id: string) {
+      asked = id;
+      return {
+        epoch: "e1",
+        error: null,
+        prompts: [{ seq: 4, timestamp: "t", preview: "fix the rail" }],
+      };
+    },
+  };
+  assert.deepEqual(await ops["timeline.prompts"]({ op: "timeline.prompts", agentId: "a1" }), {
+    epoch: "e1",
+    prompts: [{ seq: 4, timestamp: "t", preview: "fix the rail" }],
+  });
+  assert.equal(asked, "a1");
 });

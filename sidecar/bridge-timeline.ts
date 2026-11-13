@@ -335,6 +335,31 @@ export function timelineOps(ctx: BridgeConnection): Ops {
       };
     },
 
+    // Every prompt you sent in one chat, `{seq, timestamp, preview}`: the
+    // daemon's chat outline, which is what lets the search find a chat by what
+    // you asked it. Gated, but never thrown: a host without the index gives the
+    // search no prompt rows, and the names still match.
+    async "timeline.prompts"(req) {
+      const agentId = String(need(req.agentId, "agentId"));
+      const raw = ctx.raw();
+      if (
+        raw.getLastServerInfoMessage()?.features?.agentTimelinePromptIndex !==
+        true
+      ) {
+        return { unsupported: true, prompts: [] };
+      }
+      const page: any = await raw.listAgentTimelinePrompts(agentId);
+      if (page?.error) throw new Error(String(page.error));
+      return {
+        epoch: page?.epoch ?? null,
+        prompts: (page?.prompts ?? []).map((p: any) => ({
+          seq: p.seq,
+          timestamp: p.timestamp ?? null,
+          preview: p.preview ?? "",
+        })),
+      };
+    },
+
     async "timeline.unsubscribe"(req) {
       const id = String(need(req.agentId, "agentId"));
       const entry = ctx.timelines.get(id);
