@@ -551,11 +551,6 @@ local function tree_groups(fixed)
     { "PaseoTreeEndOfBuffer", "NvimTreeEndOfBuffer", "PaseoBase" },
     { "PaseoTreeCursorLine", "NvimTreeCursorLine", "CursorLine" },
     { "PaseoTreeWinSeparator", "NvimTreeWinSeparator", "WinSeparator" },
-    { "PaseoTreeRoot", "NvimTreeRootFolder", "Title" },
-    { "PaseoTreeFolder", "NvimTreeFolderName", "Directory" },
-    { "PaseoTreeFolderIcon", "NvimTreeFolderIcon", "Directory" },
-    { "PaseoTreeArrowOpen", "NvimTreeFolderArrowOpen", "Directory" },
-    { "PaseoTreeArrowClosed", "NvimTreeFolderArrowClosed", "NonText" },
     { "PaseoTreeIndent", "NvimTreeIndentMarker", "NonText" },
     { "PaseoTreeSession", "NvimTreeFileName", "Normal" },
     -- The session on screen is the file that is open.
@@ -563,7 +558,6 @@ local function tree_groups(fixed)
     -- A subagent and an agent that has finished are quiet, as a hidden or
     -- ignored file is.
     { "PaseoTreeSubagent", "Comment", "Comment" },
-    { "PaseoTreeIdle", "Comment", "Comment" },
     { "PaseoTreeMeta", "Comment", "Comment" },
     -- State, as nvim-tree says it about files: diagnostics.
     { "PaseoTreeRunning", "NvimTreeDiagnosticInfoIcon", "DiagnosticInfo" },
@@ -589,7 +583,6 @@ local function tree_groups(fixed)
     "PaseoTreeFailed",
     "PaseoTreeUnread",
     "PaseoTreeSubagent",
-    "PaseoTreeIdle",
     "PaseoTreeMeta",
   } do
     local target = out[name].link
@@ -690,12 +683,23 @@ function M.groups(t)
   for name, spec in pairs(tree_groups(require("paseo.config").get().ui.colors == "fixed")) do
     groups[name] = spec
   end
+  -- The rail's own, from the app's sidebar rather than from nvim-tree: the
+  -- dot a finished row keeps so the column of statuses has an edge (the app
+  -- draws it at 30% opacity -- here, mostly background), and the project
+  -- header's name, muted under the workspaces' titles.
+  groups.PaseoTreeIdle = { fg = M.blend(c.grey, bg.bg0 or c.bg, 55) or c.grey }
+  groups.PaseoTreeProject = { fg = c.grey, bold = true }
 
   -- Identity swatches: one per hue, legible on the surface they are drawn on.
   -- A repo, a project, an agent -- anything whose colour means "this one" and
   -- not "this is good" or "this is broken".
   for i, hue in ipairs(M.hues(c.blue, M.SWATCHES)) do
     groups["PaseoSwatch" .. i] = { fg = M.readable(hue, bg.bg1 or c.bg, M.MIN_CONTRAST) }
+    -- The project's letter tile on the rail, as the app's sidebar draws a
+    -- project: the initial on a muted square of its colour.
+    local fill = M.blend(hue, bg.bg0 or c.bg, 45)
+    groups["PaseoTreeTile" .. i] = fill and { fg = c.text, bg = fill, bold = true }
+      or { fg = M.readable(hue, c.bg, M.MIN_CONTRAST), bold = true, reverse = true }
   end
 
   -- The accent ramps, as groups, so a `lines()` closure can name a stop

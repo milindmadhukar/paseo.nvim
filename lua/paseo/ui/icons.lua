@@ -157,39 +157,6 @@ M.ui = {
   mic = g(0xf036c), -- md-microphone
 }
 
--- -------------------------------------------------------------------- tree
---
--- The workspace rail is a file tree, and folds like one: these are
--- nvim-tree's own defaults for an open and a closed folder, so a rail beside
--- an nvim-tree reads as the same kind of thing.
-
-M.tree = {
-  open = g(0xf47c), -- oct-chevron_down
-  closed = g(0xf460), -- oct-chevron_right
-  -- A workspace is a folder, drawn with the folder nvim-tree draws.
-  folder = g(0xe5ff), -- custom-folder
-  folder_open = g(0xe5fe), -- custom-folder_open
-  -- What is in it, each with the one icon its kind always has -- the way a
-  -- file's icon says its type -- coloured by what it is doing.
-  agent = g(0xf06a9), -- md-robot
-  subagent = g(0xf167a), -- md-robot_outline
-  terminal = g(0xe795), -- dev-terminal
-  -- After a workspace's name, the way nvim-tree puts git status after a
-  -- file's: only when there is something to say.
-  waiting = g(0xf071), -- fa-warning
-  -- nvim-tree's own diagnostic glyph, so a failed workspace reads as an
-  -- error does in the tree beside it.
-  error = g(0xf057), -- fa-times_circle
-  unread = g(0xf444), -- oct-dot_fill
-  -- A pull request that is not merged, and the two ways it can be not open.
-  pr_closed = g(0xf4dc), -- oct-git_pull_request_closed
-  pr_draft = g(0xf4dd), -- oct-git_pull_request_draft
-  -- CI, as the app's sidebar summarises it.
-  passed = g(0xf42e), -- oct-check
-  failed = g(0xf467), -- oct-x
-  running = g(0xf444), -- oct-dot_fill
-}
-
 ---Braille spinner. Ten frames, so a full cycle is a round second at 100ms --
 ---which is what makes the elapsed counter beside it readable rather than
 ---strobing.

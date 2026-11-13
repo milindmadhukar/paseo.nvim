@@ -1662,47 +1662,41 @@ from the keyboard; and the plugin needs nothing to draw any of it.
                                                                   *paseo-rail*
 THE WORKSPACE RAIL is the split down the left of every agent's tab: each
 workspace in the project you are standing in, with what its agents are
-doing -- the desktop app's sidebar, drawn as nvim-tree draws a tree, with
-the app's rule deciding each one's state. A workspace says it after its name,
-as nvim-tree puts a file's git status, and says nothing once its agents are
-done; an agent says it with its icon: >
+doing -- the desktop app's sidebar, laid out as it is: the project's tile
+and name, one row per workspace with its lines changed at the right, and a
+workspace's agents, subagents and terminals under it, NESTED BY INDENTATION
+ALONE -- no arrows, no folder icons.
 
-    ⠋  spinner          an agent is working, or a subagent of one is
-      warning          one is waiting on you -- a permission or a question
-      error            a turn failed
-    ●  dot, blue robot  a turn finished while you were elsewhere
-    󰚩  grey robot       done
+EVERY ROW LEADS WITH ONE STATUS SLOT, as the app's does: one cell, one plain
+character, never a nerd-font icon (a terminal like Ghostty lets those spill
+into the next cell and swallow the gap after them): >
+
+    ⠋  spinner          working, or a subagent is
+    !  warning colour   waiting on you -- a permission or a question
+    ✗  error colour     a turn failed
+    •  accent           finished while you were elsewhere
+    •  faint            done -- kept so the column has an edge
+    $                   a terminal
 <
 A workspace shows its MOST URGENT agent: one waiting on you among three
-running shows the warning. Only its OWN agents count, matched by workspace
-id, and so do its subagent counts: every agent the app starts in a checkout
-gets a workspace of its own on that same directory, and one running agent
-spins only its own row. THE SESSION ON SCREEN is the open file: its name is
-in nvim-tree's opened-file colour, and so is its workspace's while that is
-folded. It is matched by the agent's workspace id, not by directory, so of
-several workspaces on one checkout only the right one is marked. The rail is
-one buffer, shown in a window on every agent's tab.
+running shows the `!`. Only its OWN agents count, matched by workspace id,
+and so do its subagent counts: every agent the app starts in a checkout gets
+a workspace of its own on that same directory, and one running agent spins
+only its own row. THE SESSION ON SCREEN has its title in the opened-file
+colour (`NvimTreeOpenedHL` where the colourscheme has one), and so does its
+workspace while that is folded. The rail is one buffer, shown in a window on
+every agent's tab.
 
                                                            *paseo-rail-colors*
-COLOURED BY nvim-tree. Every role links to the nvim-tree group for the same
-role whenever the colourscheme (or nvim-tree) defines it -- >
-
-    PaseoTreeRoot        NvimTreeRootFolder         (else Title)
-    PaseoTreeFolder      NvimTreeFolderName         (else Directory)
-    PaseoTreeFolderIcon  NvimTreeFolderIcon         (else Directory)
-    PaseoTreeArrowOpen   NvimTreeFolderArrowOpen    (else Directory)
-    PaseoTreeArrowClosed NvimTreeFolderArrowClosed  (else NonText)
-    PaseoTreeCursorLine  NvimTreeCursorLine         (else CursorLine)
-    PaseoTreeOpened      NvimTreeOpenedHL           (else Special)
-    PaseoTreeNormal      NvimTreeNormal             (else the base tier)
-    PaseoTreeRunning     NvimTreeDiagnosticInfoIcon (else DiagnosticInfo)
-    PaseoTreeWaiting     NvimTreeDiagnosticWarnIcon (else DiagnosticWarn)
-    PaseoTreeFailed      NvimTreeDiagnosticErrorIcon(else DiagnosticError)
-<
--- so the rail beside an nvim-tree is the same tree in the same colours.
-They are re-read when nvim-tree first opens, since a lazy-loaded one defines
-its groups late. Under `ui.colors = "fixed"` the background stays the
-plugin's. `ui.theme` overrides any of them.
+The WINDOW is nvim-tree's: its background, cursor band and separator
+(`NvimTreeNormal`, `NvimTreeCursorLine`, `NvimTreeWinSeparator`) whenever
+the colourscheme (or nvim-tree) defines them, else the tab's base tier,
+`CursorLine` and `WinSeparator`; the status colours are its diagnostic icons'
+(else `DiagnosticInfo`, `DiagnosticWarn`, `DiagnosticError`,
+`DiagnosticHint`). Re-read when nvim-tree first opens, since a lazy-loaded
+one defines its groups late. Under `ui.colors = "fixed"` the background stays
+the plugin's. The project's tile is `PaseoTreeTile1`..`8`, picked by its name.
+All of them are `PaseoTree*`, and `ui.theme` overrides any of them.
 
 LINES CHANGED AND THE PULL REQUEST, as the app's sidebar row has them: a
 workspace that has changed anything against its base branch ends with
@@ -1729,32 +1723,34 @@ row -- created, archived, pinned or TITLED -- refetches the list, so a
 generated title appears when it is written, not on the next poll.
 
                                             *paseo-rail-sessions* *paseo-tree*
-IT IS A FILE TREE, AND IT IS DRIVEN LIKE nvim-tree. A workspace is a folder
-and opens into its sessions, the way the app's sidebar nests them: its
-agents, then its terminals. An agent with subagents is a folder too. >
+EACH WORKSPACE OPENS INTO ITS SESSIONS, the way the app nests them: its
+agents, then its terminals, and each agent's subagents under it. A workspace
+and an agent with subagents fold as nvim-tree's folders do. >
 
-      paseo.nvim                         4
-       rail-spinner-fix   +75 -51
-           #131 · ✗ failed · changes
-       main ⠋           +1240 -386
-           #128 · ● 3/5
-         ⠋ nvim-tree style rail
-             󰚩 Study nvim-tree rendering
-             ⠋ Research Paseo app sidebar
-         󰚩 review the sidecar diff 1
-           zsh
-       upstream-0.16          +12 -0
-           #120 merged
+       P   paseo.nvim                  5
+
+      !  rail-spinner-fix      +75 -51
+         #131 · ✗ failed · changes…
+      ⠋  main               +1240 -386
+         #128 · ● 3/5
+        ⠋  nvim-tree style rail
+          •  Study nvim-tree rendering
+          ⠋  Research Paseo app sidebar
+        •  review the sidecar diff  +1
+        $  zsh
+
+      ✗  upstream-0.16          +12 -0
+         #120 merged
 
       a agent  w workspace  g? keys
 <
 The workspace on screen is open and the rest closed until you open them. An
 agent's subagents are open while one of them runs and folded once they are
-done, with how many on its row (`1/3` while some run, `3` after). Both kinds
+done, with how many after its title (`1/3` while some run, `+3` after). Both kinds
 hang off their parent: a PROVIDER subagent (Claude's Task tool) opens
 read-only, a PASEO subagent -- an agent another agent started -- opens as an
-ordinary agent, and is listed once, under its parent. The cursor band is
-nvim-tree's, and only ever says where the cursor is. A workspace's agents are its own, by id, so two
+ordinary agent, and is listed once, under its parent. The cursor band only
+ever says where the cursor is. A workspace's agents are its own, by id, so two
 workspaces on one checkout do not mix them.
 
 EVERY REAL LINE IS A ROW. The pull request line, "no sessions yet" and the

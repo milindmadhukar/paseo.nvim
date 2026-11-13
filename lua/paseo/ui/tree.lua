@@ -13,9 +13,6 @@
 --- subagent can have children of its own -- so an agent folds the way a
 --- directory does in a file tree.
 
-local icons = require "paseo.ui.icons"
-local widgets = require "paseo.ui.widgets"
-
 local M = {}
 
 ---How deep the tree goes. Past this the indent eats the title.
@@ -151,20 +148,16 @@ end
 
 -- ------------------------------------------------------------------- state
 
----A session's icon and its colour. Each kind has one icon, as a file's type
----has -- a robot for an agent, an outlined one for a subagent, a prompt for a
----terminal -- coloured by what it is doing, in the editor's diagnostic
----colours: a spinner while it works, a warning when it waits on you, an
----error when its turn failed, the unread colour when it finished while you
----were away, and quiet when it is done.
+---A session's status slot: the same marks a workspace leads with
+---(|paseo.ui.rail|.badge), from its agent's state -- or, for a provider
+---subagent, from what its parent reports of it. A terminal is `$`.
 ---@param node paseo.TreeNode
----@return string icon, string hl
-function M.icon(node)
+---@return string mark, string hl
+function M.mark(node)
   local item = node.item
   if node.kind == "terminal" then
-    return icons.tree.terminal, "PaseoTreeTerminal"
+    return "$", "PaseoTreeTerminal"
   end
-  local idle = node.kind == "agent" and icons.tree.agent or icons.tree.subagent
   local bucket
   if node.kind == "agent" or item.kind == "paseo" then
     local agent = node.kind == "agent" and item or require("paseo.agents").get(item.id)
@@ -179,19 +172,7 @@ function M.icon(node)
       bucket = "done"
     end
   end
-  if bucket == "running" then
-    return widgets.spinner(), "PaseoTreeRunning"
-  end
-  if bucket == "needs_input" then
-    return icons.tree.waiting, "PaseoTreeWaiting"
-  end
-  if bucket == "failed" then
-    return icons.tree.error, "PaseoTreeFailed"
-  end
-  if bucket == "attention" then
-    return idle, "PaseoTreeUnread"
-  end
-  return idle, "PaseoTreeIdle"
+  return require("paseo.ui.rail").badge(bucket)
 end
 
 ---What a session's row is called.

@@ -460,78 +460,79 @@ nothing to draw any of it.
 #### The workspace rail
 
 Down the left of every agent's tab: each workspace in the project you are
-standing in, and what its agents are doing. It is the desktop app's
-sidebar, drawn as **nvim-tree** draws a tree, and it uses the app's rule to
-decide each one's state. A workspace says it after its name, the way
-nvim-tree puts a file's git status after it — and says nothing when its
-agents are done, which is most of the time. An agent says it with its icon:
+standing in, and what its agents are doing — the desktop app's sidebar, and
+laid out as it is: the project's tile and name at the top, then one row per
+workspace with its lines changed at the right, and a workspace's agents,
+subagents and terminals under it, **nested by indentation alone** — no
+arrows, no folder icons.
+
+**Every row leads with one status slot**, as the app's does: one cell, one
+plain character, never a nerd-font icon (a terminal like Ghostty lets those
+spill into the next cell and swallow the gap after them).
 
 | | |
 |---|---|
-| spinner | an agent is working — or a subagent of one is, after its parent's turn has ended |
-| warning (yellow) | one is waiting on you: a permission, or a question |
-| error (red) | a turn failed |
-| dot / blue robot | a turn finished while you were elsewhere |
-| grey robot | done |
+| `⠋` spinner | working — or a subagent is, after its parent's turn has ended |
+| `!` (warning colour) | waiting on you: a permission, or a question |
+| `✗` (error colour) | a turn failed |
+| `•` (accent) | finished while you were elsewhere |
+| `•` (faint) | done — kept so the column of statuses still has an edge |
+| `$` | a terminal |
 
 A workspace shows its **most urgent** agent, so one waiting on you among three
-running shows the warning. Only its **own** agents count, matched by workspace
+running shows the `!`. Only its **own** agents count, matched by workspace
 id: every agent the app starts in a checkout gets a workspace of its own on
 that same directory, and one running agent spins only its own row. **The
-session on screen** is the open file: its name is in nvim-tree's opened-file
-colour (`NvimTreeOpenedHL`), and so is its workspace's while that is folded.
-It is matched by the agent's workspace, not the directory, so when several
-workspaces share one checkout only the right one is marked.
+session on screen** has its title in the opened-file colour
+(`NvimTreeOpenedHL` where your colourscheme has one), and so does its
+workspace while that is folded.
 
-**Coloured by nvim-tree.** Every role links to the nvim-tree group for the
-same role — `NvimTreeRootFolder`, `NvimTreeFolderName`, the two arrow groups,
-`NvimTreeCursorLine`, `NvimTreeOpenedHL`, the diagnostic icons — whenever your
-colourscheme defines it, so the rail beside an nvim-tree is the same tree in
-the same colours; without one it falls back to where nvim-tree's own defaults
-point (`Title`, `Directory`, `CursorLine`). They are `PaseoTree*`, and
-`ui.theme` overrides any of them.
-
-**It is a file tree, and it is driven like nvim-tree.** A workspace is a
-folder; its agents and terminals are what is in it, and an agent with
-subagents is a folder too. What the app's sidebar row says goes on the row:
-the **lines the workspace has changed** against its base branch (`+120 -7`,
-right-aligned), and on a line under it, when there is one, its **pull
-request and CI** — `#128 · ● 3/5` while checks run, `✓ passed`, `✗ failed`,
-`approved` or `changes` from review, `merged` or `closed` once it is done.
-All of it is the daemon's, pushed as it changes: the diff stat on every save,
-the pull request every twenty seconds while a check is pending.
+What the app's row says goes on the row: the **lines the workspace has
+changed** against its base branch (`+120 -7`, right-aligned), and on a line
+under it, when there is one, its **pull request and CI** — `#128 · ● 3/5`
+while checks run, `✓ passed`, `✗ failed`, `approved` or `changes requested`,
+`merged` or `closed` once it is done. All of it is the daemon's, pushed as it
+changes: the diff stat on every save, the pull request every twenty seconds
+while a check is pending.
 
 ```
-  paseo.nvim                         4
-   rail-spinner-fix   +75 -51
-       #131 · ✗ failed · changes
-   main ⠋           +1240 -386
-       #128 · ● 3/5
-     ⠋ nvim-tree style rail
-         󰚩 Study nvim-tree rendering
-         ⠋ Research Paseo app sidebar
-     󰚩 review the sidecar diff 1
-      󰚩 docs sweep
-       zsh
-   upstream-0.16          +12 -0
-       #120 merged
-   voice-mode-experiment
+   P   paseo.nvim                  5
+
+  !  rail-spinner-fix      +75 -51
+     #131 · ✗ failed · changes…
+  ⠋  main               +1240 -386
+     #128 · ● 3/5
+    ⠋  nvim-tree style rail
+      •  Study nvim-tree rendering
+      ⠋  Research Paseo app sidebar
+    •  review the sidecar diff  +1
+    •  docs sweep
+    $  zsh
+
+  ✗  upstream-0.16          +12 -0
+     #120 merged
+  •  voice-mode-experiment
 
   a agent  w workspace  g? keys
 ```
 
+The window itself is nvim-tree's: its background, cursor band and separator
+(`NvimTreeNormal`, `NvimTreeCursorLine`, `NvimTreeWinSeparator`) when your
+colourscheme defines them, and the status colours are its diagnostic ones.
+The groups are `PaseoTree*`, and `ui.theme` overrides any of them.
+
 The workspace on screen is open and the rest are closed until you open them;
 an agent's subagents are open while one of them runs, and folded once they
-are done, with how many on its row (`1/3` while some run, `3` after). Both
+are done, with how many after its title (`1/3` while some run, `+3` after). Both
 kinds hang off their parent: a **provider** subagent (Claude's Task tool)
 opens read-only, a **Paseo** subagent (an agent another agent started) is an
 ordinary agent and opens as one, listed once, under its parent. The cursor
-band is nvim-tree's, and only ever says where the cursor is. A workspace's agents are its own, by
+band only ever says where the cursor is. A workspace's agents are its own, by
 workspace id, so two workspaces on one checkout do not mix them.
 
 **Every real line is a row.** The pull request line, "no sessions yet" and
 the hints are virtual lines, so `j`/`k`, counts, `gg`/`G` and `/` are Vim's
-own and never stop on decoration. The cursor sits on the name, as nvim-tree's
+own and never stop on decoration. The cursor sits on the title, as nvim-tree's
 `hijack_cursor` keeps it, and stays on the row it was on when rows above it
 come and go.
 
@@ -539,8 +540,9 @@ come and go.
 `<C-h>` moves into it, showing it first if it was hidden; **`<C-s>`** moves
 into it **on the session on screen**, unfolding what it is under — from the
 composer in either mode, from a terminal, and from every other buffer of the
-surface. Inside it, nvim-tree's keys where it has one for the job (`g?` lists
-them):
+surface. Inside it, nvim-tree's keys where it has one for the job — a
+workspace and an agent with subagents fold as nvim-tree's folders do (`g?`
+lists them):
 
 | | |
 |---|---|

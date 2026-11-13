@@ -100,20 +100,29 @@ local function test_buckets()
   eq("rail: the picker's summary is the workspace's", agents.summary(quiet, host), "2 idle")
   agents._apply { kind = "snapshot", hostId = host, entries = {} }
 
-  -- The glyphs the user asked for, by bucket.
+  -- The status slot, by bucket: one cell, one plain character -- never a
+  -- nerd-font icon, which a terminal like Ghostty spills over the gap after it.
   local rail = require "paseo.ui.rail"
   local icons = require "paseo.ui.icons"
   eq(
-    "rail: waiting is a yellow exclamation",
-    { rail.status "needs_input" },
-    { icons.status.waiting, "PaseoBadge" }
+    "rail: waiting is a warning-coloured !",
+    { rail.badge "needs_input" },
+    { "!", "PaseoTreeWaiting" }
   )
-  eq("rail: failed is a red dot", { rail.status "failed" }, { icons.status.idle, "PaseoToolFail" })
-  eq("rail: done is a green dot", { rail.status "done" }, { icons.status.idle, "PaseoToolOk" })
+  eq(
+    "rail: failed is an error-coloured cross",
+    { rail.badge "failed" },
+    { "✗", "PaseoTreeFailed" }
+  )
+  eq("rail: unread is a coloured dot", { rail.badge "attention" }, { "•", "PaseoTreeUnread" })
+  eq("rail: done keeps a dot, nearly background", { rail.badge "done" }, { "•", "PaseoTreeIdle" })
   truthy(
     "rail: running is a spinner frame",
-    vim.tbl_contains(icons.spinner, (rail.status "running"))
+    vim.tbl_contains(icons.spinner, (rail.badge "running"))
   )
+  for _, bucket in ipairs { "running", "needs_input", "failed", "attention", "done", "none" } do
+    eq(("rail: %s is one cell"):format(bucket), vim.fn.strdisplaywidth((rail.badge(bucket))), 1)
+  end
 end
 
 local function test_layout()
@@ -696,7 +705,7 @@ local function test_tree()
     end
     truthy(
       "tree: the diff stat is right-aligned on its row",
-      vim.tbl_contains(right, "+5 -2"),
+      vim.tbl_contains(right, "+5 -2 "),
       vim.inspect(right)
     )
     truthy("tree: the pull request is a line under it", #vim.tbl_filter(function(l)
@@ -710,8 +719,8 @@ local function test_tree()
       table.concat(lines(), "\n")
     )
     truthy(
-      "tree: and the row has the closed arrow",
-      lines()[line_of "finished parent"]:find(icons.tree.closed, 1, true)
+      "tree: and the row says how many it holds",
+      lines()[line_of "finished parent"]:find("+2", 1, true)
     )
 
     native.focus_rail()

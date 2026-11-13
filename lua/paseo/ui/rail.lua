@@ -355,52 +355,39 @@ end
 
 -- ---------------------------------------------------------------- drawing
 
----The glyph and highlight for a workspace's bucket. Public so the tests can
----hold the mapping to what the desktop app draws.
----@param bucket string  |paseo.agents|.workspace_bucket's answer.
----@return string glyph, string hl
-function M.status(bucket)
-  if bucket == "running" then
-    return widgets.spinner(), "PaseoBlue0"
-  end
-  if bucket == "needs_input" then
-    return icons.status.waiting, "PaseoBadge"
-  end
-  if bucket == "failed" then
-    return icons.status.idle, "PaseoToolFail"
-  end
-  if bucket == "attention" then
-    -- Finished while you were somewhere else: news, not a problem.
-    return icons.status.idle, "PaseoBlue0"
-  end
-  if bucket == "done" then
-    return icons.status.idle, "PaseoToolOk"
-  end
-  -- Never opened an agent here.
-  return icons.status.pending, "PaseoDim"
-end
-
----What a workspace says after its name, the way nvim-tree puts a file's git
----status after it: nothing when its agents are done -- most workspaces, most
----of the time -- and otherwise the one thing worth knowing. The same states
----the app's sidebar has, in the editor's diagnostic colours.
----@param bucket string  `M.bucket`'s answer.
----@return string|nil glyph, string|nil hl
+---The status slot every row of the rail leads with, as the app's sidebar
+---leads every row with one: one cell, one plain character, in the editor's
+---diagnostic colours. Busy is the only one that moves. A finished row keeps a
+---dot, nearly background, so the column of statuses still has an edge.
+---@param bucket string  `M.bucket` (or |paseo.agents|.bucket)'s answer.
+---@return string mark, string hl
 function M.badge(bucket)
   if bucket == "running" then
     return widgets.spinner(), "PaseoTreeRunning"
   end
   if bucket == "needs_input" then
-    return icons.tree.waiting, "PaseoTreeWaiting"
+    return "!", "PaseoTreeWaiting"
   end
   if bucket == "failed" then
-    return icons.tree.error, "PaseoTreeFailed"
+    return "✗", "PaseoTreeFailed"
   end
   if bucket == "attention" then
     -- Finished while you were somewhere else: unread, not a problem.
-    return icons.tree.unread, "PaseoTreeUnread"
+    return "•", "PaseoTreeUnread"
   end
-  return nil
+  return "•", "PaseoTreeIdle"
+end
+
+---A project's colour, by its name: the same project, the same tile, every
+---time.
+---@param name string
+---@return integer
+function M.swatch(name)
+  local h = 0
+  for i = 1, #name do
+    h = (h * 31 + name:byte(i)) % 2147483647
+  end
+  return h % 8 + 1
 end
 
 ---A workspace's state, SUBAGENTS INCLUDED.
@@ -584,41 +571,44 @@ function M.meta(ws)
   if type(pr) ~= "table" or not pr.number then
     return nil
   end
-  local glyph, hl, word = icons.ui.pull_request, "PaseoTreePrOpen", nil
+  -- Plain characters, as the status slot is: a nerd-font icon spills into
+  -- the cell after it in some terminals and takes the gap with it.
+  local hl, word = "PaseoTreePrOpen", nil
   if pr.state == "merged" then
-    glyph, hl, word = icons.ui.merged, "PaseoTreePrMerged", "merged"
+    hl, word = "PaseoTreePrMerged", "merged"
   elseif pr.state == "closed" then
-    glyph, hl, word = icons.tree.pr_closed, "PaseoTreePrClosed", "closed"
+    hl, word = "PaseoTreePrClosed", "closed"
   elseif pr.draft then
-    glyph, hl, word = icons.tree.pr_draft, "PaseoTreeMeta", "draft"
+    hl, word = "PaseoTreeMeta", "draft"
   end
-  local out = { { glyph .. " #" .. pr.number, hl } }
+  local out = { { "#" .. pr.number, hl } }
   if word then
     out[#out + 1] = { " " .. word, hl }
   end
+  local sep = { " " .. icons.marker.bullet .. " ", "PaseoTreeMeta" }
   -- CI only while it can still matter: a merged or closed PR's checks are
   -- history.
   if pr.state == "open" and pr.checks then
     local check = ({
-      passed = { icons.tree.passed, "PaseoTreeChecksPassed", "passed" },
-      failed = { icons.tree.failed, "PaseoTreeChecksFailed", "failed" },
-      running = { icons.tree.running, "PaseoTreeChecksRunning", "running" },
+      passed = { "✓ passed", "PaseoTreeChecksPassed" },
+      failed = { "✗ failed", "PaseoTreeChecksFailed" },
+      running = { "● running", "PaseoTreeChecksRunning" },
     })[pr.checks]
     if check then
-      local text = check[3]
+      local text = check[1]
       if pr.checks == "running" and (pr.checksTotal or 0) > 0 then
-        text = ("%d/%d"):format(pr.checksDone or 0, pr.checksTotal)
+        text = ("● %d/%d"):format(pr.checksDone or 0, pr.checksTotal)
       end
-      out[#out + 1] = { " " .. icons.marker.bullet .. " ", "PaseoTreeMeta" }
-      out[#out + 1] = { check[1] .. " " .. text, check[2] }
+      out[#out + 1] = sep
+      out[#out + 1] = { text, check[2] }
     end
   end
   if pr.state == "open" and pr.review == "approved" then
-    out[#out + 1] = { " " .. icons.marker.bullet .. " ", "PaseoTreeMeta" }
+    out[#out + 1] = sep
     out[#out + 1] = { "approved", "PaseoTreeChecksPassed" }
   elseif pr.state == "open" and pr.review == "changes_requested" then
-    out[#out + 1] = { " " .. icons.marker.bullet .. " ", "PaseoTreeMeta" }
-    out[#out + 1] = { "changes", "PaseoTreeChecksFailed" }
+    out[#out + 1] = sep
+    out[#out + 1] = { "changes requested", "PaseoTreeChecksFailed" }
   end
   return out
 end
@@ -642,32 +632,35 @@ end
 function M.build(width)
   local b = { lines = {}, rows = {}, right = {}, below = {} }
   local markers = M.options().indent_markers == true
-  -- nvim-tree's signcolumn: two cells down the left, so nothing is drawn
-  -- against the window edge.
+  -- Two cells down the left, so nothing is drawn against the window edge.
   local PAD = "  "
 
-  -- THE ROOT, as nvim-tree labels it (`root_folder_label = ":t"`): the
-  -- project's name, and how many workspaces it has.
+  -- THE PROJECT, as the app's sidebar heads one: its initial on a tile of its
+  -- own colour, then its name, muted under the titles of its workspaces.
   local name = cache.root and vim.fs.basename(cache.root) or "workspaces"
+  local initial = (name:match "[%w]" or "?"):upper()
+  local tile = "PaseoTreeTile" .. ((M.swatch(name) - 1) % 8 + 1)
   b.lines[1] = vim.list_extend(
-    { { PAD } },
-    render.truncate({ { name, "PaseoTreeRoot" } }, math.max(1, width - 6))
+    { { PAD }, { " " .. initial .. " ", tile }, { "  " } },
+    render.truncate({ { name, "PaseoTreeProject" } }, math.max(1, width - 10))
   )
   if cache.list then
     b.right[1] = { { tostring(#cache.list) .. " ", "PaseoTreeMeta" } }
   end
+  -- Air under the header, as the app leaves it.
+  b.below[1] = { { { "" } } }
 
   if not cache.list then
     b.lines[2] = {
       {
-        PAD .. "  " .. (cache.err and "unavailable" or "loading…"),
+        PAD .. (cache.err and "unavailable" or "loading…"),
         cache.err and "PaseoTreeFailed" or "PaseoTreeMeta",
       },
     }
     return b
   end
   if #cache.list == 0 then
-    b.lines[2] = { { PAD .. "  no workspaces", "PaseoTreeMeta" } }
+    b.lines[2] = { { PAD .. "no workspaces", "PaseoTreeMeta" } }
     return b
   end
 
@@ -675,18 +668,21 @@ function M.build(width)
   local tree = require "paseo.ui.tree"
   local here_session = tree.on_screen(chat)
 
-  ---Draw one row, as nvim-tree builds one: indent, arrow, icon, name, and what
-  ---comes after the name. `last` is, for each depth from 1, whether that
-  ---ancestor (or this row, at its own depth) is the last of its siblings --
-  ---what the indent markers need to know which bars continue.
-  ---@param spec { icon: string, icon_hl: string, name: string, name_hl: string, after?: table[], right?: table[] }
+  ---Draw one row: the status slot, then the title, then what follows it.
+  ---
+  ---EVERY STATUS IN ONE SLOT, as the app's sidebar keeps them: one cell, one
+  ---plain character -- never a nerd-font icon, which a terminal like Ghostty
+  ---lets spill into the next cell and so swallows the gap after it. Nesting
+  ---is the indent and nothing else; a folded agent says how many it holds
+  ---after its title.
+  ---@param spec { mark: string, mark_hl: string, name: string, name_hl: string, after?: table[], right?: table[] }
   local function emit(row, last, spec)
     local indent
     if markers and row.depth > 0 then
       local parts = {}
       for d = 1, row.depth do
         if d == row.depth then
-          parts[#parts + 1] = last[d] and "└ " or "│ "
+          parts[#parts + 1] = last[d] and "└ " or "├ "
         else
           parts[#parts + 1] = last[d] and "  " or "│ "
         end
@@ -695,16 +691,11 @@ function M.build(width)
     else
       indent = ("  "):rep(row.depth)
     end
-    local arrow, arrow_hl = "  ", "PaseoTreeIndent"
-    if row.open ~= nil then
-      arrow = (row.open and icons.tree.open or icons.tree.closed) .. " "
-      arrow_hl = row.open and "PaseoTreeArrowOpen" or "PaseoTreeArrowClosed"
-    end
     local left = {
       { PAD },
       { indent, "PaseoTreeIndent" },
-      { arrow, arrow_hl },
-      { spec.icon .. " ", spec.icon_hl },
+      { spec.mark, spec.mark_hl },
+      { "  " },
     }
     local col = 0
     for _, cell in ipairs(left) do
@@ -716,34 +707,34 @@ function M.build(width)
     local after = spec.after or {}
     local after_w = render.width(after)
     local used = render.width(left)
-    -- The name is what you read: the right-hand column goes before it does,
-    -- and the badges after it before that.
+    -- The title is what you read: the right-hand column goes before it does,
+    -- and what follows the title before that.
     if used + right_w + 6 > width then
       right, right_w = {}, 0
     end
     if used + after_w + right_w + 4 > width then
       after, after_w = {}, 0
     end
-    local room = math.max(1, width - used - after_w - (right_w > 0 and right_w + 1 or 0))
+    local room = math.max(1, width - used - after_w - (right_w > 0 and right_w + 2 or 1))
     vim.list_extend(left, render.truncate({ { spec.name, spec.name_hl } }, room))
     vim.list_extend(left, after)
     local line = #b.lines + 1
     b.lines[line] = left
     b.rows[line] = row
     if right_w > 0 then
-      b.right[line] = right
+      b.right[line] = vim.list_extend(vim.deepcopy(right), { { " " } })
     end
     return line
   end
 
-  ---Something under a row that is not a row: a virtual line, indented to the
-  ---row's name.
+  ---Something under a row that is not a row: a virtual line, under the row's
+  ---title.
   local function below(line, chunks)
     local row = b.rows[line]
     local pad = row and render.width(vim.list_slice(b.lines[line], 1, 4)) or 2
     b.below[line] = b.below[line] or {}
     -- Cut to the window: a virtual line is not wrapped or clipped for us.
-    chunks = render.truncate(chunks, math.max(1, width - pad))
+    chunks = render.truncate(chunks, math.max(1, width - pad - 1))
     table.insert(b.below[line], vim.list_extend({ { (" "):rep(pad) } }, chunks))
   end
 
@@ -752,27 +743,20 @@ function M.build(width)
     local here = i == current
     local open = M.is_expanded(ws, here)
     local key = ws_key(ws)
-    -- AFTER THE NAME, as nvim-tree puts a file's git status: the pin, and the
-    -- workspace's state -- only when it has one worth saying. A workspace
-    -- whose agents are done says nothing; that is most of them.
+    local mark, mark_hl = M.badge(M.bucket(ws))
+    -- No pin drawn: pinned workspaces lead the list, as the app's Pinned
+    -- section does, and a word for it takes a narrow rail's room from the
+    -- title.
     local after = {}
-    if ws.pinned then
-      after[#after + 1] = { " " .. icons.ui.pin, "PaseoTreeMeta" }
-    end
-    local badge, badge_hl = M.badge(M.bucket(ws))
-    if badge then
-      after[#after + 1] = { " " .. badge, badge_hl }
-    end
     local ws_line = emit(
       { kind = "workspace", ws = ws, depth = 0, open = open, key = key, path = { key } },
       {},
       {
-        icon = open and icons.tree.folder_open or icons.tree.folder,
-        icon_hl = "PaseoTreeFolderIcon",
+        mark = mark,
+        mark_hl = mark_hl,
         name = ws.name or "",
-        -- Folded over the session on screen, the folder says it is in there,
-        -- the way the open file would.
-        name_hl = (here and not open) and "PaseoTreeOpened" or "PaseoTreeFolder",
+        -- The one you are in, when its session is folded out of sight.
+        name_hl = (here and not open) and "PaseoTreeOpened" or "PaseoTreeSession",
         after = after,
         right = M.diff_stat(ws),
       }
@@ -784,9 +768,10 @@ function M.build(width)
     if meta then
       below(ws_line, meta)
     end
+    local group_last = ws_line
 
-    -- ITS SESSIONS, UNDER IT: agents, their subagents folded under them, then
-    -- its terminals -- one sidebar, the way the app's is.
+    -- ITS SESSIONS, UNDER IT, nested by indentation alone: agents, their
+    -- subagents under them, then its terminals.
     if open then
       local forest = tree.forest(ws, chat)
       local drafting = here and chat and chat.draft ~= nil
@@ -810,23 +795,26 @@ function M.build(width)
           row.open = node_open(node, here_session)
         end
         local mine = tree.is_on_screen(node, here_session)
-        local icon, icon_hl = tree.icon(node)
-        -- A folded agent says how many subagents are in it, since you can no
-        -- longer see them -- the hidden count nvim-tree puts after a folder.
+        local m, mhl = tree.mark(node)
+        -- Folded, it says how many it holds -- `+3`, or `1/3` while some run.
         local after
         if has_kids and not row.open then
-          local text = node.running > 0 and ("%d/%d"):format(node.running, #node.kids)
-            or tostring(#node.kids)
-          after = { { " " .. text, node.running > 0 and "PaseoTreeRunning" or "PaseoTreeMeta" } }
+          local text = node.running > 0 and ("  %d/%d"):format(node.running, #node.kids)
+            or ("  +%d"):format(#node.kids)
+          after = { { text, node.running > 0 and "PaseoTreeRunning" or "PaseoTreeMeta" } }
         end
         local line = emit(row, last, {
-          icon = icon,
-          icon_hl = icon_hl,
+          mark = m,
+          mark_hl = mhl,
           name = tree.title(node),
           name_hl = mine and "PaseoTreeOpened"
-            or (node.kind == "subagent" and "PaseoTreeSubagent" or "PaseoTreeSession"),
+            or (
+              (node.kind == "subagent" or node.kind == "terminal") and "PaseoTreeSubagent"
+              or "PaseoTreeSession"
+            ),
           after = after,
         })
+        group_last = line
         if mine and not b.session then
           b.session = line
         end
@@ -844,12 +832,12 @@ function M.build(width)
       -- where the agent will appear.
       if drafting then
         local dkey = key .. "/draft"
-        emit(
+        group_last = emit(
           { kind = "draft", ws = ws, depth = 1, parent = ws_line, key = dkey, path = { key, dkey } },
           { true },
           {
-            icon = icons.tree.subagent,
-            icon_hl = "PaseoTreeIdle",
+            mark = "•",
+            mark_hl = "PaseoTreeIdle",
             name = "new session",
             name_hl = "PaseoTreeOpened",
           }
@@ -857,6 +845,12 @@ function M.build(width)
       end
       if count == 0 then
         below(ws_line, { { "no sessions yet", "PaseoTreeMeta" } })
+      end
+      -- An open workspace's sessions end in a gap, so the next workspace
+      -- does not read as one more of them.
+      if i < #cache.list then
+        b.below[group_last] = b.below[group_last] or {}
+        table.insert(b.below[group_last], { { "" } })
       end
     end
   end
@@ -868,11 +862,11 @@ function M.build(width)
     b.below[last] = b.below[last] or {}
     table.insert(b.below[last], { { "" } })
     table.insert(b.below[last], {
-      { PAD .. "a", "PaseoTreeFolder" },
+      { PAD .. "a", "PaseoKey" },
       { " agent  ", "PaseoTreeMeta" },
-      { "w", "PaseoTreeFolder" },
+      { "w", "PaseoKey" },
       { " workspace  ", "PaseoTreeMeta" },
-      { "g?", "PaseoTreeFolder" },
+      { "g?", "PaseoKey" },
       { " keys", "PaseoTreeMeta" },
     })
   end
