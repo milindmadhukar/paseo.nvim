@@ -167,9 +167,15 @@ export async function followDirectory(ctx: BridgeConnection): Promise<void> {
   // the Lua side refetches, since it owns what a list means.
   let workspaces: any = null;
   try {
+    // THE SAME PAGE THE APP ASKS FOR, not one row. The daemon watches a
+    // workspace's checkout -- and so computes its diff stat, dirty flag and
+    // pull request at all -- only for workspaces a subscription has been sent
+    // (session.ts `reconcileWorkspaceGitObservers`). A page of one meant one
+    // workspace in the whole daemon ever had a live stat.
     workspaces = await api.workspaces.list({
       subscribe: {},
-      page: { limit: 1 },
+      sort: [{ key: "activity_at", direction: "desc" }],
+      page: { limit: 200 },
     });
     workspaces?.subscription?.subscribe({
       snapshot: () => {},
