@@ -25,7 +25,7 @@
 ---
 --- THE RULES ARE NOT HERE, AND NEITHER IS THE DAEMON. |paseo.ui.questions| owns
 --- what a tick does and when a set of answers is complete; |paseo.ui.plan| owns
---- which buttons exist and what each means; |paseo.ui.permission| owns the queue
+--- what a plan is and how its decision reads (the buttons are the daemon's); |paseo.ui.permission| owns the queue
 --- and the one response each request gets, and hands this module three callbacks
 --- rather than being called back into. That is deliberate: it keeps the
 --- dependency one-way -- `permission` requires `answer`, never the reverse -- and it
@@ -1038,8 +1038,8 @@ local function bind(o, buf)
         M.act(i)
       end)
     end
-    -- The FIRST allow, which `plan.actions` orders least-rope-first: the reflex
-    -- key is the cautious one.
+    -- The FIRST allow, which the daemon puts before its resume button: plain
+    -- Implement, landing in accept-edits, so the reflex key is the cautious one.
     map("y", function()
       for i, action in ipairs(o.view.actions or {}) do
         if action.behavior == "allow" then

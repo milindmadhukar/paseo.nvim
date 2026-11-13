@@ -35,14 +35,6 @@ local function test_plan()
     },
   }
 
-  local claude = {
-    { id = "plan", label = "Plan Mode" },
-    { id = "default", label = "Always Ask" },
-    { id = "acceptEdits", label = "Accept File Edits" },
-    { id = "auto", label = "Auto mode" },
-    { id = "bypassPermissions", label = "Bypass" },
-  }
-
   truthy("plan: a plan request is recognised by kind", plan.parse(request))
   -- By `kind`, not by `name`: mapping ExitPlanMode onto it is the daemon's
   -- job, already done, for every provider rather than just for Claude.
@@ -70,64 +62,25 @@ local function test_plan()
   )
   eq("plan: and nothing at all is an empty string, not nil", plan.text { kind = "plan" }, "")
 
-  local actions = plan.actions(request, claude)
-  eq("plan: claude gets three Implement buttons and a Reject", #actions, 4)
-  eq("plan: least rope first, so `y` is the cautious key", {
-    actions[1].mode,
-    actions[2].mode,
-    actions[3].mode,
-  }, { "acceptEdits", "auto", "default" })
-  eq("plan: and the last one denies", actions[4].behavior, "deny")
+  -- The buttons are the daemon's: there is no list of modes here to fall out
+  -- of step with the app, which is how "Implement with Bypass" went missing.
+  eq("plan: no button list of our own", plan.actions, nil)
 
-  -- THE POINT. The daemon keys its own behaviour off `selectedActionId` and
-  -- rejects an id it does not know, so all three Implements send its id and
-  -- differ only by the mode applied afterwards.
-  eq("plan: every Implement carries the daemon's own action id", {
-    actions[1].id,
-    actions[2].id,
-    actions[3].id,
-  }, { "implement", "implement", "implement" })
-
-  -- Modes are per PROVIDER. codex has auto/auto-review/full-access and no
-  -- `acceptEdits`, and offering it a button that cannot work would be worse
-  -- than offering nothing.
-  local codex = plan.actions(request, { { id = "auto", label = "Auto" }, { id = "full-access" } })
-  eq("plan: a mode the provider does not have is dropped", #codex, 2)
-  eq("plan: leaving the one that does exist", codex[1].mode, "auto")
-
-  -- No modes reported means nothing honest to offer: the request's own
-  -- Implement/Reject stands rather than a guess.
-  truthy(
-    "plan: no reported modes falls back to the request's buttons",
-    plan.actions(request, {}) == nil
+  -- The badge otherwise reads "allowed", which for a plan is true and useless.
+  eq("plan: a plain Implement is implemented", plan.label(request.actions[2]), "implemented")
+  eq(
+    "plan: the resume button says which mode it went back to, in the daemon's words",
+    plan.label {
+      id = "implement_resume",
+      label = "Implement with Bypass Permissions",
+      behavior = "allow",
+      intent = "implement_resume",
+    },
+    "implemented (Implement with Bypass Permissions)"
   )
-  truthy(
-    "plan: and so does a request with no allow action to build on",
-    plan.actions({ kind = "plan", actions = { { id = "reject", behavior = "deny" } } }, claude)
-      == nil
-  )
-
-  -- The daemon offers this one only when the session was in bypassPermissions
-  -- before it entered plan mode, and restores that mode SERVER-side -- so it
-  -- must come through untouched, with no mode of ours attached.
-  local resumable = vim.deepcopy(request)
-  resumable.actions[#resumable.actions + 1] = {
-    id = "implement_resume",
-    label = "Implement with Bypass",
-    behavior = "allow",
-    intent = "implement_resume",
-  }
-  local resumed = plan.actions(resumable, claude)
-  eq("plan: the daemon's resume button survives", #resumed, 5)
-  eq("plan: with its own id", resumed[4].id, "implement_resume")
-  truthy("plan: and no mode of ours attached to it", resumed[4].mode == nil)
-
-  -- The badge otherwise reads "allowed", which for a plan is true and useless:
-  -- the whole point of the four buttons is that they differ.
-  eq("plan: the badge says which mode you landed in", plan.label(actions[2]), "implemented, auto")
   eq(
     "plan: and a reject says you are still planning",
-    plan.label(actions[4]),
+    plan.label(request.actions[1]),
     "rejected, still planning"
   )
 

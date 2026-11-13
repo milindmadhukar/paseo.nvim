@@ -147,14 +147,14 @@ end
 ---The one response a request gets, whichever surface produced it.
 ---
 ---There is exactly one of these because there is exactly one response: an allow
----for a tool, an allow carrying `updatedInput` for a question, an allow plus a
----follow-up mode for a plan, a deny with or without an interrupt. Three surfaces
+---for a tool, an allow carrying `updatedInput` for a question, an allow naming
+---the daemon's chosen action for a plan, a deny with or without an interrupt. Three surfaces
 ---composing their own bridge call is how they drift, and the drift that actually
 ---happened -- a question answered with a bare allow, which reaches the agent as
 ---"The user did not answer the questions" -- is the reason this module exists.
 ---@param chat table
 ---@param request table
----@param opts { behavior: string, selectedActionId?: string, thenModeId?: string, updatedInput?: table, interrupt?: boolean, label?: string }
+---@param opts { behavior: string, selectedActionId?: string, updatedInput?: table, interrupt?: boolean, label?: string }
 function M.respond(chat, request, opts)
   M.close()
 
@@ -165,28 +165,18 @@ function M.respond(chat, request, opts)
     requestId = request.id,
     behavior = opts.behavior,
     selectedActionId = opts.selectedActionId,
-    -- The second half of a plan approval. It cannot ride in the response --
-    -- `AgentPermissionResponse` has no field for a mode -- so the sidecar
-    -- applies it after the daemon has finished applying its own. See
-    -- |paseo.ui.plan|.
-    thenModeId = opts.thenModeId,
     updatedInput = opts.updatedInput,
     interrupt = opts.interrupt,
-  }, function(err, result)
+  }, function(err)
+    if not err then
+      return
+    end
     vim.schedule(function()
-      if err then
-        return transcript.upsert(chat, {
-          kind = "notice",
-          level = "error",
-          message = "permission answer failed: " .. err,
-        })
-      end
-      -- A provider may accept a mode and still have something to say about it.
-      local notice = result and result.notice
-      notice = type(notice) == "table" and notice.message or notice
-      if type(notice) == "string" and notice ~= "" then
-        vim.notify("paseo: " .. notice, vim.log.levels.WARN)
-      end
+      transcript.upsert(chat, {
+        kind = "notice",
+        level = "error",
+        message = "permission answer failed: " .. err,
+      })
     end)
   end, chat.host_id)
 
@@ -224,8 +214,8 @@ end
 
 ---Which of the three dialogs this request wants.
 ---
----A question is answered, never approved; a plan is approved with a choice of
----what happens next; everything else is the plain allow/deny. `state` and
+---A question is answered, never approved; a plan is approved with one of the
+---daemon's Implement buttons; everything else is the plain allow/deny. `state` and
 ---`plan` are what the keys branch on, and building them ONCE here rather than
 ---re-deriving them per redraw is what keeps the three from drifting apart.
 ---@class paseo.PermissionView
@@ -246,13 +236,10 @@ local function viewer(chat, request)
   end
 
   if plan.parse(request) then
+    -- The buttons stay the daemon's own, as the Paseo app shows them: which
+    -- mode an Implement lands in is the daemon's decision, keyed off the
+    -- action id. See |paseo.ui.plan|.
     view.plan = true
-    -- `availableModes` is per PROVIDER and loaded with the rest of the agent session
-    -- settings, so the buttons are the modes this agent can actually be put
-    -- into. Without a snapshot there is nothing honest to offer and the
-    -- request's own Implement/Reject stands.
-    local config = chat.config_snapshot or {}
-    view.actions = plan.actions(request, config.availableModes) or view.actions
   end
 
   return view
@@ -294,7 +281,6 @@ local function handlers(chat, request, view)
       M.respond(chat, request, {
         behavior = action.behavior,
         selectedActionId = action.id,
-        thenModeId = action.mode,
         label = view.plan and plan.label(action) or action.label,
       })
     end,

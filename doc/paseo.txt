@@ -389,12 +389,14 @@ at a time (`2 of 3`):
                                                   *paseo-permission-plan-keys*
 Plans ~
 A plan to approve is shown in the same place, as a real buffer you can
-scroll and search:
+scroll and search. Its buttons are the daemon's, the same ones the Paseo
+app shows, numbered in that order:
 
-    1           implement, accepting file edits
-    2           implement, in auto mode
-    3           implement, asking about everything
-    y           the same as 1
+    1           Reject, and keep planning
+    2           Implement; the agent moves to accept-edits
+    3           Implement with <mode>: back to the mode you were in before
+                planning. Offered only when that was Bypass Permissions or Auto
+    y           Implement (the same as 2)
     n           reject and keep planning
     N           reject and stop the turn
     j k <C-d> <C-u> gg G    scroll the plan

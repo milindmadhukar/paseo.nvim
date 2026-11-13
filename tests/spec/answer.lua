@@ -10,7 +10,6 @@ local eq, truthy = t.eq, t.truthy
 --- is on screen and what comes back out, and none of it needs a socket.
 local function test_answer()
   local ask = require "paseo.ui.answer"
-  local plan = require "paseo.ui.plan"
   local questions = require "paseo.ui.questions"
 
   ---A chat with a REAL conversation window, because the overlay anchors to one.
@@ -368,17 +367,23 @@ local function test_answer()
   local plan_request = {
     id = "ask-plan",
     kind = "plan",
+    -- In the daemon's order, which is the order the Paseo app shows them.
     actions = {
-      { id = "impl", label = "Implement", behavior = "allow" },
-      { id = "rej", label = "Reject", behavior = "deny" },
+      { id = "reject", label = "Reject", behavior = "deny", intent = "dismiss" },
+      { id = "implement", label = "Implement", behavior = "allow", intent = "implement" },
+      {
+        id = "implement_resume",
+        label = "Implement with Bypass Permissions",
+        behavior = "allow",
+        intent = "implement_resume",
+      },
     },
     input = { plan = table.concat(long, "\n") },
   }
   chat = chat_with_window(90)
-  local modes = { { id = "acceptEdits" }, { id = "auto" }, { id = "default" } }
   local picked
   ask.open(chat, plan_request, {
-    actions = plan.actions(plan_request, modes),
+    actions = plan_request.actions,
     plan = true,
   }, {
     submit = function() end,
@@ -404,8 +409,8 @@ local function test_answer()
   eq("ask: carrying the plan in full", body and vim.api.nvim_buf_line_count(body), 120)
   eq("ask: and nothing is elided", drawn(card):find "more lines", nil)
   truthy(
-    "ask: one Implement per mode it could land in",
-    drawn(card):find("accept edits", 1, true) ~= nil,
+    "ask: the daemon's buttons, resume included",
+    drawn(card):find("3  Implement with Bypass Permissions", 1, true) ~= nil,
     drawn(card)
   )
 
@@ -446,9 +451,9 @@ local function test_answer()
     ("%d -> %d"):format(before, after)
   )
 
-  press "1"
-  eq("ask: a button sends the daemon's own action id", picked and picked.id, "impl")
-  eq("ask: with the mode that button means", picked and picked.mode, "acceptEdits")
+  -- `y` is the first ALLOW, not the first button: Reject comes first.
+  press "y"
+  eq("ask: y is the plain Implement, the daemon's own id", picked and picked.id, "implement")
 
   ask.close()
 

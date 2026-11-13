@@ -533,18 +533,6 @@ export function agentOps(ctx: BridgeConnection): Ops {
             };
 
       await agent.respondToPermission({ requestId, response });
-
-      if (behavior === "allow" && req.thenModeId) {
-        const notice = await ctx
-          .raw()
-          .setAgentMode(agentId, String(req.thenModeId));
-        return {
-          requestId,
-          behavior,
-          modeId: req.thenModeId,
-          notice: notice ?? null,
-        };
-      }
       return { requestId, behavior };
     },
 
