@@ -127,8 +127,9 @@ readers and the microphone.
                                                            *:Paseo-settings*
 :Paseo settings [group] The chat agent's settings card: permission mode,
                         thinking level, model and features (Fast, Plan, ...).
-                        {group} opens it on one of `mode`, `thinking`,
-                        `model`, `features`. See |paseo-settings|.
+                        `mode`, `thinking` and `model` open that list
+                        straight in your picker (|paseo-pick|); `features`
+                        opens the card on the toggles. See |paseo-settings|.
 
                                                                *:Paseo-stop*
 :Paseo stop             Interrupt the turn the chat's agent is running.
@@ -264,9 +265,14 @@ Settings ~
 |:Paseo-settings| opens the agent's settings as cards in a float; on the full
 screen they are also the Settings panel (`<C-p>`, then `1`).
 
+Permission mode, thinking and model are each one row showing what is set.
+Their letter, or `<CR>` on the row, opens the list in your picker
+(|paseo-pick|): type to filter, `<CR>` to pick. Features stay checkboxes.
+
     h j k l     move between settings
-    <CR>        apply the one under focus
-    m t s f     jump to Mode, Thinking, model (s), Features
+    <CR>        open the picker / toggle the feature under focus
+    m t s       pick the Mode, Thinking level or model (s)
+    f           jump to Features
     r           re-fetch from the daemon
     q <Esc>     close
 
@@ -341,7 +347,10 @@ worktree, the worktree), with that message as its first prompt. A terminal
 needs no message: `<Tab>` up to the choices and `<CR>` on what to run.
 
 In the choices: `h` `j` `k` `l` move, `<CR>` applies, a card's letter jumps
-to it, `i` or `<Tab>` goes back to the box, `q` cancels. The daemon names a
+to it, `i` or `<Tab>` goes back to the box, `q` cancels. Provider, Model,
+Permission mode and Thinking are lists, so their letter (`p` `s` `m` `t`)
+opens the list in your picker (|paseo-pick|), and so does the base branch's
+`…`. Start, Where and the features stay chips you press. The daemon names a
 new worktree and its branch, and titles the agent from your message.
 Everything you pick is remembered per project and pre-filled next time.
 
@@ -501,7 +510,7 @@ needs no manifest: Paseo's own worktrees are used.
 8. CHOOSERS                                                     *paseo-choose*
 
 Every "pick one of these" in the plugin -- the workspace and agent lists, a
-fork's destination, the rail's `.` menu, a base branch, a yes-or-no -- is the
+fork's destination, the rail's `.` menu, a yes-or-no -- is the
 same chooser: a real buffer in a float, one line per choice, and the cursor
 is the selection.
 
@@ -518,8 +527,19 @@ window cancels it.
 `require("paseo.ui.choose").select(items, opts, on_choice)` has the signature
 of |vim.ui.select()|, for your own code (|paseo.ui.choose|).
 
-Settings are not lists, so they are cards (|paseo-settings|), drawn in the
-same frame.
+                                                                  *paseo-pick*
+The lists you search -- a provider, a model, a permission mode, a thinking
+level, a base branch -- open in YOUR picker instead: whatever has replaced
+|vim.ui.select()| (snacks, telescope's ui-select, fzf-lua, mini.pick, ...),
+with your keys and your layout. Each call passes a `kind` of `paseo.provider`,
+`paseo.model`, `paseo.mode`, `paseo.thinking` or `paseo.branch`, for a picker
+that configures by kind. What is set is listed first and marked `●`; a mode
+that skips every permission check is marked `⚠`. With no picker plugin
+installed, the builtin |vim.ui.select()| is an unsearchable numbered list, so
+the chooser above is used instead.
+
+Yes-or-no questions, a fork's destination and the workspace and agent lists
+stay on the chooser. The settings themselves are cards (|paseo-settings|).
 
 ==============================================================================
 9. CONFIGURATION                                         *paseo-configuration*
@@ -853,6 +873,14 @@ open({opts})        The chooser itself. {opts}: `title`, `prompt`, `items`
                     (`{ { key, label, fn(item, handle) } }`), `on_pick`,
                     `on_cancel`, `numbers`. Returns a handle with
                     `update(items)`, `current()` and `close()`.
+
+------------------------------------------------------------------------------
+require("paseo.ui.pick") ~                                      *paseo.ui.pick*
+
+select({items}, {opts}, {on_choice})
+                    |vim.ui.select()| when something has replaced it,
+                    else |paseo.ui.choose|'s `select` (|paseo-pick|).
+overridden()        Whether |vim.ui.select()| has been replaced.
 
 ------------------------------------------------------------------------------
 require("paseo.quit") ~

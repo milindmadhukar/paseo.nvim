@@ -404,7 +404,9 @@ local function apply(task, group, entry, done)
       return done()
     end
     local list = task.branches or {}
-    return require("paseo.ui.choose").select(list, { prompt = "Cut the worktree from…" }, function(branch)
+    -- Your picker, not the chooser: a repo's branches are a list you search.
+    local opts = { prompt = "Cut the worktree from…", kind = "paseo.branch" }
+    return require("paseo.ui.pick").select(list, opts, function(branch)
       if branch then
         task.base = branch ~= (task.iso and task.iso.base) and branch or nil
       end

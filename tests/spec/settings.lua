@@ -187,6 +187,128 @@ local function test_settings()
   package.loaded["paseo.ui.chat"] = old_chat
 end
 
+---Model, thinking, provider and mode open in the user's own picker.
+local function test_pick()
+  local pick = require "paseo.ui.pick"
+  local choose = require "paseo.ui.choose"
+  local real_select, real_choose = vim.ui.select, choose.select
+
+  -- No picker plugin: the builtin `vim.ui.select` is `inputlist`, which cannot
+  -- be searched, so the Paseo chooser stands in for it.
+  eq("pick: the builtin vim.ui.select is not an override", pick.overridden(), false)
+  local via
+  choose.select = function(_, _, done)
+    via = "choose"
+    done(nil)
+  end
+  pick.select({ "a" }, {}, function() end)
+  eq("pick: without a picker plugin, the Paseo chooser", via, "choose")
+
+  -- snacks, telescope, fzf-lua: anything that replaces `vim.ui.select`.
+  local seen
+  vim.ui.select = function(items, opts, done)
+    via = "vim.ui.select"
+    seen = { items = items, opts = opts }
+    done(items[2])
+  end
+  eq("pick: a replaced vim.ui.select is noticed", pick.overridden(), true)
+
+  local group = {
+    id = "thinking",
+    label = "Thinking",
+    current = "high",
+    entries = {
+      { id = "low", label = "Low" },
+      { id = "high", label = "High", note = "default" },
+    },
+  }
+  local got = {}
+  truthy(
+    "pick: a group opens",
+    pick.group(group, function(entry)
+      got[#got + 1] = entry.id
+    end)
+  )
+  eq("pick: through the user's picker", via, "vim.ui.select")
+  eq("pick: titled by the group", seen.opts.prompt, "Thinking")
+  eq("pick: with a kind to theme by", seen.opts.kind, "paseo.thinking")
+  eq("pick: what is set comes first", seen.items[1].id, "high")
+  eq("pick: and is marked, with its note", seen.opts.format_item(seen.items[1]), "● High · default")
+  eq("pick: the rest are not marked", seen.opts.format_item(seen.items[2]), "  Low")
+  eq("pick: the answer comes back", got, { "low" })
+
+  -- Picking what is already set is "leave it", not a round trip.
+  vim.ui.select = function(items, _, done)
+    done(items[1])
+  end
+  pick.group(group, function(entry)
+    got[#got + 1] = entry.id
+  end)
+  eq("pick: re-picking what is set changes nothing", got, { "low" })
+
+  -- An empty list says why instead of opening an empty picker.
+  local notified
+  local real_notify = vim.notify
+  vim.notify = function(msg)
+    notified = msg
+  end
+  local opened = pick.group({ id = "model", label = "Model", entries = {} }, function() end)
+  vim.notify = real_notify
+  eq("pick: an empty group does not open", opened, false)
+  truthy("pick: and says so", notified and notified:find("no model", 1, true) ~= nil, notified)
+
+  -- `:Paseo settings mode` is the picker, straight away: no card in front.
+  local bridge = require "paseo.bridge"
+  local old_request, old_chat = bridge.request, package.loaded["paseo.ui.chat"]
+  local chat = {
+    agent_id = "spec-pick",
+    config_snapshot = nil,
+  }
+  local config = {
+    modeId = "default",
+    availableModes = {
+      { id = "plan", label = "Plan" },
+      { id = "default", label = "Always ask" },
+    },
+    thinkingOptions = {},
+    models = {},
+    features = {},
+  }
+  package.loaded["paseo.ui.chat"] = {
+    current = function()
+      return chat
+    end,
+    load_settings = function() end,
+  }
+  local set_to
+  bridge.request = function(op, args, done)
+    if op == "agent.config" then
+      return done(nil, config)
+    end
+    if op == "agent.setMode" then
+      set_to = args.modeId
+      return done(nil, {})
+    end
+    error("unexpected operation " .. op)
+  end
+  local offered
+  vim.ui.select = function(items, opts, done)
+    offered = opts.kind
+    done(items[2])
+  end
+  require("paseo.ui.session").mode()
+  vim.wait(200, function()
+    return set_to ~= nil
+  end)
+  eq("pick: :Paseo settings mode opens the mode picker", offered, "paseo.mode")
+  eq("pick: and the answer is written to the agent", set_to, "plan")
+  eq("pick: with no settings popup in between", require("paseo.ui.settings").is_open(), false)
+
+  bridge.request, package.loaded["paseo.ui.chat"] = old_request, old_chat
+  vim.ui.select, choose.select = real_select, real_choose
+end
+
 return {
   { "settings", test_settings },
+  { "pick", test_pick },
 }

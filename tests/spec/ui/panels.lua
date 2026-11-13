@@ -156,27 +156,79 @@ local function test_panels()
 
   -- Keyboard, not just mouse: the panel used to have no mappings at all, so
   -- the only way to change a setting was to aim at it.
-  local view = session_panel.new(require("paseo.ui.session").source(surface_chat))
+  -- Mode, thinking and model are PICK groups: one row on the card, and the
+  -- list itself in the user's own picker. Stubbed here as an overridden
+  -- `vim.ui.select`, which is what snacks or telescope installing one is.
+  local real_select = vim.ui.select
+  local picked = {}
+  local answer
+  vim.ui.select = function(items, opts, done)
+    picked[#picked + 1] = { items = items, opts = opts }
+    done(answer and items[answer] or nil)
+  end
+  local applied = {}
+  local source = require("paseo.ui.session").source(surface_chat)
+  local real_apply = source.apply
+  source.apply = function(_, group, entry, done)
+    applied[#applied + 1] = { group.id, entry.id }
+    done()
+  end
+
+  local view = session_panel.new(source)
   local _, focused = view:resolve()
   eq("session: focus starts on what is set", focused.id, "default")
+  -- A pick group is ONE stop: the next step is the next card, not the next
+  -- mode along a row you cannot see any more.
   view:move(1)
-  local _, after = view:resolve()
-  eq("session: and moves on to the next entry", after.id, "bypassPermissions")
+  local after_group = view:resolve()
+  eq("session: a pick group is one stop", after_group.id, "thinking")
+  eq("session: moving opens no picker", #picked, 0)
+
+  -- The mnemonic of a pick group OPENS its picker, on top of moving there.
   view:jump "s"
   local jumped_group, jumped = view:resolve()
   eq("session: a mnemonic jumps to its group", jumped_group.id, "model")
   eq("session: landing on what that group has set", jumped.id, "opus")
-  -- Running off the end of a group lands on the NEXT GROUP rather than
-  -- wrapping inside itself, so `j` means "the next thing" everywhere and
-  -- there is one traversal rather than one per card. `m` lands on the
-  -- selected mode, which is the second of three; two steps back is one step
-  -- past the top.
+  eq("session: and opens the picker", #picked, 1)
+  eq("session: on that group's list", picked[1].opts.kind, "paseo.model")
+  eq("session: what is set is listed first", picked[1].items[1].id, "opus")
+  eq(
+    "session: and marked",
+    picked[1].opts.format_item(picked[1].items[1]):sub(1, #"●"),
+    "●"
+  )
+  eq("session: a cancelled pick applies nothing", #applied, 0)
+
+  -- The dangerous mode says so in the TEXT: a picker has no chip colours.
+  answer = 3
   view:jump "m"
+  truthy(
+    "session: bypass is flagged in the picker",
+    picked[2].opts.format_item(picked[2].items[3]):find("⚠", 1, true) ~= nil
+  )
+  eq("session: the pick reaches apply", applied, { { "mode", "bypassPermissions" } })
+  answer = nil
+
+  -- Running off the end of a group lands on the NEXT GROUP rather than
+  -- wrapping inside itself, so `j` means "the next thing" everywhere. The
+  -- stops are mode, thinking, the one feature, model; two back from mode is
+  -- the feature.
+  view:set_focus({ id = "mode" }, nil)
   view:move(-1)
+  local back_group = view:resolve()
+  eq("session: stepping off the top lands in the last group", back_group.id, "model")
   view:move(-1)
-  local wrapped_group, wrapped = view:resolve()
-  eq("session: stepping off the top lands in the last group", wrapped_group.id, "model")
-  eq("session: on its last entry", wrapped.id, "sonnet")
+  local toggle_group, toggle = view:resolve()
+  eq("session: toggles are still one stop each", toggle_group.id, "features")
+  eq("session: on the toggle", toggle.id, "fast_mode")
+
+  -- `<CR>` on a toggle toggles, with no picker in front of it.
+  view:activate()
+  eq("session: a toggle opens no picker", #picked, 2)
+  eq("session: it applies directly", applied[2], { "features", "fast_mode" })
+
+  vim.ui.select = real_select
+  source.apply = real_apply
 
   -- `maparg` reads the CURRENT buffer, not the one being bound -- and at the
   -- moment the Agent panel attaches, the current buffer is usually the
@@ -260,9 +312,11 @@ local function test_panels()
   }
   local stable = session_panel.new(require("paseo.ui.session").source(tall))
   local on_short = #stable:lines(60)
-  stable:move(1)
+  -- A pick card shows what is SET, so the thing that changes its contents is
+  -- picking -- and the card holds the height of the longest description.
+  tall.config_snapshot.modeId = "long"
   local on_long = #stable:lines(60)
-  eq("session: a card's height does not depend on which entry is focused", on_long, on_short)
+  eq("session: a card's height does not depend on which entry is set", on_long, on_short)
 
   settings.close()
   truthy("settings: and closes", not settings.is_open())
@@ -292,18 +346,26 @@ local function test_panels()
   -- longer had on the popup's bottom row, overprinting there forever. Needs
   -- room to shrink into, so it is checked on a tall editor rather than the
   -- clamped one above.
+  -- On the features card: a pick card is one row however many models there
+  -- are, so the list that can still shrink under you is the toggles.
   vim.o.lines = 40
-  settings.open(surface_chat, "model")
+  local real_features = surface_chat.config_snapshot.features
+  surface_chat.config_snapshot.features = {}
+  for i = 1, 12 do
+    surface_chat.config_snapshot.features[i] =
+      { id = "f" .. i, label = "Feature " .. i, type = "toggle", value = false }
+  end
+  settings.open(surface_chat, "features")
   local shrinking = vim.api.nvim_get_current_buf()
   local before = #vim.api.nvim_buf_get_lines(shrinking, 0, -1, false)
-  surface_chat.config_snapshot.models = {
-    { id = "m1", label = "Model 1" },
-    { id = "m2", label = "Model 2" },
+  surface_chat.config_snapshot.features = {
+    { id = "f1", label = "Feature 1", type = "toggle", value = false },
+    { id = "f2", label = "Feature 2", type = "toggle", value = false },
   }
   vim.api.nvim_feedkeys(vim.keycode "l", "x", false)
   local after = #vim.api.nvim_buf_get_lines(shrinking, 0, -1, false)
   truthy(
-    "settings: dropping ten models shrinks the buffer",
+    "settings: dropping ten toggles shrinks the buffer",
     after < before,
     before .. " -> " .. after
   )
@@ -314,10 +376,11 @@ local function test_panels()
   local hl_ns = require("paseo.ui.hl").ns
   local shrunk_marks = #vim.api.nvim_buf_get_extmarks(shrinking, hl_ns, 0, -1, {})
   settings.close()
-  settings.open(surface_chat, "model")
+  settings.open(surface_chat, "features")
   local fresh_marks = #vim.api.nvim_buf_get_extmarks(vim.api.nvim_get_current_buf(), hl_ns, 0, -1, {})
   eq("settings: and leaves no extmarks behind from the rows it lost", shrunk_marks, fresh_marks)
   settings.close()
+  surface_chat.config_snapshot.features = real_features
 
   vim.o.lines = real_lines
 

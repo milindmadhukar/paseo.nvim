@@ -112,7 +112,7 @@ function M.groups(chat)
       key = M.KEYS.mode,
       icon = icons.ui.mode,
       label = "Permission mode",
-      kind = "chips",
+      kind = "pick",
       entries = modes,
       current = config.modeId,
       op = "agent.setMode",
@@ -123,7 +123,7 @@ function M.groups(chat)
       key = M.KEYS.thinking,
       icon = icons.ui.thinking,
       label = "Thinking",
-      kind = "chips",
+      kind = "pick",
       entries = entries(config.thinkingOptions, default_note),
       current = config.thinkingOptionId,
       op = "agent.setThinking",
@@ -144,7 +144,7 @@ function M.groups(chat)
       key = M.KEYS.model,
       icon = icons.ui.model,
       label = "Model",
-      kind = "radio",
+      kind = "pick",
       entries = entries(config.models, default_note),
       current = config.model,
       op = "agent.setModel",
@@ -347,19 +347,43 @@ local function popup(group_id)
   require("paseo.ui.settings").open(chat, group_id)
 end
 
+---Open one group straight in the picker (|paseo.ui.pick|), no card first.
+---
+---`:Paseo settings model` used to open the settings popup on the Model card,
+---where you then walked to a model and pressed `<CR>`. The command names the
+---list it wants, so it gets the list -- in the picker you type at.
+---@param group_id string
+local function pick_now(group_id)
+  local chat = target()
+  if not chat then
+    return
+  end
+  -- Fresh, as the popup was: the lists are per provider and per model, and
+  -- the app may have switched either since the last look.
+  M.load(chat, function(config)
+    if not config then
+      return vim.notify("paseo: could not read the agent config", vim.log.levels.ERROR)
+    end
+    local group = M.group(M.groups(chat), group_id)
+    require("paseo.ui.pick").group(group, function(entry)
+      M.apply(chat, group, entry)
+    end)
+  end)
+end
+
 ---Permission / operating mode.
 function M.mode()
-  popup "mode"
+  pick_now "mode"
 end
 
 ---Reasoning level. Per MODEL, so the list changes with the model.
 function M.thinking()
-  popup "thinking"
+  pick_now "thinking"
 end
 
 ---Change model on the running agent session, or fork it.
 function M.model()
-  popup "model"
+  pick_now "model"
 end
 
 ---Everything about the agent session, in one window.

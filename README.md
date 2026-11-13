@@ -56,7 +56,10 @@ vim.keymap.set("n", "<leader>as", "<cmd>Paseo settings<cr>")        -- mode, mod
    first message, and send it with `<M-CR>` (or `<CR>` in normal mode).
 2. The agent works in the middle of the Paseo tab. The **rail** on the left
    (`<C-b>`) lists your workspaces and their agents, and `<C-p>` opens a panel
-   with Settings, Changes and Usage.
+   with Settings, Changes and Usage. In Settings, `m`, `t` and `s` open the
+   permission mode, thinking level and model in your own picker: whatever
+   replaces `vim.ui.select` (snacks, telescope, fzf-lua), so you can type to
+   filter.
 3. When the agent asks for permission, a dialog opens. `y` allows, `n` denies,
    and `1`–`9` pick a specific action.
 4. Back in your code, put the cursor on a hunk and run `:Paseo ask`. The
@@ -75,7 +78,7 @@ vim.keymap.set("n", "<leader>as", "<cmd>Paseo settings<cr>")        -- mode, mod
 | `:Paseo explain [kind]` | Explain code with the bundled review rubric, sent at once |
 | `:Paseo workspaces [all]` | This project's workspaces (`all`: every project's) |
 | `:Paseo agents` | The agents in this workspace |
-| `:Paseo settings [mode\|thinking\|model\|features]` | The chat agent's settings |
+| `:Paseo settings [mode\|thinking\|model\|features]` | The chat agent's settings; `mode`, `thinking` and `model` open straight in your picker |
 | `:Paseo stop` | Interrupt the agent's turn |
 | `:Paseo ws init\|edit\|create\|rm\|ls\|status` | Multi-repo workspaces |
 

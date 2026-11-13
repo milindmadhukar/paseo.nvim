@@ -10,6 +10,12 @@
 --- what they call to repaint, so sharing the builders is what keeps the two
 --- from drifting into different-looking versions of the same four settings.
 ---
+--- A group of kind `"pick"` -- provider, model, permission mode, thinking --
+--- is ONE row showing what is set, and its key or `<CR>` opens the list in
+--- your own picker (|paseo.ui.pick|, i.e. `vim.ui.select`), where you can
+--- type at it. Those lists are what you search; walking a row of chips to
+--- reach the fourth one was the slow way to choose. Toggles stay checkboxes.
+---
 --- WHY A FOCUS MODEL AND NOT THE CURSOR. Focus is ours, held by id and drawn
 --- with `PaseoChipFocus`, so it survives a redraw that rebuilds every row, and
 --- it picks one chip out of a row of several. It began as a workaround: volt
@@ -17,6 +23,7 @@
 --- `{1,1}` after every click, so a selection on the cursor was thrown away on
 --- each interaction.
 
+local pick = require "paseo.ui.pick"
 local render = require "paseo.ui.render"
 local session = require "paseo.ui.session"
 local widgets = require "paseo.ui.widgets"
@@ -24,6 +31,18 @@ local widgets = require "paseo.ui.widgets"
 local M = {}
 
 M.title = "Settings"
+
+---The index of the entry a group has set, else 1.
+---@param group table
+---@return integer
+function M.current(group)
+  for i, entry in ipairs(group.entries or {}) do
+    if entry.id == group.current then
+      return i
+    end
+  end
+  return 1
+end
 
 ---Focus is stored BY ID, never by index: the lists change under us -- switching
 ---model replaces every thinking option -- and an index kept across that lands
@@ -151,8 +170,17 @@ function View:move(step)
 
   local flat = {}
   for g, group in ipairs(groups) do
-    for e, entry in ipairs(group.entries) do
-      flat[#flat + 1] = { group = group, entry = entry, g = g, e = e }
+    if group.kind == "pick" then
+      -- One stop: the row is the group, and the choosing happens in the
+      -- picker. Walking through entries you cannot see would be walking blind.
+      if #group.entries > 0 then
+        local at = M.current(group)
+        flat[#flat + 1] = { group = group, entry = group.entries[at], g = g, e = at }
+      end
+    else
+      for e, entry in ipairs(group.entries) do
+        flat[#flat + 1] = { group = group, entry = entry, g = g, e = e }
+      end
     end
   end
   if #flat == 0 then
@@ -161,7 +189,7 @@ function View:move(step)
 
   local at = 1
   for i, item in ipairs(flat) do
-    if item.g == gi and item.e == ei then
+    if item.g == gi and (item.e == ei or groups[gi].kind == "pick") then
       at = i
     end
   end
@@ -172,12 +200,19 @@ function View:move(step)
 end
 
 ---Jump focus to a group by its mnemonic key.
+---
+---On a pick group the key also OPENS the picker: `s` and type a model name is
+---the whole point of the key, and "jump there, then press `<CR>`" is a second
+---keypress that only ever means one thing.
 ---@param key string
 function View:jump(key)
   for _, group in ipairs(self:groups() or {}) do
     if group.key == key then
       self:set_focus(group, nil)
       self.redraw()
+      if group.kind == "pick" then
+        self:activate()
+      end
       return
     end
   end
@@ -187,6 +222,15 @@ end
 function View:activate()
   local group, entry = self:resolve()
   if not (group and entry) then
+    return
+  end
+  if group.kind == "pick" then
+    pick.group(group, function(picked)
+      self:set_focus(group, picked)
+      self.source:apply(group, picked, function()
+        self.redraw()
+      end)
+    end)
     return
   end
   self.source:apply(group, entry, function()
@@ -390,6 +434,50 @@ local function toggles_body(self, group, focus, w)
   return lines
 end
 
+---The body of a pick group: what is set, and how to change it.
+---
+---ONE row, whatever the list's length, so twelve models cost the card no more
+---than two do. The chip keeps its tone -- bypass still reads as danger on the
+---card, which is the one place left that can colour it. The description is the
+---CURRENT entry's, under a height reserved for the longest, so picking a mode
+---with a longer description does not move every card below.
+---@param self paseo.AgentSettingsView
+---@param group table
+---@param focus table  `{ group = id, entry = id }`
+---@param w integer
+---@return table[][]
+local function pick_body(self, group, focus, w)
+  if #group.entries == 0 then
+    return { { { group.placeholder or "(none reported by this provider)", "PaseoCardDim" } } }
+  end
+  local entry = group.entries[M.current(group)]
+  local set = entry.id == group.current
+  local focused = focus.group == group.id or hovered("paseo:" .. group.id)
+  local state = focused and "focus" or (set and (entry.tone or "on")) or "off"
+  local action = click(self, group, entry)
+  -- The hover id is the GROUP's: the row stands for the whole list.
+  action.hover.id = "paseo:" .. group.id
+
+  local left = { { " ", "PaseoCardText" }, widgets.chip(entry.label, state, action) }
+  if entry.note then
+    left[#left + 1] = { "  " .. entry.note, "PaseoCardDim", action }
+  end
+  local count = #group.entries
+  local right = {
+    { ("%d option%s  "):format(count, count == 1 and "" or "s"), "PaseoCardDim", action },
+    { " " .. (group.key or "<CR>") .. " ", "PaseoChipOff", action },
+    { " pick ", "PaseoCardDim", action },
+  }
+  local line = widgets.row(left, right, w)
+  for _, cell in ipairs(line) do
+    cell[3] = cell[3] or action
+  end
+
+  local lines = { line }
+  vim.list_extend(lines, description_block(group, entry, w))
+  return lines
+end
+
 ---One group, as a card.
 ---@param self paseo.AgentSettingsView
 ---@param group table
@@ -403,7 +491,9 @@ local function card(self, group, focus, w)
   local inner = math.max(8, widgets.card_inner(w))
   local body
 
-  if group.kind == "chips" then
+  if group.kind == "pick" then
+    body = pick_body(self, group, focus, inner)
+  elseif group.kind == "chips" then
     body = chips_body(self, group, focus, inner)
   elseif group.kind == "toggles" then
     body = toggles_body(self, group, focus, inner)
@@ -547,19 +637,27 @@ function View:draw(width)
   -- The mnemonics come from the groups being DRAWN, not from a literal: this
   -- view is also the one the new-agent screen uses, and that one has a
   -- Provider card the running-agent one does not.
-  local keys = {}
+  -- A pick group's key opens its picker; any other group's key only moves
+  -- there. Two different verbs, so two different hints.
+  local picks, jumps = {}, {}
   for _, group in ipairs(groups) do
     if group.key then
-      keys[#keys + 1] = group.key
+      local into = group.kind == "pick" and picks or jumps
+      into[#into + 1] = group.key
     end
   end
 
   local hints = {
     { "h j k l", "move" },
-    { "<CR>", "apply" },
-    { table.concat(keys, " "), "group" },
-    { "r", "reload" },
+    { "<CR>", #picks > 0 and "pick / apply" or "apply" },
   }
+  if #picks > 0 then
+    hints[#hints + 1] = { table.concat(picks, " "), "pick" }
+  end
+  if #jumps > 0 then
+    hints[#hints + 1] = { table.concat(jumps, " "), "group" }
+  end
+  hints[#hints + 1] = { "r", "reload" }
   vim.list_extend(hints, self.hints or {})
   lines[#lines + 1] = widgets.hints(hints)
 
