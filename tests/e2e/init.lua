@@ -1,7 +1,6 @@
 --- The Neovim the end-to-end scenarios drive.
 ---
---- Like tests/minimal_init.lua -- no user config, dependencies from
---- $PASEO_TEST_DEPS -- except that it talks to a REAL daemon: the throwaway one
+--- Like tests/minimal_init.lua -- no user config, no other plugins -- except that it talks to a REAL daemon: the throwaway one
 --- tests/e2e/daemon.sh started, never the live one on 6767. `autostart` is off
 --- so a mistyped port fails loudly instead of quietly starting a daemon
 --- against the wrong home.
@@ -11,13 +10,6 @@ local root = vim.fs.dirname(vim.fs.dirname(here))
 vim.opt.runtimepath:prepend(root)
 package.path = ("%s/?.lua;%s"):format(root, package.path)
 
-local deps = assert(vim.env.PASEO_TEST_DEPS, "PASEO_TEST_DEPS is not set; run tests/e2e/nvim.sh")
-for name, kind in vim.fs.dir(deps) do
-  -- Never volt, even when an old cache still has it: nothing needs it.
-  if kind == "directory" and name ~= "volt" then
-    vim.opt.runtimepath:append(vim.fs.joinpath(deps, name))
-  end
-end
 
 local url = assert(vim.env.PASEO_E2E_URL, "PASEO_E2E_URL is not set; start tests/e2e/daemon.sh")
 assert(not url:match ":6767/", "refusing to drive the live daemon on 6767")

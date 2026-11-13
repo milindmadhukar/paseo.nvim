@@ -39,15 +39,6 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
 
-      # Shallow clones of gitsigns and telescope. `tests/deps.sh` fetches into
-      # this directory on every run, so a hit here is a speed-up and never a
-      # reason the suite is testing yesterday's plugins.
-      - name: Cache the plugins under test
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/paseo-nvim/test-deps
-          key: test-deps-${{ runner.os }}
-
       - name: Install the sidecar's dependencies
         run: bun install
         working-directory: sidecar

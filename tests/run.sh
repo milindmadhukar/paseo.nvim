@@ -17,10 +17,8 @@ export GIT_AUTHOR_NAME="paseo tests" GIT_AUTHOR_EMAIL="tests@paseo.invalid"
 export GIT_COMMITTER_NAME="paseo tests" GIT_COMMITTER_EMAIL="tests@paseo.invalid"
 
 fixtures="${PASEO_FIXTURES:-${TMPDIR:-/tmp}/paseo-nvim-tests}"
-deps="${PASEO_TEST_DEPS:-${XDG_CACHE_HOME:-$HOME/.cache}/paseo-nvim/test-deps}"
 
 "$here/fixtures.sh" "$fixtures" >/dev/null
-"$here/deps.sh" "$deps" >/dev/null
 
 # `-u` and nothing else: no user configuration, no plugin manager, no shada.
 # See tests/minimal_init.lua. VIMRUNTIME goes with it: an inherited one belongs
@@ -28,7 +26,7 @@ deps="${PASEO_TEST_DEPS:-${XDG_CACHE_HOME:-$HOME/.cache}/paseo-nvim/test-deps}"
 # against the runtime of the binary actually running it.
 unset VIMRUNTIME
 cd "$root"
-PASEO_FIXTURES="$fixtures" PASEO_TEST_DEPS="$deps" PASEO_TEST_FILTER="$filter" \
+PASEO_FIXTURES="$fixtures" PASEO_TEST_FILTER="$filter" \
   nvim --headless -i NONE -u tests/minimal_init.lua \
   -c 'lua local failed = require("tests.spec").run(vim.env.PASEO_TEST_FILTER); vim.cmd(failed > 0 and "cq" or "qa!")' \
   2>&1

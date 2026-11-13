@@ -9,15 +9,13 @@ tests/run.sh git      # only the suites whose name matches `git`
 
 Install the sidecar's dependencies first (`cd sidecar && bun install`, or
 `npm install`). Neovim runs with `-u tests/minimal_init.lua` and nothing else,
-so none of your own configuration is loaded. `tests/deps.sh` clones the
-plugins under test (gitsigns) into `~/.cache/paseo-nvim/test-deps`. CI runs
-the same command against Neovim 0.11, stable and nightly.
+so none of your own configuration is loaded, and no other plugin: the plugin
+depends on none. CI runs the same command against Neovim 0.11, stable and nightly.
 
 ```
 tests/
   run.sh              fixtures, then Neovim, then the sidecar's own tests
   fixtures.sh         the git repositories assertions are made against
-  deps.sh             shallow clones of the plugins under test
   minimal_init.lua    the Neovim the suite runs in
   spec.lua            the runner: the suite files, in the order they run
   spec/               one file per area; helpers.lua has eq/truthy

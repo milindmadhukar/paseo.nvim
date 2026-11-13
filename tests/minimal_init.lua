@@ -5,8 +5,8 @@
 --- is also what makes it runnable on a CI machine that has no configuration at
 --- all.
 ---
---- Dependencies come from `$PASEO_TEST_DEPS` (see `tests/deps.sh`), never from
---- a plugin manager's install directory.
+--- The plugin has no plugin dependencies, so nothing but this checkout goes on
+--- the runtimepath -- never a plugin manager's install directory.
 
 local here = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h")
 local root = vim.fs.dirname(here)
@@ -20,15 +20,6 @@ vim.opt.runtimepath:prepend(root)
 -- with `./?.lua` alone -- so without this the suite only runs from the repo
 -- root, and silently tests nothing from anywhere else.
 package.path = ("%s/?.lua;%s"):format(root, package.path)
-
-local deps = assert(vim.env.PASEO_TEST_DEPS, "PASEO_TEST_DEPS is not set; run tests/run.sh")
-for name, kind in vim.fs.dir(deps) do
-  -- Never volt, even when an old cache still has it: nothing needs it, and a
-  -- suite that passed only because it was there would prove nothing.
-  if kind == "directory" and name ~= "volt" then
-    vim.opt.runtimepath:append(vim.fs.joinpath(deps, name))
-  end
-end
 
 -- The plugin has no `plugin/` directory, so `:Paseo` and the ColorScheme hook
 -- that keeps the highlight groups alive both come from `setup()` -- exactly as

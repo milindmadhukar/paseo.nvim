@@ -16,12 +16,10 @@ out="${2:-}"
 
 case "$kind" in
 micro)
-  deps="${PASEO_TEST_DEPS:-${XDG_CACHE_HOME:-$HOME/.cache}/paseo-nvim/test-deps}"
-  "$root/tests/deps.sh" "$deps" >/dev/null
   unset VIMRUNTIME
   cd "$root"
   log="$(mktemp "${TMPDIR:-/tmp}/paseo-bench.XXXXXX")"
-  PASEO_PERF=1 PASEO_TEST_DEPS="$deps" PASEO_FIXTURES="${PASEO_FIXTURES:-${TMPDIR:-/tmp}/paseo-nvim-tests}" \
+  PASEO_PERF=1 PASEO_FIXTURES="${PASEO_FIXTURES:-${TMPDIR:-/tmp}/paseo-nvim-tests}" \
     nvim --headless -i NONE -u tests/minimal_init.lua \
     -c 'lua local ok, err = pcall(dofile, "tests/bench/micro.lua"); if not ok then io.stdout:write("BENCH FAILED: " .. tostring(err) .. "\n") end; vim.cmd(ok and "qa!" or "cq")' \
     2>&1 | tee "$log"

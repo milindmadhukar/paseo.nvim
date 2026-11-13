@@ -21,12 +21,10 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
-repo="$(cd "$here/../.." && pwd)"
 eval "$("$here/daemon.sh" env)"
 session="${PASEO_E2E_SESSION:-paseo-e2e}"
 sock="$PASEO_E2E_ROOT/nvim.sock"
 shots="$PASEO_E2E_ROOT/shots"
-deps="${PASEO_TEST_DEPS:-${XDG_CACHE_HOME:-$HOME/.cache}/paseo-nvim/test-deps}"
 cols="${PASEO_E2E_COLS:-140}"
 rows="${PASEO_E2E_ROWS:-42}"
 
@@ -37,16 +35,13 @@ remote() {
 case "${1:-}" in
   start)
     cwd="${2:-$PASEO_E2E_ROOT/repo}"
-    # Fetched once; every scenario starts a Neovim, and a network round trip
-    # per start is both slow and a way to fail for reasons that are not ours.
-    [ -d "$deps/gitsigns.nvim" ] || "$repo/tests/deps.sh" "$deps" >/dev/null
     tmux kill-session -t "$session" 2>/dev/null || true
     rm -f "$sock"
     # What the new-task screen remembers is per scenario: one that started a
     # worktree must not open the next one's screen on Worktree.
     rm -f "$PASEO_E2E_ROOT/xdg/state/nvim/paseo/new.json"
     tmux new-session -d -s "$session" -x "$cols" -y "$rows" -c "$cwd" \
-      "env PASEO_TEST_DEPS='$deps' PASEO_E2E_URL='$PASEO_E2E_URL' PASEO_E2E_HOME='$PASEO_E2E_HOME' \
+      "env PASEO_E2E_URL='$PASEO_E2E_URL' PASEO_E2E_HOME='$PASEO_E2E_HOME' \
        XDG_STATE_HOME='$PASEO_E2E_ROOT/xdg/state' XDG_DATA_HOME='$PASEO_E2E_ROOT/xdg/data' \
        PASEO_E2E_SURFACE='${PASEO_E2E_SURFACE:-native}' PASEO_E2E_UI_COLORS='${PASEO_E2E_UI_COLORS:-auto}' PASEO_E2E_COLORS='${PASEO_E2E_COLORS:-habamax}' \
        nvim --listen '$sock' -i NONE -u '$here/init.lua'"
