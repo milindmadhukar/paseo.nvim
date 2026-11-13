@@ -209,6 +209,48 @@ local function test_panels()
   eq("session: the pick reaches apply", applied, { { "mode", "bypassPermissions" } })
   answer = nil
 
+  -- SPREAD (the new-task screen): every option of a pick group is on its
+  -- card, what is set lit and the rest dim -- and the key still picks.
+  local function text_of(lines)
+    local out = {}
+    for _, line in ipairs(lines) do
+      local row = {}
+      for _, cell in ipairs(line) do
+        row[#row + 1] = cell[1]
+      end
+      out[#out + 1] = table.concat(row)
+    end
+    return table.concat(out, "\n")
+  end
+  local function hl_of(lines, text)
+    for _, line in ipairs(lines) do
+      for _, cell in ipairs(line) do
+        if cell[1] == " " .. text .. " " then
+          return cell[2]
+        end
+      end
+    end
+  end
+  local one_row = text_of(session_panel.new(source):lines(80))
+  truthy("session: unspread, an unset model is not on the card", not one_row:find("Sonnet 5", 1, true))
+  local spread = session_panel.new(source, { spread = true })
+  local spread_lines = spread:lines(80)
+  local spread_text = text_of(spread_lines)
+  for _, label in ipairs { "Opus 5", "Sonnet 5", "Plan", "Always ask", "Bypass" } do
+    truthy("session: spread, every model is on the card: " .. label, spread_text:find(label, 1, true))
+  end
+  truthy("session: spread, no '3 options' count", not spread_text:find("options", 1, true))
+  eq("session: spread, an unset option is dim", hl_of(spread_lines, "Sonnet 5"), "PaseoChipOff")
+  eq("session: spread, what is set is lit", hl_of(spread_lines, "Opus 5"), "PaseoChipOn")
+  eq("session: spread, bypass is danger unset too", hl_of(spread_lines, "Bypass"), "PaseoChipDangerOff")
+  spread:jump "s"
+  eq("session: spread, the key still opens the picker", #picked, 3)
+  local spread_group = spread:resolve()
+  spread:move(1)
+  truthy("session: spread, the card is still one stop", spread:resolve().id ~= spread_group.id)
+  -- Leave the pick log as the checks below expect it.
+  table.remove(picked)
+
   -- Running off the end of a group lands on the NEXT GROUP rather than
   -- wrapping inside itself, so `j` means "the next thing" everywhere. The
   -- stops are mode, thinking, the one feature, model; two back from mode is

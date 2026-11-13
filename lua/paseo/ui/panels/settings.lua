@@ -53,6 +53,7 @@ end
 ---@field section string    Left from volt, which repainted this section on
 ---                          hover. Nothing dispatches a hover now.
 ---@field compact boolean   Drop the padding inside every card.
+---@field spread boolean    Pick groups show every option, not just what is set.
 ---@field hints table[]|nil Extra footer hint pairs.
 ---@field footer nil|fun(width: integer): table[][]  A row under the cards.
 ---@field focus { group: string|nil, entry: string|nil }
@@ -61,7 +62,7 @@ local View = {}
 View.__index = View
 
 ---@param source paseo.SettingsSource  |paseo.ui.session|.source or |paseo.ui.draft|.source
----@param opts? { only?: string, section?: string, hints?: table[], redraw?: fun() }
+---@param opts? { only?: string, section?: string, hints?: table[], redraw?: fun(), spread?: boolean }
 ---@return paseo.AgentSettingsView
 function M.new(source, opts)
   opts = opts or {}
@@ -74,6 +75,10 @@ function M.new(source, opts)
     -- Drop the padding inside every card. Set by whichever surface is drawing
     -- when the rows it has are fewer than the rows the layout wants.
     compact = false,
+    -- Every option of a pick group on its card, what is set lit and the rest
+    -- dim (the new-task screen). Off, a pick group is one row: the panel is
+    -- narrow, and twelve models there would push everything off screen.
+    spread = opts.spread or false,
     -- Extra hint pairs for the footer, for keys the surface around the view
     -- binds itself -- the popup's `q`. A hint bar that lies about how to get
     -- out is worse than no hint bar.
@@ -434,6 +439,50 @@ local function toggles_body(self, group, focus, w)
   return lines
 end
 
+---A pick group with EVERY option on the card, for a view with `spread` set:
+---the new-task screen, which has the width and is where you read all four
+---settings at once before you send.
+---
+---What is set is lit (green, or its tone); everything else is dim, so the
+---card says what you are about to start AND what else there was. Choosing
+---still happens in your picker -- the group's letter, or `<CR>` -- so the
+---row is one stop in `h j k l`, as the one-row card is. A click on an
+---option picks that option directly: you are pointing at it.
+---@param self paseo.AgentSettingsView
+---@param group table
+---@param focus table  `{ group = id, entry = id }`
+---@param w integer
+---@return table[][]
+local function spread_body(self, group, focus, w)
+  local lit = focus.group == group.id or hovered("paseo:" .. group.id)
+  local current = group.entries[M.current(group)]
+  local chips = {}
+  for _, entry in ipairs(group.entries) do
+    local state
+    if entry.id == group.current then
+      state = lit and "focus" or (entry.tone or "on")
+    else
+      -- Toned options keep their tone unselected, as in `chips_body`:
+      -- bypass reads as danger while you are choosing, not after.
+      state = entry.tone and (entry.tone .. "_off") or "off"
+    end
+    local label = entry.note and (entry.label .. " · " .. entry.note) or entry.label
+    local action = {
+      click = function()
+        self:set_focus(group, entry)
+        self.source:apply(group, entry, function()
+          self.redraw()
+        end)
+      end,
+      hover = { id = "paseo:" .. group.id, redraw = self.section },
+    }
+    chips[#chips + 1] = widgets.chip(label, state, action)
+  end
+  local lines = widgets.chiprow(chips, w)
+  vim.list_extend(lines, description_block(group, current, w))
+  return lines
+end
+
 ---The body of a pick group: what is set, and how to change it.
 ---
 ---ONE row, whatever the list's length, so twelve models cost the card no more
@@ -449,6 +498,9 @@ end
 local function pick_body(self, group, focus, w)
   if #group.entries == 0 then
     return { { { group.placeholder or "(none reported by this provider)", "PaseoCardDim" } } }
+  end
+  if self.spread then
+    return spread_body(self, group, focus, w)
   end
   local entry = group.entries[M.current(group)]
   local set = entry.id == group.current

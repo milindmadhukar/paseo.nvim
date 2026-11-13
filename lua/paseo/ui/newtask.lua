@@ -655,6 +655,9 @@ local function build(task)
       load(task, done)
     end,
   }, {
+    -- Every provider, model, mode and thinking level on the screen, what is
+    -- set lit: this is where you read what you are about to start.
+    spread = true,
     hints = {
       { keys.label("composer", "i") or "i", "type" },
       { "q", "cancel" },

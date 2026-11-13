@@ -385,11 +385,12 @@ agent), with that message as its first prompt. A terminal needs no message:
 
 In the choices: `h` `j` `k` `l` move, `<CR>` applies, a card's letter jumps
 to it, `i` or `<Tab>` goes back to the box, `q` cancels. Provider, Model,
-Permission mode and Thinking are lists, so their letter (`p` `s` `m` `t`)
-opens the list in your picker (|paseo-pick|), and so does the base branch's
-`…`. Start, Where and the features stay chips you press. The daemon names a
-new session (and a worktree's branch), and titles the agent from your
-message.
+Permission mode and Thinking show every option, what is set lit and the
+rest dim, so you read the whole choice before you send. Their letter
+(`p` `s` `m` `t`) opens the list in your picker (|paseo-pick|), as does the
+base branch's `…`, and a click on an option picks it. Start, Where and the
+features stay chips you press. The daemon names a new session (and a
+worktree's branch), and titles the agent from your message.
 Everything you pick is remembered per project and pre-filled next time.
 `:Paseo settings mode`, `thinking` and `model` on a draft open its own lists.
 
