@@ -898,14 +898,19 @@ function M.build(width)
     local last = #b.lines
     b.below[last] = b.below[last] or {}
     table.insert(b.below[last], { { "" } })
-    table.insert(b.below[last], {
-      { PAD .. "a", "PaseoKey" },
-      { " agent  ", "PaseoTreeMeta" },
-      { "w", "PaseoKey" },
-      { " workspace  ", "PaseoTreeMeta" },
-      { "g?", "PaseoKey" },
-      { " keys", "PaseoTreeMeta" },
-    })
+    -- As BOUND (`keys.rail` remaps), and a key you unbound is not offered.
+    local key = require "paseo.ui.keys"
+    local line = {}
+    for _, hint in ipairs { { "a", "agent" }, { "w", "workspace" }, { "g?", "keys" } } do
+      local lhs = key.label("rail", hint[1])
+      if lhs then
+        line[#line + 1] = { (#line == 0 and PAD or "  ") .. lhs, "PaseoKey" }
+        line[#line + 1] = { " " .. hint[2], "PaseoTreeMeta" }
+      end
+    end
+    if #line > 0 then
+      table.insert(b.below[last], line)
+    end
   end
   return b
 end
@@ -1498,9 +1503,11 @@ local function keymap(keys)
     -- here".
     { "<Esc>", keys.back, "back to the conversation" },
     { "q", keys.back, "back to the conversation" },
-    { keys.focus, keys.back, "back to the conversation" },
-    { keys.sessions, keys.back, "back to the conversation" },
-    { keys.toggle, keys.on_toggle, "hide the workspace rail" },
+    -- The native surface's own keys: already configured, so not remapped
+    -- again through `keys.rail`.
+    { keys.focus, keys.back, "back to the conversation", configured = true },
+    { keys.sessions, keys.back, "back to the conversation", configured = true },
+    { keys.toggle, keys.on_toggle, "hide the workspace rail", configured = true },
   }
 end
 
@@ -1597,15 +1604,16 @@ function M.buf(keys)
 
   -- `nowait`: a global mapping that starts with one of these (`<leader>`-less
   -- `g` and `z` sequences, say) would otherwise hold the key for 'timeoutlen'.
-  bound = keymap(keys)
-  for _, entry in ipairs(bound) do
-    if entry[1] then
-      vim.keymap.set(
-        "n",
-        entry[1],
-        entry[2],
-        { buffer = buf, nowait = true, silent = true, desc = "paseo: " .. entry[3] }
-      )
+  --
+  -- `bound` is what was actually bound, after `keys.rail` remaps and with
+  -- lists spread out, so `g?` and the footer show your keys, not ours.
+  local key = require "paseo.ui.keys"
+  bound = {}
+  for _, entry in ipairs(keymap(keys)) do
+    local lhss = entry.configured and key.list(entry[1]) or key.resolve("rail", entry[1])
+    for _, lhs in ipairs(lhss) do
+      vim.keymap.set("n", lhs, entry[2], { buffer = buf, nowait = true, silent = true, desc = "paseo: " .. entry[3] })
+      bound[#bound + 1] = { lhs, entry[2], entry[3], default = entry[1] }
     end
   end
 

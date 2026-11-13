@@ -104,15 +104,17 @@ require("paseo").setup {
       panel = 56,                 -- the Settings/Changes/Usage split
       composer = 10,              -- rows the box may grow TO
       composer_min = 3,           -- ...and the fewest it rests at
+      keys = {                    -- buffer-local; a key, a LIST, or false
+        rail = "<C-b>", focus = "<C-h>", sessions = "<C-s>",
+        panel = "<C-p>", new = "<C-n>",
+      },
     },
 
-    float = {                     -- (the name is historical) the rail's keys
+    float = {                     -- (the name is historical)
       rail = {                    -- the workspaces down the left; see below
         enabled = true,           -- where it starts — the toggle is remembered
         show_background = false,  -- background workspaces, as the app hides them
-        keys = { toggle = "<C-b>", focus = "<C-h>", sessions = "<C-s>" },
       },
-      keys = { new = "<C-n>" },   -- start an agent or a terminal, from anywhere
     },
 
     sidebar = {
@@ -164,9 +166,37 @@ require("paseo").setup {
   },
 
   quit = {
-    warn_active_agents = true,    -- warn before leaving while agents are active
+    guard = false,                -- ZZ/ZQ and :q abbreviations: global, so opt-in
+    warn_active_agents = true,    -- ...and with it on, warn while agents are active
+  },
+
+  -- Move or unbind any built-in key, by its DEFAULT: `false` unbinds,
+  -- a key moves it, a list binds it on all of them.
+  keys = {
+    conversation = {}, composer = {}, rail = {}, panel = {},
   },
 }
+```
+
+### Keys
+
+**The plugin maps nothing globally.** Everything it binds is buffer-local, on
+its own buffers; how you get *to* it is yours. Map the `:Paseo` commands, or
+the `<Plug>` names that exist for it:
+
+```lua
+vim.keymap.set({ "n", "t" }, [[<C-\>]], "<Plug>(paseo-native)") -- in and out, full screen
+vim.keymap.set("n", "<leader>an", "<Plug>(paseo-new)")           -- start something
+-- also <Plug>(paseo-rail): the rail, on or off
+```
+
+A key you map to one of them is shown where it matters: the full-screen winbar
+names your `:Paseo native` key as the way back to your code. And the surface's
+own keys (`ui.native.keys`) take lists, so the rail can sit on your explorer
+key — only in here:
+
+```lua
+ui = { native = { keys = { rail = { "<C-b>", "<leader>e" } } } }
 ```
 
 ## Commands
@@ -1554,7 +1584,9 @@ asked. When the plugin started the daemon itself, normal whole-editor exits
 (`:q`, `:qa`, `:wq`, `:x`, their long forms, `ZZ`, and `ZQ`) warn if a
 non-archived agent is running, starting, queued, or waiting for attention.
 Closing a split, tab page, or float does not warn, and a forced `!` exit is the
-explicit bypass. Set `quit.warn_active_agents = false` to opt out. Custom quit
+explicit bypass. The guard is off unless `quit.guard = true` (it maps `ZZ`/`ZQ`
+and abbreviates `:q`, which a plugin should not do unasked); with it on, set
+`quit.warn_active_agents = false` to keep it quiet. Custom quit
 routers can call:
 
 ```lua

@@ -71,4 +71,96 @@ function M.release(buf, saved)
   end
 end
 
+-- ------------------------------------------------------------ configured
+
+---Every lhs a key option names: a string is one, a list is several, `false`
+---(or nil) is none -- the "leave it unbound" every key option accepts.
+---@param spec string|string[]|false|nil
+---@return string[]
+function M.list(spec)
+  if type(spec) == "string" then
+    return spec ~= "" and { spec } or {}
+  end
+  if type(spec) == "table" then
+    local out = {}
+    for _, lhs in ipairs(spec) do
+      if type(lhs) == "string" and lhs ~= "" then
+        out[#out + 1] = lhs
+      end
+    end
+    return out
+  end
+  return {}
+end
+
+---What a built-in key is bound as in `scope`, after your `keys.<scope>`
+---remaps (|paseo-config.keys|): keyed by the DEFAULT key, so `["d"] = false`
+---unbinds it, `["d"] = "x"` moves it, `["d"] = { "d", "x" }` adds one.
+---@param scope string  "conversation"|"composer"|"rail"|"panel"|…
+---@param lhs string|string[]|false|nil  The default, or a list of them.
+---@return string[]
+function M.resolve(scope, lhs)
+  local remaps = (require("paseo.config").get().keys or {})[scope] or {}
+  local out, seen = {}, {}
+  for _, default in ipairs(M.list(lhs)) do
+    local remap = remaps[default]
+    local lhss = remap == nil and { default } or M.list(remap)
+    for _, key in ipairs(lhss) do
+      if not seen[key] then
+        seen[key] = true
+        out[#out + 1] = key
+      end
+    end
+  end
+  return out
+end
+
+---`vim.keymap.set` for a built-in key, through `resolve`: nothing if it was
+---unbound, every lhs if it was remapped to several.
+---@param scope string
+---@param mode string|string[]
+---@param lhs string|string[]|false|nil
+---@param rhs string|function
+---@param opts? table
+---@return string[] bound
+function M.set(scope, mode, lhs, rhs, opts)
+  local bound = M.resolve(scope, lhs)
+  for _, key in ipairs(bound) do
+    vim.keymap.set(mode, key, rhs, opts)
+  end
+  return bound
+end
+
+---The key to SHOW for a built-in one in a hint: the first it is bound as, or
+---nil when it is unbound -- in which case the hint should go, not lie.
+---@param scope string|nil  nil: `lhs` is already a configured key option.
+---@param lhs string|string[]|false|nil
+---@return string|nil
+function M.label(scope, lhs)
+  local keys = scope and M.resolve(scope, lhs) or M.list(lhs)
+  return keys[1]
+end
+
+---A key YOU mapped, globally, to `rhs` (a `<Plug>` name or a command line
+---such as `<cmd>Paseo native<cr>`): what a hint can show for an action the
+---plugin deliberately leaves unmapped. Case and `<cr>` spelling ignored.
+---@param rhs string|string[]
+---@param mode? string
+---@return string|nil
+function M.user_key(rhs, mode)
+  local wants = {}
+  for _, want in ipairs(type(rhs) == "table" and rhs or { rhs }) do
+    wants[#wants + 1] = want:lower():gsub("%s+", " ")
+  end
+  for _, map in ipairs(api.nvim_get_keymap(mode or "n")) do
+    local got = (map.rhs or ""):lower():gsub("%s+", " ")
+    for _, want in ipairs(wants) do
+      if got == want or got == want .. "<cr>" or got:gsub("<cr>$", "") == want:gsub("<cr>$", "") then
+        return (map.lhs:gsub("^ ", "<Space>"))
+      end
+    end
+  end
+  return nil
+end
+
 return M

@@ -99,15 +99,17 @@ Defaults: >lua
           panel = 56,             -- the Settings/Changes/Usage split
           composer = 10,          -- rows the box may grow TO
           composer_min = 3,       -- ...and the fewest it rests at
+          keys = {                -- each a key, a LIST, or false
+            rail = "<C-b>", focus = "<C-h>", sessions = "<C-s>",
+            panel = "<C-p>", new = "<C-n>",
+          },
         },
 
-        float = {                 -- (the name is historical) the rail's keys
+        float = {                 -- (the name is historical)
           rail = {                -- the workspaces, down the left
             enabled = true,       -- where it STARTS; your toggle is remembered
             show_background = false, -- background workspaces, hidden
-            keys = { toggle = "<C-b>", focus = "<C-h>", sessions = "<C-s>" },
           },
-          keys = { new = "<C-n>" }, -- start an agent or a terminal
         },
 
         sidebar = {
@@ -146,7 +148,12 @@ Defaults: >lua
       },
 
       quit = {
+        guard = false,            -- ZZ/ZQ and :q abbreviations: opt-in
         warn_active_agents = true,
+      },
+
+      keys = {                    -- remap built-in keys, by their DEFAULT
+        conversation = {}, composer = {}, rail = {}, panel = {},
       },
     }
 <
@@ -363,6 +370,22 @@ ui.native                                                           table
           composer_min = 3,  -- ...and the fewest it rests at
         }
 <
+                                                 *paseo-config.ui.native.keys*
+    `keys` are the surface's own, bound in NORMAL mode on EVERY one of its
+    buffers -- conversation, composer, rail and panel -- and only there:
+    they are buffer-local, so a key that means something else in the rest of
+    your editor keeps meaning it there. Each is a key, a LIST of keys, or
+    `false` to leave it unbound, and the winbar hints show what you chose.
+
+      `rail`      the workspace rail, on or off             `<C-b>`
+      `focus`     into the rail and back out                `<C-h>`
+      `sessions`  into the rail, on the session on screen   `<C-s>`
+      `panel`     the Settings / Changes / Usage panel      `<C-p>`
+      `new`       start something (|paseo-new|)             `<C-n>`
+
+    Your explorer key, for the rail, only while you are in here: >lua
+        ui = { native = { keys = { rail = { "<C-b>", "<leader>e" } } } }
+<
     `markdown` writes the agent's prose as raw markdown and soft-wraps it, so
     treesitter -- and render-markdown.nvim, if you have it -- draws headings,
     code fences, lists and tables. Tool cards, thinking and permissions keep
@@ -395,17 +418,18 @@ ui.native                                                           table
 ui.float                                                            table
 
     THE NAME IS HISTORICAL. This was the old volt dashboard's table, and what
-    is still read from it is the workspace `rail` and `keys.new`, which the
-    full-screen surface binds. >lua
+    is still read from it is the workspace `rail`. >lua
         float = {
           rail = {
             enabled = true,
             show_background = false,
-            keys = { toggle = "<C-b>", focus = "<C-h>", sessions = "<C-s>" },
           },
-          keys = { new = "<C-n>" },
         }
 <
+    `rail.keys` (`toggle`, `focus`, `sessions`) and `keys.new` are the OLD
+    names of |paseo-config.ui.native.keys|, and still work: one set here and
+    not there is taken from here.
+
     `width`, `height`, `row`, `col`, `composer`, `composer_min`, `backdrop`
     and `tab_keys` described the float and are no longer read; `zindex`
     survives only as the base the subagent list (|:Paseo-subagents|) stacks
@@ -432,16 +456,12 @@ ui.float.rail                                                       table
     `hints` is the `a agent  w workspace  g? keys` line under the last row.
     Default true.
 
-    Each key is bound in NORMAL mode on the conversation, the composer and the
-    rail, or `false` to leave it unbound. `sessions` goes into the rail ON THE
-    SESSION ON SCREEN -- see |paseo-rail-sessions|.
+    Its keys are |paseo-config.ui.native.keys|.
 
                                                   *paseo-config.ui.float.keys*
 ui.float.keys                                                       table
 
-    `new` (default `<C-n>`) starts something from the conversation or the
-    composer, in normal mode: an agent in this workspace, an agent in a new
-    workspace, or a terminal -- see |paseo-new|. `false` leaves it unbound.
+    The old name of |paseo-config.ui.native.keys| `new`.
 
                                                  *paseo-config.ui.sidebar*
 ui.sidebar                                                          table
@@ -683,6 +703,15 @@ review.agents                                       boolean, default `true`
     report who made a change and what they were told to do. Agents this plugin
     created are excluded: asking the agent you are talking to what it did is a
     loop. Set `false` and the prompt is the reference and nothing else.
+
+                                                    *paseo-config.quit.guard*
+quit.guard                                          boolean, default `false`
+
+    Install the quit guard: `ZZ` and `ZQ` wrapped, and `:q`, `:wq`, `:x` and
+    their long forms abbreviated to a guarded quit (|paseo-quit|). OFF unless
+    you ask, because those are GLOBAL mappings and abbreviations, and the
+    plugin sets none of those by itself. A config with its own quit router
+    leaves this off and calls |paseo.quit.guard| instead.
 
                                       *paseo-config.quit.warn_active_agents*
 quit.warn_active_agents                             boolean, default `true`
@@ -2435,7 +2464,8 @@ asking about the daemon this Neovim started itself.
 Full screen, each agent has a tab page of its own, so `:q` in its
 conversation or its box closes that TAB, not Neovim; the agent lives on.
 
-With |paseo-config.quit.warn_active_agents| enabled, normal whole-editor
+With |paseo-config.quit.guard| on (it is off by default) and
+|paseo-config.quit.warn_active_agents| enabled, normal whole-editor
 routes (`:q`, `:qa`, `:wq`, `:x`, long forms, `ZZ`, and `ZQ`) warn when a
 non-archived agent session is running, starting, queued, or waiting for
 attention. Idle, failed, and closed sessions do not warn. The prompt offers
@@ -2444,6 +2474,34 @@ split, Neovim tab page, or float does not warn; a forced `!` exit bypasses it.
 
 Existing mappings and command-line abbreviations are not replaced. A central
 quit router should call |paseo.quit.guard| around its own confirmation.
+
+                                                  *paseo-keys* *paseo-config.keys*
+Keys ~
+
+THE PLUGIN MAPS NOTHING GLOBALLY. Every key it binds is buffer-local, on its
+own buffers; the keys that reach it from your code are yours to choose. Map
+the `:Paseo` commands, or these names, which exist for exactly that: >lua
+    vim.keymap.set({ "n", "t" }, [[<C-\>]], "<Plug>(paseo-native)")
+    vim.keymap.set("n", "<leader>an", "<Plug>(paseo-new)")
+<
+  `<Plug>(paseo-native)`  in and out of the chat, full screen (|:Paseo-native|)
+  `<Plug>(paseo-new)`     start something (|paseo-new|)
+  `<Plug>(paseo-rail)`    the rail, on or off (on an agent's tab)
+
+A key you map to one of them is SHOWN where it matters: the full-screen
+winbar names your |:Paseo-native| key as the way back to your code.
+
+The surface's main keys are options (|paseo-config.ui.native.keys|). Every
+other built-in key -- the conversation's, the composer's, the rail's, the
+panel's -- can be moved or unbound through `keys`, keyed by its DEFAULT: >lua
+    keys = {
+      rail = { d = false, m = "M" },      -- no `d`; pin on `M`
+      composer = { ["<C-v>"] = false },   -- your own <C-v> back
+      conversation = { f = { "f", "F" } }, -- fork on both
+    }
+<
+`false` unbinds it, a key moves it, a list binds it on all of them. The
+rail's `g?` and every hint show the keys as bound after this.
 
                                                           *paseo-colours*
 Every colour is DERIVED from your colourscheme by default, and nothing here

@@ -740,6 +740,9 @@ local function name_buffer(buf, prefix, root)
 end
 
 local function make_buffers(chat)
+  -- Every built-in key here goes through `keys.set`, so `keys.conversation`
+  -- and `keys.composer` can move or unbind it (|paseo-config.keys|).
+  local keys = require "paseo.ui.keys"
   if not (chat.conversation and vim.api.nvim_buf_is_valid(chat.conversation)) then
     chat.conversation = vim.api.nvim_create_buf(false, true)
     vim.bo[chat.conversation].buftype = "nofile"
@@ -753,23 +756,23 @@ local function make_buffers(chat)
     -- actually printed, and a pending permission answered from the log.
     local conv = { buffer = chat.conversation, nowait = true }
     for _, key in ipairs { "<Tab>", "<CR>", "za" } do
-      vim.keymap.set("n", key, function()
+      keys.set("conversation", "n", key, function()
         transcript.toggle_at_cursor(chat)
       end, vim.tbl_extend("force", conv, { desc = "paseo: expand/collapse" }))
     end
-    vim.keymap.set("n", "q", function()
+    keys.set("conversation", "n", "q", function()
       M.close()
     end, vim.tbl_extend("force", conv, { desc = "paseo: close chat" }))
-    vim.keymap.set("n", "gp", function()
+    keys.set("conversation", "n", "gp", function()
       require("paseo.ui.permission").reopen(chat)
     end, vim.tbl_extend("force", conv, { desc = "paseo: reopen permission prompt" }))
-    vim.keymap.set("n", "gs", function()
+    keys.set("conversation", "n", "gs", function()
       require("paseo.pickers.subagents").open(chat)
     end, vim.tbl_extend("force", conv, { desc = "paseo: this agent's subagents" }))
-    vim.keymap.set("n", "f", function()
+    keys.set("conversation", "n", "f", function()
       require("paseo.fork").start(chat)
     end, vim.tbl_extend("force", conv, { desc = "paseo: fork this conversation" }))
-    vim.keymap.set(
+    keys.set("conversation",
       "n",
       "<C-f>",
       M.fullscreen,
@@ -782,7 +785,7 @@ local function make_buffers(chat)
     -- way to stop a running turn from the editor -- the only interrupt this
     -- plugin had was the permission dialog's "decline AND stop", which only
     -- works while something is waiting to be answered.
-    vim.keymap.set("n", "<C-c>", function()
+    keys.set("conversation", "n", "<C-c>", function()
       M.stop(chat)
     end, vim.tbl_extend("force", conv, { desc = "paseo: stop the turn" }))
 
@@ -815,7 +818,7 @@ local function make_buffers(chat)
     -- keymaps, completion, abbreviations and undo all work, which is the
     -- difference between writing a prompt and filling in a text field.
     local opts = { buffer = chat.composer, nowait = true }
-    vim.keymap.set("n", "<CR>", function()
+    keys.set("composer", "n", "<CR>", function()
       send(chat)
     end, vim.tbl_extend("force", opts, { desc = "paseo: send" }))
 
@@ -830,11 +833,11 @@ local function make_buffers(chat)
     -- terminals that do not send it simply never deliver it, and `<M-CR>` is
     -- the one that works everywhere.
     for _, key in ipairs { "<M-CR>", "<C-CR>" } do
-      vim.keymap.set("i", key, function()
+      keys.set("composer", "i", key, function()
         vim.cmd.stopinsert()
         send(chat)
       end, vim.tbl_extend("force", opts, { desc = "paseo: send" }))
-      vim.keymap.set("n", key, function()
+      keys.set("composer", "n", key, function()
         send(chat)
       end, vim.tbl_extend("force", opts, { desc = "paseo: send" }))
     end
@@ -864,17 +867,17 @@ local function make_buffers(chat)
       end
     end
     for _, mode in ipairs { "n", "i" } do
-      vim.keymap.set(mode, "<Up>", recall(-1), vim.tbl_extend("force", opts, { desc = "paseo: recall an earlier prompt" }))
-      vim.keymap.set(mode, "<Down>", recall(1), vim.tbl_extend("force", opts, { desc = "paseo: recall a later prompt" }))
+      keys.set("composer", mode, "<Up>", recall(-1), vim.tbl_extend("force", opts, { desc = "paseo: recall an earlier prompt" }))
+      keys.set("composer", mode, "<Down>", recall(1), vim.tbl_extend("force", opts, { desc = "paseo: recall a later prompt" }))
     end
 
     -- THE OTHER SEND, the app's long-press: queue it behind the running turn
     -- when sending steers, send it now when sending queues. `g<CR>` works in
     -- every terminal; `<S-CR>` in those that can tell it from `<CR>`.
-    vim.keymap.set("n", "g<CR>", function()
+    keys.set("composer", "n", "g<CR>", function()
       send(chat, true)
     end, vim.tbl_extend("force", opts, { desc = "paseo: send the other way (queue / now)" }))
-    vim.keymap.set({ "n", "i" }, "<S-CR>", function()
+    keys.set("composer", { "n", "i" }, "<S-CR>", function()
       if vim.fn.mode() == "i" then
         vim.cmd.stopinsert()
       end
@@ -887,7 +890,7 @@ local function make_buffers(chat)
     -- rail is up.
     local sessions_key = config.get().ui.terminal.keys.sessions
     if sessions_key then
-      vim.keymap.set({ "n", "i" }, sessions_key, function()
+      keys.set("composer", { "n", "i" }, sessions_key, function()
         if vim.fn.mode() ~= "n" then
           vim.cmd.stopinsert()
         end
@@ -905,7 +908,7 @@ local function make_buffers(chat)
     local voice_key = (config.get().voice or {}).key
     if voice_key and (config.get().voice or {}).enabled ~= false then
       for _, mode in ipairs { "n", "i" } do
-        vim.keymap.set(mode, voice_key, function()
+        keys.set("composer", mode, voice_key, function()
           require("paseo.voice").toggle {
             -- The visible half of dictation is |paseo.ui.composer|'s: the
             -- meter over the box, the clock, and taking the indicator down
@@ -928,7 +931,7 @@ local function make_buffers(chat)
     -- In insert mode too: you are usually typing the next thing when you
     -- decide the current thing should stop.
     for _, mode in ipairs { "n", "i" } do
-      vim.keymap.set(mode, "<C-c>", function()
+      keys.set("composer", mode, "<C-c>", function()
         if mode == "i" then
           vim.cmd.stopinsert()
         end
@@ -965,7 +968,7 @@ local function make_buffers(chat)
       end
     end
     for _, key in ipairs { "p", "P" } do
-      vim.keymap.set(
+      keys.set("composer",
         "n",
         key,
         paste(key),
@@ -974,7 +977,7 @@ local function make_buffers(chat)
         })
       )
     end
-    vim.keymap.set(
+    keys.set("composer",
       { "n", "i" },
       "<C-v>",
       paste "<C-v>",
@@ -982,17 +985,17 @@ local function make_buffers(chat)
         desc = "paseo: paste (an image, if the clipboard has one)",
       })
     )
-    vim.keymap.set("n", "q", function()
+    keys.set("composer", "n", "q", function()
       M.close()
     end, vim.tbl_extend("force", opts, { desc = "paseo: close chat" }))
-    vim.keymap.set("n", "gq", function()
+    keys.set("composer", "n", "gq", function()
       M.close()
     end, vim.tbl_extend("force", opts, { desc = "paseo: close chat" }))
-    vim.keymap.set("n", "f", function()
+    keys.set("composer", "n", "f", function()
       require("paseo.fork").start(chat)
     end, vim.tbl_extend("force", opts, { desc = "paseo: fork this conversation" }))
     for _, mode in ipairs { "n", "i" } do
-      vim.keymap.set(mode, "<C-f>", function()
+      keys.set("composer", mode, "<C-f>", function()
         vim.cmd.stopinsert()
         M.fullscreen()
       end, vim.tbl_extend("force", opts, { desc = "paseo: sidebar <-> full screen" }))

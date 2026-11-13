@@ -14,6 +14,7 @@ local M = {}
 ---@field skills paseo.Config.Skills
 ---@field review paseo.Config.Review
 ---@field quit paseo.Config.Quit
+---@field keys table<string, table<string, string|string[]|false>>
 
 ---@class paseo.Config.Paseo
 ---@field url string?     Daemon WebSocket endpoint. Leave unset to DISCOVER
@@ -326,6 +327,8 @@ local M = {}
 ---                       Off means the prompt is the reference and nothing else.
 
 ---@class paseo.Config.Quit
+---@field guard boolean  Install the quit guard (ZZ/ZQ, `:q`/`:wq`/`:x`
+---                       abbreviations). Off by default: global mappings.
 ---@field warn_active_agents boolean  Ask before leaving Neovim while a Paseo
 ---                       agent session is running or waiting for attention.
 ---                       The agents keep running; this protects the view, not
@@ -413,22 +416,13 @@ local defaults = {
         -- Cells, on the old float. The native surface's rail is as wide as
         -- `native.rail` says.
         width = 32,
-        keys = {
-          toggle = "<C-b>",
-          -- Into the rail and back out. `<C-h>` because the rail is the
-          -- window to the left -- the key a split user already presses.
-          focus = "<C-h>",
-          -- Into the rail ON THE SESSION ON SCREEN, its workspace opened.
-          -- `<C-s>` is "the session list" in the composer and out of a
-          -- terminal too.
-          sessions = "<C-s>",
-        },
+        -- OLD NAMES for `ui.native.keys.rail`/`focus`/`sessions`, read only
+        -- when `ui.native.keys` does not set the same one. Empty by default:
+        -- the defaults live there now.
+        keys = {},
       },
-      keys = {
-        -- An agent here, an agent in a new workspace, or a terminal -- asked.
-        -- On the native surface's conversation and composer, in normal mode.
-        new = "<C-n>",
-      },
+      -- Old name for `ui.native.keys.new`, the same way.
+      keys = {},
     },
 
     -- The old dashboard in a window of its own rather than floating over your
@@ -460,6 +454,26 @@ local defaults = {
       -- A ceiling and a floor for the box you type in, as `sidebar`'s.
       composer = 10,
       composer_min = 3,
+      -- The surface's own keys, on EVERY one of its buffers (conversation,
+      -- composer, rail, panel), normal mode. Each is a key, a LIST of keys,
+      -- or false to leave it unbound -- `rail = { "<C-b>", "<leader>e" }`
+      -- puts the rail on your explorer key while you are in here, and only
+      -- here: these are buffer-local, so the global one is untouched.
+      keys = {
+        -- The workspace rail, on or off.
+        rail = "<C-b>",
+        -- Into the rail and back out. `<C-h>` because the rail is the
+        -- window to the left -- the key a split user already presses.
+        focus = "<C-h>",
+        -- Into the rail ON THE SESSION ON SCREEN, its workspace opened.
+        -- `<C-s>` is "the session list" in the composer and out of a
+        -- terminal too.
+        sessions = "<C-s>",
+        -- The Settings / Changes / Usage panel, on or off.
+        panel = "<C-p>",
+        -- Start something: the new-task screen.
+        new = "<C-n>",
+      },
     },
 
     sidebar = {
@@ -536,7 +550,23 @@ local defaults = {
   },
 
   quit = {
+    -- OFF unless you ask: guarding ZZ/ZQ and `:q`/`:wq`/`:x` means global
+    -- mappings and abbreviations, and a plugin sets none of those on its
+    -- own. `true` installs them; `require("paseo.quit").guard` is there for a
+    -- config with its own quit router.
+    guard = false,
     warn_active_agents = true,
+  },
+
+  -- REMAPS for the built-in keys of each surface, keyed by the DEFAULT key:
+  -- `["d"] = false` unbinds it, `["d"] = "x"` moves it, `["d"] = { "d", "x" }`
+  -- adds one. Scopes: `conversation`, `composer`, `rail`, `panel`. `g?` on
+  -- the rail, and every hint, shows what a key is bound as after this.
+  keys = {
+    conversation = {},
+    composer = {},
+    rail = {},
+    panel = {},
   },
 
   skills = {
@@ -552,11 +582,44 @@ local defaults = {
 ---@type paseo.Config
 local config = vim.deepcopy(defaults)
 
+---A key option's value: a key, a list of keys, or false.
+---@param v any
+---@return boolean
+local function is_key(v)
+  if v == false or type(v) == "string" then
+    return true
+  end
+  if type(v) ~= "table" then
+    return false
+  end
+  for _, lhs in ipairs(v) do
+    if type(lhs) ~= "string" then
+      return false
+    end
+  end
+  return true
+end
+
 ---Merge user options over the defaults.
 ---@param opts? table
 ---@return paseo.Config
 function M.setup(opts)
   config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts or {})
+
+  -- The old homes of the native surface's keys still work: a key set there,
+  -- and not under `ui.native.keys`, is taken from there.
+  local ui_opts = (opts or {}).ui or {}
+  local set_native = (ui_opts.native or {}).keys or {}
+  local legacy_rail = ((ui_opts.float or {}).rail or {}).keys or {}
+  for old_name, new_name in pairs { toggle = "rail", focus = "focus", sessions = "sessions" } do
+    if legacy_rail[old_name] ~= nil and set_native[new_name] == nil then
+      config.ui.native.keys[new_name] = legacy_rail[old_name]
+    end
+  end
+  local legacy_new = ((ui_opts.float or {}).keys or {}).new
+  if legacy_new ~= nil and set_native.new == nil then
+    config.ui.native.keys.new = legacy_new
+  end
 
   vim.validate("paseo.hosts", config.paseo.hosts, function(v)
     return v == nil or type(v) == "table"
@@ -707,20 +770,20 @@ function M.setup(opts)
   config.ui.float.zindex = math.max(10, math.floor(config.ui.float.zindex))
   vim.validate("ui.float.rail", config.ui.float.rail, "table")
   vim.validate("ui.float.rail.width", config.ui.float.rail.width, "number")
-  for name, key in pairs(config.ui.float.rail.keys or {}) do
-    vim.validate(("ui.float.rail.keys.%s"):format(name), key, function(v)
-      return v == false or type(v) == "string"
-    end, "a key, or false to leave it unbound")
-  end
   for _, group in ipairs {
+    { "ui.float.rail.keys", config.ui.float.rail.keys },
     { "ui.float.keys", config.ui.float.keys },
+    { "ui.native.keys", config.ui.native.keys },
+    { "keys.conversation", config.keys.conversation },
+    { "keys.composer", config.keys.composer },
+    { "keys.rail", config.keys.rail },
+    { "keys.panel", config.keys.panel },
   } do
     for name, key in pairs(group[2] or {}) do
-      vim.validate(("%s.%s"):format(group[1], name), key, function(v)
-        return v == false or type(v) == "string"
-      end, "a key, or false to leave it unbound")
+      vim.validate(("%s.%s"):format(group[1], name), key, is_key, "a key, a list of keys, or false to leave it unbound")
     end
   end
+  vim.validate("quit.guard", config.quit.guard, "boolean")
   vim.validate("ui.terminal.presets", config.ui.terminal.presets, "table")
   for name, key in pairs(config.ui.terminal.keys) do
     vim.validate(("ui.terminal.keys.%s"):format(name), key, function(v)

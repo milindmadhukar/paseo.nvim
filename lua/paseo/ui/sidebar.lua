@@ -396,12 +396,21 @@ function M.refresh(chat)
   -- Ahead of `speak` and `close` deliberately: `widgets.hints` degrades off
   -- the END, and `q` closes things in every plugin ever written while this
   -- one is new.
-  local right = widgets.hints({
-    { "f", "fork" },
-    { "<C-f>", "screen" },
-    { "<C-t>", "speak" },
-    { "q", "close" },
-  }, nil, math.max(0, width - 24))
+  -- As bound: `keys.composer` remaps, `voice.key`; an unbound one goes.
+  local key = require "paseo.ui.keys"
+  local voice = require("paseo.config").get().voice or {}
+  local hints = {}
+  for _, hint in ipairs {
+    { key.label("composer", "f"), "fork" },
+    { key.label("composer", "<C-f>"), "screen" },
+    { voice.enabled ~= false and key.label("composer", voice.key) or nil, "speak" },
+    { key.label("composer", "q"), "close" },
+  } do
+    if hint[1] then
+      hints[#hints + 1] = hint
+    end
+  end
+  local right = widgets.hints(hints, nil, math.max(0, width - 24))
 
   pcall(function()
     vim.wo[win].winbar = render.to_winbar(

@@ -540,6 +540,16 @@ commands.skills = {
 }
 
 ---@param opts? table See `paseo.Config`.
+---Start something from wherever you are: an agent here, in a new worktree,
+---or a terminal -- see |paseo-new|.
+function M.new_task()
+  if vim.fn.mode() ~= "n" then
+    pcall(vim.cmd.stopinsert)
+  end
+  local start = require "paseo.start"
+  start.new(start.context(require("paseo.ui.chat").current()))
+end
+
 function M.setup(opts)
   M.config.setup(opts)
   require("paseo.hosts").setup()
@@ -567,7 +577,26 @@ function M.setup(opts)
   -- Guard the standard interactive routes. Existing command-line
   -- abbreviations and mappings are preserved; configs with a central quit
   -- router can call `require("paseo.quit").guard` directly.
-  require("paseo.quit").install()
+  if M.config.get().quit.guard then
+    require("paseo.quit").install()
+  end
+
+  -- NO KEYS, only names for them: map these (or the `:Paseo` commands) to
+  -- whatever you like. `<Plug>` mappings cannot be typed, so defining them
+  -- takes nothing from anybody. See |paseo-keys|.
+  for name, run in pairs {
+    native = function()
+      require("paseo.ui.chat").surface("native", { toggle = true })
+    end,
+    new = function()
+      M.new_task()
+    end,
+    rail = function()
+      require("paseo.ui.native").toggle_rail()
+    end,
+  } do
+    vim.keymap.set({ "n", "t" }, ("<Plug>(paseo-%s)"):format(name), run, { desc = "paseo: " .. name })
+  end
 
   -- The sidecar is a child process; leaving it behind on :qa would leak one per
   -- session.

@@ -53,8 +53,11 @@ M.PANELS = { "Settings", "Changes", "Usage" }
 ---The panel `<C-p>` reopens: the one you last looked at, per session.
 local last_panel = "Settings"
 
----Not `gp`, which the chat's buffers already give to reopening a question.
-local PANEL_KEY = "<C-p>"
+---The surface's own keys (`ui.native.keys`): each a key, a list, or false.
+---@return { rail: any, focus: any, sessions: any, panel: any, new: any }
+local function nkeys()
+  return require("paseo.config").get().ui.native.keys or {}
+end
 
 local function config()
   return require("paseo.config").get().ui.native
@@ -185,10 +188,10 @@ end
 
 ---Keys the rail's buffer is built with, when native builds it first.
 local function rail_keys()
-  local keys = require("paseo.config").get().ui.float.rail.keys or {}
+  local keys = nkeys()
   return {
     back = M.back,
-    toggle = keys.toggle,
+    toggle = keys.rail,
     focus = keys.focus,
     sessions = keys.sessions,
     on_toggle = function()
@@ -293,8 +296,8 @@ function M.bind_terminal(buf)
   vim.b[buf].paseo_terminal_keys = true
   local keys = (require("paseo.config").get().ui.terminal or {}).keys or {}
   local function map(modes, lhs, fn, desc)
-    if lhs then
-      vim.keymap.set(modes, lhs, fn, { buffer = buf, nowait = true, silent = true, desc = "paseo: " .. desc })
+    for _, key in ipairs(require("paseo.ui.keys").list(lhs)) do
+      vim.keymap.set(modes, key, fn, { buffer = buf, nowait = true, silent = true, desc = "paseo: " .. desc })
     end
   end
   map({ "n", "t" }, keys.chrome, function()
@@ -492,10 +495,19 @@ local function show_panel(t, name)
     pcall(panel.attach, t.chat, t.panel_buf)
   end
 
-  local function map(lhs, fn, desc)
-    vim.keymap.set("n", lhs, fn, { buffer = t.panel_buf, nowait = true, silent = true, desc = "paseo: " .. desc })
+  local keys = require "paseo.ui.keys"
+  local opts = { buffer = t.panel_buf, nowait = true, silent = true }
+  -- The surface's keys (configured), then the panel's own (remappable).
+  local function surface(lhs, fn, desc)
+    for _, key in ipairs(keys.list(lhs)) do
+      vim.keymap.set("n", key, fn, vim.tbl_extend("force", opts, { desc = "paseo: " .. desc }))
+    end
   end
-  map(PANEL_KEY, M.toggle_panel, "close the panel")
+  local function map(lhs, fn, desc)
+    keys.set("panel", "n", lhs, fn, vim.tbl_extend("force", opts, { desc = "paseo: " .. desc }))
+  end
+  surface(nkeys().panel, M.toggle_panel, "close the panel")
+  surface(nkeys().rail, M.toggle_rail, "show or hide the workspace rail")
   for i, panel_name in ipairs(M.PANELS) do
     map(tostring(i), function()
       M.panel(panel_name)
@@ -507,7 +519,7 @@ local function show_panel(t, name)
   end, "close the panel")
   -- The panels that take `r` themselves have already bound it, and win;
   -- this is the reload for the ones that do not.
-  if vim.fn.maparg("r", "n", false, true).buffer ~= 1 then
+  if vim.fn.maparg(keys.label("panel", "r") or "r", "n", false, true).buffer ~= 1 then
     map("r", function()
       if type(panel.invalidate) == "function" then
         pcall(panel.invalidate)
@@ -560,12 +572,38 @@ end
 -- ------------------------------------------------------------------- header
 
 ---The keys this surface adds, on the conversation's winbar.
-local HINTS = {
-  { PANEL_KEY, "panel" },
-  { "<C-b>", "rail" },
-  { "gt", "next agent" },
-  { "q", "close" },
-}
+---@type { at: integer, lhs: string|nil }|nil
+local out_key
+
+---The winbar's hints, from the keys as they are BOUND: a remapped key shows
+---as what you remapped it to, an unbound one is not advertised at all.
+---@return { [1]: string, [2]: string }[]
+local function hints()
+  local keys = require "paseo.ui.keys"
+  -- The way back to your code is YOUR key (the plugin maps none): looked up
+  -- among your mappings, at most every couple of seconds -- the winbar is
+  -- redrawn on every streamed event.
+  local now = vim.uv.now()
+  if not out_key or now - out_key.at > 2000 then
+    out_key = {
+      at = now,
+      lhs = keys.user_key { "<Plug>(paseo-native)", "<cmd>Paseo native<cr>", ":Paseo native<cr>" },
+    }
+  end
+  local out = {}
+  for _, hint in ipairs {
+    { out_key.lhs, "code" },
+    { keys.label(nil, nkeys().panel), "panel" },
+    { keys.label(nil, nkeys().rail), "rail" },
+    { "gt", "next agent" },
+    { keys.label("conversation", "q"), "close" },
+  } do
+    if hint[1] then
+      out[#out + 1] = hint
+    end
+  end
+  return out
+end
 
 ---Repaint the conversation's winbar: which agent, what it is doing, and the
 ---surface's keys. The composer's own bar is |paseo.ui.composer|'s.
@@ -593,7 +631,7 @@ function M.refresh(chat)
     left[#left + 1] = { "  " .. require("paseo.ui.icons").status.waiting .. " waiting on you", "PaseoBadge" }
   end
 
-  local right = widgets.hints(HINTS, nil, math.max(0, width - 30))
+  local right = widgets.hints(hints(), nil, math.max(0, width - 30))
   pcall(function()
     vim.wo[win].winbar = render.to_winbar(
       widgets.row(render.truncate(left, math.max(4, width - render.width(right) - 2)), right, width)
@@ -693,15 +731,14 @@ end
 ---The surface's keys, on the chat's two buffers, while it is on this surface.
 ---@param chat table
 local function bind(chat)
-  local keys = require("paseo.config").get().ui.float.rail.keys or {}
-  local new = (require("paseo.config").get().ui.float.keys or {}).new
+  local keys = nkeys()
   local list = {
-    { keys.toggle, M.toggle_rail, "show or hide the workspace rail" },
+    { keys.rail, M.toggle_rail, "show or hide the workspace rail" },
     { keys.focus, M.focus_rail, "into the workspace rail" },
     { keys.sessions, M.focus_rail, "the sessions, in the rail" },
-    { PANEL_KEY, M.toggle_panel, "the panel: Settings / Changes / Usage" },
+    { keys.panel, M.toggle_panel, "the panel: Settings / Changes / Usage" },
     {
-      new,
+      keys.new,
       function()
         if api.nvim_get_mode().mode ~= "n" then
           pcall(vim.cmd.stopinsert)
@@ -715,9 +752,11 @@ local function bind(chat)
   chat.native_keys = {}
   for _, buf in ipairs { chat.conversation, chat.composer } do
     for _, item in ipairs(list) do
-      if item[1] and buf and api.nvim_buf_is_valid(buf) then
-        vim.keymap.set("n", item[1], item[2], { buffer = buf, nowait = true, silent = true, desc = "paseo: " .. item[3] })
-        chat.native_keys[#chat.native_keys + 1] = { buf, item[1] }
+      for _, lhs in ipairs(require("paseo.ui.keys").list(item[1])) do
+        if buf and api.nvim_buf_is_valid(buf) then
+          vim.keymap.set("n", lhs, item[2], { buffer = buf, nowait = true, silent = true, desc = "paseo: " .. item[3] })
+          chat.native_keys[#chat.native_keys + 1] = { buf, lhs }
+        end
       end
     end
   end

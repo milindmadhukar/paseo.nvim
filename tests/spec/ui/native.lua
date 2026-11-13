@@ -341,6 +341,37 @@ local function test_rail_beside()
   chat_mod.set_current(saved_current)
 end
 
+local function test_keys()
+  local native = require "paseo.ui.native"
+  local chat_mod = require "paseo.ui.chat"
+  local config = require "paseo.config"
+  local rail = require "paseo.ui.rail"
+  local saved, saved_current = vim.deepcopy(config.get()), chat_mod.current()
+
+  -- The rail's buffer is shared and built once: rebuild it with these keys.
+  rail.reset()
+  config.setup { ui = { native = { keys = { rail = { "<C-b>", "<leader>e" }, panel = false } } } }
+  local chat = new_chat "native-keys"
+  native.open(chat)
+  settle()
+  local function bound(buf, lhs)
+    return api.nvim_buf_call(buf, function()
+      return vim.fn.maparg(lhs, "n", false, true).buffer == 1
+    end)
+  end
+  truthy("keys: <leader>e toggles the rail from the composer", bound(chat.composer, "<leader>e"))
+  truthy("keys: and from the conversation", bound(chat.conversation, "<leader>e"))
+  truthy("keys: <C-b> is still there beside it", bound(chat.composer, "<C-b>"))
+  truthy("keys: a key set to false is not bound", not bound(chat.composer, "<C-p>"))
+  local bar = vim.wo[chat.win_conversation].winbar
+  truthy("keys: and not advertised", not bar:find("panel", 1, true))
+
+  native.close(chat)
+  native.reset()
+  config.setup(saved)
+  chat_mod.set_current(saved_current)
+end
+
 local function test_toggle()
   local native = require "paseo.ui.native"
   local chat_mod = require "paseo.ui.chat"
@@ -370,6 +401,7 @@ end
 return {
   { "ui.native.layout", test_layout },
   { "ui.native.toggle", test_toggle },
+  { "ui.native.keys", test_keys },
   { "ui.native.rail_beside", test_rail_beside },
   { "ui.native.markdown", test_markdown },
   { "ui.native.panels", test_panels },
