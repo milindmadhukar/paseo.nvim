@@ -67,6 +67,17 @@ local function test_rows()
   truthy("rows: which it also matches on", prompt.ordinal:find("Done one", 1, true))
   eq("rows: a prompt's paragraph is one line", rows[6].title, "fix the rail")
 
+  eq("rows: a workspace named for its branch says it once", search.rows({
+    workspaces = { { id = "w", hostId = "h", title = "main", branch = "main" } },
+    agents = { { id = "x", hostId = "h", title = "X", workspaceId = "w", provider = "fake" } },
+    bucket = function()
+      return "done"
+    end,
+    ws_bucket = function()
+      return "done"
+    end,
+  })[1].detail, "main · fake")
+
   local old = rows[7]
   eq("rows: a past chat matches its workspace, branch and project", old.ordinal, "Old chat gone main app")
 

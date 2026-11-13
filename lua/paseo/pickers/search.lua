@@ -64,11 +64,14 @@ end
 ---@param sep? string
 ---@return string
 local function join(parts, sep)
-  local out = {}
+  local out, seen = {}, {}
   -- `maxn`, not `ipairs`: the parts are optional, so the list has holes.
+  -- Each once: a workspace called `main` on branch `main` is `main`, not
+  -- `main · main`.
   for i = 1, table.maxn(parts) do
     local s = line(parts[i])
-    if s ~= "" then
+    if s ~= "" and not seen[s] then
+      seen[s] = true
       out[#out + 1] = s
     end
   end
