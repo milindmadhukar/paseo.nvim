@@ -41,6 +41,7 @@ import { timelineOps } from "./bridge-timeline.ts";
 import { terminalOps } from "./bridge-terminals.ts";
 import { voiceOps } from "./bridge-voice.ts";
 import { subagentOps } from "./bridge-subagents.ts";
+import { createScheduler } from "./bridge-dispatch.ts";
 
 const ctx = new BridgeConnection();
 const ops: Ops = {
@@ -92,28 +93,10 @@ async function dispatch(req: Request, arrived: number): Promise<void> {
   }
 }
 
-/**
- * Ops run IN ORDER, on one chain.
- *
- * Dispatching each line as it arrived looked fine and was not: `connect`,
- * `providers` and `close` all started at once and `close` won, so the two reads
- * came back "Daemon client closed" against a daemon that was up. Anything
- * stateful -- and `connect` is the whole state -- needs the ordering the caller
- * already assumes it has.
- *
- * A turn can take ten minutes, so `agent.run` is released from the chain once
- * it reaches the front: it still cannot start before an earlier `connect`, but
- * it does not hold up everything behind it.
- */
-// `dictation.finish` waits for the daemon to transcribe, with no deadline of
-// its own, and the microphone keeps feeding `dictation.chunk` while it does.
-// Neither may sit in front of a `timeline.history` or an `agent.send`.
-const CONCURRENT = new Set([
-  "agent.run",
-  "dictation.chunk",
-  "dictation.finish",
-]);
-let queue: Promise<void> = Promise.resolve();
+// The order they run in is |bridge-dispatch.ts|'s: barriers for connect and
+// close, one lane per terminal, agent and dictation stream, everything else at
+// once.
+const schedule = createScheduler(dispatch, (error) => log("dispatch:", error));
 
 function handle(line: string): void {
   let req: Request;
@@ -123,22 +106,7 @@ function handle(line: string): void {
     emit("protocol_error", { error: String(error) });
     return;
   }
-
-  const arrived = performance.now();
-  queue = queue
-    .then(async () => {
-      if (CONCURRENT.has(req.op)) {
-        void dispatch(req, arrived);
-        return;
-      }
-      await dispatch(req, arrived);
-    })
-    // A REJECTED QUEUE IS A DEAF SIDECAR. `queue` is the chain every later
-    // request is appended to, and once it rejects every `.then` after it is
-    // skipped -- silently, and for the rest of the session. dispatch has its
-    // own catch, so nothing is expected here; "nothing is expected" is exactly
-    // the condition under which this was missing.
-    .catch((error) => log("queue:", error));
+  void schedule(req);
 }
 
 // Line-buffered stdin. Chunks split anywhere, so a partial line is held over

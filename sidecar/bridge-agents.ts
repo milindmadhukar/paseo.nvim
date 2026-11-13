@@ -122,9 +122,21 @@ export function describeAgent(agent: any): Record<string, unknown> {
  * So `timeline.subscribe` calls this too, for the settings it could not
  * otherwise see. It lives here because this module owns `ctx.directory`.
  */
-export async function followDirectory(ctx: BridgeConnection): Promise<void> {
-  if (ctx.directory) return;
+export function followDirectory(ctx: BridgeConnection): Promise<void> {
+  if (ctx.directory) return Promise.resolve();
+  // ONE FOLLOW AT A TIME. Requests run concurrently now (bridge-dispatch.ts),
+  // and `agents.subscribe` and `timeline.subscribe` both arrive here on a
+  // chat's first open: two that both saw no directory would subscribe twice
+  // and leak the first. The second waits on the first instead.
+  if (!ctx.following) {
+    ctx.following = startFollowing(ctx).finally(() => {
+      ctx.following = null;
+    });
+  }
+  return ctx.following;
+}
 
+async function startFollowing(ctx: BridgeConnection): Promise<void> {
   const api = ctx.connected();
 
   const applyUpdate = guarded("agents", (message: any) => {

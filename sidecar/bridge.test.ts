@@ -1118,3 +1118,128 @@ test("a workspace carries what the app's sidebar row shows: lines changed, branc
   assert.equal(describePullRequest({ url: "https://gitlab.com/o/r/-/merge_requests/9", state: "closed" }).number, 9);
   assert.equal(describePullRequest(null), null);
 });
+
+// ------------------------------------------------------------- scheduling
+
+import { createScheduler, laneOf } from "./bridge-dispatch.ts";
+
+/** A `run` whose ops take as long as `delays[op]` says, and a log of starts/ends. */
+function recorder(delays: Record<string, number>) {
+  const log: string[] = [];
+  const run = async (req: any) => {
+    const name = `${req.op}#${req.id}`;
+    log.push(`start ${name}`);
+    await new Promise((r) => setTimeout(r, delays[req.op] ?? 0));
+    log.push(`end ${name}`);
+  };
+  return { log, run };
+}
+
+test("scheduler: nothing starts before an earlier connect has finished", async () => {
+  const { log, run } = recorder({ connect: 30 });
+  const schedule = createScheduler(run);
+  const all = [
+    schedule({ op: "connect", id: 1 }),
+    schedule({ op: "providers", id: 2 }),
+    schedule({ op: "workspaces.list", id: 3 }),
+  ];
+  await Promise.all(all);
+  assert.equal(log[0], "start connect#1");
+  assert.equal(log[1], "end connect#1");
+});
+
+test("scheduler: a slow read does not hold up an unrelated one", async () => {
+  const { log, run } = recorder({ providers: 60, "timeline.history": 1 });
+  const schedule = createScheduler(run);
+  const slow = schedule({ op: "providers", id: 1 });
+  const fast = schedule({ op: "timeline.history", id: 2, agentId: "a" });
+  await fast;
+  assert.ok(log.includes("end timeline.history#2"));
+  assert.ok(!log.includes("end providers#1"), "history waited for providers");
+  await slow;
+});
+
+test("scheduler: requests about the same thing keep their order", async () => {
+  const { log, run } = recorder({ "terminals.input": 20, "timeline.subscribe": 30 });
+  const schedule = createScheduler(run);
+  await Promise.all([
+    schedule({ op: "terminals.input", id: 1, terminalId: "t" }),
+    schedule({ op: "terminals.input", id: 2, terminalId: "t" }),
+    schedule({ op: "timeline.subscribe", id: 3, agentId: "a" }),
+    schedule({ op: "timeline.history", id: 4, agentId: "a" }),
+  ]);
+  assert.ok(log.indexOf("end terminals.input#1") < log.indexOf("start terminals.input#2"));
+  assert.ok(log.indexOf("end timeline.subscribe#3") < log.indexOf("start timeline.history#4"));
+});
+
+test("scheduler: close waits for what is running, and later requests wait for close", async () => {
+  const { log, run } = recorder({ providers: 30, close: 10 });
+  const schedule = createScheduler(run);
+  await Promise.all([
+    schedule({ op: "providers", id: 1 }),
+    schedule({ op: "close", id: 2 }),
+    schedule({ op: "connect", id: 3 }),
+    schedule({ op: "agents.list", id: 4 }),
+  ]);
+  assert.ok(log.indexOf("end providers#1") < log.indexOf("start close#2"));
+  assert.ok(log.indexOf("end close#2") < log.indexOf("start connect#3"));
+  assert.ok(log.indexOf("end connect#3") < log.indexOf("start agents.list#4"));
+});
+
+test("scheduler: a turn neither blocks its agent's lane nor a close", async () => {
+  const { log, run } = recorder({ "agent.run": 80 });
+  const schedule = createScheduler(run);
+  void schedule({ op: "agent.run", id: 1, agentId: "a" });
+  await new Promise((r) => setTimeout(r, 5));
+  await schedule({ op: "agent.send", id: 2, agentId: "a" });
+  await schedule({ op: "close", id: 3 });
+  assert.ok(!log.includes("end agent.run#1"), "waited for the turn");
+});
+
+test("scheduler: a failing op does not deafen the rest", async () => {
+  const errors: unknown[] = [];
+  const schedule = createScheduler(
+    async (req: any) => {
+      if (req.id === 1) throw new Error("boom");
+    },
+    (e) => errors.push(e),
+  );
+  await schedule({ op: "x", id: 1 });
+  let ran = false;
+  const after = createScheduler(async () => {
+    ran = true;
+  });
+  await after({ op: "y", id: 2 });
+  await schedule({ op: "y", id: 2 });
+  assert.equal(errors.length, 1);
+  assert.ok(ran);
+});
+
+test("scheduler: two workspace-makers on one directory go one at a time", () => {
+  assert.equal(laneOf({ op: "workspace.open", cwd: "/x" }), "cwd:/x");
+  assert.equal(laneOf({ op: "agent.start", cwd: "/x" }), "cwd:/x");
+  assert.equal(laneOf({ op: "providers", cwd: "/x" }), null);
+});
+
+import { followDirectory } from "./bridge-agents.ts";
+
+test("followDirectory: two at once subscribe once", async () => {
+  const ctx = new BridgeConnection();
+  let lists = 0;
+  const subscription = { subscribe() {}, release: async () => {} };
+  (ctx as any).connected = () => ({
+    agents: {
+      list: async () => {
+        lists += 1;
+        await new Promise((r) => setTimeout(r, 20));
+        return { subscription };
+      },
+    },
+    workspaces: { list: async () => ({ subscription }) },
+  });
+  await Promise.all([followDirectory(ctx), followDirectory(ctx)]);
+  assert.equal(lists, 1);
+  assert.ok(ctx.directory);
+  await followDirectory(ctx);
+  assert.equal(lists, 1);
+});

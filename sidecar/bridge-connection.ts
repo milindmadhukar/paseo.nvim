@@ -19,6 +19,8 @@ export class BridgeConnection {
   // `timeline.subscribe` in bridge-timeline.ts.
   timelines = new Map<string, TimelineEntry>();
   private cleanups = new Set<() => void | Promise<void>>();
+  /** A `followDirectory` in progress, for a second caller to wait on. */
+  following: Promise<void> | null = null;
   directory: {
     subscription?: { release: () => Promise<void> };
     workspaces?: { release: () => Promise<void> };
