@@ -258,15 +258,20 @@ function M.toggle_pin()
   if not (ws and ws.id) then
     return
   end
-  require("paseo.bridge").request("workspace.pin", { workspaceId = ws.id, pinned = not ws.pinned }, function(err)
-    vim.schedule(function()
-      if err then
-        return vim.notify("paseo: could not pin — " .. tostring(err), vim.log.levels.ERROR)
-      end
-      cache.loading = false
-      M.load()
-    end)
-  end, ws.hostId)
+  require("paseo.bridge").request(
+    "workspace.pin",
+    { workspaceId = ws.id, pinned = not ws.pinned },
+    function(err)
+      vim.schedule(function()
+        if err then
+          return vim.notify("paseo: could not pin — " .. tostring(err), vim.log.levels.ERROR)
+        end
+        cache.loading = false
+        M.load()
+      end)
+    end,
+    ws.hostId
+  )
 end
 
 -- ---------------------------------------------------------------- drawing
@@ -327,7 +332,9 @@ function M.subagent_badge(ws)
     return nil
   end
   local numbers = running > 0 and ("%d/%d"):format(running, total) or tostring(total)
-  return { { icons.tool.sub_agent .. " " .. numbers, running > 0 and "PaseoToolRunning" or "PaseoDim" } }
+  return {
+    { icons.tool.sub_agent .. " " .. numbers, running > 0 and "PaseoToolRunning" or "PaseoDim" },
+  }
 end
 
 ---@param path string
@@ -434,7 +441,9 @@ function M.lines(width)
   out[2] = {}
 
   if not cache.list then
-    out[3] = { { cache.err and "unavailable" or "loading…", cache.err and "PaseoToolFail" or "PaseoDim" } }
+    out[3] = {
+      { cache.err and "unavailable" or "loading…", cache.err and "PaseoToolFail" or "PaseoDim" },
+    }
     return out, rows, sessions
   end
   if #cache.list == 0 then
@@ -578,7 +587,13 @@ function M.draw()
   -- green name said it, and said it about every workspace sharing the
   -- directory. A band says it at a glance, from across the surface.
   if current_line then
-    api.nvim_buf_set_extmark(buf, ns, current_line - 1, 0, { line_hl_group = "PaseoRowCurrent", priority = 10 })
+    api.nvim_buf_set_extmark(
+      buf,
+      ns,
+      current_line - 1,
+      0,
+      { line_hl_group = "PaseoRowCurrent", priority = 10 }
+    )
   end
   for i, line in ipairs(lines) do
     local col = 0
@@ -674,7 +689,9 @@ function M.expand(want)
     return
   end
   local key = ws.id or ws.directory or ws.name
-  local here = cache.list and M.current_index(cache.list) and cache.list[M.current_index(cache.list)] == ws
+  local here = cache.list
+    and M.current_index(cache.list)
+    and cache.list[M.current_index(cache.list)] == ws
   local now = M.is_expanded(ws, here or false)
   if want == nil then
     want = not now
@@ -780,7 +797,12 @@ function M.buf(keys)
 
   local function map(lhs, fn, desc)
     if lhs then
-      vim.keymap.set("n", lhs, fn, { buffer = buf, nowait = true, silent = true, desc = "paseo: " .. desc })
+      vim.keymap.set(
+        "n",
+        lhs,
+        fn,
+        { buffer = buf, nowait = true, silent = true, desc = "paseo: " .. desc }
+      )
     end
   end
   map("j", function()
@@ -903,22 +925,22 @@ end
 ---The rail's window options, on a window that shows its buffer.
 ---@param w integer
 function M.style(w)
-    for option, value in pairs {
-      -- `EndOfBuffer` too: under a light theme like `morning` it carries a
-      -- background of its own, and every row below the list came out grey.
-      winhl = "Normal:PaseoNormal,NormalFloat:PaseoNormal,EndOfBuffer:PaseoNormal,CursorLine:PaseoRowHover",
-      -- Off until you are IN it. The row you are standing in already has
-      -- the bar and the green; a band on it as well, while the cursor is in
-      -- the composer, says the rail has focus when it does not.
-      cursorline = api.nvim_get_current_win() == w,
-      wrap = false,
-      scrolloff = 2,
-      sidescrolloff = 0,
-    } do
-      pcall(function()
-        vim.wo[w][option] = value
-      end)
-    end
+  for option, value in pairs {
+    -- `EndOfBuffer` too: under a light theme like `morning` it carries a
+    -- background of its own, and every row below the list came out grey.
+    winhl = "Normal:PaseoNormal,NormalFloat:PaseoNormal,EndOfBuffer:PaseoNormal,CursorLine:PaseoRowHover",
+    -- Off until you are IN it. The row you are standing in already has
+    -- the bar and the green; a band on it as well, while the cursor is in
+    -- the composer, says the rail has focus when it does not.
+    cursorline = api.nvim_get_current_win() == w,
+    wrap = false,
+    scrolloff = 2,
+    sidescrolloff = 0,
+  } do
+    pcall(function()
+      vim.wo[w][option] = value
+    end)
+  end
 end
 
 ---Make `w` THE rail window: the native surface's split, which this module

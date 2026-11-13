@@ -63,7 +63,10 @@ local function test_terminals()
   -- Paseo lists them. A panel holding a list is the thing that was replaced,
   -- so its absence is the assertion.
   local panels = require("paseo.ui.native").PANELS
-  truthy("terminals: no panel is a Sessions list -- the rail is", not vim.tbl_contains(panels, "Sessions"))
+  truthy(
+    "terminals: no panel is a Sessions list -- the rail is",
+    not vim.tbl_contains(panels, "Sessions")
+  )
   truthy("terminals: and none is a Terminals list", not vim.tbl_contains(panels, "Terminals"))
 
   -- The registry: several terminals alive at once is the whole point, and one
@@ -139,8 +142,22 @@ local function test_terminals()
   subagents.list = function(parent)
     if parent == "a1" then
       return {
-        { kind = "provider", id = "task", parent = "a1", title = "Map the auth flow", status = "running", running = true },
-        { kind = "paseo", id = "a2", parent = "a1", title = "child", status = "running", running = true },
+        {
+          kind = "provider",
+          id = "task",
+          parent = "a1",
+          title = "Map the auth flow",
+          status = "running",
+          running = true,
+        },
+        {
+          kind = "paseo",
+          id = "a2",
+          parent = "a1",
+          title = "child",
+          status = "running",
+          running = true,
+        },
       }
     end
     return {}
@@ -180,7 +197,11 @@ local function test_terminals()
       "subagent:a2:1",
       "terminal:t1:0",
     })
-    truthy("tree: drawn as a tree", joined:find("├", 1, true) and joined:find("└", 1, true), joined)
+    truthy(
+      "tree: drawn as a tree",
+      joined:find("├", 1, true) and joined:find("└", 1, true),
+      joined
+    )
     truthy("tree: the parent says how many are running", joined:find("2/2", 1, true) ~= nil, joined)
   end)
   agents.for_root, agents.get, subagents.list = old.for_root, old.get, old.list

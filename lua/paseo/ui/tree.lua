@@ -196,7 +196,10 @@ local function row(width, mine, prefix, glyph, glyph_hl, title, title_hl, right)
     meta, meta_w = {}, 0
   end
   local room = math.max(1, width - used - (meta_w > 0 and meta_w + 1 or 0))
-  vim.list_extend(left, render.truncate({ { title, mine and "PaseoAgent" or title_hl or "PaseoText" } }, room))
+  vim.list_extend(
+    left,
+    render.truncate({ { title, mine and "PaseoAgent" or title_hl or "PaseoText" } }, room)
+  )
   if meta_w > 0 then
     -- Padded in the surface's own colour: the default pad is a card's.
     return widgets.row(left, meta, width, "PaseoNormal")
@@ -224,10 +227,12 @@ function M.lines(ws, chat, width, draft)
       local glyph, hl = agent_glyph(item)
       local right = {}
       if (node.children or 0) > 0 then
-        local text = node.running > 0 and ("%d/%d"):format(node.running, node.children) or tostring(node.children)
+        local text = node.running > 0 and ("%d/%d"):format(node.running, node.children)
+          or tostring(node.children)
         right[#right + 1] = { text, node.running > 0 and "PaseoToolRunning" or "PaseoDim" }
       end
-      out[#out + 1] = row(width, mine, prefix, glyph, hl, item.title or item.id:sub(1, 8), nil, right)
+      out[#out + 1] =
+        row(width, mine, prefix, glyph, hl, item.title or item.id:sub(1, 8), nil, right)
     else
       local glyph, hl = subagent_glyph(item)
       out[#out + 1] = row(width, mine, prefix, glyph, hl, item.title or "subagent", "PaseoDim", nil)
@@ -238,7 +243,8 @@ function M.lines(ws, chat, width, draft)
   -- A draft on this workspace: nothing is on the daemon yet, so say so where
   -- the agent will appear.
   if draft then
-    out[#out + 1] = row(width, true, "", icons.status.pending, "PaseoDim", "new session", "PaseoText")
+    out[#out + 1] =
+      row(width, true, "", icons.status.pending, "PaseoDim", "new session", "PaseoText")
   end
 
   for _, item in ipairs(terms) do
@@ -273,7 +279,11 @@ function M.open(node, chat)
   local native = require "paseo.ui.native"
   local host_id = node.ws and node.ws.hostId or chat.host_id
   if node.kind == "terminal" then
-    return native.show_session { kind = "terminal", id = node.item.id, hostId = node.item.hostId or host_id }
+    return native.show_session {
+      kind = "terminal",
+      id = node.item.id,
+      hostId = node.item.hostId or host_id,
+    }
   end
   if node.kind == "agent" or node.item.kind == "paseo" then
     return native.show_session { kind = "agent", id = node.item.id, hostId = host_id }

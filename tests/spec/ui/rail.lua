@@ -12,13 +12,29 @@ local function test_buckets()
   -- The desktop app's rule, case by case. Each of these is a different glyph
   -- on the rail, so each one answered wrongly is a workspace drawn as doing
   -- something it is not.
-  eq("rail: a pending permission is waiting on you", agents.bucket { status = "running", pendingPermissionCount = 1 }, "needs_input")
-  eq("rail: so is our own permission flag, from an older sidecar", agents.bucket { status = "idle", requiresAttention = true }, "needs_input")
+  eq(
+    "rail: a pending permission is waiting on you",
+    agents.bucket { status = "running", pendingPermissionCount = 1 },
+    "needs_input"
+  )
+  eq(
+    "rail: so is our own permission flag, from an older sidecar",
+    agents.bucket { status = "idle", requiresAttention = true },
+    "needs_input"
+  )
   eq("rail: a failed agent is failed", agents.bucket { status = "error" }, "failed")
-  eq("rail: and so is one the daemon flagged for an error", agents.bucket { status = "idle", attentionReason = "error", daemonAttention = true }, "failed")
+  eq(
+    "rail: and so is one the daemon flagged for an error",
+    agents.bucket { status = "idle", attentionReason = "error", daemonAttention = true },
+    "failed"
+  )
   eq("rail: running is running", agents.bucket { status = "running" }, "running")
   eq("rail: and booting spins too", agents.bucket { status = "initializing" }, "running")
-  eq("rail: finished unseen is news", agents.bucket { status = "idle", attentionReason = "finished", daemonAttention = true }, "attention")
+  eq(
+    "rail: finished unseen is news",
+    agents.bucket { status = "idle", attentionReason = "finished", daemonAttention = true },
+    "attention"
+  )
   eq("rail: and otherwise it is done", agents.bucket { status = "idle" }, "done")
 
   -- One answer for a workspace: its most urgent agent.
@@ -34,8 +50,16 @@ local function test_buckets()
       { id = "elsewhere", status = "error", cwd = root .. "-other" },
     },
   }
-  eq("rail: a workspace answers with its most urgent agent", agents.workspace_bucket(root, host), "needs_input")
-  eq("rail: and a sibling directory is not inside it", agents.workspace_bucket(root .. "-other", host), "failed")
+  eq(
+    "rail: a workspace answers with its most urgent agent",
+    agents.workspace_bucket(root, host),
+    "needs_input"
+  )
+  eq(
+    "rail: and a sibling directory is not inside it",
+    agents.workspace_bucket(root .. "-other", host),
+    "failed"
+  )
   eq("rail: no agents is none", agents.workspace_bucket(root .. "-nobody", host), "none")
 
   -- MANY WORKSPACES, ONE DIRECTORY. Every agent the app starts in a checkout
@@ -53,24 +77,43 @@ local function test_buckets()
   local busy = { id = "wks_busy", directory = root, hostId = host }
   local quiet = { id = "wks_quiet", directory = root, hostId = host }
   local empty = { id = "wks_empty", directory = root, hostId = host }
-  eq("rail: the running agent's own workspace spins", agents.workspace_bucket(busy, host), "running")
+  eq(
+    "rail: the running agent's own workspace spins",
+    agents.workspace_bucket(busy, host),
+    "running"
+  )
   eq("rail: a sibling on the same directory does not", agents.workspace_bucket(quiet, host), "done")
-  eq("rail: one whose agents are elsewhere answers for the id-less one only", agents.workspace_bucket(empty, host), "done")
+  eq(
+    "rail: one whose agents are elsewhere answers for the id-less one only",
+    agents.workspace_bucket(empty, host),
+    "done"
+  )
   eq("rail: and the row says the same", require("paseo.ui.rail").bucket(quiet), "done")
   eq("rail: a workspace lists its own agents", #agents.for_workspace(quiet, host), 2)
-  eq("rail: by id, plus the agent with no id to match", vim.tbl_map(function(a)
-    return a.id
-  end, require("paseo.ui.tree").workspace_agents(quiet, host)), { "legacy", "quiet" })
+  eq(
+    "rail: by id, plus the agent with no id to match",
+    vim.tbl_map(function(a)
+      return a.id
+    end, require("paseo.ui.tree").workspace_agents(quiet, host)),
+    { "legacy", "quiet" }
+  )
   eq("rail: the picker's summary is the workspace's", agents.summary(quiet, host), "2 idle")
   agents._apply { kind = "snapshot", hostId = host, entries = {} }
 
   -- The glyphs the user asked for, by bucket.
   local rail = require "paseo.ui.rail"
   local icons = require "paseo.ui.icons"
-  eq("rail: waiting is a yellow exclamation", { rail.status "needs_input" }, { icons.status.waiting, "PaseoBadge" })
+  eq(
+    "rail: waiting is a yellow exclamation",
+    { rail.status "needs_input" },
+    { icons.status.waiting, "PaseoBadge" }
+  )
   eq("rail: failed is a red dot", { rail.status "failed" }, { icons.status.idle, "PaseoToolFail" })
   eq("rail: done is a green dot", { rail.status "done" }, { icons.status.idle, "PaseoToolOk" })
-  truthy("rail: running is a spinner frame", vim.tbl_contains(icons.spinner, (rail.status "running")))
+  truthy(
+    "rail: running is a spinner frame",
+    vim.tbl_contains(icons.spinner, (rail.status "running"))
+  )
 end
 
 local function test_layout()
@@ -163,7 +206,8 @@ local function test_toggle()
     native.open(chat)
     -- The list lands on the next tick.
     vim.wait(200, function()
-      return rail.current() ~= nil or (rail.win() and api.nvim_buf_line_count(api.nvim_win_get_buf(rail.win())) > 3)
+      return rail.current() ~= nil
+        or (rail.win() and api.nvim_buf_line_count(api.nvim_win_get_buf(rail.win())) > 3)
     end)
     local win = rail.win()
     truthy("rail: the window is up", win ~= nil)
@@ -174,7 +218,11 @@ local function test_toggle()
     local composer_width = api.nvim_win_get_width(chat.win_composer)
     truthy("rail: left of the conversation", rail_col + api.nvim_win_get_width(win) < composer_col)
     local text = table.concat(api.nvim_buf_get_lines(api.nvim_win_get_buf(win), 0, -1, false), "\n")
-    truthy("rail: lists the project's workspaces", text:find("alpha", 1, true) and text:find("beta", 1, true), text)
+    truthy(
+      "rail: lists the project's workspaces",
+      text:find("alpha", 1, true) and text:find("beta", 1, true),
+      text
+    )
 
     -- Into it, down a row, and open.
     native.focus_rail()
@@ -202,10 +250,14 @@ local function test_toggle()
 
     native.toggle_rail()
     truthy("rail: and back on", rail.win() ~= nil and api.nvim_win_is_valid(rail.win()))
-    eq("rail: and remembered as on", (function()
-      rail.reset()
-      return rail.visible()
-    end)(), true)
+    eq(
+      "rail: and remembered as on",
+      (function()
+        rail.reset()
+        return rail.visible()
+      end)(),
+      true
+    )
     native.close(chat)
   end)
 
@@ -240,11 +292,19 @@ local function test_current()
     agents.get = function()
       return { id = "a", cwd = dir, workspaceId = "ws-2" }
     end
-    eq("rail: the agent's own workspace, not the first on its directory", rail.current_index(list), 2)
+    eq(
+      "rail: the agent's own workspace, not the first on its directory",
+      rail.current_index(list),
+      2
+    )
     agents.get = function()
       return { id = "a", cwd = dir }
     end
-    eq("rail: without an id, the first on the directory -- and only it", rail.current_index(list), 1)
+    eq(
+      "rail: without an id, the first on the directory -- and only it",
+      rail.current_index(list),
+      1
+    )
     native.chat = function()
       return { host_id = "local", root = dir .. "-other" }
     end
@@ -287,9 +347,30 @@ local function test_sessions()
   local root = vim.fn.tempname()
   local host = require("paseo.hosts").selected()
   local listed = {
-    { id = "s-1", title = "first agent", status = "idle", workspaceId = "ws-a", cwd = root .. "/a", createdAt = "1" },
-    { id = "s-2", title = "second agent", status = "idle", workspaceId = "ws-a", cwd = root .. "/a", createdAt = "2" },
-    { id = "s-3", title = "other agent", status = "idle", workspaceId = "ws-b", cwd = root .. "/b", createdAt = "3" },
+    {
+      id = "s-1",
+      title = "first agent",
+      status = "idle",
+      workspaceId = "ws-a",
+      cwd = root .. "/a",
+      createdAt = "1",
+    },
+    {
+      id = "s-2",
+      title = "second agent",
+      status = "idle",
+      workspaceId = "ws-a",
+      cwd = root .. "/a",
+      createdAt = "2",
+    },
+    {
+      id = "s-3",
+      title = "other agent",
+      status = "idle",
+      workspaceId = "ws-b",
+      cwd = root .. "/b",
+      createdAt = "3",
+    },
   }
   local ok, failure = pcall(function()
     vim.o.columns, vim.o.lines = 160, 50
@@ -316,7 +397,16 @@ local function test_sessions()
     end
     subagents.list = function(parent)
       if parent == "s-1" then
-        return { { kind = "provider", id = "task", parent = "s-1", title = "child task", status = "running", running = true } }
+        return {
+          {
+            kind = "provider",
+            id = "task",
+            parent = "s-1",
+            title = "child task",
+            status = "running",
+            running = true,
+          },
+        }
       end
       return {}
     end
@@ -325,7 +415,13 @@ local function test_sessions()
     end
     workspaces.list = function(cb)
       cb({
-        { id = "ws-a", name = "alpha", directory = root .. "/a", projectRoot = root, hostId = host },
+        {
+          id = "ws-a",
+          name = "alpha",
+          directory = root .. "/a",
+          projectRoot = root,
+          hostId = host,
+        },
         { id = "ws-b", name = "beta", directory = root .. "/b", projectRoot = root, hostId = host },
       }, nil)
     end
@@ -343,26 +439,50 @@ local function test_sessions()
     transcript.reset(chat)
     native.open(chat)
     local function text()
-      return rail.win() and table.concat(api.nvim_buf_get_lines(api.nvim_win_get_buf(rail.win()), 0, -1, false), "\n") or ""
+      return rail.win()
+          and table.concat(
+            api.nvim_buf_get_lines(api.nvim_win_get_buf(rail.win()), 0, -1, false),
+            "\n"
+          )
+        or ""
     end
     vim.wait(300, function()
       return text():find("first agent", 1, true) ~= nil
     end)
     local drawn = text()
-    truthy("rail: the workspace on screen is open, its agents under it", drawn:find("first agent", 1, true) and drawn:find("second agent", 1, true), drawn)
-    truthy("rail: with each agent's subagents nested under it", drawn:find("child task", 1, true), drawn)
+    truthy(
+      "rail: the workspace on screen is open, its agents under it",
+      drawn:find("first agent", 1, true) and drawn:find("second agent", 1, true),
+      drawn
+    )
+    truthy(
+      "rail: with each agent's subagents nested under it",
+      drawn:find("child task", 1, true),
+      drawn
+    )
     truthy("rail: and the others closed", not drawn:find("other agent", 1, true), drawn)
     local alpha_at, child_at = drawn:find("alpha", 1, true), drawn:find("child task", 1, true)
     truthy("rail: the sessions come after their workspace's row", alpha_at < child_at, drawn)
 
-
     -- <C-s>: into the rail, on the session on screen.
     native.focus_rail()
     eq("rail: the sessions key lands in the rail", api.nvim_get_current_win(), rail.win())
-    eq("rail: on the agent on screen", rail.current_session() and rail.current_session().item.id, "s-1")
+    eq(
+      "rail: on the agent on screen",
+      rail.current_session() and rail.current_session().item.id,
+      "s-1"
+    )
     vim.api.nvim_feedkeys("j", "x", false)
-    eq("rail: j walks into its subagents", rail.current_session() and rail.current_session().item.id, "task")
-    eq("rail: which belong to the workspace", rail.current_workspace() and rail.current_workspace().id, "ws-a")
+    eq(
+      "rail: j walks into its subagents",
+      rail.current_session() and rail.current_session().item.id,
+      "task"
+    )
+    eq(
+      "rail: which belong to the workspace",
+      rail.current_workspace() and rail.current_workspace().id,
+      "ws-a"
+    )
 
     -- Open the other workspace from its row.
     local _, rows = rail.lines(32)
@@ -372,7 +492,11 @@ local function test_sessions()
       end
     end
     rail.expand(true)
-    truthy("rail: l opens another workspace's sessions", text():find("other agent", 1, true), text())
+    truthy(
+      "rail: l opens another workspace's sessions",
+      text():find("other agent", 1, true),
+      text()
+    )
     rail.expand(false)
     truthy("rail: and h closes them", not text():find("other agent", 1, true), text())
     native.close(chat)

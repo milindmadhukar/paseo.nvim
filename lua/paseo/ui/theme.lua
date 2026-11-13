@@ -226,7 +226,6 @@ M.ROLES = { "red", "green", "blue", "yellow", "grey", "border", "text", "bg" }
 ---cache; otherwise from the groups every colourscheme has to define anyway.
 ---@return paseo.Theme.Palette
 local function from_colourscheme()
-
   -- `Normal` first, not `NormalFloat`. The native surface covers the screen,
   -- and every surface REPLACES its windows' `Normal` with one of ours
   -- (`PaseoBase`, `PaseoNormal`), so the colour those have to be a step away
