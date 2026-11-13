@@ -227,6 +227,99 @@ function M.from_file(path)
   return encode(bytes, mime, vim.fn.fnamemodify(path, ":~"))
 end
 
+---What a terminal paste of FILES looks like: a path, a `file://` URL, a
+---quoted or backslash-escaped path, or several of them, one per line or
+---space-separated. That is what dragging a file onto the terminal, or
+---pasting one copied in a file manager, delivers -- text, never bytes.
+---@param text string
+---@return string[]|nil paths  Every one an image file on disk; nil if any is not.
+local function paths_in(text)
+  local function one(token)
+    token = vim.trim(token)
+    if token == "" then
+      return nil
+    end
+    local quoted = token:match "^'(.*)'$" or token:match '^"(.*)"$'
+    token = quoted or token:gsub("\\(.)", "%1")
+    if token:match "^file://" then
+      local ok, path = pcall(vim.uri_to_fname, token)
+      token = ok and path or token
+    end
+    token = vim.fn.expand(token)
+    if not BY_EXTENSION[vim.fn.fnamemodify(token, ":e"):lower()] then
+      return nil
+    end
+    local stat = vim.uv.fs_stat(token)
+    return stat and stat.type == "file" and token or nil
+  end
+
+  local out = {}
+  for _, line in ipairs(vim.split(vim.trim(text), "\n", { trimempty = true })) do
+    local whole = one(line)
+    if whole then
+      out[#out + 1] = whole
+    else
+      -- Several on one line: split on spaces that are not escaped or quoted.
+      local tokens, current, quote = {}, {}, nil
+      local i = 1
+      while i <= #line do
+        local c = line:sub(i, i)
+        if c == "\\" and not quote then
+          current[#current + 1] = line:sub(i, i + 1)
+          i = i + 1
+        elseif (c == "'" or c == '"') and (quote == nil or quote == c) then
+          quote = quote == nil and c or nil
+          current[#current + 1] = c
+        elseif c:match "%s" and not quote then
+          tokens[#tokens + 1] = table.concat(current)
+          current = {}
+        else
+          current[#current + 1] = c
+        end
+        i = i + 1
+      end
+      tokens[#tokens + 1] = table.concat(current)
+      for _, token in ipairs(tokens) do
+        if vim.trim(token) ~= "" then
+          local path = one(token)
+          if not path then
+            return nil
+          end
+          out[#out + 1] = path
+        end
+      end
+    end
+  end
+  return #out > 0 and out or nil
+end
+
+---The images a paste names, if it names nothing but images.
+---
+---nil, nil means "this is ordinary text, paste it": a sentence that happens
+---to mention `shot.png` is not a request to attach it, so EVERY token has to
+---be an image file that exists.
+---@param lines string[]|string  What `vim.paste` was handed.
+---@return paseo.Image[]|nil images, string|nil err
+function M.from_paste(lines)
+  local text = type(lines) == "table" and table.concat(lines, "\n") or lines
+  if #text > 8192 then
+    return nil, nil
+  end
+  local paths = paths_in(text)
+  if not paths then
+    return nil, nil
+  end
+  local images = {}
+  for _, path in ipairs(paths) do
+    local image, err = M.from_file(path)
+    if not image then
+      return nil, err
+    end
+    images[#images + 1] = image
+  end
+  return images, nil
+end
+
 ---One line about an image, for a notification.
 ---@param image paseo.Image
 ---@return string

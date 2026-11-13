@@ -64,6 +64,45 @@ local function test_image()
     )
   end
 
+  -- A PASTE THAT NAMES FILES: what dragging one onto the terminal, or
+  -- pasting one copied in a file manager, delivers.
+  local dir = vim.fn.tempname() .. " shots"
+  vim.fn.mkdir(dir, "p")
+  local spaced = dir .. "/my shot.png"
+  local second = dir .. "/b.jpg"
+  for _, p in ipairs { spaced, second } do
+    local fd2 = assert(io.open(p, "wb"))
+    fd2:write(bytes)
+    fd2:close()
+  end
+  local function pasted(input)
+    local images = image.from_paste(input)
+    return images and #images or 0
+  end
+  eq("paste: a plain path is an image", pasted { path }, 1)
+  eq("paste: a file:// URL, %20 and all", pasted { vim.uri_from_fname(spaced) }, 1)
+  eq("paste: a quoted path", pasted { "'" .. spaced .. "'" }, 1)
+  eq("paste: a backslash-escaped path", pasted { (spaced:gsub(" ", "\\ ")) }, 1)
+  eq("paste: one per line", pasted { path, second }, 2)
+  eq("paste: several on one line", pasted { (spaced:gsub(" ", "\\ ")) .. " " .. (second:gsub(" ", "\\ ")) }, 2)
+  eq("paste: a mime type comes with it", image.from_paste({ second })[1].mime, "image/jpeg")
+  eq("paste: a sentence that names one is text", pasted { "look at " .. path }, 0)
+  eq("paste: a .txt is text", pasted { text }, 0)
+  eq("paste: a path that is not there is text", pasted { dir .. "/gone.png" }, 0)
+  eq("paste: ordinary prose is text", pasted { "hello", "world" }, 0)
+
+  -- Outside a composer, vim.paste is untouched.
+  require("paseo.ui.chat").attach_events()
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_set_current_buf(buf)
+  vim.paste({ path }, -1)
+  truthy(
+    "paste: in any other buffer a path pastes as text",
+    table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false)):find(path, 1, true) ~= nil
+  )
+  vim.api.nvim_buf_delete(buf, { force = true })
+  vim.fn.delete(dir, "rf")
+
   vim.fn.delete(path)
   vim.fn.delete(text)
 end

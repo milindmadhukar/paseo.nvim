@@ -45,5 +45,14 @@ for surface in native sidebar; do
   "$E" keys p
   "$E" wait "($composer):find(\"[Image #2]\", 1, true) ~= nil" 10 || fail "$surface: composer p attached nothing"
   [ "$(q "$shape")" = "$before" ] || fail "$surface: composer p moved the surface: $before -> $(q "$shape")"
+
+  # And a terminal paste of the file's PATH -- a file dragged onto the
+  # terminal -- in insert mode in the composer.
+  "$E" lua '(function() vim.api.nvim_set_current_win(require("paseo.ui.chat").current().win_composer); return 1 end)()' >/dev/null
+  "$E" keys A
+  "$E" lua "(function() vim.paste({ \"$PASEO_E2E_ROOT/pic.png\" }, -1); return 1 end)()" >/dev/null
+  "$E" wait "($composer):find(\"[Image #3]\", 1, true) ~= nil" 10 || fail "$surface: pasting the path attached nothing"
+  "$E" wait "($composer):find(\"pic.png\", 1, true) == nil" 5 || fail "$surface: the path was pasted as text too"
+  "$E" keys Escape
   "$E" shot "paste-$surface" >/dev/null
 done

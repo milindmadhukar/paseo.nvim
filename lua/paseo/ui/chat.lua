@@ -58,6 +58,9 @@ local M = {}
 ---@type table<string, paseo.Chat>
 local chats = {}
 
+---See `-- images` below.
+local composers
+
 ---@type paseo.Chat|nil
 local current
 
@@ -618,6 +621,11 @@ end
 
 -- ------------------------------------------------------------------- images
 
+---Composer buffer -> its chat, for the paste handler. Weak: a chat that is
+---gone takes its entry with it.
+---@type table<integer, paseo.Chat>
+composers = setmetatable({}, { __mode = "v" })
+
 ---Put an image in the composer.
 ---
 ---What lands in the BUFFER is a placeholder -- `[Image #1]` -- and not the
@@ -878,6 +886,7 @@ local function make_buffers(chat)
     vim.bo[chat.composer].bufhidden = "hide"
     vim.bo[chat.composer].filetype = "markdown"
     name_buffer(chat.composer, "compose", chat.root)
+    composers[chat.composer] = chat
 
     -- The box is the size of what is in it: three rows for a question, more
     -- for a paragraph, back to three once it is sent. A fixed eight rows was
@@ -2051,6 +2060,29 @@ function M.attach_events()
     return
   end
   attached = true
+
+  -- PASTING A FILE IS ATTACHING IT. A terminal never hands Neovim an image's
+  -- bytes, only text -- so a screenshot copied as a FILE, or a file dragged
+  -- onto the terminal, arrives here as its path or `file://` URL. In a
+  -- composer, a paste that is nothing but image paths attaches them.
+  -- Everything else, and every other buffer, pastes as it always did.
+  local paste = vim.paste
+  vim.paste = function(lines, phase)
+    local chat = composers[vim.api.nvim_get_current_buf()]
+    if chat and phase == -1 then
+      local images, err = require("paseo.image").from_paste(lines)
+      if images then
+        for _, image in ipairs(images) do
+          attach_image(chat, image)
+        end
+        return true
+      end
+      if err then
+        vim.notify("paseo: " .. err, vim.log.levels.WARN)
+      end
+    end
+    return paste(lines, phase)
+  end
 
   ---@param agent_id string
   ---@return paseo.Chat|nil
