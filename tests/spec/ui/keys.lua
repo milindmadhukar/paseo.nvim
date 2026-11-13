@@ -33,8 +33,8 @@ local function test_helpers()
   api.nvim_buf_delete(buf, { force = true })
 
   -- A key YOU mapped to an action the plugin leaves unmapped.
-  vim.keymap.set("n", "<leader>zq", "<cmd>Paseo native<cr>")
-  truthy("keys: finds your own mapping by its rhs", keys.user_key "<cmd>Paseo native<cr>" ~= nil)
+  vim.keymap.set("n", "<leader>zq", "<cmd>Paseo<cr>")
+  truthy("keys: finds your own mapping by its rhs", keys.user_key "<cmd>Paseo<cr>" ~= nil)
   pcall(vim.keymap.del, "n", "<leader>zq")
 
   config.setup(saved)

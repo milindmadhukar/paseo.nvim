@@ -64,7 +64,7 @@ local M = {}
 ---@field remote_root string
 
 ---@class paseo.Config.UI
----@field surface "native"|"sidebar"  Which surface `:Paseo chat` opens on.
+---@field surface "native"|"sidebar"  Which surface `:Paseo` opens on.
 ---                       "native" is the default: full screen, one Paseo tab
 ---                       with every agent a buffer, every pane a real split. The sidebar is the
 ---                       narrower thing beside your code; <C-f> goes from it to
@@ -297,12 +297,12 @@ local M = {}
 ---                       included, means you handled it.
 
 ---@class paseo.Config.Skills
----@field dirs string[]  Where `:Paseo skills install` puts the bundled skills.
+---@field dirs string[]  Where `require("paseo.skills").install()` puts the bundled skills.
 ---                      Absolute; `~` is expanded at setup. The default is the
 ---                      one directory an agent can see from INSIDE a workspace
 ---                      member worktree, which a project-local one cannot.
 ---@field project_dirs string[]  Relative to the ws project root, for
----                      `:Paseo skills install project`.
+---                      `install { target = "project" }`.
 ---@field method "link"|"copy"  A symlink keeps the plugin the source of
 ---                      truth, so `:Lazy update` updates the skills. Defaults
 ---                      to "copy" on Windows, where symlinks need privileges.
@@ -444,7 +444,7 @@ local defaults = {
       end,
     },
 
-    -- EXPERIMENTAL. The native surface (`:Paseo native`): one Paseo tab, every
+    -- EXPERIMENTAL. The native surface (`:Paseo`): one Paseo tab, every
     -- agent a buffer in it, every pane a real split -- the workspace rail on
     -- the left, the conversation over the composer, a panel on the right when
     -- you ask for one. See |paseo.ui.native|.

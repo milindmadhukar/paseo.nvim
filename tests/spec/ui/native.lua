@@ -706,17 +706,6 @@ local function test_api()
   -- The public names, through `require("paseo")` too.
   eq("api: require(\"paseo\").native is the module", require("paseo").native.toggle_rail, api_.toggle_rail)
 
-  -- COMPLETION: the actions, then a panel's names.
-  truthy("api: the actions complete", vim.tbl_contains(api_.complete("", { "" }), "panel"))
-  eq("api: by prefix", api_.complete("pa", { "pa" }), { "panel" })
-  eq("api: and a panel's names after it", api_.complete("ch", { "panel", "ch" }), { "changes" })
-  local line = "Paseo native panel u"
-  eq(
-    "api: through :Paseo's own completion",
-    vim.fn.getcompletion(line, "cmdline"),
-    { "usage" }
-  )
-
   -- EVERY ACTION A <Plug> NAME, and every panel one.
   for _, name in ipairs { "native", "rail", "focus", "panel", "panel-changes", "new", "next", "code" } do
     truthy(
@@ -737,11 +726,11 @@ local function test_api()
     end
   end
 
-  -- `:Paseo native panel changes` goes straight to one, any case.
-  vim.cmd "Paseo native panel Changes"
-  eq("api: :Paseo native panel <name> shows that panel", panel_shown(), "changes")
-  vim.cmd "Paseo native panel"
-  eq("api: and with no name, toggles it", panel_shown(), nil)
+  -- `panel "Changes"` goes straight to one, any case.
+  api_.panel "Changes"
+  eq("api: panel(<name>) shows that panel", panel_shown(), "changes")
+  api_.toggle_panel()
+  eq("api: and toggle_panel() hides it", panel_shown(), nil)
 
   -- FROM YOUR CODE: the action takes you there and SHOWS, never hides.
   local shown_before = native.rail_shown() and true or false

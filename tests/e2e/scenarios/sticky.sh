@@ -17,7 +17,7 @@ tall="$(printf 'echo\n\n'; for i in $(seq 1 120); do printf -- '- line %d\n' "$i
 "$E" stop
 "$E" start "$repo"
 
-"$E" keys ':Paseo native' Enter
+"$E" keys ':Paseo' Enter
 "$E" wait 'require("paseo.ui.native").chat() ~= nil' 20 || fail "no Paseo tab"
 settle
 first="$("$E" lua "$C.agent_id")"
@@ -53,7 +53,7 @@ sleep 0.5
 # ANOTHER TAB, AND BACK through :Paseo native.
 "$E" keys Escape ':tabprevious' Enter
 "$E" wait 'not require("paseo.ui.native").on_tab()' 5 || fail "did not leave the Paseo tab"
-"$E" keys ':Paseo native' Enter
+"$E" keys ':Paseo' Enter
 "$E" wait 'require("paseo.ui.native").on_tab()' 10 || fail "did not come back to the Paseo tab"
 sleep 0.5
 [ "$("$E" lua "$top")" = "1" ] || fail "back from another tab at line $("$E" lua "$top"), not where it was left"

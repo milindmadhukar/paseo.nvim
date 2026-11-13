@@ -56,8 +56,36 @@ local function test_commands()
     truthy(":Paseo new opens the screen", seen ~= nil)
     eq(":Paseo new opens it on what you chose last", seen.opts, nil)
     seen = nil
-    vim.cmd "Paseo wcreate"
-    eq(":Paseo wcreate opens it on a new worktree, no name asked", seen and seen.opts, { where = "worktree" })
+    vim.cmd "Paseo new worktree"
+    eq(":Paseo new worktree opens it on a new worktree, no name asked", seen and seen.opts, { where = "worktree" })
+
+    -- THE WHOLE SET. Anything else is a key in the chat or a Lua function.
+    eq(
+      ":Paseo completes to the nine commands",
+      vim.fn.getcompletion("Paseo ", "cmdline"),
+      { "agents", "ask", "explain", "new", "settings", "stop", "workspaces", "ws" }
+    )
+    eq(":Paseo ask completes qf too", vim.fn.getcompletion("Paseo ask q", "cmdline"), { "qf" })
+    eq(":Paseo settings completes its groups", vim.fn.getcompletion("Paseo settings th", "cmdline"), { "thinking" })
+
+    -- Bare is the toggle.
+    local chat = require "paseo.ui.chat"
+    local old_toggle, toggled = chat.toggle, false
+    chat.toggle = function()
+      toggled = true
+    end
+    vim.cmd "Paseo"
+    chat.toggle = old_toggle
+    truthy(":Paseo with nothing after it toggles the chat", toggled)
+
+    -- A removed name says what there is instead.
+    local old_notify, said = vim.notify, nil
+    vim.notify = function(msg)
+      said = msg
+    end
+    vim.cmd "Paseo image"
+    vim.notify = old_notify
+    truthy("an unknown subcommand lists the real ones", said and said:find("workspaces", 1, true), said)
   end)
   new.open = old_open
   if not ok then

@@ -945,35 +945,4 @@ function M.for_dir(root, callback)
   end, host.id)
 end
 
----@param callback fun(id: string|nil, err: string|nil)
-function M.new_agent_session(ws, opts, callback)
-  opts = opts or {}
-  require("paseo.ui.create").review({
-    cwd = ws.directory,
-    preferred = (hosts.get(ws.hostId) or {}).provider
-      or require("paseo.config").get().paseo.provider,
-    host_id = ws.hostId,
-  }, function(draft, review_err)
-    if review_err or not draft then
-      return callback(nil, review_err or "cancelled")
-    end
-    bridge.request("agent.create", {
-      workspaceId = ws.id,
-      provider = draft.provider,
-      modeId = draft.modeId,
-      thinkingOptionId = draft.thinkingOptionId,
-      featureValues = draft.featureValues,
-      title = opts.title,
-    }, function(err, result)
-      if not err then
-        require("paseo.config").get().paseo.provider = draft.provider
-      end
-      callback(result and result.id, err)
-    end, ws.hostId)
-  end)
-end
-
----Compatibility alias for the former ambiguous name.
-M.new_session = M.new_agent_session
-
 return M

@@ -2,7 +2,7 @@
 --- else -- no floats over your code, no frame drawn around it.
 ---
 --- ONE TAB PAGE, THE PASEO TAB. Your code is on the tab you came from; Paseo
---- is this one, and `:Paseo native` goes back and forth between the two. You
+--- is this one, and `:Paseo` goes back and forth between the two. You
 --- never `gt` to it, and nothing here opens a tab of its own:
 ---
 ---   ┌ rail ┬ conversation (winbar: agent · status · keys) ┬ panel ┐
@@ -66,7 +66,7 @@ local ns = api.nvim_create_namespace "paseo.native"
 ---@type paseo.NativeSurface|nil
 local S
 
----The tab you last left for the Paseo tab: where `:Paseo native` goes back to.
+---The tab you last left for the Paseo tab: where `:Paseo` goes back to.
 local origin
 
 ---The panels, in the order of their number keys (`1` `2` `3` in the panel),
@@ -402,7 +402,7 @@ end
 
 ---Out of the Paseo tab, back to the code: the tab you came from if it is
 ---still there, else any other, else a fresh one. The Paseo tab stays, so
----`:Paseo native` again lands straight back on it.
+---`:Paseo` again lands straight back on it.
 function M.leave()
   local s = surface()
   local paseo = s and s.tab
@@ -917,7 +917,7 @@ local function hints()
   if not out_key or now - out_key.at > 2000 then
     out_key = {
       at = now,
-      lhs = keys.user_key { "<Plug>(paseo-native)", "<cmd>Paseo native<cr>", ":Paseo native<cr>" },
+      lhs = keys.user_key { "<Plug>(paseo-native)", "<cmd>Paseo<cr>", ":Paseo<cr>" },
     }
   end
   local out = {}
@@ -1615,7 +1615,7 @@ function M.show_terminal(term, opts)
 end
 
 ---Take the Paseo tab down. The chats live on, as they do when any surface
----closes; `:Paseo native` brings it back.
+---closes; `:Paseo` brings it back.
 function M.close_surface()
   local s = S
   if not s then
@@ -1650,7 +1650,7 @@ function M.close_surface()
 end
 
 ---`q`: the Paseo tab goes, as a whole. On a subagent's peek it is back to
----the parent instead. The chats live on; `:Paseo native` brings it back.
+---the parent instead. The chats live on; `:Paseo` brings it back.
 ---@param chat table
 function M.close(chat)
   local s = surface()

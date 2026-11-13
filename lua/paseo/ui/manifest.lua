@@ -1,7 +1,7 @@
 --- The workspace manifest, as a screen you answer rather than a file you find.
 ---
 --- The manifest used to arrive one of two ways, and neither
---- of them asked you anything. `:Paseo wcreate` in a multi-repo directory
+--- of them asked you anything. `:Paseo new worktree` in a multi-repo directory
 --- discovered a manifest and WROTE it, reporting what it had guessed through a
 --- `vim.notify` you cannot act on; `:Paseo ws init` dropped you into a raw TOML
 --- buffer you had to already know about. The file itself then carries the
@@ -445,7 +445,7 @@ end
 
 ---Configure a manifest before anything is written.
 ---
----Opened by `:Paseo wcreate` in a multi-repo directory and by `:Paseo ws init`.
+---Opened by `:Paseo new worktree` in a multi-repo directory and by `:Paseo ws init`.
 ---`callback(manifest, notes)` on confirm; `callback(nil)` on every other exit,
 ---including `t` -- which hands the file over to you and so is not a confirm.
 ---@param opts { root: string, manifest?: paseo.ws.Manifest, notes?: table[] }

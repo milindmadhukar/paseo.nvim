@@ -18,7 +18,7 @@ q() {
 
 # Open the chat on the fixture repo and wait until an agent is bound.
 open_chat() {
-  "$E" keys ':Paseo chat' Enter
+  "$E" keys ':Paseo' Enter
   "$E" wait 'require("paseo.ui.chat").current() ~= nil' 20 || fail "no chat opened"
   settle
 }

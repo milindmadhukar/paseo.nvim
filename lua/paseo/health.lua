@@ -188,6 +188,17 @@ local function check_paseo()
   else
     warn "neither bun nor node found; the push-based agent status column needs one"
   end
+
+  -- The sidecar process itself: up or not, and how many agents it can see.
+  -- (`require("paseo.bridge").stop()` shuts it down; the next request starts
+  -- it again.)
+  local bridge = require "paseo.bridge"
+  if bridge.running() then
+    local seen = #require("paseo.agents").all "*"
+    ok(("sidecar running; %d agent(s) in its directory"):format(seen))
+  else
+    info "sidecar not running (it starts on the first request)"
+  end
 end
 
 ---Pasting an image needs a helper. Neovim's own clipboard is text, so a
@@ -209,7 +220,7 @@ local function check_images()
   else
     warn(
       "no usable clipboard image reader: install wl-paste (Wayland), xclip (X11) "
-        .. "or pngpaste (macOS). `:Paseo image <path>` works regardless."
+        .. "or pngpaste (macOS). Pasting an image's path or file:// URL into the composer works regardless."
     )
     info(("looked for: %s"):format(table.concat(installed, ", ")))
   end
@@ -297,10 +308,10 @@ local function check_skills()
     if installed == #bundled then
       ok(("%s — all %d installed"):format(short, installed))
     elseif installed == 0 then
-      warn(("%s — none installed; run `:Paseo skills install`"):format(short))
+      warn(("%s — none installed; run `:lua require('paseo.skills').install()`"):format(short))
     else
       warn(
-        ("%s — %d of %d installed; run `:Paseo skills install`"):format(
+        ("%s — %d of %d installed; run `:lua require('paseo.skills').install()`"):format(
           short,
           installed,
           #bundled

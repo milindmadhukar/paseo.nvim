@@ -67,7 +67,7 @@ local function build(results)
             -- WITH YOUR CODE: back on the tab you came from, an ordinary
             -- buffer among your others. Editing here would take the panel's
             -- window; a tab of its own was a third place to keep track of.
-            -- `:Paseo native` comes back to the agent.
+            -- `:Paseo` comes back to the agent.
             require("paseo.ui.native").edit(file)
           end,
         }

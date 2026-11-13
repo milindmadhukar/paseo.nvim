@@ -631,7 +631,7 @@ local function attach_image(chat, image)
   local placeholder = ("[Image #%d]"):format(#chat.images)
 
   -- At the cursor when the composer is where you are, appended when it is not
-  -- -- `:Paseo image` from a code buffer should not need the chat focused.
+  -- -- `paste_image()` from a code buffer should not need the chat focused.
   local win = chat.win_composer
   if win and vim.api.nvim_win_is_valid(win) and vim.api.nvim_get_current_win() == win then
     local row, col = unpack(vim.api.nvim_win_get_cursor(win))
@@ -1511,7 +1511,7 @@ end
 ---tab-local directory is where the window you are looking at is standing.
 ---
 ---Resolved the same way |paseo.workspaces|.open passes a root, so
----`:Paseo chat` and an automatic |paseo.ui.chat|.follow land on the same
+---`:Paseo` and an automatic |paseo.ui.chat|.follow land on the same
 ---agent rather than on two agents one directory apart.
 ---
 ---Callers that mean a particular FILE -- |paseo.explain|, `:Paseo ask` --
@@ -1524,7 +1524,7 @@ local function here()
   return repos.workspace_root(cwd) or (repo and repo.worktree) or cwd
 end
 
----Where `:Paseo chat` would open, from this tab: see `here` above.
+---Where `:Paseo` would open, from this tab: see `here` above.
 M.here = here
 
 ---Open (or focus) a chat.
@@ -1691,7 +1691,7 @@ function M.open(opts, callback)
         return adopt(found)
       end
       if opts.create == false then
-        notice(chat, "no agent in this workspace yet — :Paseo chat starts one")
+        notice(chat, "no agent in this workspace yet — :Paseo new starts one")
         return callback(nil, nil)
       end
       -- NOTHING HERE YET: the new-task screen (|paseo-new|), which is a
@@ -2020,7 +2020,7 @@ end
 ---`<C-f>`: from the sidebar beside your code, to the Paseo tab.
 ---
 ---Not a key ON the native surface: the Paseo tab is a place of its own, and
----`:Paseo native` -- or `q` -- is how you leave it. Declined silently; a notification
+---`:Paseo` -- or `q` -- is how you leave it. Declined silently; a notification
 ---for "this key does nothing here" is noise on a key people press by reflex.
 function M.fullscreen()
   local chat = current
@@ -2193,7 +2193,7 @@ function M.attach_events()
     end
     local agent = require("paseo.agents").get(payload.agentId, payload.hostId)
     vim.notify(
-      ("paseo: %s needs permission — `:Paseo chat` in its worktree to answer"):format(
+      ("paseo: %s needs permission — `:Paseo` in its worktree to answer"):format(
         (agent and agent.title) or payload.agentId
       ),
       vim.log.levels.WARN

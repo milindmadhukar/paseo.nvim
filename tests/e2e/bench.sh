@@ -96,7 +96,7 @@ if [ "$load" -gt 0 ]; then
   rm -f "$PASEO_E2E_ROOT/xdg/state/nvim/paseo/ui.json"
   PASEO_PERF=1 "$E" start "$fixture" || exit 1
   "$E" lua "dofile(\"$here/bench.lua\") and 1" >/dev/null
-  "$E" keys ':Paseo chat' Enter
+  "$E" keys ':Paseo' Enter
   "$E" wait 'require("paseo.ui.chat").current() ~= nil and require("paseo.ui.rail").win() ~= nil' 30 || exit 1
   sleep 2
   # In four of the seeded worktree workspaces, so the rail has rows spinning,

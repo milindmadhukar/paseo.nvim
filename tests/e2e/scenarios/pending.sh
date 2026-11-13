@@ -15,7 +15,7 @@ at_end='(function() local c = require("paseo.ui.chat").current(); local m = vim.
 repo="$(fresh_repo)"
 "$E" stop
 "$E" start "$repo"
-"$E" keys ':Paseo chat' Enter
+"$E" keys ':Paseo' Enter
 new_task_ready
 users_before=0
 "$E" keys 'long slow answer please' Escape Enter
@@ -30,7 +30,7 @@ wait_idle 90
 repo="$(fresh_repo)"
 "$E" stop
 "$E" start "$repo"
-"$E" keys ':Paseo wcreate' Enter
+"$E" keys ':Paseo new worktree' Enter
 new_task_ready
 "$E" keys 'long slow answer for the worktree' Escape Enter
 "$E" wait 'require("paseo.ui.chat").current() and require("paseo.ui.chat").current().agent_id ~= nil' 60 \

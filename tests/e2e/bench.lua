@@ -174,7 +174,7 @@ function M.run(out)
     -- boot and the connection, unless something already paid for them.
     function(next)
       measure("chat.open.cold", function()
-        vim.cmd "Paseo chat"
+        vim.cmd "Paseo"
       end, function()
         local c = chat_mod().current()
         return c ~= nil and native().is_open(c)

@@ -143,15 +143,6 @@ local function test_bridge()
     "bridge: `agents` is the canonical agent-session command",
     init_source:find("commands.agents =", 1, true) ~= nil
   )
-  truthy(
-    "bridge: `sessions` remains a compatibility alias",
-    init_source:find("commands.sessions = commands.agents", 1, true) ~= nil
-  )
-  truthy(
-    "bridge: `agent-settings` is canonical and `session` remains an alias",
-    init_source:find('commands["agent-settings"] =', 1, true) ~= nil
-      and init_source:find('commands.session = commands["agent-settings"]', 1, true) ~= nil
-  )
 end
 
 return {

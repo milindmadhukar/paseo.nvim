@@ -21,23 +21,6 @@ M.native = setmetatable({}, {
 ---@type table<string, { run: fun(args: string[]), desc: string, complete?: fun(lead: string, args: string[]): string[] }>
 local commands = {}
 
-commands.repos = {
-  desc = "List the repos in the current unit of work",
-  run = function()
-    local repos = require("paseo.repos").list()
-    if #repos == 0 then
-      vim.notify("paseo: not inside a git repository", vim.log.levels.WARN)
-      return
-    end
-    local lines = {}
-    for i, repo in ipairs(repos) do
-      local where = vim.fn.fnamemodify(repo.worktree, ":~")
-      lines[#lines + 1] = ("%d. %s  %s"):format(i, repo.name, where)
-    end
-    vim.notify(table.concat(lines, "\n"), vim.log.levels.INFO, { title = "paseo: repos" })
-  end,
-}
-
 ---@param args string[]
 ---@return table|nil m, string|nil root, string|nil err
 local function project(args)
@@ -46,7 +29,7 @@ local function project(args)
   if not root then
     return nil,
       nil,
-      "no .workspaces/workspace.toml here or above — `:Paseo wcreate` needs none, and "
+      "no .workspaces/workspace.toml here or above — `:Paseo new worktree` needs none, and "
         .. "writes one if this project turns out to want one"
   end
   local m, err = require("paseo.workspace.manifest").load(root)
@@ -147,7 +130,7 @@ commands.ws = {
       -- entirely when Paseo's own worktree isolation applies. Only a subcommand
       -- that must READ the manifest -- rm, ls, status -- fails here.
       if sub == "create" and args[2] and not args[3] then
-        return require("paseo.pickers.workspaces").named(args[2])
+        return require("paseo.new").open(nil, { where = "worktree" })
       end
       return vim.notify("paseo: " .. err, vim.log.levels.ERROR)
     end
@@ -236,363 +219,166 @@ commands.ws = {
       vim.log.levels.INFO
     )
   end,
+  complete = function(_, args)
+    if #args <= 1 then
+      return { "init", "edit", "create", "rm", "ls", "status" }
+    end
+    return {}
+  end,
 }
 
 commands.workspaces = {
-  desc = "Workspace picker for this project (`all`: every project): open, agent sessions, new, archive",
+  desc = "Workspaces in this project (`all`: every project's)",
   run = function(args)
-    require("paseo.pickers.workspaces").open { all = args[1] == "all" }
+    M.workspaces { all = args[1] == "all" }
   end,
-}
-
-commands.subagents = {
-  desc = "Subagents of the chat's agent session: a Paseo one opens as a chat, a provider one read-only",
-  run = function()
-    require("paseo.pickers.subagents").open()
-  end,
-}
-
-commands.new = {
-  desc = "Start something: a chat here or in a new worktree, or a terminal — one screen",
-  run = function()
-    require("paseo.new").open()
-  end,
-}
-
--- The old "new workspace": the same screen, opened on a new worktree. It
--- used to ask for a name first -- the daemon names it now.
-commands.wcreate = {
-  desc = "Start something in a new worktree (the new-task screen, on Worktree)",
-  run = function()
-    require("paseo.new").open(nil, { where = "worktree" })
-  end,
-}
-
--- Where the time went: see |paseo.perf|. `:Paseo perf` turns recording on
--- (if it was not already), `:Paseo perf reset` starts the count again.
-commands.perf = {
-  desc = "Timings: what the plugin spent its time on since recording began",
-  run = function(args)
-    local perf = require "paseo.perf"
-    if args[1] == "reset" then
-      perf.reset()
-      return vim.notify("paseo: perf counters reset", vim.log.levels.INFO)
-    end
-    if not perf.enabled then
-      perf.enable()
-      return vim.notify(
-        "paseo: perf recording is on now; do the slow thing, then :Paseo perf again",
-        vim.log.levels.INFO
-      )
-    end
-    vim.notify(table.concat(perf.lines(), "\n"), vim.log.levels.INFO, { title = "paseo: perf" })
+  complete = function()
+    return { "all" }
   end,
 }
 
 commands.agents = {
-  desc = "Agent sessions in the workspace containing this directory",
+  desc = "Agents in the workspace containing this directory",
   run = function()
-    require("paseo.pickers.sessions").here()
+    M.agents()
   end,
 }
 
--- Compatibility alias for the former ambiguous command name.
-commands.sessions = commands.agents
-
-commands.term = {
-  desc = "The terminals in this workspace, on the Sessions tab",
-  run = function()
-    -- A terminal is a SESSION, so there is nowhere else to go: the rail lists
-    -- the agents and the PTYs together, and picking either gives it a native
-    -- tab. This used to open a rail-and-pane window of its own, over the top
-    -- of whatever you were looking at.
-    --
-    -- Through `open` with a callback rather than `surface` and then a call
-    -- after it. With no chat yet, `surface` defers to an `open` of its own and
-    -- the surface is up only once the daemon has answered -- so a call written
-    -- after it races that answer, against a real daemon rather than a
-    -- synchronous stub, and acts on a surface that is not up yet.
-    --
-    -- NO `surface` here. It used to say `"float"`, which `open` then wrote
-    -- onto `chat.surface` -- so asking for the terminals from the old buffer
-    -- dashboard moved you to a float and kept you there.
-    require("paseo.ui.chat").open({}, function(chat)
-      if chat then
-        -- Through `sessions` rather than a focus of its own, because
-        -- "get me to that list from wherever I am" is exactly what `<C-s>`
-        -- means and the answer should not differ by which one you pressed.
-        -- From the sidebar that is the native surface's rail -- the list
-        -- exists nowhere else.
-        require("paseo.ui.chat").sessions(chat)
-      end
-    end)
-  end,
-}
-
--- The old name. It used to mean "the tab listing them"; the list is the
--- rail now and this lands there too. Kept because the help tag is
--- published.
-commands.terminals = commands.term
-
-commands.chat = {
-  desc = "Open the chat for this directory (toggle)",
-  run = function()
-    require("paseo.ui.chat").toggle()
-  end,
-}
-
--- With no action, the toggle it always was; with one, that action of
--- |paseo-native-api| -- `:Paseo native panel changes`, `:Paseo native rail`.
-commands.native = {
-  desc = "Toggle the chat full screen; or an action: rail, focus, panel [name], new, next, prev, code, close…",
+commands.new = {
+  desc = "Start something: a chat here or in a new worktree, or a terminal",
   run = function(args)
-    require("paseo.native").command(args)
+    M.new_task(args[1] == "worktree" and { where = "worktree" } or nil)
   end,
-  complete = function(lead, args)
-    return require("paseo.native").complete(lead, args)
-  end,
-}
-
--- `dash`, `buf` and `tab` opened the old volt dashboard's two mounts. That
--- dashboard is gone and the native surface is what they meant -- the chat,
--- full screen -- so they open it, and the keys bound to them keep working.
--- `dash` is not a toggle, as it was not: it asks for the surface.
-commands.dash = {
-  desc = "Open the chat full screen (the native surface)",
-  run = function()
-    require("paseo.ui.chat").surface "native"
-  end,
-}
-commands.buf = commands.native
-commands.tab = commands.native
-
-commands.stop = {
-  desc = "Interrupt the turn the current chat's agent is running",
-  run = function()
-    require("paseo.ui.chat").stop()
+  complete = function()
+    return { "worktree" }
   end,
 }
 
-commands.sidebar = {
-  desc = "Open the chat in the sidebar, beside your code",
-  run = function()
-    require("paseo.ui.chat").surface "sidebar"
+local REF_KINDS = { "hunk", "visual", "file", "cursor" }
+
+commands.ask = {
+  desc = "Ask about the hunk/selection/file (`qf`: every quickfix entry)",
+  run = function(args)
+    M.ask(args[1])
+  end,
+  complete = function()
+    return vim.list_extend(vim.deepcopy(REF_KINDS), { "qf" })
   end,
 }
 
 commands.explain = {
   desc = "Explain the hunk/selection/file, using the rubric",
   run = function(args)
-    require("paseo.explain").explain(args[1])
+    M.explain(args[1])
+  end,
+  complete = function()
+    return REF_KINDS
   end,
 }
 
-commands.ask = {
-  desc = "Attach the hunk/selection/file and type a question",
+local SETTINGS = { "mode", "thinking", "model", "features" }
+
+commands.settings = {
+  desc = "The chat agent's settings: mode, thinking, model, features",
   run = function(args)
-    require("paseo.explain").ask(args[1])
+    M.settings(args[1])
+  end,
+  complete = function()
+    return SETTINGS
   end,
 }
 
-commands.qfask = {
-  desc = "Attach every hunk in the quickfix list",
+commands.stop = {
+  desc = "Interrupt the turn the chat's agent is running",
   run = function()
-    require("paseo.explain").quickfix()
+    M.stop()
   end,
 }
 
-commands.mode = {
-  desc = "Permission / operating mode for this agent session",
-  run = function()
-    require("paseo.ui.session").mode()
-  end,
-}
+-- ----------------------------------------------------------------- the API
 
-commands.thinking = {
-  desc = "Reasoning level for this agent session",
-  run = function()
-    require("paseo.ui.session").thinking()
-  end,
-}
+---Open or close the chat, on the surface `ui.surface` names.
+function M.toggle()
+  require("paseo.ui.chat").toggle()
+end
 
-commands.fast = {
-  desc = "Toggle fast mode (or pick another feature toggle)",
-  run = function(args)
-    require("paseo.ui.session").toggle(args[1])
-  end,
-}
+---Ask about code: the hunk, selection or file, or every quickfix entry.
+---@param kind? "hunk"|"visual"|"file"|"cursor"|"qf"
+function M.ask(kind)
+  if kind == "qf" then
+    return require("paseo.explain").quickfix()
+  end
+  require("paseo.explain").ask(kind)
+end
 
-commands.plan = {
-  desc = "Toggle this agent session's planning mode",
-  run = function()
-    require("paseo.ui.session").plan()
-  end,
-}
+---Explain the hunk, selection or file, using the bundled rubric.
+---@param kind? "hunk"|"visual"|"file"|"cursor"
+function M.explain(kind)
+  require("paseo.explain").explain(kind)
+end
 
-commands["agent-settings"] = {
-  desc = "What this agent session is set to",
-  run = function()
-    require("paseo.ui.session").status()
-  end,
-}
+---The chat agent's settings card, optionally on one group.
+---@param group? "mode"|"thinking"|"model"|"features"
+function M.settings(group)
+  local session = require "paseo.ui.session"
+  if group == "mode" then
+    return session.mode()
+  elseif group == "thinking" then
+    return session.thinking()
+  elseif group == "model" then
+    return session.model()
+  elseif group == nil then
+    return session.status()
+  end
+  local chat = require("paseo.ui.chat").current()
+  if not chat then
+    return vim.notify("paseo: no chat open", vim.log.levels.WARN)
+  end
+  require("paseo.ui.settings").open(chat, group)
+end
 
--- Compatibility alias for the former ambiguous command name.
-commands.session = commands["agent-settings"]
+---Toggle a feature of the chat agent: Fast by default, or the one named.
+---@param feature_id? string
+function M.toggle_feature(feature_id)
+  require("paseo.ui.session").toggle(feature_id)
+end
 
-commands.switchmodel = {
-  desc = "Change the running agent session's model",
-  run = function()
-    require("paseo.ui.session").model()
-  end,
-}
+---Toggle Plan: a Codex feature or a Claude mode.
+function M.toggle_plan()
+  require("paseo.ui.session").plan()
+end
 
-commands.image = {
-  desc = "Attach an image to the chat: the clipboard, or a path",
-  run = function(args)
-    require("paseo.ui.chat").paste_image { path = args[1] }
-  end,
-}
+---Interrupt the turn the chat's agent is running.
+function M.stop()
+  require("paseo.ui.chat").stop()
+end
 
-commands.model = {
-  desc = "Choose the provider/model new agents are created with",
-  run = function(args)
-    require("paseo.ui.create").preference(args[1], function(selection, err)
-      if err then
-        return vim.notify("paseo: " .. err, vim.log.levels.ERROR)
-      end
-      if selection then
-        vim.notify("paseo: new agents will use " .. selection.provider, vim.log.levels.INFO)
-      end
-    end)
-  end,
-}
+---Attach an image to the chat: the clipboard's, or the file at `path`.
+---@param path? string
+---@return boolean attached
+function M.paste_image(path)
+  return require("paseo.ui.chat").paste_image { path = path }
+end
 
--- `agent stop` shuts down the SIDECAR PROCESS. It reads like it stops an
--- agent, and now that `:Paseo stop` interrupts a turn the difference is worth
--- spelling out in the one place you would look for it.
-commands.agent = {
-  desc = "Sidecar status; `agent stop` shuts the sidecar down (`:Paseo stop` is the turn)",
-  run = function(args)
-    local b = require "paseo.bridge"
-    if args[1] == "stop" then
-      b.stop()
-      vim.notify("paseo: sidecar stopped", vim.log.levels.INFO)
-      return
-    end
-    if not b.running() then
-      vim.notify("paseo: sidecar is not running", vim.log.levels.INFO)
-      return
-    end
-    b.request("agents.list", {}, function(err, result)
-      if err then
-        vim.notify("paseo: " .. err, vim.log.levels.ERROR)
-        return
-      end
-      local lines = {}
-      for _, agent in ipairs(result.entries or {}) do
-        lines[#lines + 1] = ("%s  %s  %s"):format(
-          agent.status,
-          agent.provider or "?",
-          agent.title or agent.id
-        )
-      end
-      vim.notify(#lines > 0 and table.concat(lines, "\n") or "no agents", vim.log.levels.INFO, {
-        title = "paseo: agents",
-      })
-    end)
-  end,
-}
+---The workspaces in this project.
+---@param opts? { all?: boolean }
+function M.workspaces(opts)
+  require("paseo.pickers.workspaces").open(opts)
+end
 
-commands.health = {
-  desc = "Run :checkhealth paseo",
-  run = function()
-    vim.cmd "checkhealth paseo"
-  end,
-}
+---The agents in the workspace containing the cwd.
+function M.agents()
+  require("paseo.pickers.sessions").here()
+end
 
-commands.skills = {
-  desc = "Agent skills: status | install | uninstall [global|project] [link|copy|force|dry] [name...]",
-  run = function(args)
-    local skills = require "paseo.skills"
-
-    local VERBS = { status = true, install = true, uninstall = true }
-    local FLAGS = {
-      global = "target",
-      project = "target",
-      link = "method",
-      copy = "method",
-      force = "force",
-      dry = "dry",
-    }
-
-    -- `status` is the bare default. A command that writes into ~/.claude the
-    -- moment you type it to find out what it does is a bad command.
-    local verb = "status"
-    local opts, names = {}, {}
-    for i, word in ipairs(args) do
-      if i == 1 and VERBS[word] then
-        verb = word
-      elseif FLAGS[word] then
-        local key = FLAGS[word]
-        opts[key] = (key == "force" or key == "dry") and true or word
-      elseif VERBS[word] then
-        return vim.notify(
-          ("paseo: %q is a verb and only makes sense first"):format(word),
-          vim.log.levels.ERROR
-        )
-      else
-        -- NOT ignored. A dropped `force` typo is a no-op that reads as a bug.
-        names[#names + 1] = word
-      end
-    end
-
-    if verb == "status" then
-      return vim.notify(
-        table.concat(skills.status(opts), "\n"),
-        vim.log.levels.INFO,
-        { title = "paseo: skills" }
-      )
-    end
-
-    local plan, err = skills.plan(vim.tbl_extend("force", opts, {
-      action = verb,
-      names = names,
-    }))
-    if not plan then
-      return vim.notify("paseo: " .. tostring(err), vim.log.levels.ERROR)
-    end
-
-    if opts.dry then
-      local lines = { ("would %s:"):format(verb) }
-      for _, action in ipairs(plan) do
-        lines[#lines + 1] = ("  %-7s %s%s"):format(
-          action.verb,
-          vim.fn.fnamemodify(action.path, ":~"),
-          action.reason and (" — " .. action.reason) or ""
-        )
-      end
-      return vim.notify(table.concat(lines, "\n"), vim.log.levels.INFO, { title = "paseo: skills" })
-    end
-
-    local lines, refused, backed_up = skills.apply(plan)
-    if refused then
-      lines[#lines + 1] = ""
-      lines[#lines + 1] = "add `force` to move what is in the way aside"
-    end
-    vim.notify(
-      table.concat(lines, "\n"),
-      refused and vim.log.levels.ERROR or backed_up and vim.log.levels.WARN or vim.log.levels.INFO,
-      { title = "paseo: skills" }
-    )
-  end,
-}
-
----@param opts? table See `paseo.Config`.
 ---Start something from wherever you are: an agent here, in a new worktree,
 ---or a terminal -- see |paseo-new|.
-function M.new_task()
-  require("paseo.new").open()
+---@param opts? { where?: "here"|"worktree", kind?: "chat"|"terminal" }
+function M.new_task(opts)
+  require("paseo.new").open(nil, opts)
 end
+
+---@param opts? table See |paseo-configuration|.
 
 function M.setup(opts)
   M.config.setup(opts)
@@ -668,16 +454,24 @@ function M.setup(opts)
   })
 
   vim.api.nvim_create_user_command("Paseo", function(args)
-    local sub = args.fargs[1] or "repos"
+    local sub = args.fargs[1]
+    if not sub then
+      return M.toggle()
+    end
     local cmd = commands[sub]
     if not cmd then
-      vim.notify(("paseo: unknown subcommand `%s`"):format(sub), vim.log.levels.ERROR)
+      local names = vim.tbl_keys(commands)
+      table.sort(names)
+      vim.notify(
+        ("paseo: no `:Paseo %s`; the commands are %s"):format(sub, table.concat(names, ", ")),
+        vim.log.levels.ERROR
+      )
       return
     end
     cmd.run(vim.list_slice(args.fargs, 2))
   end, {
     nargs = "*",
-    desc = "paseo.nvim",
+    desc = "paseo.nvim: :Paseo toggles the chat; see :help paseo-commands",
     complete = function(lead, line, pos)
       -- The words after `:Paseo`, up to the cursor; the one being typed is
       -- `lead` (empty right after a space).
@@ -686,14 +480,19 @@ function M.setup(opts)
       if lead == "" then
         words[#words + 1] = ""
       end
-      if #words <= 1 then
-        return vim.tbl_filter(function(name)
+      local function starting(list)
+        local out = vim.tbl_filter(function(name)
           return vim.startswith(name, lead)
-        end, vim.tbl_keys(commands))
+        end, list)
+        table.sort(out)
+        return out
+      end
+      if #words <= 1 then
+        return starting(vim.tbl_keys(commands))
       end
       local cmd = commands[words[1]]
       if cmd and cmd.complete then
-        return cmd.complete(lead, vim.list_slice(words, 2))
+        return starting(cmd.complete(lead, vim.list_slice(words, 2)))
       end
       return {}
     end,

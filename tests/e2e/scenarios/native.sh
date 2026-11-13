@@ -13,7 +13,7 @@ other="$(fresh_repo)"
 "$E" stop
 "$E" start "$repo"
 
-"$E" keys ':Paseo native' Enter
+"$E" keys ':Paseo' Enter
 "$E" wait 'require("paseo.ui.native").chat() ~= nil' 20 || fail "no Paseo tab"
 settle
 [ "$("$E" lua '#vim.api.nvim_tabpage_list_wins(0)')" = "3" ] || fail "rail, conversation, composer"
@@ -102,7 +102,7 @@ echo "changed" >>"$repo/README.md"
 
 # Back in, and an agent of ANOTHER WORKSPACE: it joins the row, nothing is
 # closed for it, and the tab stands where it works.
-"$E" keys ':Paseo native' Enter
+"$E" keys ':Paseo' Enter
 "$E" wait 'require("paseo.ui.native").chat() ~= nil' 10 || fail "did not come back to the Paseo tab"
 "$E" lua "(function() for _, a in ipairs(require(\"paseo.agents\").all()) do
     if a.cwd == \"$other\" then require(\"paseo.ui.native\").show_session { kind = \"agent\", id = a.id }; return a.id end

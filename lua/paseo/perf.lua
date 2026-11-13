@@ -17,7 +17,7 @@
 --- - STALLS: how late a 10 ms timer fires on the main loop, which is how long
 ---   the editor could not answer a key.
 ---
---- `M.report()` returns the lot as a table; `:Paseo perf` prints it.
+--- `M.report()` returns the lot as a table; `require("paseo.perf").show()` prints it.
 
 local M = {}
 
@@ -242,6 +242,19 @@ function M.lines()
     end
   end
   return out
+end
+
+---`:lua require("paseo.perf").show()`: turn recording on the first time;
+---after that, print what it has measured.
+function M.show()
+  if not M.enabled then
+    M.enable()
+    return vim.notify(
+      "paseo: perf recording is on now; do the slow thing, then show() again",
+      vim.log.levels.INFO
+    )
+  end
+  vim.notify(table.concat(M.lines(), "\n"), vim.log.levels.INFO, { title = "paseo: perf" })
 end
 
 return M

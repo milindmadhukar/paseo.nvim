@@ -17,7 +17,7 @@ before="$(count_workspaces)"
 
 "$E" stop
 "$E" start "$repo"
-"$E" keys ':Paseo wcreate' Enter
+"$E" keys ':Paseo new worktree' Enter
 new_task_ready
 [ "$("$E" lua 'require("paseo.ui.newtask").task(require("paseo.ui.chat").current()).where')" = "worktree" ] \
   || fail "wcreate did not open the screen on a new worktree"

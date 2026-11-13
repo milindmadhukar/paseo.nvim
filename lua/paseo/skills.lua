@@ -502,11 +502,69 @@ function M.status(opts)
     if installed == #bundled then
       lines[#lines + 1] = ("  all %d installed"):format(installed)
     elseif installed == 0 then
-      lines[#lines + 1] = "  none installed — run `:Paseo skills install`"
+      lines[#lines + 1] = "  none installed — run `:lua require('paseo.skills').install()`"
     end
   end
 
   return lines
+end
+
+-- ------------------------------------------------------------------ verbs
+
+---@class paseo.skills.Opts
+---@field target? "global"|"project"
+---@field method? "link"|"copy"
+---@field force? boolean   Move whatever is in the way aside.
+---@field dry? boolean     Say what would happen; change nothing.
+---@field names? string[]  Only these skills.
+
+---@param action "install"|"uninstall"
+---@param opts? paseo.skills.Opts
+local function run(action, opts)
+  opts = opts or {}
+  local plan, err = M.plan(vim.tbl_extend("force", opts, { action = action, names = opts.names or {} }))
+  if not plan then
+    return vim.notify("paseo: " .. tostring(err), vim.log.levels.ERROR)
+  end
+  if opts.dry then
+    local lines = { ("would %s:"):format(action) }
+    for _, step in ipairs(plan) do
+      lines[#lines + 1] = ("  %-7s %s%s"):format(
+        step.verb,
+        vim.fn.fnamemodify(step.path, ":~"),
+        step.reason and (" — " .. step.reason) or ""
+      )
+    end
+    return vim.notify(table.concat(lines, "\n"), vim.log.levels.INFO, { title = "paseo: skills" })
+  end
+  local lines, refused, backed_up = M.apply(plan)
+  if refused then
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = "pass `{ force = true }` to move what is in the way aside"
+  end
+  vim.notify(
+    table.concat(lines, "\n"),
+    refused and vim.log.levels.ERROR or backed_up and vim.log.levels.WARN or vim.log.levels.INFO,
+    { title = "paseo: skills" }
+  )
+end
+
+---Install the bundled skills (into ~/.claude/skills by default).
+---@param opts? paseo.skills.Opts
+function M.install(opts)
+  run("install", opts)
+end
+
+---Take them out again. Only what this plugin put there.
+---@param opts? paseo.skills.Opts
+function M.uninstall(opts)
+  run("uninstall", opts)
+end
+
+---What is bundled and where it is installed, as a notification.
+---@param opts? paseo.skills.Opts
+function M.show(opts)
+  vim.notify(table.concat(M.status(opts), "\n"), vim.log.levels.INFO, { title = "paseo: skills" })
 end
 
 return M

@@ -19,7 +19,7 @@ workspaces_in() {
 
 "$E" stop
 "$E" start "$repo"
-"$E" keys ':Paseo chat' Enter
+"$E" keys ':Paseo' Enter
 # Nothing here yet: the new-task screen, on a chat here (nothing remembered).
 new_task_ready
 

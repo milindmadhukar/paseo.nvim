@@ -696,7 +696,7 @@ end
 ---which Neovim only follows for an agent with a chat of its own. Nobody opens
 ---one: you are watching the parent. So the subagent blocked on a tool call
 ---with nothing on screen anywhere -- no dialog, no card, no notification --
----and `:Paseo chat` in that worktree found the parent, not it. The workspace
+---and `:Paseo` in that worktree found the parent, not it. The workspace
 ---rail knew (`!`), and nothing it led to could answer.
 ---
 ---The agent directory carries a pending COUNT per agent; when a subagent of

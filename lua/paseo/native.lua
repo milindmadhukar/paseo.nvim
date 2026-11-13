@@ -1,8 +1,7 @@
 --- The full-screen surface, as functions you can call: |paseo-native-api|.
 ---
 --- Every key the Paseo tab binds is one of these, and so is every
---- `:Paseo native <action>` (|:Paseo-native|) and every `<Plug>(paseo-…)`
---- name (|paseo-keys|). The plugin maps none of them globally -- bind the
+--- `<Plug>(paseo-…)` name (|paseo-plug|). The plugin maps none of them globally -- bind the
 --- ones you want, to whatever you like:
 ---
 ---   vim.keymap.set("n", "<leader>ap", function() require("paseo.native").panel "Changes" end)
@@ -199,10 +198,9 @@ function M.stop()
   chat().stop()
 end
 
--- -------------------------------------------------------- the commands
+-- ------------------------------------------------------------ the names
 
----What `:Paseo native <action>` dispatches to, and what the `<Plug>` names
----are made from. `arg` is the word after the action, if any.
+---What the `<Plug>(paseo-…)` names are made from. `arg` is the word after the action, if any.
 ---@type table<string, { run: fun(arg?: string), desc: string, args?: string[] }>
 M.ACTIONS = {
   toggle = { run = M.toggle, desc = "in and out of the Paseo tab" },
@@ -228,40 +226,5 @@ M.ACTIONS = {
   prev = { run = M.prev, desc = "the previous agent or terminal" },
   stop = { run = M.stop, desc = "stop the turn" },
 }
-
----`:Paseo native [action] [arg]`.
----@param args string[]
-function M.command(args)
-  local name = args[1] or "toggle"
-  local action = M.ACTIONS[name]
-  if not action then
-    local names = vim.tbl_keys(M.ACTIONS)
-    table.sort(names)
-    vim.notify(
-      ("paseo: no native action `%s` (%s)"):format(name, table.concat(names, ", ")),
-      vim.log.levels.ERROR
-    )
-    return
-  end
-  action.run(args[2])
-end
-
----Completion for `:Paseo native …`: the actions, then a panel's names.
----@param lead string  The word being completed.
----@param args string[]  The words after `native`, the one being typed included.
----@return string[]
-function M.complete(lead, args)
-  local candidates
-  if #args <= 1 then
-    candidates = vim.tbl_keys(M.ACTIONS)
-  else
-    candidates = (M.ACTIONS[args[1]] or {}).args or {}
-  end
-  candidates = vim.tbl_filter(function(c)
-    return vim.startswith(c, lead)
-  end, candidates)
-  table.sort(candidates)
-  return candidates
-end
 
 return M

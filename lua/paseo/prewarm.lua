@@ -1,6 +1,6 @@
 --- Have the answers before they are asked for.
 ---
---- The first `:Paseo chat` of a session used to pay for everything at once:
+--- The first `:Paseo` of a session used to pay for everything at once:
 --- booting the sidecar, probing for the daemon, connecting, subscribing to
 --- the agent directory, listing the workspaces for the rail -- and the first
 --- `<C-n>` for the provider catalogue on top. None of it depends on what you

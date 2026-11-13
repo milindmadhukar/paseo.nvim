@@ -8,7 +8,7 @@ repo="$(fresh_repo)"
 "$D" paseo run --provider fake/scripted --cwd "$repo" --title "keeper" "echo keep" >/dev/null 2>&1 || fail "seed 1"
 "$E" stop
 "$E" start "$repo"
-"$E" keys ':Paseo native' Enter
+"$E" keys ':Paseo' Enter
 "$E" wait 'require("paseo.ui.native").chat() ~= nil and require("paseo.ui.chat").current().initialised' 20 || fail "no Paseo tab"
 keeper="$("$E" lua 'require("paseo.ui.chat").current().agent_id')"
 wsid="$("$E" lua "require(\"paseo.agents\").get(\"$keeper\").workspaceId")"
