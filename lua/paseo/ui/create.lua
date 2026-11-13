@@ -108,7 +108,8 @@ function M.select_model(opts, callback)
       return callback(nil, "no provider model is ready on this daemon")
     end
     vim.schedule(function()
-      require("paseo.ui.choose").select(ready, {
+      require("paseo.ui.pick").select(ready, {
+        kind = "paseo.provider",
         prompt = "Provider for new agents",
         format_item = function(entry)
           return ("%s  (%d models)"):format(entry.label or entry.provider, #(entry.models or {}))
@@ -117,7 +118,8 @@ function M.select_model(opts, callback)
         if not entry then
           return callback(nil, nil)
         end
-        require("paseo.ui.choose").select(entry.models, {
+        require("paseo.ui.pick").select(entry.models, {
+          kind = "paseo.model",
           prompt = (entry.label or entry.provider) .. " model",
           format_item = function(model)
             return ("%s%s  %s"):format(

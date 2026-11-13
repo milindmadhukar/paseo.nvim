@@ -11,9 +11,14 @@
 --- worse than the plugin's own chooser, so this falls back to
 --- |paseo.ui.choose| rather than to it.
 ---
---- Questions -- yes/no, where a fork goes, "change the model or fork?" -- stay
---- on |paseo.ui.choose|. They are not option lists, and a fuzzy finder over
---- two answers is a slower way to say yes.
+--- Questions go here too -- yes/no, where a fork goes, "change the model or
+--- fork?" -- so that every "pick one" opens in the same place. One picker
+--- everywhere beats a faster one for two answers: you never wonder which keys
+--- this one takes.
+---
+--- What stays on |paseo.ui.choose| is a list `vim.ui.select` cannot carry:
+--- the workspace, session, subagent and rail lists have verbs beside picking
+--- (archive, new, review) and update while open.
 
 local M = {}
 
@@ -60,6 +65,22 @@ function M.format(group, entry)
     parts[#parts + 1] = "— " .. entry.description
   end
   return table.concat(parts, " ")
+end
+
+---Yes or no, in the same picker as every other choice.
+---
+---The safe answer is first, so a stray `<CR>` does nothing, and the yes is a
+---verb ("Archive", "Kill it") rather than a bare "Yes": in a list the label
+---is the whole question.
+---@param prompt string
+---@param opts? { yes?: string, no?: string }
+---@param callback fun(yes: boolean)  `false` on cancel too.
+function M.confirm(prompt, opts, callback)
+  opts = opts or {}
+  local no, yes = opts.no or "Cancel", opts.yes or "Yes"
+  M.select({ no, yes }, { prompt = prompt, kind = "paseo.confirm" }, function(_, index)
+    callback(index == 2)
+  end)
 end
 
 ---Pick one entry of a settings group.

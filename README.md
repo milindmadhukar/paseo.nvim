@@ -136,13 +136,19 @@ text: delete it and that reference no longer goes. `<C-f>` takes the chat
 full screen and, from there, back beside the code. `review.surface =
 "native"` sends asks to the full-screen tab instead.
 
-### Lists look the same everywhere
+### Choices open in your picker
 
-Workspaces, agents, subagents, a fork's destination, the rail's `.` menu, a
-base branch, a yes-or-no: every list uses one chooser. It's a real buffer
-where the cursor is the selection. `j`/`k`, `/` and counts work as usual,
-`<CR>` or `1`–`9` picks, `q` cancels, and any extra actions are listed in its
-footer. Settings are cards, drawn in the same frame.
+A model, a mode, a base branch, a fork's destination, a yes-or-no ("Archive
+this agent?"): every plain choice goes through `vim.ui.select`, so it opens in
+whatever picker you use (snacks, telescope, fzf-lua, mini.pick). With none
+installed, Paseo's own chooser stands in.
+
+The lists that do more than pick (workspaces, sessions, agents, subagents,
+the rail's `.` menu) have their own chooser, because they carry extra actions
+and update while open. It's a real buffer where the cursor is the selection.
+`j`/`k`, `/` and counts work as usual, `<CR>` or `1`–`9` picks, `q` cancels,
+and the extra actions are listed in its footer. Settings are cards, drawn in
+the same frame.
 
 ## Configuration
 
@@ -190,6 +196,7 @@ native.panel("changes")
 native.next()
 
 require("paseo.ui.choose").select(items, opts, on_choice)   -- vim.ui.select, Paseo-style
+require("paseo.ui.pick").confirm(prompt, { yes = "Archive" }, function(yes) end)   -- in your picker
 ```
 
 There's also a data layer for building your own review workflow:

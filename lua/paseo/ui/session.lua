@@ -270,7 +270,8 @@ function M.apply(chat, group, entry, done)
   choices[#choices + 1] = { id = "future", label = "Use for this agent's future turns" }
   choices[#choices + 1] = { id = "cancel", label = "Cancel" }
 
-  require("paseo.ui.choose").select(choices, {
+  require("paseo.ui.pick").select(choices, {
+    kind = "paseo.model_change",
     prompt = "Change model to " .. (entry.label or entry.id) .. "?",
     format_item = function(choice)
       return choice.label

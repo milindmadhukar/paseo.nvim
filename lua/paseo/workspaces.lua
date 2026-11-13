@@ -804,10 +804,12 @@ function M.confirm_archive(ws, after)
 
       if not force and err:find "refusing" then
         vim.schedule(function()
-          require("paseo.ui.choose").select({ "No, keep it", "Yes, discard that work" }, {
-            prompt = err:gsub("\n.*", "") .. " — discard?",
-          }, function(choice)
-            if choice and choice:find "Yes" then
+          local prompt = err:gsub("\n.*", "") .. " — discard?"
+          require("paseo.ui.pick").confirm(prompt, {
+            no = "Keep it",
+            yes = "Discard that work",
+          }, function(yes)
+            if yes then
               go(true)
             end
           end)
@@ -846,8 +848,8 @@ function M.remove_project(ids, label, after)
     #ids,
     #ids == 1 and "" or "s"
   )
-  require("paseo.ui.choose").select({ "No", "Yes, remove it" }, { prompt = prompt }, function(choice)
-    if not (choice and choice:find "Yes") then
+  require("paseo.ui.pick").confirm(prompt, { yes = "Remove it" }, function(yes)
+    if not yes then
       return
     end
     local left, failed = #ids, nil

@@ -501,8 +501,8 @@ function M.kill(id, host_id)
   local name = item and M.label(item) or id
   -- Killing a terminal kills whatever is running in it, and "whatever" is
   -- routinely an agent mid-turn. Asked rather than assumed.
-  require("paseo.ui.choose").select({ "no", "yes" }, { prompt = ("Kill %s?"):format(name) }, function(choice)
-    if choice ~= "yes" then
+  require("paseo.ui.pick").confirm(("Kill %s?"):format(name), { yes = "Kill it" }, function(yes)
+    if not yes then
       return
     end
     require("paseo.bridge").request("terminals.kill", { terminalId = id, hostId = host_id }, function(err)

@@ -304,6 +304,47 @@ local function test_pick()
   eq("pick: and the answer is written to the agent", set_to, "plan")
   eq("pick: with no settings popup in between", require("paseo.ui.settings").is_open(), false)
 
+  -- A yes-or-no is asked in the same picker, the safe answer first.
+  local asked
+  vim.ui.select = function(items, opts, done)
+    asked = { items = items, opts = opts }
+    done(items[2], 2)
+  end
+  local yes
+  pick.confirm("Archive this agent?", { yes = "Archive" }, function(answer)
+    yes = answer
+  end)
+  eq("pick: confirm goes through the user's picker", asked.opts.kind, "paseo.confirm")
+  eq("pick: with the safe answer first", asked.items, { "Cancel", "Archive" })
+  eq("pick: and the yes comes back as true", yes, true)
+  vim.ui.select = function(_, _, done)
+    done(nil, nil)
+  end
+  pick.confirm("Archive this agent?", {}, function(answer)
+    yes = answer
+  end)
+  eq("pick: cancelling a confirm is a no", yes, false)
+
+  -- Archiving an agent from the tree asks through it.
+  local archived
+  bridge.request = function(op, args)
+    if op == "agent.archive" then
+      archived = args.agentId
+    end
+  end
+  vim.ui.select = function(items, opts, done)
+    asked = { items = items, opts = opts }
+    done(items[1], 1)
+  end
+  require("paseo.ui.tree").remove({ kind = "agent", item = { id = "spec-archive" } }, {})
+  eq("pick: the tree's archive asks in the picker", asked.opts.prompt, "Archive this agent?")
+  eq("pick: and a no archives nothing", archived, nil)
+  vim.ui.select = function(items, _, done)
+    done(items[2], 2)
+  end
+  require("paseo.ui.tree").remove({ kind = "agent", item = { id = "spec-archive" } }, {})
+  eq("pick: a yes archives it", archived, "spec-archive")
+
   bridge.request, package.loaded["paseo.ui.chat"] = old_request, old_chat
   vim.ui.select, choose.select = real_select, real_choose
 end

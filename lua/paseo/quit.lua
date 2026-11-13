@@ -55,7 +55,10 @@ local function ask(proceed)
   end
   prompting = true
   local noun = #active == 1 and "agent session is" or "agent sessions are"
-  require("paseo.ui.choose").select({ "Quit Neovim", "Cancel" }, {
+  -- Quitting is first: it is what you just asked for, and the daemon keeps
+  -- the work either way.
+  require("paseo.ui.pick").select({ "Quit Neovim", "Cancel" }, {
+    kind = "paseo.quit",
     prompt = ("%d active Paseo %s still working. Paseo work will continue on the daemon; quitting only closes this Neovim client."):format(
       #active,
       noun

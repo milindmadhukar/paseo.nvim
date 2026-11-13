@@ -537,10 +537,10 @@ needs no manifest: Paseo's own worktrees are used.
 ==============================================================================
 8. CHOOSERS                                                     *paseo-choose*
 
-Every "pick one of these" in the plugin -- the workspace and agent lists, a
-fork's destination, the rail's `.` menu, a yes-or-no -- is the
-same chooser: a real buffer in a float, one line per choice, and the cursor
-is the selection.
+The lists that do more than pick -- the workspace, session, agent and
+subagent lists and the rail's `.` menu -- are the plugin's own chooser: a
+real buffer in a float, one line per choice, and the cursor is the
+selection. Every other choice opens in your picker (|paseo-pick|).
 
     j k <Down> <Up>     move (counts work)
     gg G                first / last
@@ -556,18 +556,23 @@ window cancels it.
 of |vim.ui.select()|, for your own code (|paseo.ui.choose|).
 
                                                                   *paseo-pick*
-The lists you search -- a provider, a model, a permission mode, a thinking
-level, a base branch -- open in YOUR picker instead: whatever has replaced
+Every other "pick one" opens in YOUR picker: whatever has replaced
 |vim.ui.select()| (snacks, telescope's ui-select, fzf-lua, mini.pick, ...),
-with your keys and your layout. Each call passes a `kind` of `paseo.provider`,
-`paseo.model`, `paseo.mode`, `paseo.thinking` or `paseo.branch`, for a picker
-that configures by kind. What is set is listed first and marked `●`; a mode
-that skips every permission check is marked `⚠`. With no picker plugin
-installed, the builtin |vim.ui.select()| is an unsearchable numbered list, so
-the chooser above is used instead.
+with your keys and your layout. That is the settings lists (a provider, a
+model, a permission mode, a thinking level), a base branch, a fork's
+destination, "change the model or fork?", and every yes-or-no: archive an
+agent, kill a terminal, remove a project, quit with work running. A
+yes-or-no lists the safe answer first, so `<CR>` does nothing.
 
-Yes-or-no questions, a fork's destination and the workspace and agent lists
-stay on the chooser. The settings themselves are cards (|paseo-settings|).
+Each call passes a `kind`, for a picker that configures by kind:
+`paseo.provider`, `paseo.model`, `paseo.mode`, `paseo.thinking`,
+`paseo.branch`, `paseo.fork`, `paseo.model_change`, `paseo.confirm` and
+`paseo.quit`. In a settings list, what is set is listed first and marked
+`●`; a mode that skips every permission check is marked `⚠`. With no picker
+plugin installed, the builtin |vim.ui.select()| is an unsearchable numbered
+list, so the chooser above is used instead.
+
+The settings themselves are cards (|paseo-settings|).
 
 ==============================================================================
 9. CONFIGURATION                                         *paseo-configuration*
@@ -914,6 +919,10 @@ require("paseo.ui.pick") ~                                      *paseo.ui.pick*
 select({items}, {opts}, {on_choice})
                     |vim.ui.select()| when something has replaced it,
                     else |paseo.ui.choose|'s `select` (|paseo-pick|).
+confirm({prompt}, {opts}, {callback})
+                    Yes or no through `select`, "Cancel" first. {opts}:
+                    `yes`, `no` (labels). {callback} gets a boolean; a
+                    cancel is `false`.
 overridden()        Whether |vim.ui.select()| has been replaced.
 
 ------------------------------------------------------------------------------

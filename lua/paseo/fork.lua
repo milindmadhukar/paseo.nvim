@@ -151,7 +151,8 @@ end
 ---@param fork table
 ---@param callback fun(id: string|nil)
 function M.choose(fork, callback)
-  require("paseo.ui.choose").select(M.DESTINATIONS, {
+  require("paseo.ui.pick").select(M.DESTINATIONS, {
+    kind = "paseo.fork",
     prompt = ("Fork %s into…"):format(fork.title and ("%q"):format(fork.title) or "this agent"),
     format_item = spell,
   }, function(choice)

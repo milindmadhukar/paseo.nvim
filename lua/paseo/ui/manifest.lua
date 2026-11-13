@@ -332,7 +332,8 @@ function M.choose_base(draft, name, done)
   end
 
   choices[#choices + 1] = "other…"
-  require("paseo.ui.choose").select(choices, {
+  require("paseo.ui.pick").select(choices, {
+    kind = "paseo.branch",
     prompt = ("base branch for %s"):format(name),
   }, function(choice)
     if not choice then
