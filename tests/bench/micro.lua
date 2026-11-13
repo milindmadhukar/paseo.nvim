@@ -13,6 +13,9 @@
 --- mean, n } }` in ms, for tests/bench/compare.py.
 
 local perf = require "paseo.perf"
+if vim.env.BENCH_PROFILE then
+  dofile(vim.env.BENCH_PROFILE)
+end
 
 local SIZES = {
   workspaces = tonumber(vim.env.BENCH_WORKSPACES) or 50,
@@ -37,7 +40,11 @@ local function summarise(samples)
 end
 
 ---Time `fn` `runs` times (after one warm-up) as `name`.
+local only = vim.env.BENCH_ONLY
 local function bench(name, fn, runs, setup)
+  if only and not name:find(only, 1, true) then
+    return
+  end
   runs = runs or SIZES.runs
   if setup then
     setup()
