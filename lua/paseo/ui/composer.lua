@@ -640,6 +640,10 @@ function M.style(chat, opts)
     "NormalFloat:PaseoCard",
     "WinBar:PaseoComposerBar",
     "WinBarNC:PaseoComposerBar",
+    -- The line down its right edge is the conversation's, against the panel:
+    -- without this the box's stretch of it was the editor's `WinSeparator`,
+    -- a different (often near-invisible) colour from the line above it.
+    "WinSeparator:PaseoBaseSeparator",
   }
   if opts.border then
     parts[#parts + 1] = "FloatBorder:" .. opts.border

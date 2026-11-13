@@ -231,6 +231,47 @@ local function test_theme()
   end
 end
 
+local function test_rail_colors()
+  -- catppuccin's shape: the tree a shade darker, its separator drawn in the
+  -- background colour (`fg == bg`), and no `NvimTreeEndOfBuffer` at all.
+  local api = vim.api
+  local theme = require "paseo.ui.theme"
+  api.nvim_set_hl(0, "NvimTreeNormal", { fg = 0xcdd6f4, bg = 0x181825 })
+  api.nvim_set_hl(0, "NvimTreeWinSeparator", { fg = 0x1e1e2e, bg = 0x1e1e2e })
+  api.nvim_set_hl(0, "NvimTreeEndOfBuffer", {})
+  local groups = theme.groups()
+  eq(
+    "rail: an invisible tree separator gives way to the surface's",
+    groups.PaseoTreeWinSeparator,
+    { link = "PaseoBaseSeparator" }
+  )
+  eq(
+    "rail: past the last line is the tree's background, not the base tier",
+    groups.PaseoTreeEndOfBuffer,
+    { link = "PaseoTreeNormal" }
+  )
+  eq("rail: the tree's own background is kept", groups.PaseoTreeNormal, { link = "NvimTreeNormal" })
+
+  -- A separator that DOES draw a line is nvim-tree's, as before.
+  api.nvim_set_hl(0, "NvimTreeWinSeparator", { fg = 0x45475a, bg = 0x1e1e2e })
+  api.nvim_set_hl(0, "NvimTreeEndOfBuffer", { fg = 0x181825 })
+  groups = theme.groups()
+  eq(
+    "rail: a visible tree separator is kept",
+    groups.PaseoTreeWinSeparator,
+    { link = "NvimTreeWinSeparator" }
+  )
+  eq(
+    "rail: a defined tree EndOfBuffer is kept",
+    groups.PaseoTreeEndOfBuffer,
+    { link = "NvimTreeEndOfBuffer" }
+  )
+  for _, name in ipairs { "NvimTreeNormal", "NvimTreeWinSeparator", "NvimTreeEndOfBuffer" } do
+    api.nvim_set_hl(0, name, {})
+  end
+  require("paseo.ui.hl").setup()
+end
+
 local function test_layout()
   -- ---------------------------------------------------------------- layout
 
@@ -372,6 +413,7 @@ end
 return {
   { "ui.style", test_style },
   { "ui.theme", test_theme },
+  { "ui.rail_colors", test_rail_colors },
   { "ui.layout", test_layout },
   { "ui.animate", test_animate },
 }

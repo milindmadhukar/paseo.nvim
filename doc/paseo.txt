@@ -1857,7 +1857,14 @@ the colourscheme (or nvim-tree) defines them, else the tab's base tier,
 (else `DiagnosticInfo`, `DiagnosticWarn`, `DiagnosticError`,
 `DiagnosticHint`). Re-read when nvim-tree first opens, since a lazy-loaded
 one defines its groups late. Under `ui.colors = "fixed"` the background stays
-the plugin's. The project's tile is `PaseoTreeTile1`..`8`, picked by its name.
+the plugin's.
+
+ONE BACKGROUND, TOP TO BOTTOM: with no `NvimTreeEndOfBuffer`, the rows
+below the last line are the rail's own background, never the lighter base
+tier. And A LINE ON ITS EDGE: nvim-tree's separator is used only if it would
+draw one. Some colourschemes (catppuccin) paint it in the background colour,
+and then the rail takes `PaseoBaseSeparator` instead -- the same line the
+conversation draws against the panel, the box under it included. The project's tile is `PaseoTreeTile1`..`8`, picked by its name.
 All of them are `PaseoTree*`, and `ui.theme` overrides any of them.
 
 LINES CHANGED AND THE PULL REQUEST, as the app's sidebar row has them: a

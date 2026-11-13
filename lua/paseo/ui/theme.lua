@@ -570,9 +570,40 @@ local function tree_groups(fixed)
   for _, role in ipairs(roles) do
     out[role[1]] = { link = defined(role[2]) and role[2] or role[3] }
   end
+  -- ONE BACKGROUND DOWN THE RAIL. Past the last line is `EndOfBuffer`, and a
+  -- colourscheme that darkens the tree (catppuccin: `NvimTreeNormal` on
+  -- mantle) seldom gives `NvimTreeEndOfBuffer` a colour of its own -- nvim-tree
+  -- does not need one, its EndOfBuffer has no background and shows the tree's.
+  -- Falling back to the base tier instead painted everything under the rail's
+  -- last line a shade lighter than the rows above it.
+  if not defined "NvimTreeEndOfBuffer" then
+    out.PaseoTreeEndOfBuffer = { link = "PaseoTreeNormal" }
+  end
+  -- A SEPARATOR YOU CAN SEE. Some colourschemes draw the tree's edge in the
+  -- background colour on purpose (catppuccin: `fg = base, bg = base`), because
+  -- the darker tree is edge enough beside code. Beside the conversation it is
+  -- not: the rail read as part of it. So nvim-tree's separator is taken only
+  -- when it would actually draw a line; otherwise the surface's own, the same
+  -- one the conversation draws against the panel.
+  local function visible(name)
+    local ok, sep = pcall(api.nvim_get_hl, 0, { name = name, link = false })
+    if not (ok and sep.fg) then
+      return false
+    end
+    local under = sep.bg
+    if not under then
+      local _, normal = pcall(api.nvim_get_hl, 0, { name = out.PaseoTreeNormal.link, link = false })
+      under = type(normal) == "table" and normal.bg or nil
+    end
+    return sep.fg ~= under
+  end
+  if not (defined "NvimTreeWinSeparator" and visible "NvimTreeWinSeparator") then
+    out.PaseoTreeWinSeparator = { link = "PaseoBaseSeparator" }
+  end
   if fixed then
     out.PaseoTreeNormal = { link = "PaseoBase" }
     out.PaseoTreeEndOfBuffer = { link = "PaseoBase" }
+    out.PaseoTreeWinSeparator = { link = "PaseoBaseSeparator" }
   end
   -- Diagnostics and comments are italic in a good many colourschemes, and a
   -- name or an icon in italics is not the tree nvim-tree draws: take the
