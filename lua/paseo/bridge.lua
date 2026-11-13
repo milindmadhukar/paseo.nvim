@@ -147,22 +147,42 @@ local function on_stdout(state, _, chunk)
   if not chunk then
     return
   end
-  state.buffer = state.buffer .. chunk
+  -- Split ONCE per chunk, from a position, rather than re-slicing the whole
+  -- buffer per line: a burst of terminal output or a long history arrives as
+  -- a few large chunks of many lines, and slicing the remainder for each was
+  -- quadratic in the chunk.
+  local data = state.buffer .. chunk
+  local lines = {}
+  local from = 1
   while true do
-    local index = state.buffer:find "\n"
+    local index = data:find("\n", from, true)
     if not index then
       break
     end
-    local line = state.buffer:sub(1, index - 1)
-    state.buffer = state.buffer:sub(index + 1)
-    if line ~= "" then
-      -- Back onto the main loop: handlers touch buffers and windows, and this
-      -- runs on the libuv thread.
-      vim.schedule(function()
-        on_line(state, line)
-      end)
+    if index > from then
+      lines[#lines + 1] = data:sub(from, index - 1)
     end
+    from = index + 1
   end
+  state.buffer = data:sub(from)
+  if #lines == 0 then
+    return
+  end
+  -- Back onto the main loop -- handlers touch buffers and windows, and this
+  -- runs on the libuv thread -- as ONE callback for the chunk, in order.
+  vim.schedule(function()
+    for _, line in ipairs(lines) do
+      -- A reply handler that throws costs ITS line, not the rest of the
+      -- chunk's: raised on its own, as it was when each line was scheduled
+      -- separately.
+      local ok, err = pcall(on_line, state, line)
+      if not ok then
+        vim.schedule(function()
+          error(err, 0)
+        end)
+      end
+    end
+  end)
 end
 
 ---Subscribe to an event the sidecar emits.
