@@ -723,6 +723,11 @@ function M.open(ctx, opts)
   }
   task.chat = chat
   tasks[chat] = task
+  -- Which session the draft is IN, for the rail to draw it under: an agent's
+  -- is the one it goes into. Sessions can share a directory, so the
+  -- directory cannot say.
+  chat.new_scope = scope
+  chat.workspace_id = scope == "agent" and ctx.workspace_id or nil
   mount(task)
   to_composer(task)
   -- Again on the next tick: opened from TERMINAL mode (a key mapped in `t`),

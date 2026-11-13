@@ -561,7 +561,8 @@ function M.showing()
   if chat then
     local agent = chat.agent_id and require("paseo.agents").get(chat.agent_id, chat.host_id)
     return {
-      id = agent and agent.workspaceId or nil,
+      -- A draft of a new agent knows the session it goes into.
+      id = agent and agent.workspaceId or chat.workspace_id or nil,
       dir = (agent and agent.cwd) or chat.local_root or chat.root,
     }
   end
@@ -933,7 +934,7 @@ function M.build(width)
           {
             mark = "•",
             mark_hl = "PaseoTreeIdle",
-            name = "new session",
+            name = chat.new_scope == "agent" and "new agent" or "new session",
             name_hl = "PaseoTreeOpened",
           }
         )

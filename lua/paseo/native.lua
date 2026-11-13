@@ -175,14 +175,14 @@ function M.new()
   new.open(nil, { scope = "session" })
 end
 
----A new agent IN the session on screen: the `+` on the app's row of tabs.
----Only the Paseo tab has a session on screen; anywhere else this is a new
----session, and says so (|paseo.new|.open).
+---A new agent IN the session of the chat you are in -- on the Paseo tab or
+---in the sidebar: the `+` on the app's row of tabs. With no agent's chat to
+---go by this is a new session, and says so (|paseo.new|.open).
 function M.new_agent()
   local new = require "paseo.new"
   local current = chat().current()
   pcall(vim.cmd.stopinsert)
-  if ui().on_tab() and current then
+  if current and current.agent_id then
     return new.open(new.context(current), { scope = "agent" })
   end
   new.open(nil, { scope = "agent" })

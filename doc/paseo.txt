@@ -877,7 +877,7 @@ toggle_panel()      The panel on or off.
                                                           *paseo.native.new()*
 new()               A new session, from the agent on screen: its project.
                                                     *paseo.native.new_agent()*
-new_agent()         A new agent in the session on screen.
+new_agent()         A new agent in the session of the chat you are in.
                                                      *paseo.native.worktree()*
 worktree()          A new session, on a new worktree.
                                                          *paseo.native.next()*
