@@ -17,7 +17,6 @@ every pane a real split, and the keys are Vim's.
 |---|---|
 | Always | Neovim 0.11+, `git`, a Nerd Font |
 | Agents | the Paseo daemon (the desktop app runs one), and `bun` or `node` ≥ 22 |
-| The hunk under the cursor | [gitsigns.nvim](https://github.com/lewis6991/gitsigns.nvim) |
 | Pasting a screenshot | `wl-paste` (Wayland), `xclip` (X11) or `pngpaste` (macOS) |
 | Dictation | `arecord`, `rec` (sox) or `ffmpeg` |
 | Pull-request status | `gh` |
@@ -33,7 +32,6 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
 ```lua
 {
   "milindmadhukar/paseo.nvim",
-  dependencies = { "lewis6991/gitsigns.nvim" },
   event = "VeryLazy",
   opts = {},
 }
@@ -177,8 +175,8 @@ require("paseo.ui.choose").select(items, opts, on_choice)   -- vim.ui.select, Pa
 
 There's also a data layer for building your own review workflow:
 `require("paseo.repos").list()` gives the repos in the current unit of work,
-and `require("paseo.git")` provides `status`, `hunks`, `diff_text` and
-`stage`. Two events, `User PaseoWorkspaceOpen` and `User PaseoReview`, let you
+and `require("paseo.git")` provides `status`, `hunks`, `buffer_hunks`,
+`diff_text` and `stage`. Two events, `User PaseoWorkspaceOpen` and `User PaseoReview`, let you
 decide what happens around a workspace switch.
 
 `:help paseo-api` documents every function, `:help paseo-plug` the `<Plug>`

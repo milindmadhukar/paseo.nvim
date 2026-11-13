@@ -30,10 +30,6 @@ for name, kind in vim.fs.dir(deps) do
   end
 end
 
--- gitsigns does nothing until it is set up, and the hunk suites need it
--- attached to real fixture repos. Everything else here is required on demand.
-require("gitsigns").setup {}
-
 -- The plugin has no `plugin/` directory, so `:Paseo` and the ColorScheme hook
 -- that keeps the highlight groups alive both come from `setup()` -- exactly as
 -- they do for someone with `opts = {}` in their lazy spec.

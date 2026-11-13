@@ -51,7 +51,6 @@ Terms, as Paseo uses them:
   - `git`
   - the Paseo daemon (the desktop app starts one), and `bun` or `node` 22+
   - a Nerd Font
-  - gitsigns.nvim, for the hunk under the cursor (|:Paseo-ask|)
 
 Optional:
   - `wl-paste` (Wayland), `xclip` (X11) or `pngpaste` (macOS), to paste a
@@ -67,7 +66,6 @@ No build step and no UI library: every surface is plain buffers and windows.
 With lazy.nvim: >lua
     {
       "milindmadhukar/paseo.nvim",
-      dependencies = { "lewis6991/gitsigns.nvim" },
       event = "VeryLazy",
       opts = {},
     }
@@ -102,7 +100,9 @@ readers and the microphone.
                                                                 *:Paseo-ask*
 :Paseo ask [kind]       Ask an agent about code. A small box takes your
                         question (|paseo-ask-box|). {kind}:
-                          `hunk`    the git hunk under the cursor
+                          `hunk`    the git hunk under the cursor: the
+                                    buffer, unsaved edits included, against
+                                    `HEAD` (so a staged hunk counts)
                           `visual`  the selection (use from visual mode)
                           `file`    the whole file
                           `cursor`  the line under the cursor
@@ -883,6 +883,14 @@ hunks({repo}, {changes})
                     -> |paseo.Hunk|[]. Every hunk, as quickfix-ready
                     positions, at zero context. {changes} limits it to those
                     files. An untracked file is one `kind = "new"` hunk.
+                                                     *paseo-git-buffer_hunks*
+                                                                              
+buffer_hunks({repo}, {bufnr})
+                    -> |paseo.BufHunk|[]. A buffer's hunks against `HEAD`,
+                    as on screen: unsaved edits included, diffed with the
+                    built-in xdiff and 'diffopt'. A rename diffs against its
+                    source; a file `HEAD` does not have is one added hunk;
+                    an ignored file has none.
                                                          *paseo-git-diff_text*
                                                                               
 diff_text({change}, {opts})
@@ -909,6 +917,16 @@ A hunk: >lua
       lines = { "@@ -40,2 +42,7 @@", "-old", "+new" } }
 <
 `lines` is the hunk verbatim; `stage()` applies it, so keep it intact.
+
+                                                               *paseo.BufHunk*
+                                                                              
+A buffer hunk: >lua
+    { start = 9, count = 0, vend = 9, removed = 3, kind = "delete",
+      lines = { "@@ -10,3 +9,0 @@", "-10", "-11", "-12" } }
+<
+`start`..`vend` is the lines it occupies. A pure deletion occupies the one
+line above the removed block (`start = 0` at the top of the file), and its
+`lines` are the only copy of the text it removed.
 
 ------------------------------------------------------------------------------
 require("paseo.skills") ~                                       *paseo-skills*
@@ -987,7 +1005,7 @@ re-derived on |ColorScheme|. Override any of them with
 ==============================================================================
 14. HEALTH AND MAINTENANCE                                      *paseo-health*
 
-`:checkhealth paseo` reports git and gitsigns; which daemon answered, and
+`:checkhealth paseo` reports git; which daemon answered, and
 where; the sidecar runtime, and whether the sidecar is running; the
 clipboard image readers; the microphone recorder; the installed skills.
 

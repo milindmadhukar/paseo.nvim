@@ -7,8 +7,8 @@
 ---
 --- IT DOES NOT CARRY THE TEXT, and that is the point. Inlining the lines makes
 --- the prompt scale with the size of the thing you asked about -- a long hunk,
---- or a newly created file, which gitsigns reports as one all-added hunk and
---- which therefore used to paste the file in whole. The agent can open the
+--- or a newly created file, which is one all-added hunk and which therefore
+--- used to paste the file in whole. The agent can open the
 --- file, and reading it gets surrounding context and the file's CURRENT state
 --- rather than a snapshot taken when you pressed the key.
 ---
@@ -142,46 +142,61 @@ function M.file()
   return build(0, 1, vim.api.nvim_buf_line_count(0), "file")
 end
 
----The hunk under the cursor.
+---Which hunk the cursor is on, by the rules the sign column uses.
 ---
----GOTCHA: the public hunk type from `gitsigns.get_hunks()` omits `.vend`, so
----the end of the range has to be recomputed as
----`added.start + max(added.count - 1, 0)`. Take `added.count` at face value and
----a pure deletion -- `added.count == 0` -- produces an empty or inverted range
----and is never matched.
+---A pure deletion occupies the single line ABOVE the removed block, and two
+---positions are not lines at all: a deletion at the top of the file sits on
+---line 0, which the cursor reaches as line 1, and one past the end sits on
+---`line_count + 1`, which it reaches as the last line.
+---@param lnum integer
+---@param hunks paseo.BufHunk[]
+---@param line_count integer
+---@return paseo.BufHunk|nil
+local function find_hunk(lnum, hunks, line_count)
+  for _, hunk in ipairs(hunks) do
+    if lnum == 1 and hunk.start == 0 and hunk.vend == 0 then
+      return hunk
+    end
+    if lnum == line_count and hunk.start == line_count + 1 then
+      return hunk
+    end
+    if hunk.start <= lnum and hunk.vend >= lnum then
+      return hunk
+    end
+  end
+  return nil
+end
+
+---The hunk under the cursor: the buffer against HEAD, diffed here with the
+---git CLI and Neovim's own xdiff. See `git.buffer_hunks()`.
 ---@return paseo.Ref|nil
 function M.hunk()
-  local ok, gs = pcall(require, "gitsigns")
-  if not ok then
+  local name = vim.api.nvim_buf_get_name(0)
+  if name == "" or vim.bo.buftype ~= "" then
     return nil
   end
-
-  local hunks = gs.get_hunks(0)
-  if not hunks or #hunks == 0 then
+  local repo = repos.resolve(vim.fn.fnamemodify(name, ":p"))
+  if not repo then
     return nil
   end
 
   local lnum = vim.api.nvim_win_get_cursor(0)[1]
-  for _, hunk in ipairs(hunks) do
-    local first = hunk.added.start
-    local last = first + math.max(hunk.added.count - 1, 0)
-    if lnum >= first and lnum <= last then
-      local ref = build(0, first, last, "hunk")
-      if ref then
-        -- A deletion has no added lines to quote, so the hunk's own body --
-        -- which carries the removed text -- is the only useful content. Mark
-        -- it detached: `render()` inlines exactly these, because they are the
-        -- one thing an agent cannot recover by opening the file.
-        if hunk.added.count == 0 and hunk.lines then
-          ref.lines = hunk.lines
-          ref.detached = true
-        end
-      end
-      return ref
-    end
+  local hunk =
+    find_hunk(lnum, require("paseo.git").buffer_hunks(repo, 0), vim.api.nvim_buf_line_count(0))
+  if not hunk then
+    return nil
   end
 
-  return nil
+  local ref = build(0, hunk.start, hunk.vend, "hunk")
+  if ref and hunk.count == 0 then
+    -- A deletion has no added lines to point at, so the removed text is the
+    -- only useful content. Mark it detached: `render()` inlines exactly these,
+    -- because they are the one thing an agent cannot recover by opening the
+    -- file.
+    ref.lines = hunk.lines
+    ref.detached = true
+  end
+  return ref
 end
 
 ---A reference from whatever the cursor is on, preferring the most specific.

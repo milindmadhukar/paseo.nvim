@@ -4,7 +4,7 @@
 # Every shape here exists because it broke something: paths with spaces and
 # non-ASCII (diff header quoting), a rename (the porcelain-v2 two-field record),
 # a beginning-of-file and an end-of-file deletion (the `+c,0` line number), a
-# whole-file deletion (cannot be staged through gitsigns at all), an untracked
+# whole-file deletion (cannot be staged as a hunk at all), an untracked
 # file, and a multi-hunk file (partial staging).
 set -euo pipefail
 

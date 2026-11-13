@@ -2,7 +2,7 @@
 --- more than one suite needs.
 ---
 --- No plenary, no busted: the interesting assertions are all about what real
---- git and real gitsigns do, so the suite needs a real Neovim and real
+--- real git does, so the suite needs a real Neovim and real
 --- repositories far more than it needs a framework.
 ---
 --- Suites live beside this file, in `tests/spec/`, and are run by

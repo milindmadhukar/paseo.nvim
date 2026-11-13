@@ -17,7 +17,7 @@ local M = {}
 ---@class paseo.Hunk
 ---@field repo paseo.Repo
 ---@field path string   Relative to `repo.worktree`.
----@field lnum integer  The line `gitsigns.stage_hunk()` acts on. See `hunks()`.
+---@field lnum integer  The `+c` line of the hunk header, clamped to 1. See `hunks()`.
 ---@field added integer
 ---@field removed integer
 ---@field kind "add"|"change"|"delete"|"new"
@@ -289,6 +289,134 @@ function M.hunks(repo, changes)
     }
   end
 
+  return hunks
+end
+
+---@class paseo.BufHunk
+---@field start integer   First added line. For a pure deletion, the line ABOVE
+---                       the removed block -- 0 when it was at the top.
+---@field count integer   Added lines; 0 for a pure deletion.
+---@field vend integer    Last line the hunk occupies: `start + max(count - 1, 0)`,
+---                       so a deletion occupies exactly one line.
+---@field removed integer Removed lines.
+---@field kind "add"|"change"|"delete"
+---@field lines string[]  The `@@` header, then the removed lines as `-` lines.
+---                       Only the deleted text: what is added is in the buffer.
+
+---'diffopt', read the way `:diffthis` reads it, so the hunks found here have the
+---same boundaries as the signs in the sign column (gitsigns reads it too).
+---@return table
+local function diff_opts()
+  local opts = { result_type = "indices", algorithm = "myers" }
+  local flags = {
+    ["indent-heuristic"] = "indent_heuristic",
+    iwhite = "ignore_whitespace_change",
+    iwhiteall = "ignore_whitespace",
+    iwhiteeol = "ignore_whitespace_change_at_eol",
+    iblank = "ignore_blank_lines",
+  }
+  for _, o in ipairs(vim.split(vim.o.diffopt, ",", { plain = true })) do
+    if flags[o] then
+      opts[flags[o]] = true
+    elseif vim.startswith(o, "algorithm:") then
+      opts.algorithm = o:sub(#"algorithm:" + 1)
+    elseif vim.startswith(o, "linematch:") then
+      opts.linematch = tonumber(o:sub(#"linematch:" + 1))
+    end
+  end
+  return opts
+end
+
+---Split blob text into lines the way a buffer holds them: no trailing empty
+---line for the final newline.
+---@param text string
+---@return string[]
+local function blob_lines(text)
+  local lines = vim.split(text, "\n", { plain = true })
+  if lines[#lines] == "" then
+    lines[#lines] = nil
+  end
+  return lines
+end
+
+---The hunks of a BUFFER against HEAD: what is on screen, unsaved edits
+---included, rather than what is on disk.
+---
+---HEAD and not the index, like `hunks()` and `diff_text()`: a hunk you have
+---staged is still a change you can ask about. (gitsigns diffs against the
+---index, so near a partly staged hunk its signs and these can disagree.)
+---
+---A rename's destination diffs against its source. A path HEAD does not have
+---at all -- untracked, newly added, a repo with no commits yet -- diffs against
+---nothing, so the whole buffer is one added hunk. An IGNORED file has no hunks.
+---
+---`cat-file`, not `show`: `show` may run a textconv filter, and then the base
+---is not the text the buffer holds.
+---@param repo paseo.Repo
+---@param bufnr integer
+---@return paseo.BufHunk[]
+function M.buffer_hunks(repo, bufnr)
+  if bufnr == 0 then
+    bufnr = vim.api.nvim_get_current_buf()
+  end
+  local path = require("paseo.repos").relative(repo, vim.api.nvim_buf_get_name(bufnr))
+
+  local base = {}
+  local blob = git(repo, { "cat-file", "-p", "HEAD:" .. path })
+  if not blob then
+    -- A rename's destination is not in HEAD under its new name. Diff it
+    -- against its source, or a pure `git mv` is one whole-file hunk. Only
+    -- paid for paths HEAD does not have.
+    for _, change in ipairs(M.status(repo)) do
+      if change.path == path and change.orig_path then
+        blob = git(repo, { "cat-file", "-p", "HEAD:" .. change.orig_path })
+        break
+      end
+    end
+  end
+  if blob then
+    base = blob_lines(blob)
+    if vim.bo[bufnr].fileformat == "dos" then
+      for i, line in ipairs(base) do
+        base[i] = line:gsub("\r$", "")
+      end
+    end
+  elseif git(repo, { "check-ignore", "-q", "--", path }) then
+    return {}
+  end
+
+  local current = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  ---@diagnostic disable-next-line: deprecated
+  local diff = vim.text and vim.text.diff or vim.diff
+  local function text(lines)
+    return #lines == 0 and "" or table.concat(lines, "\n") .. "\n"
+  end
+  local raw = diff(text(base), text(current), diff_opts()) --[[@as integer[][] ]]
+
+  ---@type paseo.BufHunk[]
+  local hunks = {}
+  for _, r in ipairs(raw) do
+    local rs, rc, as, ac = r[1], r[2], r[3], r[4]
+    local lines = {
+      ("@@ -%d%s +%d%s @@"):format(
+        rs,
+        rc ~= 1 and "," .. rc or "",
+        as,
+        ac ~= 1 and "," .. ac or ""
+      ),
+    }
+    for i = rs, rs + rc - 1 do
+      lines[#lines + 1] = "-" .. (base[i] or "")
+    end
+    hunks[#hunks + 1] = {
+      start = as,
+      count = ac,
+      vend = as + math.max(ac - 1, 0),
+      removed = rc,
+      kind = (ac == 0 and "delete") or (rc == 0 and "add") or "change",
+      lines = lines,
+    }
+  end
   return hunks
 end
 

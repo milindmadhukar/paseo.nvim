@@ -14,7 +14,7 @@
 --- is `tests/spec/helpers.lua`.
 ---
 --- No plenary, no busted: the interesting assertions are all about what real
---- git and real gitsigns do, so the suite needs a real Neovim and real
+--- real git does, so the suite needs a real Neovim and real
 --- repositories far more than it needs a framework.
 ---
 --- Every case here corresponds to something that was actually wrong at some

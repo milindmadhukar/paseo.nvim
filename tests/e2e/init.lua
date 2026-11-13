@@ -26,7 +26,6 @@ vim.opt.swapfile = false
 vim.opt.termguicolors = true
 vim.cmd.colorscheme(vim.env.PASEO_E2E_COLORS or "habamax")
 
-require("gitsigns").setup {}
 require("paseo").setup {
   paseo = {
     url = url,

@@ -45,16 +45,6 @@ local function check_core()
     err "`git` is not executable; nothing in this plugin works without it"
   end
 
-  for name, why in pairs {
-    ["gitsigns"] = "finding the hunk under the cursor (`:Paseo ask hunk`)",
-  } do
-    if pcall(require, name) then
-      ok(("%s is available (%s)"):format(name, why))
-    else
-      warn(("%s is not loaded -- it may just be lazy; needed for %s"):format(name, why))
-    end
-  end
-
   -- No UI library. Every surface -- the Paseo tab, the sidebar, popups and
   -- dialogs -- is plain buffers. (nvzone/volt drew an older dashboard; a copy
   -- still installed is unused and can be removed.)
