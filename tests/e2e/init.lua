@@ -10,6 +10,12 @@ local root = vim.fs.dirname(vim.fs.dirname(here))
 vim.opt.runtimepath:prepend(root)
 package.path = ("%s/?.lua;%s"):format(root, package.path)
 
+-- PLUGINS A SCENARIO ASKS FOR, `:`-separated: the search's telescope picker
+-- has nothing to show without telescope (and plenary under it).
+for _, dir in ipairs(vim.split(vim.env.PASEO_E2E_RTP or "", ":", { trimempty = true })) do
+  vim.opt.runtimepath:append(dir)
+end
+
 
 local url = assert(vim.env.PASEO_E2E_URL, "PASEO_E2E_URL is not set; start tests/e2e/daemon.sh")
 assert(not url:match ":6767/", "refusing to drive the live daemon on 6767")
