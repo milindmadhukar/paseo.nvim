@@ -82,6 +82,16 @@ local RECENT = 4
 ---@type table<table, paseo.NewTask>
 local tasks = {}
 
+local seq = 0
+
+---An id for a draft that outlives this Neovim: the rail keys its row on it,
+---and the saved drafts are filed under it.
+---@return string
+local function new_id()
+  seq = seq + 1
+  return ("%x-%x-%x"):format(os.time(), vim.uv.hrtime() % 0x100000, seq)
+end
+
 -- ------------------------------------------------------------------ choice
 
 ---What the screen says right now, as |paseo.new| takes it.
@@ -574,6 +584,38 @@ local function to_composer(task)
   end
 end
 
+---What you type in a draft's box: the rail names the draft by its first
+---line, so the rail is redrawn -- after a pause, not on every key.
+---@param task paseo.NewTask
+local function watch_composer(task)
+  local buf = task.chat.composer
+  if not (buf and api.nvim_buf_is_valid(buf)) then
+    return
+  end
+  local pending = false
+  api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
+    buffer = buf,
+    desc = "paseo: a draft's first line names its rail row",
+    callback = function()
+      if not tasks[task.chat] then
+        return true
+      end
+      if pending then
+        return
+      end
+      pending = true
+      vim.defer_fn(function()
+        pending = false
+        if tasks[task.chat] then
+          pcall(function()
+            require("paseo.ui.rail").draw()
+          end)
+        end
+      end, 300)
+    end,
+  })
+end
+
 local place
 
 ---Focus the choices -- putting them back first, if the window lost them.
@@ -751,7 +793,10 @@ function M.open(ctx, opts)
     end,
   }
   task.chat = chat
+  task.id = opts.id or new_id()
+  chat.draft_id = task.id
   tasks[chat] = task
+  watch_composer(task)
   -- Which session the draft is IN, for the rail to draw it under: an agent's
   -- is the one it goes into. Sessions can share a directory, so the
   -- directory cannot say.

@@ -577,15 +577,24 @@ end
 ---@param list table[]
 ---@return integer|nil
 function M.current_index(list)
-  local showing = M.showing()
-  if showing.id then
+  return M.index_of(list, M.showing(), true)
+end
+
+---Which row of `list` a place -- `{ id, dir }`, as |M.showing| returns one --
+---is in: by id, else the first workspace holding the directory.
+---@param list table[]
+---@param place { id: string|nil, dir: string|nil }
+---@param cwd? boolean  Fall back to the cwd, as the workspace on screen does.
+---@return integer|nil
+function M.index_of(list, place, cwd)
+  if place.id then
     for i, ws in ipairs(list) do
-      if ws.id == showing.id then
+      if ws.id == place.id then
         return i
       end
     end
   end
-  for _, path in ipairs { showing.dir, vim.fn.getcwd() } do
+  for _, path in ipairs { place.dir, cwd and vim.fn.getcwd() or nil } do
     if path and path ~= "" then
       for i, ws in ipairs(list) do
         if contains(ws, path) then
@@ -835,6 +844,22 @@ function M.build(width)
   end
 
   local current = M.current_index(cache.list)
+  -- EVERY DRAFT on the row, under the workspace it was opened on -- not only
+  -- the one in the middle: you can have several on the go, and each is a row
+  -- to go back to.
+  local drafts_at = {}
+  for _, c in ipairs(require("paseo.ui.native").listed()) do
+    if c.draft and not c.agent_id then
+      local at = M.index_of(cache.list, { id = c.workspace_id, dir = c.local_root or c.root })
+      if not at and c == chat then
+        at = current
+      end
+      if at then
+        drafts_at[at] = drafts_at[at] or {}
+        table.insert(drafts_at[at], c)
+      end
+    end
+  end
   for i, ws in ipairs(cache.list) do
     local here = i == current
     local open = M.is_expanded(ws, here)
@@ -870,8 +895,8 @@ function M.build(width)
     -- subagents under them, then its terminals.
     if open then
       local forest = tree.forest(ws, chat)
-      local drafting = here and chat and chat.draft ~= nil
-      local count = #forest + (drafting and 1 or 0)
+      local drafts = drafts_at[i] or {}
+      local count = #forest + #drafts
       local index = 0
       local function walk(node, parent_line, path, last)
         local has_kids = #node.kids > 0
@@ -924,20 +949,27 @@ function M.build(width)
         index = index + 1
         walk(node, ws_line, { key }, { index == count })
       end
-      -- A draft on this workspace: nothing is on the daemon yet, so say so
-      -- where the agent will appear.
-      if drafting then
-        local dkey = key .. "/draft"
-        group_last = emit(
-          { kind = "draft", ws = ws, depth = 1, parent = ws_line, key = dkey, path = { key, dkey } },
-          { true },
+      -- The drafts on this workspace: nothing is on the daemon yet, so say
+      -- so where the agent will appear -- by the first line you wrote, once
+      -- there is one.
+      for _, draft in ipairs(drafts) do
+        index = index + 1
+        local dkey = key .. "/draft/" .. tostring(draft.draft_id or draft.conversation)
+        local mine = draft == chat
+        local line = emit(
+          { kind = "draft", ws = ws, chat = draft, depth = 1, parent = ws_line, key = dkey, path = { key, dkey } },
+          { index == count },
           {
             mark = "•",
             mark_hl = "PaseoTreeIdle",
-            name = chat.new_scope == "agent" and "new agent" or "new session",
-            name_hl = "PaseoTreeOpened",
+            name = M.draft_title(draft),
+            name_hl = mine and "PaseoTreeOpened" or "PaseoTreeSession",
           }
         )
+        group_last = line
+        if mine and not b.session then
+          b.session = line
+        end
       end
       if count == 0 then
         below(ws_line, { { "no sessions yet", "PaseoTreeMeta" } })
@@ -1337,6 +1369,23 @@ local function open_workspace(ws)
   require("paseo.workspaces").open(ws)
 end
 
+---What a draft's row is called: the first line of what you are writing, or
+---what it will make while there is none.
+---@param chat table
+---@return string
+function M.draft_title(chat)
+  local buf = chat.composer
+  if buf and api.nvim_buf_is_valid(buf) then
+    for _, l in ipairs(api.nvim_buf_get_lines(buf, 0, 8, false)) do
+      local text = vim.trim(l)
+      if text ~= "" then
+        return text
+      end
+    end
+  end
+  return chat.new_scope == "agent" and "new agent" or "new session"
+end
+
 ---`<CR>`: what nvim-tree's `<CR>` does. A session opens in the Paseo tab's
 ---middle window -- a subagent as a peek, read-only for a provider one. A workspace is a
 ---folder, and folds; `O` opens it as a place.
@@ -1351,6 +1400,10 @@ function M.open_current()
       require("paseo.ui.tree").open(row.node, chat)
     end
     return
+  end
+  if row.kind == "draft" and row.chat then
+    -- Back to the draft, as you left it.
+    return require("paseo.ui.native").show(row.chat)
   end
   if row.kind == "workspace" then
     return M.expand()

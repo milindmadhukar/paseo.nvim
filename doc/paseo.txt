@@ -395,7 +395,9 @@ Everything you pick is remembered per project and pre-filled next time.
 
 A draft is a buffer like an agent's, and you can have several. Switch to
 another agent or terminal and back, and the draft's choices and what you
-typed are as you left them; `q` on the choices throws it away.
+typed are as you left them; `q` on the choices throws it away. Each draft
+is a row on the rail, under the workspace it was opened on, named by the
+first line you wrote ("new session" until then); `<CR>` on it goes back.
 
                                                              *paseo-terminals*
                                                          *paseo-terminal-keys*

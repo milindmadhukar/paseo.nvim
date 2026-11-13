@@ -583,6 +583,52 @@ local function test_sessions()
     )
     rail.expand(false)
     truthy("rail: and h closes them", not text():find("other agent", 1, true), text())
+
+    -- DRAFTS: every one on the row is a row of its own, under its
+    -- workspace, named by the first line written in it -- not only the one
+    -- in the middle.
+    local function draft(id, first)
+      local d = {
+        root = root .. "/a",
+        host_id = host,
+        draft = {},
+        draft_id = id,
+        new_scope = "session",
+        pending = {},
+        conversation = api.nvim_create_buf(false, true),
+        composer = api.nvim_create_buf(false, true),
+      }
+      api.nvim_buf_set_lines(d.composer, 0, -1, false, first and { "", first } or {})
+      transcript.reset(d)
+      return d
+    end
+    local d1 = draft("d1", "fix the invoice rounding")
+    local d2 = draft("d2", nil)
+    native.open(d1, { focus = false })
+    native.open(d2, { focus = false })
+    rail.draw()
+    vim.wait(300, function()
+      return text():find("fix the invoice rounding", 1, true) ~= nil
+    end)
+    local with_drafts = text()
+    truthy("rail: a draft off screen keeps its row, by its first line", with_drafts:find("fix the invoice rounding", 1, true), with_drafts)
+    truthy("rail: the one on screen, with nothing written, says what it makes", with_drafts:find("new session", 1, true), with_drafts)
+    truthy(
+      "rail: both under the workspace they were opened in",
+      with_drafts:find("alpha", 1, true) < with_drafts:find("fix the invoice", 1, true)
+        and with_drafts:find("fix the invoice", 1, true) < with_drafts:find("beta", 1, true),
+      with_drafts
+    )
+    local rail_buf = api.nvim_win_get_buf(rail.win())
+    for line, l in ipairs(api.nvim_buf_get_lines(rail_buf, 0, -1, false)) do
+      if l:find("fix the invoice", 1, true) then
+        api.nvim_win_set_cursor(rail.win(), { line, 0 })
+      end
+    end
+    rail.open_current()
+    eq("rail: <CR> on a draft's row brings it back", native.chat(), d1)
+    native.remove(d1)
+    native.remove(d2)
     native.close(chat)
   end)
 
