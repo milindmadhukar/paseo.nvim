@@ -1991,26 +1991,21 @@ A workspace shows its MOST URGENT agent: one waiting on you among three
 running shows the `!`. Only its OWN agents count, matched by workspace id,
 and so do its subagent counts: every agent the app starts in a checkout gets
 a workspace of its own on that same directory, and one running agent spins
-only its own row. THE SESSION ON SCREEN has its title in the opened-file
-colour (`NvimTreeOpenedHL` where the colourscheme has one), and so does its
-workspace while that is folded. The rail is one buffer, made once and kept.
+only its own row. THE SESSION ON SCREEN has its title in `Special`, and so
+does its workspace while that is folded. The rail is one buffer, made once and kept.
 
                                                            *paseo-rail-colors*
-The WINDOW is nvim-tree's: its background, cursor band and separator
-(`NvimTreeNormal`, `NvimTreeCursorLine`, `NvimTreeWinSeparator`) whenever
-the colourscheme (or nvim-tree) defines them, else the tab's base tier,
-`CursorLine` and `WinSeparator`; the status colours are its diagnostic icons'
-(else `DiagnosticInfo`, `DiagnosticWarn`, `DiagnosticError`,
-`DiagnosticHint`). Re-read when nvim-tree first opens, since a lazy-loaded
-one defines its groups late. Under `ui.colors = "fixed"` the background stays
-the plugin's.
-
-ONE BACKGROUND, TOP TO BOTTOM: with no `NvimTreeEndOfBuffer`, the rows
-below the last line are the rail's own background, never the lighter base
-tier. And A LINE ON ITS EDGE: nvim-tree's separator is used only if it would
-draw one. Some colourschemes (catppuccin) paint it in the background colour,
-and then the rail takes `PaseoBaseSeparator` instead -- the same line the
-conversation draws against the panel, the box under it included. The project's tile is `PaseoTreeTile1`..`8`, picked by its name.
+The rail's COLOURS ARE ITS OWN, and no other plugin is read for them: it
+looks the same with or without nvim-tree. Its background is its own
+sidebar tier, three lightness points darker than the tab's base tier on a
+dark theme and a light one alike (catppuccin's mantle sits exactly that far
+under its base), and on a transparent theme the base itself -- one
+background top to bottom; the cursor band is
+`CursorLine`; the line on its edge is `PaseoBaseSeparator`, the same line
+the conversation draws against the panel; the status colours are
+`DiagnosticInfo`, `DiagnosticWarn`, `DiagnosticError` and `DiagnosticHint`,
+the colour alone, never their italics. The project's tile is
+`PaseoTreeTile1`..`8`, picked by its name.
 All of them are `PaseoTree*`, and `ui.theme` overrides any of them.
 
 LINES CHANGED AND THE PULL REQUEST, as the app's sidebar row has them: a

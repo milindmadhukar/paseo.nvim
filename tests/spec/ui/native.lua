@@ -361,12 +361,15 @@ local function test_uniform()
     for _, win in ipairs(api.nvim_tabpage_list_wins(0)) do
       local what = vim.bo[api.nvim_win_get_buf(win)].filetype
       if what == "paseo-rail" then
-        -- The rail is coloured as nvim-tree is (|paseo.ui.theme|): its own
-        -- group, which with no nvim-tree colours to borrow IS the base tier.
+        -- The rail is the one exception, on purpose: its own sidebar tier,
+        -- `theme.SIDEBAR` below THIS base (|paseo.ui.theme|), so it follows
+        -- the base under either palette.
+        local want = theme.shift(string.format("#%06x", base.bg), theme.SIDEBAR)
         truthy(
-          ("native: %s (%s) is on the base tier"):format(what, mode),
+          ("native: %s (%s) is on its sidebar tier, under the base"):format(what, mode),
           vim.wo[win].winhl:find("Normal:PaseoTreeNormal", 1, true) ~= nil
-            and api.nvim_get_hl(0, { name = "PaseoTreeNormal", link = false }).bg == base.bg,
+            and api.nvim_get_hl(0, { name = "PaseoTreeNormal", link = false }).bg
+              == tonumber(want:sub(2), 16),
           vim.wo[win].winhl
         )
       elseif win ~= chat.win_composer then

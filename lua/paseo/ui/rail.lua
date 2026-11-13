@@ -37,9 +37,9 @@ local ns = api.nvim_create_namespace "paseo.rail"
 
 M.FILETYPE = "paseo-rail"
 
----The rail's window highlights: nvim-tree's, through the `PaseoTree*` links
----(|paseo.ui.theme|), so it sits on the background an nvim-tree would, with
----the same cursor band and the same separator.
+---The rail's window highlights: its own `PaseoTree*` groups
+---(|paseo.ui.theme|), on the surface's background with the core cursor band
+---and the surface's separator.
 M.WINHL = table.concat({
   "Normal:PaseoTreeNormal",
   "NormalNC:PaseoTreeNormal",

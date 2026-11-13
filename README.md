@@ -637,9 +637,8 @@ A workspace shows its **most urgent** agent, so one waiting on you among three
 running shows the `!`. Only its **own** agents count, matched by workspace
 id: every agent the app starts in a checkout gets a workspace of its own on
 that same directory, and one running agent spins only its own row. **The
-session on screen** has its title in the opened-file colour
-(`NvimTreeOpenedHL` where your colourscheme has one), and so does its
-workspace while that is folded.
+session on screen** has its title in `Special`, and so does its workspace
+while that is folded.
 
 What the app's row says goes on the row: the **lines the workspace has
 changed** against its base branch (`+120 -7`, right-aligned), and on a line
@@ -668,13 +667,13 @@ while a check is pending.
   •  voice-mode-experiment
 ```
 
-The window itself is nvim-tree's: its background, cursor band and separator
-(`NvimTreeNormal`, `NvimTreeCursorLine`, `NvimTreeWinSeparator`) when your
-colourscheme defines them, and the status colours are its diagnostic ones.
-It is one background top to bottom, and it always has a visible line on its
-edge: a separator your colourscheme paints in the background colour
-(catppuccin's) is replaced by the one the conversation draws against the
-panel. The groups are `PaseoTree*`, and `ui.theme` overrides any of them.
+**The rail's colours are its own**, and it needs no other plugin. It sits a
+shade darker than the panes beside it, derived from your colourscheme the
+way an explorer sidebar is (catppuccin's mantle under its base), one
+background top to bottom, with `CursorLine` for the cursor band, the line the conversation draws against
+the panel on its edge, and the diagnostic colours for status. It looks the
+same whether or not you have nvim-tree. The groups are `PaseoTree*`, and
+`ui.theme` overrides any of them.
 
 The workspace on screen is open and the rest are closed until you open them;
 an agent's subagents are open while one of them runs, and folded once they

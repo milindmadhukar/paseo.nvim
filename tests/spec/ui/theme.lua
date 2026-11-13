@@ -232,41 +232,49 @@ local function test_theme()
 end
 
 local function test_rail_colors()
-  -- catppuccin's shape: the tree a shade darker, its separator drawn in the
-  -- background colour (`fg == bg`), and no `NvimTreeEndOfBuffer` at all.
+  -- STANDALONE: the rail's colours are its own whatever else is installed.
+  -- With nvim-tree's groups defined (catppuccin's shape: the tree a shade
+  -- darker, a separator in the background colour), the rail reads none of them.
   local api = vim.api
   local theme = require "paseo.ui.theme"
   api.nvim_set_hl(0, "NvimTreeNormal", { fg = 0xcdd6f4, bg = 0x181825 })
-  api.nvim_set_hl(0, "NvimTreeWinSeparator", { fg = 0x1e1e2e, bg = 0x1e1e2e })
-  api.nvim_set_hl(0, "NvimTreeEndOfBuffer", {})
+  api.nvim_set_hl(0, "NvimTreeWinSeparator", { fg = 0x45475a, bg = 0x1e1e2e })
+  api.nvim_set_hl(0, "NvimTreeEndOfBuffer", { fg = 0x181825 })
+  api.nvim_set_hl(0, "NvimTreeOpenedHL", { fg = 0xf5c2e7 })
   local groups = theme.groups()
+  local t = theme.derive()
+  if t.opaque then
+    eq(
+      "rail: its own sidebar tier, a step below the surface",
+      groups.PaseoTreeNormal.bg,
+      theme.shift(t.bg.bg0, theme.SIDEBAR)
+    )
+  else
+    eq("rail: on a transparent theme, the base", groups.PaseoTreeNormal, { link = "PaseoBase" })
+  end
   eq(
-    "rail: an invisible tree separator gives way to the surface's",
-    groups.PaseoTreeWinSeparator,
-    { link = "PaseoBaseSeparator" }
-  )
-  eq(
-    "rail: past the last line is the tree's background, not the base tier",
+    "rail: one background past the last line",
     groups.PaseoTreeEndOfBuffer,
     { link = "PaseoTreeNormal" }
   )
-  eq("rail: the tree's own background is kept", groups.PaseoTreeNormal, { link = "NvimTreeNormal" })
-
-  -- A separator that DOES draw a line is nvim-tree's, as before.
-  api.nvim_set_hl(0, "NvimTreeWinSeparator", { fg = 0x45475a, bg = 0x1e1e2e })
-  api.nvim_set_hl(0, "NvimTreeEndOfBuffer", { fg = 0x181825 })
-  groups = theme.groups()
-  eq(
-    "rail: a visible tree separator is kept",
-    groups.PaseoTreeWinSeparator,
-    { link = "NvimTreeWinSeparator" }
-  )
-  eq(
-    "rail: a defined tree EndOfBuffer is kept",
-    groups.PaseoTreeEndOfBuffer,
-    { link = "NvimTreeEndOfBuffer" }
-  )
-  for _, name in ipairs { "NvimTreeNormal", "NvimTreeWinSeparator", "NvimTreeEndOfBuffer" } do
+  eq("rail: the surface's separator", groups.PaseoTreeWinSeparator, { link = "PaseoBaseSeparator" })
+  eq("rail: the core cursor band", groups.PaseoTreeCursorLine, { link = "CursorLine" })
+  eq("rail: the session on screen in Special", groups.PaseoTreeOpened, { link = "Special" })
+  for name, spec in pairs(groups) do
+    if name:find("^PaseoTree") and spec.link then
+      truthy(
+        "rail: " .. name .. " links to no nvim-tree group",
+        not spec.link:find "^NvimTree",
+        spec.link
+      )
+    end
+  end
+  for _, name in ipairs {
+    "NvimTreeNormal",
+    "NvimTreeWinSeparator",
+    "NvimTreeEndOfBuffer",
+    "NvimTreeOpenedHL",
+  } do
     api.nvim_set_hl(0, name, {})
   end
   require("paseo.ui.hl").setup()

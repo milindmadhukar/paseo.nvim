@@ -431,6 +431,11 @@ M.RAMP = { 10, 40, 60, 80 }
 ---greys less readily than between two light ones.
 M.ELEVATION = { bg0 = 0, bg1 = 2, bg2 = 5, bg3 = 8, bg4 = 11 }
 
+---How far the rail's background sits below the surface's, in lightness
+---points: darker on a dark theme and a light one alike, as an explorer
+---sidebar is (|paseo.ui.theme| `tree_groups`).
+M.SIDEBAR = -3
+
 ---@class paseo.Theme
 ---@field palette paseo.Theme.Palette
 ---@field opaque boolean   The theme has a background to build tiers on.
@@ -523,90 +528,46 @@ function M.derive()
   return { palette = c, opaque = opaque, sign = sign, bg = bg, ramp = ramp, ink = ink }
 end
 
----Is a highlight group defined -- by a colourscheme or by its plugin?
----@param name string
----@return boolean
-local function defined(name)
-  local ok, group = pcall(api.nvim_get_hl, 0, { name = name })
-  return ok and type(group) == "table" and next(group) ~= nil
-end
-
----THE RAIL IS COLOURED BY nvim-tree. Each of its roles links to the nvim-tree
----group for the same role when the colourscheme (or nvim-tree) defines one,
----so the rail beside an nvim-tree is the same tree in the same colours -- the
----pink root, the blue folders, the grey closed arrow, the subtle cursor band,
----the opened-file colour. Without one, it links where nvim-tree's own
----defaults link (`Title`, `Directory`, `CursorLine`...), which is what an
----nvim-tree with no colourscheme support looks like.
+---THE RAIL'S OWN COLOURS, from the plugin's base tier and Neovim's core
+---groups -- never from another plugin's. It used to borrow nvim-tree's
+---(`NvimTreeNormal` and the rest) where a colourscheme defined them, which
+---made how the rail looked depend on whether nvim-tree happened to be
+---installed. Now it looks the same with or without it, and `ui.theme`
+---overrides any of these.
+---
+---ITS OWN SIDEBAR TIER: `M.SIDEBAR` points darker than the surface, the
+---shade a colourscheme gives its explorer (catppuccin's mantle is exactly
+---three below its base, in mocha and in latte alike), derived from whatever
+---is loaded rather than read from an explorer's groups.
+---@param t paseo.Theme
 ---@return table<string, vim.api.keyset.highlight>
----@param fixed boolean  `ui.colors = "fixed"`: the plugin's palette, not the
----                       colourscheme's -- so the background is never borrowed.
-local function tree_groups(fixed)
-  local roles = {
-    -- Paseo group            nvim-tree group               nvim-tree's own default
-    -- The background: the tree's own where the colourscheme gives it one
-    -- (some draw the explorer a shade darker), otherwise the tab's base tier
-    -- -- one background for every pane, as |paseo.ui.native| has it.
-    { "PaseoTreeNormal", "NvimTreeNormal", "PaseoBase" },
-    { "PaseoTreeEndOfBuffer", "NvimTreeEndOfBuffer", "PaseoBase" },
-    { "PaseoTreeCursorLine", "NvimTreeCursorLine", "CursorLine" },
-    { "PaseoTreeWinSeparator", "NvimTreeWinSeparator", "WinSeparator" },
-    { "PaseoTreeIndent", "NvimTreeIndentMarker", "NonText" },
-    { "PaseoTreeSession", "NvimTreeFileName", "Normal" },
-    -- The session on screen is the file that is open.
-    { "PaseoTreeOpened", "NvimTreeOpenedHL", "Special" },
-    -- A subagent and an agent that has finished are quiet, as a hidden or
-    -- ignored file is.
-    { "PaseoTreeSubagent", "Comment", "Comment" },
-    { "PaseoTreeMeta", "Comment", "Comment" },
-    -- State, as nvim-tree says it about files: diagnostics.
-    { "PaseoTreeRunning", "NvimTreeDiagnosticInfoIcon", "DiagnosticInfo" },
-    { "PaseoTreeWaiting", "NvimTreeDiagnosticWarnIcon", "DiagnosticWarn" },
-    { "PaseoTreeFailed", "NvimTreeDiagnosticErrorIcon", "DiagnosticError" },
-    { "PaseoTreeUnread", "NvimTreeDiagnosticHintIcon", "DiagnosticHint" },
-    { "PaseoTreeTerminal", "NvimTreeExecFile", "Question" },
+local function tree_groups(t)
+  local sidebar = t.opaque and M.shift(t.bg.bg0, M.SIDEBAR) or nil
+  local out = {
+    -- One background top to bottom: the same past the last line.
+    PaseoTreeNormal = sidebar and { fg = t.palette.text, bg = sidebar }
+      or { link = "PaseoBase" },
+    PaseoTreeEndOfBuffer = { link = "PaseoTreeNormal" },
+    PaseoTreeCursorLine = { link = "CursorLine" },
+    -- A line you can see on its edge: the one the conversation draws against
+    -- the panel.
+    PaseoTreeWinSeparator = { link = "PaseoBaseSeparator" },
+    PaseoTreeIndent = { link = "NonText" },
+    PaseoTreeSession = { link = "Normal" },
+    -- The session on screen.
+    PaseoTreeOpened = { link = "Special" },
+    -- A subagent and an agent that has finished are quiet.
+    PaseoTreeSubagent = { link = "Comment" },
+    PaseoTreeMeta = { link = "Comment" },
+    -- State, in the diagnostics' colours.
+    PaseoTreeRunning = { link = "DiagnosticInfo" },
+    PaseoTreeWaiting = { link = "DiagnosticWarn" },
+    PaseoTreeFailed = { link = "DiagnosticError" },
+    PaseoTreeUnread = { link = "DiagnosticHint" },
+    PaseoTreeTerminal = { link = "Question" },
   }
-  local out = {}
-  for _, role in ipairs(roles) do
-    out[role[1]] = { link = defined(role[2]) and role[2] or role[3] }
-  end
-  -- ONE BACKGROUND DOWN THE RAIL. Past the last line is `EndOfBuffer`, and a
-  -- colourscheme that darkens the tree (catppuccin: `NvimTreeNormal` on
-  -- mantle) seldom gives `NvimTreeEndOfBuffer` a colour of its own -- nvim-tree
-  -- does not need one, its EndOfBuffer has no background and shows the tree's.
-  -- Falling back to the base tier instead painted everything under the rail's
-  -- last line a shade lighter than the rows above it.
-  if not defined "NvimTreeEndOfBuffer" then
-    out.PaseoTreeEndOfBuffer = { link = "PaseoTreeNormal" }
-  end
-  -- A SEPARATOR YOU CAN SEE. Some colourschemes draw the tree's edge in the
-  -- background colour on purpose (catppuccin: `fg = base, bg = base`), because
-  -- the darker tree is edge enough beside code. Beside the conversation it is
-  -- not: the rail read as part of it. So nvim-tree's separator is taken only
-  -- when it would actually draw a line; otherwise the surface's own, the same
-  -- one the conversation draws against the panel.
-  local function visible(name)
-    local ok, sep = pcall(api.nvim_get_hl, 0, { name = name, link = false })
-    if not (ok and sep.fg) then
-      return false
-    end
-    local under = sep.bg
-    if not under then
-      local _, normal = pcall(api.nvim_get_hl, 0, { name = out.PaseoTreeNormal.link, link = false })
-      under = type(normal) == "table" and normal.bg or nil
-    end
-    return sep.fg ~= under
-  end
-  if not (defined "NvimTreeWinSeparator" and visible "NvimTreeWinSeparator") then
-    out.PaseoTreeWinSeparator = { link = "PaseoBaseSeparator" }
-  end
-  if fixed then
-    out.PaseoTreeNormal = { link = "PaseoBase" }
-    out.PaseoTreeEndOfBuffer = { link = "PaseoBase" }
-    out.PaseoTreeWinSeparator = { link = "PaseoBaseSeparator" }
-  end
   -- Diagnostics and comments are italic in a good many colourschemes, and a
-  -- name or an icon in italics is not the tree nvim-tree draws: take the
+  -- title or a status in italics reads as a different kind of row: take the
   -- colour alone.
   for _, name in ipairs {
     "PaseoTreeRunning",
@@ -616,8 +577,7 @@ local function tree_groups(fixed)
     "PaseoTreeSubagent",
     "PaseoTreeMeta",
   } do
-    local target = out[name].link
-    local ok, group = pcall(api.nvim_get_hl, 0, { name = target, link = false })
+    local ok, group = pcall(api.nvim_get_hl, 0, { name = out[name].link, link = false })
     if ok and group.fg then
       out[name] = { fg = group.fg }
     end
@@ -677,7 +637,7 @@ function M.groups(t)
 
     -- The workspace rail's diff stat and pull request line: the app's
     -- colours for them, on the surface. The rest of the rail's groups are
-    -- nvim-tree's -- see `tree_groups` below.
+    -- in `tree_groups`.
     PaseoTreeAdded = { fg = on_surface(c.green) },
     PaseoTreeRemoved = { fg = on_surface(c.red) },
     PaseoTreePrOpen = { fg = on_surface(c.green) },
@@ -711,10 +671,10 @@ function M.groups(t)
     },
   }
 
-  for name, spec in pairs(tree_groups(require("paseo.config").get().ui.colors == "fixed")) do
+  for name, spec in pairs(tree_groups(t)) do
     groups[name] = spec
   end
-  -- The rail's own, from the app's sidebar rather than from nvim-tree: the
+  -- The rail's own, from the app's sidebar: the
   -- dot a finished row keeps so the column of statuses has an edge (the app
   -- draws it at 30% opacity -- here, mostly background), and the project
   -- header's name, muted under the workspaces' titles.
