@@ -2375,6 +2375,12 @@ function M.fullscreen()
     end
     current = chat
     result = M.surface "sidebar"
+    -- You were in the chat, and the key moved the chat: you are still in it.
+    -- `sidebar.open` hands focus back to the window it came from, which here
+    -- is the code -- right for a chip arriving, wrong for this.
+    if chat.win_composer and vim.api.nvim_win_is_valid(chat.win_composer) then
+      vim.api.nvim_set_current_win(chat.win_composer)
+    end
   else
     result = M.surface "native"
   end

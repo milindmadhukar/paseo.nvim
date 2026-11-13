@@ -678,6 +678,7 @@ local function test_chips()
     chat.fullscreen()
     truthy("chips: and <C-f> there comes back to the sidebar", sidebar.is_open(mine) and not native.has(mine))
     eq("chips: on the code's tab", vim.api.nvim_win_get_tabpage(mine.win_conversation), vim.api.nvim_win_get_tabpage(code))
+    eq("chips: and you are still in the chat", vim.api.nvim_get_current_win(), mine.win_composer)
 
     -- Full screen, and you ask from the code: the chat comes to the sidebar.
     chat.fullscreen()
