@@ -244,6 +244,8 @@ local function start_spinner(chat)
       -- animation forward a step. `chat.frame` survives as the flag saying a
       -- timer is live, which is all `M.progress` reads it for.
       set_winbar(chat)
+      -- And the line under the transcript, off the same clock.
+      require("paseo.ui.pending").draw(chat)
     end)
   )
 end
@@ -258,12 +260,29 @@ end
 ---@param on boolean
 function M.set_streaming(chat, on)
   chat.streaming = on
+  -- Said outright, so no longer assumed (see `assume`, which re-marks it).
+  chat.assumed = nil
   if on then
     start_spinner(chat)
   else
     stop_spinner(chat)
   end
   set_winbar(chat)
+  -- The same news in the conversation itself, under the last block: with the
+  -- rail shut, the bar's spinner is the only other sign anything is happening.
+  require("paseo.ui.pending").draw(chat)
+end
+
+---Working on the DIRECTORY's word, or a caller's, rather than a turn event's.
+---
+---Marked, because nothing else would ever end it: the `turn_completed` for a
+---turn that finished before this chat subscribed never reaches it. So an
+---assumed spin ends on whichever comes first -- a real turn event, or the
+---directory saying the agent is no longer working.
+---@param chat paseo.Chat
+local function assume(chat)
+  M.set_streaming(chat, true)
+  chat.assumed = true
 end
 
 ---The spinner frame and how long this turn has been running, for the header.
@@ -1215,6 +1234,21 @@ local function load_history(chat)
       -- reconnect, where the interesting news is usually the opposite -- a
       -- request we are still holding that was answered during the gap.
       require("paseo.ui.permission").reconcile(chat, result.pendingPermissions or {})
+
+      -- WORKING ALREADY, and nothing here knows it. A chat opened onto an agent
+      -- mid-turn -- the new worktree's first agent, opened the moment it was
+      -- made; any running agent opened from the rail -- missed the
+      -- `turn_started` that fired before it subscribed, and history does not
+      -- replay it. So it sat idle-looking, with no spinner anywhere, until the
+      -- turn's first word. The directory knows the agent is running. Not while
+      -- it is waiting on you, though: that is not the agent working.
+      if not chat.streaming and #(chat.permissions or {}) == 0 then
+        local agents = require "paseo.agents"
+        local agent = agents.get(chat.agent_id, chat.host_id)
+        if agent and agents.working(agent.status) then
+          assume(chat)
+        end
+      end
       release(chat)
     end)
   end, chat.host_id)
@@ -1468,7 +1502,11 @@ M.here = here
 ---looking at belongs to the window, not to the conversation you are switching
 ---to. Passing a literal here is how `:Paseo term` used to drag you off the
 ---buffer dashboard and keep you off it.
----@param opts? { root?: string, local_root?: string, host_id?: string, remote?: boolean, focus?: boolean, agent_id?: string, title?: string, create?: boolean, surface?: "float"|"sidebar"|"buffer" }
+---
+---`working` is for a caller that has just handed the agent its first prompt:
+---the turn is already running, and the `turn_started` saying so fired before
+---this chat subscribed.
+---@param opts? { root?: string, local_root?: string, host_id?: string, remote?: boolean, focus?: boolean, agent_id?: string, title?: string, create?: boolean, surface?: "float"|"sidebar"|"buffer", working?: boolean }
 ---@param callback? fun(chat: paseo.Chat|nil, err: string|nil)
 function M.open(opts, callback)
   opts = opts or {}
@@ -1549,6 +1587,9 @@ function M.open(opts, callback)
 
   if chat.agent_id then
     notice(chat, "loading…")
+    if opts.working and not chat.streaming then
+      assume(chat)
+    end
     return bridge.ensure(function(err)
       if err then
         vim.schedule(function()
@@ -2048,9 +2089,19 @@ function M.attach_events()
   end
   require("paseo.agents").on_change(function()
     vim.schedule(function()
+      local agents = require "paseo.agents"
       for _, chat in pairs(chats) do
         if chat.agent_id and chat.initialised then
           M.relay_permissions(chat)
+        end
+        -- An ASSUMED spin (see `assume`) ends when the directory says the
+        -- agent stopped -- the turn that finished before we were listening.
+        if chat.assumed and chat.agent_id then
+          local agent = agents.get(chat.agent_id, chat.host_id)
+          if agent and agent.status and not agents.working(agent.status) then
+            chat.assumed = nil
+            M.set_streaming(chat, false)
+          end
         end
       end
     end)

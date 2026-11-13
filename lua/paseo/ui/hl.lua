@@ -30,6 +30,11 @@ M.ns = api.nvim_create_namespace "paseo.chat"
 ---number that went stale three messages ago.
 M.ns_anchor = api.nvim_create_namespace "paseo.chat.anchor"
 
+---The "thinking…" line under the last block while the agent works
+---(|paseo.ui.pending|). A third namespace so neither a block's redraw nor its
+---anchor bookkeeping can take it with them.
+M.ns_pending = api.nvim_create_namespace "paseo.chat.pending"
+
 ---True when the surface has real card backgrounds to sit on.
 ---
 ---Read by the widgets: a card with no background is drawn as a plain rule

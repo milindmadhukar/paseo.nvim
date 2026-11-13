@@ -10,6 +10,7 @@
 --- us, so the anchor stays correct without any bookkeeping on our side.
 
 local hl = require "paseo.ui.hl"
+local pending = require "paseo.ui.pending"
 local render = require "paseo.ui.render"
 local timeline = require "paseo.ui.timeline"
 
@@ -81,6 +82,11 @@ function M.reset(chat)
     api.nvim_buf_clear_namespace(chat.conversation, hl.ns_anchor, 0, -1)
     vim.bo[chat.conversation].modifiable = false
   end
+  -- And the "thinking…" line, put back under the now-empty buffer: a chat
+  -- reset mid-turn -- every first message, between the agent being made and
+  -- its history landing -- is exactly the wait the line is there for.
+  pending.forget(chat)
+  pending.pin(chat)
 end
 
 ---Is the window showing the END of the transcript?
@@ -119,6 +125,8 @@ local function to_bottom(chat)
     return
   end
   pcall(api.nvim_win_set_cursor, win, { api.nvim_buf_line_count(chat.conversation), 0 })
+  -- The cursor on the last line leaves a virtual line under it clipped.
+  pending.reveal(chat)
 end
 
 ---Scroll to the bottom, but ONLY if we were already there.
@@ -320,6 +328,9 @@ local function draw(chat, block, row, old_height)
     right_gravity = true,
   })
   vim.bo[chat.conversation].modifiable = modifiable
+  -- The "thinking…" line goes under whatever is last now. Before the caller's
+  -- `to_bottom`, which is what scrolls it into view.
+  pending.pin(chat)
 end
 
 ---Append a new block to the end of the transcript.

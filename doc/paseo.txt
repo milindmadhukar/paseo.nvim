@@ -1632,6 +1632,20 @@ On the full-screen surface the conversation's winbar keeps a copy, beside the
 agent's title, so a turn that runs on while you read the Changes panel is
 still visibly going.
 
+                                                           *paseo-chat-pending*
+And the conversation says it, where you are looking: while the agent works, a
+virtual line sits UNDER THE LAST BLOCK, >
+
+    ⠹ thinking…
+<
+following the reply down as it streams and gone when the turn ends or the
+agent stops to ask you something. It is for the wait before the first word:
+with the rail shut, the gap after a first message used to show nothing at all
+in the conversation. A chat opened onto an agent already mid-turn -- a new
+worktree's first agent, a running one opened from the rail -- shows it too, on
+the agent directory's word, until a turn event or the directory says the agent
+stopped. Virtual, so it is never yanked, searched or counted as a block.
+
                                                               *paseo-chat-left*
 HOW MUCH CONTEXT IS LEFT sits in the same row, once the daemon has reported any
 usage: >

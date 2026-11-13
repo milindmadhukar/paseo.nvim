@@ -340,6 +340,14 @@ ten times a second, and among static ones it pushed everything beside it
 sideways every time the count gained a digit. Given ten columns whether it
 needs them or not, it cannot.
 
+The conversation says it too: while the agent works, a `⠹ thinking…` line sits
+**under the last block**, follows the reply down as it streams, and goes when
+the turn ends or the agent stops to ask you something. It is there for the wait
+before the first word: with the rail shut, the gap after a first message used
+to show nothing at all in the conversation. A chat opened onto an agent that is
+already mid-turn (a new worktree's first agent, a running one opened from the
+rail) shows it as well, on the agent directory's word.
+
 A pending permission shouts from the header itself — ` needs you` — because
 then the agent is not working, it is waiting for you.
 

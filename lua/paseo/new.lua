@@ -226,7 +226,9 @@ function M.chat(ctx, choice, prompt, images, done, opts)
       if opts and opts.switch then
         require("paseo.workspaces").open(workspace)
       end
-      require("paseo.ui.chat").open { root = workspace.directory, agent_id = workspace.agent_id }
+      -- `working`: its first turn is already under way -- the prompt rode the
+      -- request that made it.
+      require("paseo.ui.chat").open { root = workspace.directory, agent_id = workspace.agent_id, working = true }
       done(nil, nil)
     end)
   end

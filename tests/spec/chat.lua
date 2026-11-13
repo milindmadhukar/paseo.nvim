@@ -482,9 +482,89 @@ local function test_surface_memory()
   end
 end
 
+--- The "thinking…" line under the transcript (|paseo.ui.pending|).
+---
+--- With the rail shut, the gap between your first message and the first word
+--- back showed nothing at all in the conversation -- a chat that was working
+--- looked like one that had died. The line is the in-buffer answer.
+local function test_pending()
+  local chat = require "paseo.ui.chat"
+  local hl = require "paseo.ui.hl"
+  local transcript = require "paseo.ui.transcript"
+
+  local buf = vim.api.nvim_create_buf(false, true)
+  local win = vim.api.nvim_open_win(buf, false, {
+    relative = "editor",
+    row = 0,
+    col = 0,
+    width = 60,
+    height = 10,
+    style = "minimal",
+  })
+  vim.wo[win].scrolloff = 0
+  local session = { conversation = buf, win_conversation = win, root = vim.uv.cwd(), pending = {} }
+  transcript.reset(session)
+  transcript.upsert(session, { kind = "user", text = "hello" })
+
+  local function marks()
+    return vim.api.nvim_buf_get_extmarks(buf, hl.ns_pending, 0, -1, { details = true })
+  end
+  local function said(mark)
+    local out = {}
+    for _, chunk in ipairs(((mark or {})[4] or {}).virt_lines and mark[4].virt_lines[1] or {}) do
+      out[#out + 1] = chunk[1]
+    end
+    return table.concat(out)
+  end
+  local function last_row()
+    return vim.api.nvim_buf_line_count(buf) - 1
+  end
+
+  eq("pending: nothing while idle", #marks(), 0)
+
+  chat.set_streaming(session, true)
+  local now = marks()
+  eq("pending: one line once the agent works", #now, 1)
+  eq("pending: under the last line", now[1] and now[1][2], last_row())
+  truthy("pending: saying so", said(now[1]):find("thinking", 1, true) ~= nil)
+
+  -- A block landing moves it down: it never strands in the middle.
+  local lines = {}
+  for i = 1, 30 do
+    lines[i] = "line " .. i
+  end
+  transcript.upsert(session, { kind = "text", text = table.concat(lines, "\n") })
+  now = marks()
+  eq("pending: still one after a block lands", #now, 1)
+  eq("pending: and under the new last line", now[1] and now[1][2], last_row())
+
+  -- Following the end, the virtual line is ON SCREEN -- Neovim leaves one
+  -- below the last buffer line clipped unless something scrolls for it.
+  local top = vim.fn.line("w0", win)
+  local size = vim.api.nvim_win_text_height(win, { start_row = top - 1, end_row = last_row() })
+  truthy("pending: scrolled into view", size.all + 1 <= vim.api.nvim_win_get_height(win))
+
+  for i = 1, 5 do
+    transcript.stream(session, ("chunk %d\n"):format(i))
+  end
+  eq("pending: streaming keeps it at the end", marks()[1] and marks()[1][2], last_row())
+
+  -- A reset mid-turn -- the first message, between the agent being made and
+  -- its history landing -- keeps it, on the emptied buffer.
+  transcript.reset(session)
+  eq("pending: a reset mid-turn keeps one", #marks(), 1)
+
+  chat.set_streaming(session, false)
+  eq("pending: gone when the turn ends", #marks(), 0)
+
+  vim.api.nvim_win_close(win, true)
+  vim.api.nvim_buf_delete(buf, { force = true })
+end
+
 return {
   { "chat follows", test_chat_follow },
   { "surface memory", test_surface_memory },
   { "follow", test_follow },
   { "stop", test_stop },
+  { "pending", test_pending },
 }
