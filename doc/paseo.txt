@@ -870,7 +870,7 @@ skills.method                                       `"link"`|`"copy"`, default `
 
 :Paseo new                                                    *:Paseo-new*
 
-    Start something: a chat here or in a new worktree, or a terminal. One
+    Start something: a chat (Local, or a new worktree), or a terminal. One
     screen, every choice prefilled from last time, the box ready to type
     in. See |paseo-new|.
 
@@ -1962,8 +1962,8 @@ It is a DRAFT CHAT: the
 composer you will keep typing in, focused and in insert mode, with the
 choices drawn where the conversation will be: >
 
-    Start  a          Chat  Terminal        Where  w     Here  New worktree
-    Base   b          main  dev  feat/x  …              (a worktree, in git)
+    Start        a    Chat  Terminal        Where  w    Local  New worktree
+    Base branch  b    main  dev  feat/x  …              (a worktree, in git)
     Provider p · Model s · Permission mode m · Thinking t · Features f
     Run    c          Shell  Claude  Codex  Pi  …  Command…   (a terminal)
     ──────────────────────────────────────────────────────────────────────
@@ -1982,20 +1982,21 @@ tab's directory (or the agent's on screen) and the host it is on. And a new
 worktree is NOT NAMED: the daemon names it and its branch (`frail-squid`) and
 titles the workspace from your first message, as the app's New workspace
 does. `Where` is offered only where something can be isolated: a git
-checkout (a worktree, cut off `Base`, which defaults to what is checked out)
-or a multi-repo project (|paseo-workspace|, its worktrees assembled; a name
-is made from the prompt). A plain directory has only Here.
+checkout (a worktree, cut off `Base branch`, which defaults to what is checked
+out; `…` on it picks any branch, local or remote) or a multi-repo project
+(|paseo-workspace|, its worktrees assembled; a name is made from the prompt). A plain directory has only Local.
 
-EVERYTHING IS REMEMBERED -- chat or terminal, here or a worktree, the base you
+EVERYTHING IS REMEMBERED -- chat or terminal, Local or a worktree, the base you
 picked, the provider and model, mode, thinking, features, the terminal you
 ran -- per project and host, in `stdpath("state")/paseo/new.json`, and
 prefilled next time: in this project from what you did here, elsewhere from
 what you did last. A remembered model the provider no longer offers falls back
 to its default. Nothing is written until something is created.
 
-`Here` joins the workspace on screen, by id, so a second agent lands beside
-the first; the draft becomes that agent in place. A new worktree's agent, or a
-terminal, joins the row and takes the middle (|paseo-native-buffers|).
+`Local` (the app's word) is a NEW AGENT IN THE WORKSPACE ON SCREEN, joined by
+id, so it lands beside the first and shares its files; the draft becomes that
+agent in place. A new worktree's agent, or a terminal, joins the row and takes
+the middle (|paseo-native-buffers|).
 
                                                            *paseo-chat-usage*
 The USAGE panel (`3` in the panel) answers two different questions, from two

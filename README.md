@@ -235,7 +235,7 @@ screen.
 | `:Paseo sidebar` | The chat in the pane beside your code |
 | `:Paseo model [provider/model]` | Set the preference for new agents; no agent is created |
 | `:Paseo workspaces [all]` | Workspace picker for this project (`<C-a>` or `all`: every project's) — open, inspect agent sessions, create, archive |
-| `:Paseo new` | Start something: a chat here or in a new worktree, or a terminal — one screen |
+| `:Paseo new` | Start something: a chat (Local, a new agent in this workspace, or in a new worktree off a base branch) or a terminal — one screen |
 | `:Paseo wcreate` | The same screen, opened on a new worktree (no name to type) |
 | `:Paseo agents` | Agent sessions in this workspace |
 | `:Paseo subagents` | Subagents of the chat's agent (`gs` in the chat), in a live list: a spinner and a clock on each running one, updated as they start and finish. A Paseo one opens as a chat you can message, a provider one (Claude's Task tool) opens read-only, live |
@@ -466,8 +466,8 @@ composer or the conversation, normal mode or insert.
   last looked at. **`1` `2` `3`** in it jump straight to Settings, Changes or
   Usage, and its bar shows which is which. `<C-p>` again closes it.
 - **`<C-n>`** starts something, from any of these buffers in normal mode:
-  the [new-task screen](#starting-an-agent-session) — a chat here or in a new
-  worktree (named for you), or a terminal — with every choice prefilled from
+  the [new-task screen](#starting-an-agent-session) — a chat (Local, beside
+  this one, or in a new worktree named for you), or a terminal — with every choice prefilled from
   last time and the box ready to type in.
 - **What is current is what is in the middle.** The agent in the middle
   window is the one `:Paseo mode`, `:Paseo stop` and the rest act on.
@@ -857,8 +857,8 @@ keep typing in, focused and in insert mode, with the choices drawn above it
 where the conversation will be:
 
 ```
-  Start  a   [Chat]  Terminal              Where  w   [Here]  New worktree
-  Base   b   [main]  dev  feat/login  …                  (a worktree, in git)
+  Start        a   [Chat]  Terminal        Where  w   [Local]  New worktree
+  Base branch  b   [main]  dev  feat/login  …            (a worktree, in git)
   Provider p · Model s · Permission mode m · Thinking t · Features f
   ─────────────────────────────────────────────────────────────────────────
   ▌ Fix the flaky login test on CI
@@ -871,20 +871,22 @@ where you are standing, and a new worktree is **not named by you**: the daemon
 names it and its branch (`frail-squid`) and titles the workspace from your
 message, as the app's New workspace does. *Where* only appears where
 something can be isolated (a git checkout, or a [multi-repo
-project](#workspaces)); *Base* defaults to what is checked out. A
+project](#workspaces)); *Base branch* defaults to what is checked out, and
+`…` on it picks any branch, local or remote. A
 **Terminal** needs no prompt: `<Tab>` up to the choices and `<CR>` on what to
 run — a shell, `claude`, `codex`, `pi`, any provider the daemon has, your
 `ui.terminal.presets`, or a command you type.
 
-**Everything is remembered** — chat or terminal, here or a worktree, the base,
+**Everything is remembered** — chat or terminal, Local or a worktree, the base,
 the provider and model, mode, thinking, features, the terminal you ran — per
 project and host, and prefilled next time. Nothing is written until something
 is created.
 
 In the choices `h` `j` `k` `l` move, `<CR>` applies, the letter on a card
-jumps to it, `i` or `<Tab>` returns to the box and `q` cancels. *Here* joins
-the workspace on screen by id, so a second agent lands beside the first; the
-draft becomes that agent in place. A new worktree's agent, and a terminal,
+jumps to it, `i` or `<Tab>` returns to the box and `q` cancels. *Local* is the
+app's word for it: a **new agent in the workspace on screen**, joined by id, so
+it lands beside the first and shares its files; the draft becomes that agent
+in place. A new worktree's agent, and a terminal,
 open on tabs of their own.
 
 An *automatic* open never reaches any of this: following a workspace switch

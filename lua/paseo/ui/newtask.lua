@@ -14,8 +14,8 @@
 --- message turns the draft into a real agent. Then the conversation comes
 --- back and nothing else moves.
 ---
----   ┌ Chat | Terminal ─────── Here | New worktree ┐
----   │ Base   main  dev  feat/x  …                  │
+---   ┌ Chat | Terminal ────── Local | New worktree ┐
+---   │ Base branch  main  dev  feat/x  …            │
 ---   │ Provider · Model · Mode · Thinking · Features│   (a chat)
 ---   │ Preset  Shell  claude  codex  pi  Command…   │   (a terminal)
 ---   ├──────────────────────────────────────────────┤
@@ -154,12 +154,18 @@ local function groups(task)
       label = "Where",
       kind = "chips",
       entries = {
-        { id = "here", label = "Here", description = "in this checkout, beside whatever else works in it" },
+        -- "Local", as the app says it. The id stays `here`: it is what
+        -- `new.json` remembers, and what the rest of the code means by it.
+        {
+          id = "here",
+          label = "Local",
+          description = "a new agent in this workspace, sharing its files with the agents already in it",
+        },
         {
           id = "worktree",
           label = task.iso.label,
           description = task.iso.kind == "worktree"
-              and "a directory and branch of its own -- named for you from your first message"
+              and "a directory and branch of its own, cut from the base branch -- named from your first message"
             or "every repo's worktree, assembled -- named for you from your first message",
         },
       },
@@ -188,7 +194,7 @@ local function groups(task)
       id = "base",
       key = M.KEYS.base,
       icon = "",
-      label = "Base",
+      label = "Base branch",
       kind = "chips",
       entries = entries,
       current = current,
@@ -279,7 +285,7 @@ local function footer(task)
       local send = keys.label("composer", "<CR>") or "<M-CR>"
       local where = task.where == "worktree"
           and (task.iso and task.iso.kind == "worktree" and ("a worktree off " .. (base_of(task) or "?")) or "a new workspace")
-        or "here"
+        or "a new agent in this workspace"
       line = {
         { "  Type below; ", "PaseoDim" },
         widgets.keycap(send),

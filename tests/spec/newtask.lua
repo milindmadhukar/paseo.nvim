@@ -107,7 +107,7 @@ local function test_newtask()
     local conv = api.nvim_win_get_buf(chat.win_conversation)
     eq("newtask: the conversation window shows the choices", vim.bo[conv].filetype, "paseo-new")
     local shown = text(conv)
-    for _, want in ipairs { "Chat", "Terminal", "Here", "New worktree", "Test", "Big" } do
+    for _, want in ipairs { "Chat", "Terminal", "Local", "New worktree", "Test", "Big" } do
       truthy("newtask: it offers " .. want, shown:find(want, 1, true) ~= nil, shown)
     end
     truthy("newtask: no base until it is a worktree", not shown:find("Base", 1, true))
