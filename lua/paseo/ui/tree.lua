@@ -151,29 +151,47 @@ end
 
 -- ------------------------------------------------------------------- state
 
----A session's glyph and its colour: the rail's vocabulary for an agent, a
----subagent's own for a subagent.
+---A session's icon and its colour. Each kind has one icon, as a file's type
+---has -- a robot for an agent, an outlined one for a subagent, a prompt for a
+---terminal -- coloured by what it is doing, in the editor's diagnostic
+---colours: a spinner while it works, a warning when it waits on you, an
+---error when its turn failed, the unread colour when it finished while you
+---were away, and quiet when it is done.
 ---@param node paseo.TreeNode
----@return string glyph, string hl
-function M.glyph(node)
+---@return string icon, string hl
+function M.icon(node)
   local item = node.item
-  if node.kind == "agent" then
-    return require("paseo.ui.rail").status(require("paseo.agents").bucket(item))
-  end
   if node.kind == "terminal" then
-    local glyph = require("paseo.terminals").glyph(item)
-    return icons.panel.Terminals, glyph[2] == "PaseoDim" and "PaseoYellow1" or glyph[2]
+    return icons.tree.terminal, "PaseoTreeTerminal"
   end
-  if item.running then
-    return widgets.spinner(), "PaseoBlue0"
+  local idle = node.kind == "agent" and icons.tree.agent or icons.tree.subagent
+  local bucket
+  if node.kind == "agent" or item.kind == "paseo" then
+    local agent = node.kind == "agent" and item or require("paseo.agents").get(item.id)
+    bucket = agent and require("paseo.agents").bucket(agent) or nil
   end
-  if item.status == "failed" or item.status == "error" then
-    return icons.status.idle, "PaseoToolFail"
+  if bucket == nil then
+    if item.running then
+      bucket = "running"
+    elseif item.status == "failed" or item.status == "error" then
+      bucket = "failed"
+    else
+      bucket = "done"
+    end
   end
-  if item.status == "canceled" then
-    return icons.status.canceled or icons.status.idle, "PaseoDim"
+  if bucket == "running" then
+    return widgets.spinner(), "PaseoTreeRunning"
   end
-  return icons.status.idle, "PaseoToolOk"
+  if bucket == "needs_input" then
+    return icons.tree.waiting, "PaseoTreeWaiting"
+  end
+  if bucket == "failed" then
+    return icons.tree.error, "PaseoTreeFailed"
+  end
+  if bucket == "attention" then
+    return idle, "PaseoTreeUnread"
+  end
+  return idle, "PaseoTreeIdle"
 end
 
 ---What a session's row is called.

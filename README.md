@@ -461,24 +461,35 @@ nothing to draw any of it.
 
 Down the left of every agent's tab: each workspace in the project you are
 standing in, and what its agents are doing. It is the desktop app's
-sidebar, and it uses the same rule to decide the state:
+sidebar, drawn as **nvim-tree** draws a tree, and it uses the app's rule to
+decide each one's state. A workspace says it after its name, the way
+nvim-tree puts a file's git status after it — and says nothing when its
+agents are done, which is most of the time. An agent says it with its icon:
 
 | | |
 |---|---|
 | spinner | an agent is working — or a subagent of one is, after its parent's turn has ended |
-| yellow `!` | one is waiting on you: a permission, or a question |
-| red dot | a turn failed |
-| blue dot | a turn finished while you were elsewhere |
-| green dot | done |
-| hollow dot | no agent has run here |
+| warning (yellow) | one is waiting on you: a permission, or a question |
+| error (red) | a turn failed |
+| dot / blue robot | a turn finished while you were elsewhere |
+| grey robot | done |
 
 A workspace shows its **most urgent** agent, so one waiting on you among three
-running shows the `!`. Only its **own** agents count, matched by workspace id:
-every agent the app starts in a checkout gets a workspace of its own on that
-same directory, and one running agent spins only its own row. **The workspace on screen** (the one the agent you are
-talking to belongs to) has a green band across its row, a bar and a green
-name. It is matched by the agent's workspace, not the directory, so when
-several workspaces share one checkout only the right one is marked.
+running shows the warning. Only its **own** agents count, matched by workspace
+id: every agent the app starts in a checkout gets a workspace of its own on
+that same directory, and one running agent spins only its own row. **The
+session on screen** is the open file: its name is in nvim-tree's opened-file
+colour (`NvimTreeOpenedHL`), and so is its workspace's while that is folded.
+It is matched by the agent's workspace, not the directory, so when several
+workspaces share one checkout only the right one is marked.
+
+**Coloured by nvim-tree.** Every role links to the nvim-tree group for the
+same role — `NvimTreeRootFolder`, `NvimTreeFolderName`, the two arrow groups,
+`NvimTreeCursorLine`, `NvimTreeOpenedHL`, the diagnostic icons — whenever your
+colourscheme defines it, so the rail beside an nvim-tree is the same tree in
+the same colours; without one it falls back to where nvim-tree's own defaults
+point (`Title`, `Directory`, `CursorLine`). They are `PaseoTree*`, and
+`ui.theme` overrides any of them.
 
 **It is a file tree, and it is driven like nvim-tree.** A workspace is a
 folder; its agents and terminals are what is in it, and an agent with
@@ -491,21 +502,22 @@ All of it is the daemon's, pushed as it changes: the diff stat on every save,
 the pull request every twenty seconds while a check is pending.
 
 ```
-paseo.nvim                        4
- ▸ !  rail-spinner-fix   +75 -51
+  paseo.nvim                         4
+   rail-spinner-fix   +75 -51
        #131 · ✗ failed · changes
-▌▾ ⠋ main              +1240 -386
+   main ⠋           +1240 -386
        #128 · ● 3/5
-▌  ▾ ⠋ nvim-tree style rail
-       • Study nvim-tree rendering
-       ⠋ Research Paseo app sidebar
-   ▸ • review the sidecar diff  󱙺 1
-     󰆍 zsh
- ▸ • upstream-0.16          +12 -0
+     ⠋ nvim-tree style rail
+         󰚩 Study nvim-tree rendering
+         ⠋ Research Paseo app sidebar
+     󰚩 review the sidecar diff 1
+      󰚩 docs sweep
+       zsh
+   upstream-0.16          +12 -0
        #120 merged
- ▸ ○ voice-mode-experiment
+   voice-mode-experiment
 
- a agent  w workspace  g? keys
+  a agent  w workspace  g? keys
 ```
 
 The workspace on screen is open and the rest are closed until you open them;
@@ -513,8 +525,8 @@ an agent's subagents are open while one of them runs, and folded once they
 are done, with how many on its row (`1/3` while some run, `3` after). Both
 kinds hang off their parent: a **provider** subagent (Claude's Task tool)
 opens read-only, a **Paseo** subagent (an agent another agent started) is an
-ordinary agent and opens as one, listed once, under its parent. The bar and
-the band mark the session on screen. A workspace's agents are its own, by
+ordinary agent and opens as one, listed once, under its parent. The cursor
+band is nvim-tree's, and only ever says where the cursor is. A workspace's agents are its own, by
 workspace id, so two workspaces on one checkout do not mix them.
 
 **Every real line is a row.** The pull request line, "no sessions yet" and

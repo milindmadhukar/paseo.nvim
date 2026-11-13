@@ -81,10 +81,21 @@ end
 ---freezing whatever was loaded at startup.
 function M.attach()
   M.setup()
+  local group = api.nvim_create_augroup("PaseoHighlights", { clear = true })
   api.nvim_create_autocmd("ColorScheme", {
-    group = api.nvim_create_augroup("PaseoHighlights", { clear = true }),
+    group = group,
     callback = M.setup,
     desc = "paseo: re-derive highlight groups",
+  })
+  -- The rail takes its colours from nvim-tree's groups (|paseo.ui.theme|), and
+  -- a lazy-loaded nvim-tree defines them long after startup. Its first buffer
+  -- is the moment they exist.
+  api.nvim_create_autocmd("FileType", {
+    group = group,
+    pattern = "NvimTree",
+    once = true,
+    callback = M.setup,
+    desc = "paseo: the rail's colours, now nvim-tree has defined its own",
   })
 end
 

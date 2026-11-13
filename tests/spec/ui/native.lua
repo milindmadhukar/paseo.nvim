@@ -220,7 +220,16 @@ local function test_uniform()
 
     for _, win in ipairs(api.nvim_tabpage_list_wins(0)) do
       local what = vim.bo[api.nvim_win_get_buf(win)].filetype
-      if win ~= chat.win_composer then
+      if what == "paseo-rail" then
+        -- The rail is coloured as nvim-tree is (|paseo.ui.theme|): its own
+        -- group, which with no nvim-tree colours to borrow IS the base tier.
+        truthy(
+          ("native: %s (%s) is on the base tier"):format(what, mode),
+          vim.wo[win].winhl:find("Normal:PaseoTreeNormal", 1, true) ~= nil
+            and api.nvim_get_hl(0, { name = "PaseoTreeNormal", link = false }).bg == base.bg,
+          vim.wo[win].winhl
+        )
+      elseif win ~= chat.win_composer then
         truthy(
           ("native: %s (%s) is on the base tier"):format(what, mode),
           vim.wo[win].winhl:find("Normal:PaseoBase", 1, true) ~= nil,

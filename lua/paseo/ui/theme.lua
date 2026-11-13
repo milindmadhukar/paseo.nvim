@@ -523,6 +523,84 @@ function M.derive()
   return { palette = c, opaque = opaque, sign = sign, bg = bg, ramp = ramp, ink = ink }
 end
 
+---Is a highlight group defined -- by a colourscheme or by its plugin?
+---@param name string
+---@return boolean
+local function defined(name)
+  local ok, group = pcall(api.nvim_get_hl, 0, { name = name })
+  return ok and type(group) == "table" and next(group) ~= nil
+end
+
+---THE RAIL IS COLOURED BY nvim-tree. Each of its roles links to the nvim-tree
+---group for the same role when the colourscheme (or nvim-tree) defines one,
+---so the rail beside an nvim-tree is the same tree in the same colours -- the
+---pink root, the blue folders, the grey closed arrow, the subtle cursor band,
+---the opened-file colour. Without one, it links where nvim-tree's own
+---defaults link (`Title`, `Directory`, `CursorLine`...), which is what an
+---nvim-tree with no colourscheme support looks like.
+---@return table<string, vim.api.keyset.highlight>
+---@param fixed boolean  `ui.colors = "fixed"`: the plugin's palette, not the
+---                       colourscheme's -- so the background is never borrowed.
+local function tree_groups(fixed)
+  local roles = {
+    -- Paseo group            nvim-tree group               nvim-tree's own default
+    -- The background: the tree's own where the colourscheme gives it one
+    -- (some draw the explorer a shade darker), otherwise the tab's base tier
+    -- -- one background for every pane, as |paseo.ui.native| has it.
+    { "PaseoTreeNormal", "NvimTreeNormal", "PaseoBase" },
+    { "PaseoTreeEndOfBuffer", "NvimTreeEndOfBuffer", "PaseoBase" },
+    { "PaseoTreeCursorLine", "NvimTreeCursorLine", "CursorLine" },
+    { "PaseoTreeWinSeparator", "NvimTreeWinSeparator", "WinSeparator" },
+    { "PaseoTreeRoot", "NvimTreeRootFolder", "Title" },
+    { "PaseoTreeFolder", "NvimTreeFolderName", "Directory" },
+    { "PaseoTreeFolderIcon", "NvimTreeFolderIcon", "Directory" },
+    { "PaseoTreeArrowOpen", "NvimTreeFolderArrowOpen", "Directory" },
+    { "PaseoTreeArrowClosed", "NvimTreeFolderArrowClosed", "NonText" },
+    { "PaseoTreeIndent", "NvimTreeIndentMarker", "NonText" },
+    { "PaseoTreeSession", "NvimTreeFileName", "Normal" },
+    -- The session on screen is the file that is open.
+    { "PaseoTreeOpened", "NvimTreeOpenedHL", "Special" },
+    -- A subagent and an agent that has finished are quiet, as a hidden or
+    -- ignored file is.
+    { "PaseoTreeSubagent", "Comment", "Comment" },
+    { "PaseoTreeIdle", "Comment", "Comment" },
+    { "PaseoTreeMeta", "Comment", "Comment" },
+    -- State, as nvim-tree says it about files: diagnostics.
+    { "PaseoTreeRunning", "NvimTreeDiagnosticInfoIcon", "DiagnosticInfo" },
+    { "PaseoTreeWaiting", "NvimTreeDiagnosticWarnIcon", "DiagnosticWarn" },
+    { "PaseoTreeFailed", "NvimTreeDiagnosticErrorIcon", "DiagnosticError" },
+    { "PaseoTreeUnread", "NvimTreeDiagnosticHintIcon", "DiagnosticHint" },
+    { "PaseoTreeTerminal", "NvimTreeExecFile", "Question" },
+  }
+  local out = {}
+  for _, role in ipairs(roles) do
+    out[role[1]] = { link = defined(role[2]) and role[2] or role[3] }
+  end
+  if fixed then
+    out.PaseoTreeNormal = { link = "PaseoBase" }
+    out.PaseoTreeEndOfBuffer = { link = "PaseoBase" }
+  end
+  -- Diagnostics and comments are italic in a good many colourschemes, and a
+  -- name or an icon in italics is not the tree nvim-tree draws: take the
+  -- colour alone.
+  for _, name in ipairs {
+    "PaseoTreeRunning",
+    "PaseoTreeWaiting",
+    "PaseoTreeFailed",
+    "PaseoTreeUnread",
+    "PaseoTreeSubagent",
+    "PaseoTreeIdle",
+    "PaseoTreeMeta",
+  } do
+    local target = out[name].link
+    local ok, group = pcall(api.nvim_get_hl, 0, { name = target, link = false })
+    if ok and group.fg then
+      out[name] = { fg = group.fg }
+    end
+  end
+  return out
+end
+
 ---Every `Paseo*` group, as a plain table. Applying it is `ui/hl.lua`'s job.
 ---@param t? paseo.Theme  Derived fresh when omitted.
 ---@return table<string, vim.api.keyset.highlight>
@@ -573,28 +651,16 @@ function M.groups(t)
     PaseoAdd = { fg = on_surface(c.green) },
     PaseoDel = { fg = on_surface(c.red) },
 
-    -- The workspace rail, which is a file tree and is coloured like one:
-    -- nvim-tree's roles (root, folder, arrow, indent marker) on Paseo's
-    -- palette. A workspace is the folder; its sessions are the files in it.
-    PaseoTreeRoot = { fg = on_surface(c.blue), bold = true },
-    PaseoTreeFolder = { fg = on_surface(c.blue) },
-    PaseoTreeArrow = { fg = c.grey },
-    PaseoTreeIndent = { fg = c.border },
-    PaseoTreeSession = { fg = c.text },
-    PaseoTreeSubagent = { fg = c.grey },
-    -- Where you are: the workspace and the session on screen.
-    PaseoTreeCurrent = { fg = on_surface(c.green), bold = true },
-    -- `+12 -3`, beside a workspace: the app's sidebar diff stat.
+    -- The workspace rail's diff stat and pull request line: the app's
+    -- colours for them, on the surface. The rest of the rail's groups are
+    -- nvim-tree's -- see `tree_groups` below.
     PaseoTreeAdded = { fg = on_surface(c.green) },
     PaseoTreeRemoved = { fg = on_surface(c.red) },
-    -- The line under a workspace: its pull request and its CI.
-    PaseoTreeMeta = { fg = c.grey },
     PaseoTreePrOpen = { fg = on_surface(c.green) },
     -- Purple, as the app and GitHub both draw merged -- there is no purple
     -- in the eight, so it is mixed from the two it sits between.
     PaseoTreePrMerged = { fg = on_surface(M.blend(c.blue, c.red, 45) or c.blue) },
     PaseoTreePrClosed = { fg = on_surface(c.red) },
-    PaseoTreePrDraft = { fg = c.grey },
     PaseoTreeChecksPassed = { fg = on_surface(c.green) },
     PaseoTreeChecksFailed = { fg = on_surface(c.red) },
     PaseoTreeChecksRunning = { fg = on_surface(c.yellow) },
@@ -620,6 +686,10 @@ function M.groups(t)
         or c.grey,
     },
   }
+
+  for name, spec in pairs(tree_groups(require("paseo.config").get().ui.colors == "fixed")) do
+    groups[name] = spec
+  end
 
   -- Identity swatches: one per hue, legible on the surface they are drawn on.
   -- A repo, a project, an agent -- anything whose colour means "this one" and

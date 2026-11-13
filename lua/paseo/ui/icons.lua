@@ -166,6 +166,21 @@ M.ui = {
 M.tree = {
   open = g(0xf47c), -- oct-chevron_down
   closed = g(0xf460), -- oct-chevron_right
+  -- A workspace is a folder, drawn with the folder nvim-tree draws.
+  folder = g(0xe5ff), -- custom-folder
+  folder_open = g(0xe5fe), -- custom-folder_open
+  -- What is in it, each with the one icon its kind always has -- the way a
+  -- file's icon says its type -- coloured by what it is doing.
+  agent = g(0xf06a9), -- md-robot
+  subagent = g(0xf167a), -- md-robot_outline
+  terminal = g(0xe795), -- dev-terminal
+  -- After a workspace's name, the way nvim-tree puts git status after a
+  -- file's: only when there is something to say.
+  waiting = g(0xf071), -- fa-warning
+  -- nvim-tree's own diagnostic glyph, so a failed workspace reads as an
+  -- error does in the tree beside it.
+  error = g(0xf057), -- fa-times_circle
+  unread = g(0xf444), -- oct-dot_fill
   -- A pull request that is not merged, and the two ways it can be not open.
   pr_closed = g(0xf4dc), -- oct-git_pull_request_closed
   pr_draft = g(0xf4dd), -- oct-git_pull_request_draft

@@ -37,6 +37,19 @@ local ns = api.nvim_create_namespace "paseo.rail"
 
 M.FILETYPE = "paseo-rail"
 
+---The rail's window highlights: nvim-tree's, through the `PaseoTree*` links
+---(|paseo.ui.theme|), so it sits on the background an nvim-tree would, with
+---the same cursor band and the same separator.
+M.WINHL = table.concat({
+  "Normal:PaseoTreeNormal",
+  "NormalNC:PaseoTreeNormal",
+  "NormalFloat:PaseoTreeNormal",
+  "EndOfBuffer:PaseoTreeEndOfBuffer",
+  "CursorLine:PaseoTreeCursorLine",
+  "WinSeparator:PaseoTreeWinSeparator",
+  "SignColumn:PaseoTreeNormal",
+}, ",")
+
 ---@type integer|nil
 local buf
 
@@ -367,6 +380,29 @@ function M.status(bucket)
   return icons.status.pending, "PaseoDim"
 end
 
+---What a workspace says after its name, the way nvim-tree puts a file's git
+---status after it: nothing when its agents are done -- most workspaces, most
+---of the time -- and otherwise the one thing worth knowing. The same states
+---the app's sidebar has, in the editor's diagnostic colours.
+---@param bucket string  `M.bucket`'s answer.
+---@return string|nil glyph, string|nil hl
+function M.badge(bucket)
+  if bucket == "running" then
+    return widgets.spinner(), "PaseoTreeRunning"
+  end
+  if bucket == "needs_input" then
+    return icons.tree.waiting, "PaseoTreeWaiting"
+  end
+  if bucket == "failed" then
+    return icons.tree.error, "PaseoTreeFailed"
+  end
+  if bucket == "attention" then
+    -- Finished while you were somewhere else: unread, not a problem.
+    return icons.tree.unread, "PaseoTreeUnread"
+  end
+  return nil
+end
+
 ---A workspace's state, SUBAGENTS INCLUDED.
 ---
 ---|paseo.agents|.workspace_bucket reads the agents and nothing else, and a
@@ -554,7 +590,7 @@ function M.meta(ws)
   elseif pr.state == "closed" then
     glyph, hl, word = icons.tree.pr_closed, "PaseoTreePrClosed", "closed"
   elseif pr.draft then
-    glyph, hl, word = icons.tree.pr_draft, "PaseoTreePrDraft", "draft"
+    glyph, hl, word = icons.tree.pr_draft, "PaseoTreeMeta", "draft"
   end
   local out = { { glyph .. " #" .. pr.number, hl } }
   if word then
@@ -606,26 +642,32 @@ end
 function M.build(width)
   local b = { lines = {}, rows = {}, right = {}, below = {} }
   local markers = M.options().indent_markers == true
+  -- nvim-tree's signcolumn: two cells down the left, so nothing is drawn
+  -- against the window edge.
+  local PAD = "  "
 
   -- THE ROOT, as nvim-tree labels it (`root_folder_label = ":t"`): the
   -- project's name, and how many workspaces it has.
   local name = cache.root and vim.fs.basename(cache.root) or "workspaces"
-  b.lines[1] = render.truncate({ { name, "PaseoTreeRoot" } }, math.max(1, width - 5))
+  b.lines[1] = vim.list_extend(
+    { { PAD } },
+    render.truncate({ { name, "PaseoTreeRoot" } }, math.max(1, width - 6))
+  )
   if cache.list then
-    b.right[1] = { { tostring(#cache.list), "PaseoDim" } }
+    b.right[1] = { { tostring(#cache.list) .. " ", "PaseoTreeMeta" } }
   end
 
   if not cache.list then
     b.lines[2] = {
       {
-        "  " .. (cache.err and "unavailable" or "loading…"),
-        cache.err and "PaseoToolFail" or "PaseoDim",
+        PAD .. "  " .. (cache.err and "unavailable" or "loading…"),
+        cache.err and "PaseoTreeFailed" or "PaseoTreeMeta",
       },
     }
     return b
   end
   if #cache.list == 0 then
-    b.lines[2] = { { "  no workspaces", "PaseoDim" } }
+    b.lines[2] = { { PAD .. "  no workspaces", "PaseoTreeMeta" } }
     return b
   end
 
@@ -633,10 +675,12 @@ function M.build(width)
   local tree = require "paseo.ui.tree"
   local here_session = tree.on_screen(chat)
 
-  ---Draw one row. `last` is, for each depth from 1, whether that ancestor
-  ---(or this row, at its own depth) is the last of its siblings -- what the
-  ---indent markers need to know which bars continue.
-  local function emit(row, last, mine, glyph, glyph_hl, title, title_hl, right)
+  ---Draw one row, as nvim-tree builds one: indent, arrow, icon, name, and what
+  ---comes after the name. `last` is, for each depth from 1, whether that
+  ---ancestor (or this row, at its own depth) is the last of its siblings --
+  ---what the indent markers need to know which bars continue.
+  ---@param spec { icon: string, icon_hl: string, name: string, name_hl: string, after?: table[], right?: table[] }
+  local function emit(row, last, spec)
     local indent
     if markers and row.depth > 0 then
       local parts = {}
@@ -651,33 +695,38 @@ function M.build(width)
     else
       indent = ("  "):rep(row.depth)
     end
-    local arrow = row.open == nil and "  "
-      or ((row.open and icons.tree.open or icons.tree.closed) .. " ")
+    local arrow, arrow_hl = "  ", "PaseoTreeIndent"
+    if row.open ~= nil then
+      arrow = (row.open and icons.tree.open or icons.tree.closed) .. " "
+      arrow_hl = row.open and "PaseoTreeArrowOpen" or "PaseoTreeArrowClosed"
+    end
     local left = {
-      -- The bar that says "you are in this one", in the glyph the rest of
-      -- the plugin uses for it.
-      { mine and icons.marker.mine or " ", "PaseoAgent" },
+      { PAD },
       { indent, "PaseoTreeIndent" },
-      { arrow, "PaseoTreeArrow" },
-      { glyph .. " ", glyph_hl },
+      { arrow, arrow_hl },
+      { spec.icon .. " ", spec.icon_hl },
     }
     local col = 0
     for _, cell in ipairs(left) do
       col = col + #cell[1]
     end
     row.name_col = col
-    right = right or {}
+    local right = spec.right or {}
     local right_w = render.width(right)
+    local after = spec.after or {}
+    local after_w = render.width(after)
     local used = render.width(left)
-    -- The name is what you read: the right-hand column goes before it does.
+    -- The name is what you read: the right-hand column goes before it does,
+    -- and the badges after it before that.
     if used + right_w + 6 > width then
       right, right_w = {}, 0
     end
-    local room = math.max(1, width - used - (right_w > 0 and right_w + 1 or 0))
-    vim.list_extend(
-      left,
-      render.truncate({ { title, mine and "PaseoTreeCurrent" or title_hl } }, room)
-    )
+    if used + after_w + right_w + 4 > width then
+      after, after_w = {}, 0
+    end
+    local room = math.max(1, width - used - after_w - (right_w > 0 and right_w + 1 or 0))
+    vim.list_extend(left, render.truncate({ { spec.name, spec.name_hl } }, room))
+    vim.list_extend(left, after)
     local line = #b.lines + 1
     b.lines[line] = left
     b.rows[line] = row
@@ -693,6 +742,8 @@ function M.build(width)
     local row = b.rows[line]
     local pad = row and render.width(vim.list_slice(b.lines[line], 1, 4)) or 2
     b.below[line] = b.below[line] or {}
+    -- Cut to the window: a virtual line is not wrapped or clipped for us.
+    chunks = render.truncate(chunks, math.max(1, width - pad))
     table.insert(b.below[line], vim.list_extend({ { (" "):rep(pad) } }, chunks))
   end
 
@@ -700,18 +751,31 @@ function M.build(width)
   for i, ws in ipairs(cache.list) do
     local here = i == current
     local open = M.is_expanded(ws, here)
-    local glyph, hl = M.status(M.bucket(ws))
-    local pin = ws.pinned and (icons.ui.pin .. " ") or ""
     local key = ws_key(ws)
+    -- AFTER THE NAME, as nvim-tree puts a file's git status: the pin, and the
+    -- workspace's state -- only when it has one worth saying. A workspace
+    -- whose agents are done says nothing; that is most of them.
+    local after = {}
+    if ws.pinned then
+      after[#after + 1] = { " " .. icons.ui.pin, "PaseoTreeMeta" }
+    end
+    local badge, badge_hl = M.badge(M.bucket(ws))
+    if badge then
+      after[#after + 1] = { " " .. badge, badge_hl }
+    end
     local ws_line = emit(
       { kind = "workspace", ws = ws, depth = 0, open = open, key = key, path = { key } },
       {},
-      here,
-      glyph,
-      hl,
-      pin .. (ws.name or ""),
-      "PaseoTreeFolder",
-      M.diff_stat(ws)
+      {
+        icon = open and icons.tree.folder_open or icons.tree.folder,
+        icon_hl = "PaseoTreeFolderIcon",
+        name = ws.name or "",
+        -- Folded over the session on screen, the folder says it is in there,
+        -- the way the open file would.
+        name_hl = (here and not open) and "PaseoTreeOpened" or "PaseoTreeFolder",
+        after = after,
+        right = M.diff_stat(ws),
+      }
     )
     if here then
       b.current = ws_line
@@ -746,30 +810,23 @@ function M.build(width)
           row.open = node_open(node, here_session)
         end
         local mine = tree.is_on_screen(node, here_session)
-        local g, ghl = tree.glyph(node)
-        -- A folded agent says how many of its subagents run, since you can
-        -- no longer see them: `1/3`, or `3` once they are done.
-        local right
+        local icon, icon_hl = tree.icon(node)
+        -- A folded agent says how many subagents are in it, since you can no
+        -- longer see them -- the hidden count nvim-tree puts after a folder.
+        local after
         if has_kids and not row.open then
           local text = node.running > 0 and ("%d/%d"):format(node.running, #node.kids)
             or tostring(#node.kids)
-          right = {
-            {
-              icons.tool.sub_agent .. " " .. text,
-              node.running > 0 and "PaseoToolRunning" or "PaseoDim",
-            },
-          }
+          after = { { " " .. text, node.running > 0 and "PaseoTreeRunning" or "PaseoTreeMeta" } }
         end
-        local line = emit(
-          row,
-          last,
-          mine,
-          g,
-          ghl,
-          tree.title(node),
-          node.kind == "subagent" and "PaseoTreeSubagent" or "PaseoTreeSession",
-          right
-        )
+        local line = emit(row, last, {
+          icon = icon,
+          icon_hl = icon_hl,
+          name = tree.title(node),
+          name_hl = mine and "PaseoTreeOpened"
+            or (node.kind == "subagent" and "PaseoTreeSubagent" or "PaseoTreeSession"),
+          after = after,
+        })
         if mine and not b.session then
           b.session = line
         end
@@ -790,15 +847,16 @@ function M.build(width)
         emit(
           { kind = "draft", ws = ws, depth = 1, parent = ws_line, key = dkey, path = { key, dkey } },
           { true },
-          true,
-          icons.status.pending,
-          "PaseoDim",
-          "new session",
-          "PaseoTreeSession"
+          {
+            icon = icons.tree.subagent,
+            icon_hl = "PaseoTreeIdle",
+            name = "new session",
+            name_hl = "PaseoTreeOpened",
+          }
         )
       end
       if count == 0 then
-        below(ws_line, { { "  no sessions yet", "PaseoDim" } })
+        below(ws_line, { { "no sessions yet", "PaseoTreeMeta" } })
       end
     end
   end
@@ -810,12 +868,12 @@ function M.build(width)
     b.below[last] = b.below[last] or {}
     table.insert(b.below[last], { { "" } })
     table.insert(b.below[last], {
-      { " a", "PaseoKey" },
-      { " agent  ", "PaseoDim" },
-      { "w", "PaseoKey" },
-      { " workspace  ", "PaseoDim" },
-      { "g?", "PaseoKey" },
-      { " keys", "PaseoDim" },
+      { PAD .. "a", "PaseoTreeFolder" },
+      { " agent  ", "PaseoTreeMeta" },
+      { "w", "PaseoTreeFolder" },
+      { " workspace  ", "PaseoTreeMeta" },
+      { "g?", "PaseoTreeFolder" },
+      { " keys", "PaseoTreeMeta" },
     })
   end
   return b
@@ -956,19 +1014,6 @@ function M.draw()
   api.nvim_buf_clear_namespace(buf, ns_right, 0, -1)
   rows, current_line, session_line = b.rows, b.current, b.session
 
-  -- THE ROW YOU ARE IN, across the whole width: the session on screen when
-  -- its workspace is open, the workspace when it is not. A band says it at a
-  -- glance, from across the surface.
-  local band = session_line or current_line
-  if band then
-    api.nvim_buf_set_extmark(
-      buf,
-      ns,
-      band - 1,
-      0,
-      { line_hl_group = "PaseoRowCurrent", priority = 10 }
-    )
-  end
   for i, line in ipairs(b.lines) do
     local col = 0
     for _, cell in ipairs(line) do
@@ -1534,16 +1579,6 @@ function M.buf(keys)
   end
 
   local group = api.nvim_create_augroup("paseo.rail", { clear = true })
-  api.nvim_create_autocmd({ "WinEnter", "WinLeave" }, {
-    group = group,
-    buffer = buf,
-    desc = "paseo: the rail's cursor band only while it has focus",
-    callback = function(args)
-      if M.win() then
-        vim.wo[win].cursorline = args.event == "WinEnter"
-      end
-    end,
-  })
   -- THE CURSOR ON THE NAME, wherever a motion left it: nvim-tree's
   -- `hijack_cursor`. Normal mode only, so a visual selection can still be
   -- made, and not while a search is landing on its match.
@@ -1602,13 +1637,12 @@ end
 ---@param w integer
 function M.style(w)
   for option, value in pairs {
-    -- `EndOfBuffer` too: under a light theme like `morning` it carries a
-    -- background of its own, and every row below the list came out grey.
-    winhl = "Normal:PaseoNormal,NormalFloat:PaseoNormal,EndOfBuffer:PaseoNormal,CursorLine:PaseoRowHover",
-    -- Off until you are IN it. The row you are standing in already has
-    -- the bar and the green; a band on it as well, while the cursor is in
-    -- the composer, says the rail has focus when it does not.
-    cursorline = api.nvim_get_current_win() == w,
+    winhl = M.WINHL,
+    -- Always on, as nvim-tree's is: the band IS where the cursor is, and the
+    -- session on screen says so in its own colour, so the two never read as
+    -- one claim.
+    cursorline = true,
+    cursorlineopt = "both",
     wrap = false,
     scrolloff = 2,
     sidescrolloff = 0,
@@ -1626,14 +1660,6 @@ end
 function M.adopt(w)
   win, adopted = w, true
   M.style(w)
-  -- On the native surface's base tier, like every other pane there, rather
-  -- than the `PaseoNormal` sheet `M.style` paints a float with.
-  local native = package.loaded["paseo.ui.native"]
-  if native and native.WINHL then
-    pcall(function()
-      vim.wo[w].winhl = native.WINHL .. ",CursorLine:PaseoRowHover"
-    end)
-  end
   -- `minimal` is a float style; a split has to be told.
   for option, value in pairs {
     number = false,
