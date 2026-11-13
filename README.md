@@ -80,7 +80,7 @@ vim.keymap.set("n", "<leader>as", "<cmd>Paseo settings<cr>")        -- mode, mod
 | `:Paseo workspaces [all]` | This project's workspaces (`all`: every project's) |
 | `:Paseo agents` | The agents in this workspace |
 | `:Paseo search` | Search every workspace, agent, prompt you sent, and past chat (`<C-k>` on Paseo's buffers) |
-| `:Paseo settings [mode\|thinking\|model\|features]` | The chat agent's settings; `mode`, `thinking` and `model` open straight in your picker |
+| `:Paseo settings [mode\|thinking\|model\|features]` | The chat agent's settings; `mode`, `thinking` and `model` open straight in your picker, on a new-session draft too |
 | `:Paseo stop` | Interrupt the agent's turn |
 | `:Paseo ws init\|edit\|create\|rm\|ls\|status` | Multi-repo workspaces |
 

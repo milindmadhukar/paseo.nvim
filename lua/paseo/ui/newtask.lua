@@ -752,6 +752,39 @@ function M.task(chat)
   return tasks[chat]
 end
 
+---Open one of a draft's lists straight in the picker: what `:Paseo settings
+---mode|thinking|model` do on a chat do the same on a draft, rather than
+---warn that there is no agent yet.
+---@param chat table
+---@param group_id string
+---@return boolean handled  False when `chat` is not a draft being set up.
+function M.pick(chat, group_id)
+  local task = tasks[chat]
+  if not task then
+    return false
+  end
+  local group
+  for _, g in ipairs(groups(task)) do
+    if g.id == group_id then
+      group = g
+    end
+  end
+  if not group then
+    local why = task.error or (task.draft and ("no " .. group_id .. " to choose here")) or "still loading"
+    vim.notify("paseo: " .. why, vim.log.levels.WARN)
+    return true
+  end
+  require("paseo.ui.pick").group(group, function(entry)
+    if task.view then
+      task.view:set_focus(group, entry)
+    end
+    apply(task, group, entry, function()
+      draw(task)
+    end)
+  end)
+  return true
+end
+
 ---Redraw every open screen (a resize).
 function M.redraw()
   for _, task in pairs(tasks) do

@@ -227,6 +227,84 @@ local function test_newtask()
   end
 end
 
+---`:Paseo settings mode` (and thinking, model) on a draft: the draft's own
+---list, straight in the picker -- not "no chat is open".
+local function test_draft_pick()
+  local newtask = require "paseo.ui.newtask"
+  local session = require "paseo.ui.session"
+  local create = require "paseo.ui.create"
+  local terminals = require "paseo.terminals"
+  local workspaces = require "paseo.workspaces"
+  local bridge = require "paseo.bridge"
+  local pick = require "paseo.ui.pick"
+  local chats = require "paseo.ui.chat"
+  local native = require "paseo.ui.native"
+  local old = {
+    catalogue = create.catalogue,
+    presets = terminals.presets,
+    branches = workspaces.branches,
+    request = bridge.request,
+    select = pick.select,
+    current = chats.current(),
+  }
+  local dir = repo()
+  local ok, failure = pcall(function()
+    create.catalogue = function(_, cb)
+      cb(ENTRIES, nil)
+    end
+    terminals.presets = function(_, cb)
+      cb { { label = "Shell" } }
+    end
+    workspaces.branches = function(_, cb)
+      cb { "main" }
+    end
+    bridge.request = function(op, _, cb)
+      if op == "providers.features" then
+        return cb(nil, { features = {} })
+      end
+      cb(nil, {})
+    end
+    local asked
+    pick.select = function(items, opts, on_choice)
+      asked = { items = items, opts = opts }
+      for i, item in ipairs(items) do
+        if item.id == "plan" or item.id == "high" then
+          return on_choice(item, i)
+        end
+      end
+      on_choice(nil, nil)
+    end
+
+    local chat = newtask.open({ root = dir, local_root = dir, host_id = "local" }, {})
+    local task = newtask.task(chat)
+    vim.wait(500, function()
+      return task.draft ~= nil and not task.draft.loading
+    end)
+    eq("draft pick: the draft is the current chat", chats.current(), chat)
+
+    session.mode()
+    eq("draft pick: the mode list opened at once", asked and asked.opts.kind, "paseo.mode")
+    eq("draft pick: and the draft took the mode", task.draft.modeId, "plan")
+    eq("draft pick: its bar says so", chat.mode, "plan")
+
+    asked = nil
+    session.thinking()
+    eq("draft pick: thinking too", asked and asked.opts.kind, "paseo.thinking")
+    eq("draft pick: the draft took the level", task.draft.thinkingOptionId, "high")
+
+    native.close(chat)
+    chats.discard(chat)
+  end)
+  create.catalogue, terminals.presets = old.catalogue, old.presets
+  workspaces.branches, bridge.request, pick.select = old.branches, old.request, old.select
+  chats.set_current(old.current)
+  native.reset()
+  vim.fn.delete(dir, "rf")
+  if not ok then
+    error(failure, 0)
+  end
+end
+
 local function test_isolation()
   local new = require "paseo.new"
   local dir = repo()
@@ -264,6 +342,7 @@ end
 
 return {
   { "newtask.screen", test_newtask },
+  { "newtask.draft_pick", test_draft_pick },
   { "newtask.isolation", test_isolation },
   { "newtask.project_root", test_project_root },
 }

@@ -334,7 +334,7 @@ local function target()
   if chat and chat.agent_id then
     return chat
   end
-  vim.notify("paseo: no chat is open — <leader>aa first", vim.log.levels.WARN)
+  vim.notify("paseo: no chat is open", vim.log.levels.WARN)
   return nil
 end
 
@@ -355,6 +355,12 @@ end
 ---list it wants, so it gets the list -- in the picker you type at.
 ---@param group_id string
 local function pick_now(group_id)
+  -- A draft (the new-session screen) has no agent to ask yet, but it has the
+  -- same lists: its own, in the same picker.
+  local current = require("paseo.ui.chat").current()
+  if current and not current.agent_id and require("paseo.ui.newtask").pick(current, group_id) then
+    return
+  end
   local chat = target()
   if not chat then
     return

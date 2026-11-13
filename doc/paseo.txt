@@ -138,7 +138,9 @@ readers and the microphone.
                         thinking level, model and features (Fast, Plan, ...).
                         `mode`, `thinking` and `model` open that list
                         straight in your picker (|paseo-pick|); `features`
-                        opens the card on the toggles. See |paseo-settings|.
+                        opens the card on the toggles. On a new-session
+                        draft the three pick the draft's own choice.
+                        See |paseo-settings|.
 
                                                                *:Paseo-stop*
 :Paseo stop             Interrupt the turn the chat's agent is running.

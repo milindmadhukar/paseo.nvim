@@ -1,9 +1,10 @@
 --- The agent settings, on their own.
 ---
---- `:Paseo mode` used to be a `vim.ui.select` listing five strings with a `●`
---- glued to the front of one of them. This is the same four settings drawn the
---- same way the native surface's Settings panel draws them -- because it IS
---- that panel's view object, at a different width, with its own window.
+--- The whole card: `:Paseo settings` with no group. One list on its own --
+--- `:Paseo settings mode|thinking|model` -- skips this and opens straight in
+--- the picker (|paseo.ui.pick|). The card is drawn the same way the native
+--- surface's Settings panel draws it -- because it IS that panel's view
+--- object, at a different width, with its own window.
 ---
 --- The window itself is |paseo.ui.popup|'s, which is also what the new-agent
 --- screen opens. Those two used to be a volt popup and a plain buffer, and the
