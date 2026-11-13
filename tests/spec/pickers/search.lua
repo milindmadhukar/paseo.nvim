@@ -88,6 +88,70 @@ local function test_rows()
   end
 end
 
+--- Scope: this project's workspaces, the agents in them, and per host what
+--- the daemon filters past chats on.
+local function test_scope()
+  local search = require "paseo.pickers.search"
+  local hosts = require "paseo.hosts"
+  local old_all, old_get, old_remote, old_local = hosts.all, hosts.get, hosts.to_remote, hosts.to_local
+
+  local ok, err = pcall(function()
+    local profiles = {
+      here = { id = "here", local_host = true },
+      box = { id = "box", local_host = false },
+    }
+    hosts.all = function()
+      return { profiles.here, profiles.box }
+    end
+    hosts.get = function(id)
+      return profiles[id]
+    end
+    -- The box mounts the same projects under /srv.
+    hosts.to_remote = function(id, path)
+      return id == "box" and path:gsub("^/x/Code", "/srv") or path
+    end
+    hosts.to_local = function(id, path)
+      return id == "box" and path:gsub("^/srv", "/x/Code") or path
+    end
+
+    local list = {
+      { id = "w1", hostId = "here", projectId = "p1", projectRoot = "/x/Code/app", directory = "/x/Code/app" },
+      -- A worktree Paseo cut: elsewhere on disk, but the project's.
+      { id = "w2", hostId = "here", projectId = "p1", projectRoot = "/x/Code/app", directory = "/x/.paseo/worktrees/1/feat" },
+      { id = "w3", hostId = "here", projectId = "p2", projectRoot = "/x/Code/other", directory = "/x/Code/other" },
+      -- The same project on the box, in the box's spelling.
+      { id = "w4", hostId = "box", projectId = "rp1", projectRoot = "/srv/app", directory = "/srv/app" },
+      { id = "w5", hostId = "box", projectId = "rp2", projectRoot = "/srv/other", directory = "/srv/other" },
+    }
+    local scope = search.scope(list, { root = "/x/Code/app" })
+    local ids = vim.tbl_map(function(ws)
+      return ws.id
+    end, scope.workspaces)
+    eq("scope: this project's workspaces, its worktrees and the box's copy", ids, { "w1", "w2", "w4" })
+    eq("scope: labelled by the project", scope.label, "app")
+    eq("scope: the daemon gets this host's project ids", scope.hosts.here, { projectIds = { "p1" }, projectRoots = { "/x/Code/app" } })
+    eq("scope: and the box its own, rooted in its own spelling", scope.hosts.box, { projectIds = { "rp1" }, projectRoots = { "/srv/app" } })
+
+    eq("scope: an agent in one of its workspaces is in", scope.contains { hostId = "here", workspaceId = "w2" }, true)
+    eq("scope: one in another project's is not", scope.contains { hostId = "here", workspaceId = "w3", cwd = "/x/Code/app" }, false)
+    eq("scope: the same id on another host is not", scope.contains { hostId = "box", workspaceId = "w1" }, false)
+    eq("scope: one in no workspace, by its directory", scope.contains { hostId = "here", cwd = "/x/Code/app/lua" }, true)
+    eq("scope: mapped from the box's", scope.contains { hostId = "box", cwd = "/srv/app" }, true)
+    eq("scope: and not a sibling that shares a prefix", scope.contains { hostId = "here", cwd = "/x/Code/app-two" }, false)
+
+    local all = search.scope(list, { all = true })
+    eq("scope: `all` is every workspace", #all.workspaces, 5)
+    eq("scope: and every agent", all.contains { hostId = "here", workspaceId = "w3" }, true)
+
+    eq("scope: nowhere is an empty project", #search.scope(list, { root = "/x/nowhere" }).workspaces, 0)
+  end)
+
+  hosts.all, hosts.get, hosts.to_remote, hosts.to_local = old_all, old_get, old_remote, old_local
+  if not ok then
+    error(err)
+  end
+end
+
 --- Gathering: everything at once, one answer, kept for the next open.
 local function test_gather()
   local search = require "paseo.pickers.search"
@@ -134,6 +198,35 @@ local function test_gather()
     asked = {}
     search.gather(live, function() end)
     eq("gather: the next open asks again only for what failed", asked, { "timeline.prompts:broken" })
+
+    -- Scoped: the daemon is told which project, and says whether it is one.
+    local sent
+    bridge.request = function(op, args, callback)
+      if op == "agents.history" then
+        sent = args
+        return callback(nil, { entries = {}, projectIds = args.projectRoots[1] == "/p" and { "p1" } or {} })
+      end
+      callback(nil, {})
+    end
+    local scope = {
+      all = false,
+      root = "/p",
+      workspaces = {},
+      hosts = { h = { projectIds = { "p1" }, projectRoots = { "/p" } } },
+    }
+    local known
+    search.gather({}, function(_, _, k)
+      known = k
+    end, scope)
+    eq("gather: a scoped search sends the project", { sent.projectIds, sent.projectRoots }, { { "p1" }, { "/p" } })
+    eq("gather: and knows it is one", known, true)
+    scope.root, scope.hosts.h.projectRoots = "/q", { "/q" }
+    scope.hosts.h.projectIds = {}
+    search.gather({}, function(_, _, k)
+      known = k
+    end, scope)
+    eq("gather: each project is kept apart", sent.projectRoots, { "/q" })
+    eq("gather: and a directory with no project says so", known, false)
   end)
 
   bridge.request, hosts.all = old_request, old_all
@@ -238,10 +331,16 @@ local function test_fallback()
       cb(nil)
     end
     agents.all = function()
-      return { { id = "a1", hostId = "h", title = "Live" } }
+      return {
+        { id = "a1", hostId = "h", title = "Live", workspaceId = "w1" },
+        { id = "a2", hostId = "h", title = "Elsewhere", workspaceId = "w2" },
+      }
     end
     workspaces.list_all = function(cb)
-      cb { { id = "w1", hostId = "h", title = "WS" } }
+      cb {
+        { id = "w1", hostId = "h", title = "WS", projectRoot = "/p" },
+        { id = "w2", hostId = "h", title = "Other", projectRoot = "/q" },
+      }
     end
     search.gather = function(_, done)
       done({ ["h:a1"] = { agent = { id = "a1", hostId = "h", title = "Live" }, prompts = { { seq = 1, preview = "hello" } } } }, {})
@@ -255,15 +354,51 @@ local function test_fallback()
         end,
       }
     end
-    search.open()
+    search.open { root = "/p" }
     truthy(
       "fallback: the chooser opens",
       vim.wait(1000, function()
         return got ~= nil and updated ~= nil
       end)
     )
-    eq("fallback: on what is live", #got.items, 2)
+    eq("fallback: on what is live in this project", #got.items, 2)
+    eq("fallback: titled for it", got.title, "Paseo search · p")
     eq("fallback: then every prompt too", #updated, 3)
+
+    got, updated = nil, nil
+    search.open { all = true }
+    vim.wait(1000, function()
+      return got ~= nil and updated ~= nil
+    end)
+    eq("fallback: `all` lists every project's", #got.items, 4)
+
+    -- Nowhere: nothing live and no past chats is a message, not a list.
+    got = nil
+    local said
+    local old_notify = vim.notify
+    vim.notify = function(msg)
+      said = msg
+    end
+    search.gather = function(_, done)
+      done({}, {}, false)
+    end
+    search.open { root = "/nowhere" }
+    vim.wait(1000, function()
+      return said ~= nil
+    end)
+    vim.notify = old_notify
+    eq("fallback: a directory with no project opens nothing", got, nil)
+    truthy("fallback: and says so", said and said:find("not in a Paseo project", 1, true))
+
+    -- A project whose workspaces are all archived still has its past chats.
+    search.gather = function(_, done)
+      done({}, { { id = "old", hostId = "h", title = "Old" } }, true)
+    end
+    search.open { root = "/gone" }
+    vim.wait(1000, function()
+      return got ~= nil
+    end)
+    eq("fallback: a project with only past chats lists them", got and #got.items, 1)
   end)
 
   search.has_telescope = old.has
@@ -290,6 +425,7 @@ end
 
 return {
   { "search rows", test_rows },
+  { "search scope", test_scope },
   { "search gather", test_gather },
   { "search preview", test_preview },
   { "search pick", test_pick },

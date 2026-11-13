@@ -148,6 +148,10 @@ end
 ---belongs when its directory is in `root`'s workspaces directory. Only there:
 ---`~/Code/openfin/clm-platform` is a project of its own on the same evidence,
 ---and it is inside `~/Code/openfin` too.
+---
+---`root` is a LOCAL path. A remote host's project root is the daemon's path,
+---so it is mapped back through the host's `paths` first; one with no mapping
+---is compared as it came, which is right when both sides share a layout.
 ---@param list paseo.PaseoWorkspace[]
 ---@param root string
 ---@return paseo.PaseoWorkspace[]
@@ -156,7 +160,11 @@ function M.scope(list, root)
   local out = {}
   for _, ws in ipairs(list) do
     local dir = normalise(ws.local_directory or ws.directory)
-    local project = normalise(ws.projectRoot)
+    local project_root = ws.projectRoot
+    if project_root and ws.hostId and not (hosts.get(ws.hostId) or { local_host = true }).local_host then
+      project_root = hosts.to_local(ws.hostId, project_root) or project_root
+    end
+    local project = normalise(project_root)
     local assembled = vim.startswith(dir, vim.fs.joinpath(root, require("paseo.config").get().workspaces.dir) .. "/")
     if project == root or (assembled and (project == "" or project == dir)) then
       out[#out + 1] = ws

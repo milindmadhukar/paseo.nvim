@@ -245,9 +245,12 @@ commands.agents = {
 }
 
 commands.search = {
-  desc = "Search every workspace, agent, prompt you sent, and past chat",
-  run = function()
-    M.search()
+  desc = "Search this project's workspaces, agents, prompts and past chats (`all`: every project's)",
+  run = function(args)
+    M.search { all = args[1] == "all" }
+  end,
+  complete = function()
+    return { "all" }
   end,
 }
 
@@ -381,10 +384,12 @@ function M.agents()
   require("paseo.pickers.sessions").here()
 end
 
----Search everything in one picker -- workspaces, agents, every prompt you
----sent, and archived chats -- with a preview of each. See |:Paseo-search|.
-function M.search()
-  require("paseo.pickers.search").open()
+---Search this project in one picker -- its workspaces, agents, every prompt
+---you sent them, and its archived chats -- with a preview of each. `all`:
+---every project's. See |:Paseo-search|.
+---@param opts? { all?: boolean }
+function M.search(opts)
+  require("paseo.pickers.search").open(opts)
 end
 
 ---Start something from wherever you are: a new session, Local or in a new

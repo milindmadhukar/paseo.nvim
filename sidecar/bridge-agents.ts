@@ -7,7 +7,11 @@ import {
 } from "./bridge-io.ts";
 import { BridgeConnection } from "./bridge-connection.ts";
 import { pictures, withFallbackActions } from "./bridge-normalize.ts";
-import { describeWorkspace, workspaceFor } from "./bridge-workspaces.ts";
+import {
+  canonical,
+  describeWorkspace,
+  workspaceFor,
+} from "./bridge-workspaces.ts";
 import { describeSettings } from "./bridge-providers.ts";
 
 export function matchesReviewAgent(
@@ -113,10 +117,16 @@ export function describeAgent(agent: any): Record<string, unknown> {
  * shape plus what the row matches on -- the branch, workspace and project names
  * a live agent gets from its workspace, which an archived one may not have.
  */
-export function describeHistory(entries: any[]): Record<string, unknown>[] {
+export function describeHistory(
+  entries: any[],
+  projects?: Set<string> | null,
+): Record<string, unknown>[] {
   const out: Record<string, unknown>[] = [];
   for (const { agent, project } of entries) {
     if (!agent?.archivedAt || agent.internal) continue;
+    // Asked for one project: what the daemon was asked to filter on, checked
+    // again here for a daemon too old to know the filter and send everything.
+    if (projects && !projects.has(project?.projectKey)) continue;
     const checkout = project?.checkout ?? {};
     out.push({
       ...describeAgent(agent),
@@ -125,9 +135,46 @@ export function describeHistory(entries: any[]): Record<string, unknown>[] {
       branch: checkout.currentBranch ?? null,
       workspaceName: project?.workspaceName ?? null,
       projectName: project?.projectName ?? null,
+      projectKey: project?.projectKey ?? null,
     });
   }
   return out;
+}
+
+/**
+ * The project records a search scoped to one project means, by id: the ones
+ * the Lua side already knows from the workspaces it scoped, plus every project
+ * rooted at one of `roots`, which covers a project with no live workspace
+ * left (`emptyProjects`) -- its archived chats are still its own.
+ *
+ * Null when the request is not scoped at all. An empty list when it is and
+ * nothing here is a Paseo project.
+ *
+ * An archived agent's placement carries its project's id as `projectKey`;
+ * that is what the daemon's history filter matches on.
+ */
+export async function projectKeysFor(
+  ctx: BridgeConnection,
+  req: Request,
+): Promise<string[] | null> {
+  const ids = Array.isArray(req.projectIds) ? req.projectIds : null;
+  const roots = Array.isArray(req.projectRoots) ? req.projectRoots : null;
+  if (!ids && !roots) return null;
+  const keys = new Set<string>();
+  for (const id of ids ?? []) if (id) keys.add(String(id));
+  if (roots && roots.length > 0) {
+    const wanted = new Set(roots.map((root: unknown) => canonical(String(root))));
+    try {
+      const page: any = await ctx.raw().fetchWorkspaces({ page: { limit: 200 } });
+      for (const p of [...(page?.entries ?? []), ...(page?.emptyProjects ?? [])]) {
+        if (p?.projectId && p.projectRootPath && wanted.has(canonical(p.projectRootPath)))
+          keys.add(String(p.projectId));
+      }
+    } catch {
+      // The ids alone, then.
+    }
+  }
+  return [...keys];
 }
 
 /**
@@ -281,13 +328,22 @@ export function agentOps(ctx: BridgeConnection): Ops {
     //
     // Never fatal. A host too old for history, or one that refuses, leaves the
     // search with its live rows rather than with an error over all of them.
+    //
+    // `projectIds` and `projectRoots` scope it to one project, at the DAEMON:
+    // 200 of this project's chats, not this project's share of everyone's 200.
+    // `projectIds` comes back with what that resolved to, so the Lua side can
+    // tell "no chats here yet" from "this is not a Paseo project".
     async "agents.history"(req) {
       try {
+        const keys = await projectKeysFor(ctx, req);
+        if (keys && keys.length === 0) return { entries: [], projectIds: [] };
         const page: any = await ctx.raw().fetchAgentHistory({
+          ...(keys ? { filter: { projectKeys: keys } } : {}),
           sort: [{ key: "updated_at", direction: "desc" }],
           page: { limit: Math.min(Number(req.limit ?? 200), 200) },
         } as any);
-        return { entries: describeHistory(page?.entries ?? []) };
+        const entries = describeHistory(page?.entries ?? [], keys ? new Set(keys) : null);
+        return keys ? { entries, projectIds: keys } : { entries };
       } catch {
         return { entries: [] };
       }

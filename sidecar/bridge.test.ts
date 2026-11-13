@@ -1304,6 +1304,56 @@ test("history asks newest first and never fails the search", async () => {
   );
 });
 
+test("history scoped to a project is filtered by the daemon on its ids", async () => {
+  let asked: any = null;
+  const ctx = new BridgeConnection();
+  (ctx as any).daemon = {
+    async fetchWorkspaces() {
+      return {
+        entries: [
+          { projectId: "p1", projectRootPath: "/x/app/" },
+          { projectId: "p9", projectRootPath: "/x/other" },
+        ],
+        // A project whose workspaces are all archived is still this one.
+        emptyProjects: [{ projectId: "p2", projectRootPath: "/x/app" }],
+      };
+    },
+    async fetchAgentHistory(options: any) {
+      asked = options;
+      return {
+        entries: [
+          { agent: { id: "mine", archivedAt: "1" }, project: { projectKey: "p1" } },
+          // A daemon too old for the filter sends everyone's; dropped here.
+          { agent: { id: "theirs", archivedAt: "1" }, project: { projectKey: "p9" } },
+        ],
+      };
+    },
+  };
+  const ops = agentOps(ctx);
+  const result: any = await ops["agents.history"]({
+    op: "agents.history",
+    projectIds: ["p0"],
+    projectRoots: ["/x/app"],
+  });
+  assert.deepEqual(asked.filter.projectKeys.sort(), ["p0", "p1", "p2"]);
+  assert.deepEqual(result.projectIds.sort(), ["p0", "p1", "p2"]);
+  assert.deepEqual(result.entries.map((e: any) => e.id), ["mine"]);
+  assert.equal(result.entries[0].projectKey, "p1");
+
+  // Not a project at all: no history asked for, and it says so.
+  asked = null;
+  (ctx as any).daemon.fetchWorkspaces = async () => ({ entries: [], emptyProjects: [] });
+  assert.deepEqual(
+    await ops["agents.history"]({ op: "agents.history", projectIds: [], projectRoots: ["/x/none"] }),
+    { entries: [], projectIds: [] },
+  );
+  assert.equal(asked, null);
+
+  // Unscoped: no filter, as before.
+  await ops["agents.history"]({ op: "agents.history" });
+  assert.equal((asked as any).filter, undefined);
+});
+
 test("prompt index is capability-gated without throwing", async () => {
   let asked: string | null = null;
   const ctx = new BridgeConnection();

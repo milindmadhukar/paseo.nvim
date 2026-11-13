@@ -128,10 +128,12 @@ readers and the microphone.
                         directory, in a chooser (|paseo-agents-keys|).
 
                                                              *:Paseo-search*
-:Paseo search           Search every workspace, live agent, prompt you
-                        sent, and archived chat in one picker, with a
-                        preview of the chat (|paseo-search|). No default
-                        key: map it globally (`<Plug>(paseo-search)`).
+:Paseo search [all]     Search this project's workspaces, live agents,
+                        the prompts you sent them, and its archived chats
+                        in one picker, with a preview of the chat
+                        (|paseo-search|). `all`: every project's. No
+                        default key: map it globally
+                        (`<Plug>(paseo-search)`).
 
                                                            *:Paseo-settings*
 :Paseo settings [group] The chat agent's settings card: permission mode,
@@ -608,16 +610,32 @@ addition: it also searches what you said. It has no default key (`<C-k>` is
 window-up in most configs), so give it a global one: >lua
     vim.keymap.set("n", "<leader>ps", "<cmd>Paseo search<cr>")
 <
+It searches THIS PROJECT: the one the rail and |:Paseo-workspaces| list.
+That is the repository the cwd is in, counted from its main checkout, so
+every worktree Paseo cut from it belongs; or, inside a manifested multi-repo
+project or one of its assembled workspaces, that project
+(|paseo-workspaces-multi|). On a remote host the same project is found
+through the host's `paths` (|paseo-config.paseo.hosts|). `:Paseo search
+all` searches every project on every host. In a directory that is no Paseo
+project it says so and opens nothing.
+
 It shows one list of:
 
-    agent       every live agent, the ones waiting on you first; matched
-                on its title, workspace, branch and provider
-    ws          every workspace; matched on its title, project and branch
-    prompt      every message you have sent in a live chat, newest first,
-                from the daemon's prompt index; matched on the message
-                and the chat's title
-    archived    up to 200 archived chats, most recent first; matched on
-                the title, workspace, branch and project
+    agent       this project's live agents, the ones waiting on you
+                first; matched on its title, workspace, branch and
+                provider
+    ws          this project's workspaces; matched on its title, project
+                and branch
+    prompt      every message you have sent in one of those live chats,
+                newest first, from the daemon's prompt index; matched on
+                the message and the chat's title
+    archived    up to 200 of this project's archived chats, most recent
+                first, filtered by the daemon; matched on the title,
+                workspace, branch and project
+
+An agent is this project's when its workspace is. A past chat is this
+project's when the daemon placed it in one of the project's records, which
+includes the workspaces since archived.
 
 A prompt is matched by what you typed into it. The agent's replies are not
 searched. An empty query lists the kinds in the order above, and typing

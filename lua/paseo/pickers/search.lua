@@ -6,6 +6,14 @@
 --- each chat's PROMPT INDEX, every message you sent it, so a chat is found by
 --- what you asked as well as by what it came to be called.
 ---
+--- THIS PROJECT ONLY, unless asked for all (`:Paseo search all`): the project
+--- is the one |paseo.workspaces|.here says the cwd is in -- the main checkout,
+--- so every worktree Paseo cut from it counts, or the manifested multi-repo
+--- project around an assembled workspace -- and its workspaces are the ones
+--- |paseo.workspaces|.scope gives the rail and `:Paseo workspaces`. Agents and
+--- their prompts follow their workspace; past chats are filtered by the daemon
+--- itself, on the project's ids.
+---
 --- One list, not sections: you type, the sorter ranks, and a prompt row sits
 --- beside the agent it belongs to. Telescope when it is installed, for its
 --- sorter and its preview window; |paseo.ui.choose| when it is not, which has
@@ -248,24 +256,119 @@ function M.rows(data)
   return rows
 end
 
+-- ------------------------------------------------------------------- scope
+
+---@param path string|nil
+---@return string
+local function normal(path)
+  if not path or path == "" then
+    return ""
+  end
+  return (vim.fn.resolve(vim.fn.fnamemodify(path, ":p")):gsub("/+$", ""))
+end
+
+---@param path string
+---@param dir string
+---@return boolean
+local function inside(path, dir)
+  return dir ~= "" and (path == dir or vim.startswith(path, dir .. "/"))
+end
+
+---@class paseo.SearchScope
+---@field all boolean
+---@field root string|nil       The project, as a local directory.
+---@field label string
+---@field workspaces table[]    This project's workspaces.
+---@field contains fun(agent: table): boolean
+---@field hosts table<string, { projectIds: string[], projectRoots: string[] }>|nil
+
+---What one search covers: the project at `root`, or every project.
+---
+---A live agent is this project's when its workspace is; one the daemon has
+---placed in no workspace, when its directory is in the project or in one of
+---its workspaces. Per host, the project's ids and its root in the HOST's
+---spelling go to the daemon, which filters history on them.
+---@param list table[]  Every host's workspaces.
+---@param opts? { all?: boolean, root?: string }
+---@return paseo.SearchScope
+function M.scope(list, opts)
+  opts = opts or {}
+  if opts.all then
+    return {
+      all = true,
+      label = "all projects",
+      workspaces = list,
+      contains = function()
+        return true
+      end,
+    }
+  end
+  local hosts = require "paseo.hosts"
+  local workspaces = require "paseo.workspaces"
+  local root = normal(opts.root or workspaces.here())
+  local scoped = workspaces.scope(list, root)
+
+  local ids, dirs, per_host = {}, { root }, {}
+  for _, host in ipairs(hosts.all()) do
+    local remote_root = not host.local_host and hosts.to_remote(host.id, root) or nil
+    per_host[host.id] = { projectIds = {}, projectRoots = { remote_root or root } }
+  end
+  for _, ws in ipairs(scoped) do
+    if ws.id then
+      ids[(ws.hostId or "") .. "\0" .. ws.id] = true
+    end
+    dirs[#dirs + 1] = normal(ws.local_directory or ws.directory)
+    local entry = ws.hostId and per_host[ws.hostId]
+    if entry and ws.projectId and not vim.tbl_contains(entry.projectIds, ws.projectId) then
+      entry.projectIds[#entry.projectIds + 1] = ws.projectId
+    end
+  end
+
+  return {
+    all = false,
+    root = root,
+    label = vim.fs.basename(root),
+    workspaces = scoped,
+    hosts = per_host,
+    contains = function(agent)
+      if agent.workspaceId and agent.workspaceId ~= vim.NIL then
+        return ids[(agent.hostId or "") .. "\0" .. agent.workspaceId] == true
+      end
+      local cwd = agent.cwd and normal(hosts.to_local(agent.hostId, agent.cwd) or agent.cwd) or ""
+      for _, dir in ipairs(dirs) do
+        if inside(cwd, dir) then
+          return true
+        end
+      end
+      return false
+    end,
+  }
+end
+
 -- ------------------------------------------------------------------ gather
 
 ---Every live agent's prompt list and every host's archived agents, each from
 ---the store when it is fresh enough. `done` is called ONCE, when all of them
 ---have answered -- or failed, which counts as answering with nothing.
+---
+---With a `scope`, the archived agents are that project's, filtered by the
+---daemon, and `known` says whether any host has a project there at all.
 ---@param live table[]
----@param done fun(prompts: table<string, table>, archived: table[])
-function M.gather(live, done)
+---@param done fun(prompts: table<string, table>, archived: table[], known: boolean)
+---@param scope? paseo.SearchScope
+function M.gather(live, done, scope)
   local bridge = require "paseo.bridge"
   local store = require "paseo.store"
   local hosts = require "paseo.hosts"
+  scope = scope and not scope.all and scope or nil
 
   local prompts, archived = {}, {}
+  local known = scope == nil or #scope.workspaces > 0
   local left = 1
   local function settle()
     left = left - 1
     if left == 0 then
-      done(prompts, archived)
+      done(prompts, archived, known)
     end
   end
 
@@ -289,11 +392,21 @@ function M.gather(live, done)
 
   for _, host in ipairs(hosts.all()) do
     left = left + 1
-    store.get("search.archived:" .. host.id, M.TTL, function(finish)
-      bridge.request("agents.history", { limit = 200 }, function(err, result)
+    local req = { limit = 200 }
+    local key = "search.archived:" .. host.id
+    if scope then
+      local where = scope.hosts and scope.hosts[host.id] or { projectIds = {}, projectRoots = { scope.root } }
+      req.projectIds, req.projectRoots = where.projectIds, where.projectRoots
+      key = key .. ":" .. scope.root
+    end
+    store.get(key, M.TTL, function(finish)
+      bridge.request("agents.history", req, function(err, result)
         finish(not err and result or nil, err, not err)
       end, host.id)
     end, function(result)
+      if result and type(result.projectIds) == "table" and #result.projectIds > 0 then
+        known = true
+      end
       for _, agent in ipairs(result and result.entries or {}) do
         agent.hostId = agent.hostId or host.id
         archived[#archived + 1] = agent
@@ -305,15 +418,22 @@ function M.gather(live, done)
   settle()
 end
 
+---The live agents a scope covers, as they are now.
+---@param scope paseo.SearchScope
+---@return table[]
+local function live_agents(scope)
+  return vim.tbl_filter(scope.contains, require("paseo.agents").all "*")
+end
+
 ---What there is to search right now, without waiting for anything.
----@param workspaces table[]
+---@param scope paseo.SearchScope
 ---@param extra? { prompts?: table, archived?: table[] }
 ---@return paseo.SearchRow[]
-local function snapshot(workspaces, extra)
+local function snapshot(scope, extra)
   extra = extra or {}
   return M.rows {
-    agents = require("paseo.agents").all "*",
-    workspaces = workspaces,
+    agents = live_agents(scope),
+    workspaces = scope.workspaces,
     prompts = extra.prompts,
     archived = extra.archived,
   }
@@ -488,8 +608,9 @@ local function title_width(rows)
   return math.min(widest, math.floor(vim.o.columns * 0.35))
 end
 
----@param workspaces table[]
-local function telescope(workspaces)
+---@param scope paseo.SearchScope
+---@param extra? { prompts?: table, archived?: table[] }
+local function telescope(scope, extra)
   local pickers = require "telescope.pickers"
   local finders = require "telescope.finders"
   local conf = require("telescope.config").values
@@ -498,7 +619,7 @@ local function telescope(workspaces)
   local previewers = require "telescope.previewers"
   local entry_display = require "telescope.pickers.entry_display"
 
-  local rows = snapshot(workspaces)
+  local rows = snapshot(scope, extra)
   local displayer = entry_display.create {
     separator = " ",
     items = { { width = 8 }, { width = 1 }, { width = title_width(rows) }, { remaining = true } },
@@ -551,7 +672,7 @@ local function telescope(workspaces)
   }
 
   local picker = pickers.new({}, {
-    prompt_title = "Paseo search",
+    prompt_title = "Paseo search · " .. scope.label,
     results_title = "workspaces · agents · prompts · past chats",
     finder = finder(rows),
     sorter = conf.generic_sorter {},
@@ -570,24 +691,28 @@ local function telescope(workspaces)
     end,
   })
   picker:find()
+  if extra then
+    return
+  end
 
-  M.gather(require("paseo.agents").all "*", function(prompts, archived)
+  M.gather(live_agents(scope), function(prompts, archived)
     vim.schedule(function()
       -- Still open? `<Esc>` before the last answer leaves nothing to refresh.
       if not (picker.prompt_bufnr and api.nvim_buf_is_valid(picker.prompt_bufnr)) then
         return
       end
-      picker:refresh(finder(snapshot(workspaces, { prompts = prompts, archived = archived })), {
+      picker:refresh(finder(snapshot(scope, { prompts = prompts, archived = archived })), {
         reset_prompt = false,
       })
     end)
-  end)
+  end, scope)
 end
 
 ---Without telescope: the plugin's own chooser. No sorter and no preview, but
 ---every row, and `/` searches them.
----@param workspaces table[]
-local function fallback(workspaces)
+---@param scope paseo.SearchScope
+---@param extra? { prompts?: table, archived?: table[] }
+local function fallback(scope, extra)
   local choose = require "paseo.ui.choose"
   local function items(rows)
     local out = {}
@@ -606,21 +731,24 @@ local function fallback(workspaces)
     return out
   end
   local handle = choose.open {
-    title = "Paseo search",
+    title = "Paseo search · " .. scope.label,
     prompt = "install telescope.nvim to fuzzy-match these, with a preview",
-    items = items(snapshot(workspaces)),
+    items = items(snapshot(scope, extra)),
     numbers = false,
     on_pick = function(item)
       M.pick(item.value)
     end,
   }
-  M.gather(require("paseo.agents").all "*", function(prompts, archived)
+  if extra then
+    return
+  end
+  M.gather(live_agents(scope), function(prompts, archived)
     vim.schedule(function()
       if handle and not handle.closed then
-        handle.update(items(snapshot(workspaces, { prompts = prompts, archived = archived })))
+        handle.update(items(snapshot(scope, { prompts = prompts, archived = archived })))
       end
     end)
-  end)
+  end, scope)
 end
 
 ---Is telescope there to use?
@@ -629,8 +757,24 @@ function M.has_telescope()
   return (pcall(require, "telescope.pickers"))
 end
 
----`:Paseo search`: open it.
-function M.open()
+---@param scope paseo.SearchScope
+---@param extra? { prompts?: table, archived?: table[] }
+local function show(scope, extra)
+  if M.has_telescope() then
+    telescope(scope, extra)
+  else
+    fallback(scope, extra)
+  end
+end
+
+---`:Paseo search`: open it, on this project (`all`: on every project).
+---
+---With nothing live here, the history decides: this project's past chats
+---alone are worth a list, and with none of those either it says so rather
+---than opening on nothing -- or on everything.
+---@param opts? { all?: boolean, root?: string }
+function M.open(opts)
+  opts = opts or {}
   if api.nvim_get_mode().mode ~= "n" then
     pcall(vim.cmd.stopinsert)
   end
@@ -638,11 +782,20 @@ function M.open()
   agents.watch_all(function()
     require("paseo.workspaces").list_all(function(list)
       vim.schedule(function()
-        if M.has_telescope() then
-          telescope(list or {})
-        else
-          fallback(list or {})
+        local scope = M.scope(list or {}, opts)
+        if scope.all or #scope.workspaces > 0 or #live_agents(scope) > 0 then
+          return show(scope)
         end
+        M.gather({}, function(prompts, archived, known)
+          vim.schedule(function()
+            if #archived > 0 then
+              return show(scope, { prompts = prompts, archived = archived })
+            end
+            local why = known and ("nothing to search in %s yet"):format(scope.label)
+              or ("%s is not in a Paseo project"):format(vim.fn.fnamemodify(scope.root, ":~"))
+            vim.notify("paseo: " .. why .. " — `:Paseo search all` searches every project", vim.log.levels.INFO)
+          end)
+        end, scope)
       end)
     end)
   end)

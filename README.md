@@ -79,7 +79,7 @@ vim.keymap.set("n", "<leader>as", "<cmd>Paseo settings<cr>")        -- mode, mod
 | `:Paseo explain [kind]` | Explain code with the bundled review rubric, sent at once |
 | `:Paseo workspaces [all]` | This project's workspaces (`all`: every project's) |
 | `:Paseo agents` | The agents in this workspace |
-| `:Paseo search` | Search every workspace, agent, prompt you sent, and past chat (no default key: map it globally) |
+| `:Paseo search [all]` | Search this project's workspaces, agents, prompts you sent, and past chats; `all`: every project's (no default key: map it globally) |
 | `:Paseo settings [mode\|thinking\|model\|features]` | The chat agent's settings; `mode`, `thinking` and `model` open straight in your picker, on a new-session draft too |
 | `:Paseo stop` | Interrupt the agent's turn |
 | `:Paseo ws init\|edit\|create\|rm\|ls\|status` | Multi-repo workspaces |
@@ -154,9 +154,14 @@ most configs, so map it globally:
 vim.keymap.set("n", "<leader>ps", "<cmd>Paseo search<cr>")
 ```
 
-It opens one telescope list of every workspace, every live agent, every prompt you have
-sent in any chat, and your archived chats, so you can type at all of them at
-once. The preview shows the chat. `<CR>` on a prompt opens its chat with that
+It opens one telescope list of this project's workspaces, its live agents,
+every prompt you have sent them, and its archived chats, so you can type at
+all of them at once. "This project" is the one the rail and `:Paseo
+workspaces` list: the repository you are in, with every worktree Paseo cut
+from it, or the multi-repo project around an assembled workspace, and the same
+project on a remote host through its `paths`. `:Paseo search all` searches
+every project. In a directory that is no Paseo project it says so instead of
+opening. The preview shows the chat. `<CR>` on a prompt opens its chat with that
 message at the top, loading older history if it has to. Without telescope it
 opens in Paseo's own chooser, which has no preview.
 
