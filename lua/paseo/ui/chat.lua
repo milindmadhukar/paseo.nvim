@@ -1435,9 +1435,70 @@ local function release(chat)
   end
 end
 
+---How far back a chat opened AT a message will page before giving up and
+---showing what it has: sixty items a page, so six hundred items of
+---conversation -- far past anything a prompt list makes worth reaching for.
+M.HISTORY_PAGES = 10
+
+---The conversation's last page -- or, with `at`, every page back to the one
+---holding timeline seq `at`, stitched oldest first into one result.
+---
+---Pages, not one bigger request, because how many items lie between the end
+---and that message is not knowable from here: a fixed large limit is either
+---too small or a whole long conversation fetched to show its last screen.
+---@param chat paseo.Chat
+---@param at integer|nil
+---@param done fun(err: string|nil, result: table|nil, loaded: boolean)
+function M.fetch_history(chat, at, done)
+  local pages = {}
+  local function stitched()
+    local newest = pages[#pages]
+    local items = {}
+    for _, page in ipairs(pages) do
+      for _, item in ipairs(page.items or {}) do
+        items[#items + 1] = item
+      end
+    end
+    local result = vim.tbl_extend("force", {}, newest, { items = items })
+    result.hasOlder = pages[1].hasOlder
+    result.startCursor = pages[1].startCursor
+    return result
+  end
+  local function step(cursor, n)
+    local req = { agentId = chat.agent_id, limit = 60 }
+    if cursor then
+      req.direction, req.cursor = "before", cursor
+    end
+    bridge.request("timeline.history", req, function(err, result)
+      if err or not result then
+        if #pages == 0 then
+          return done(err or "no reply", nil, false)
+        end
+        -- An older page failed: show what arrived rather than nothing.
+        return done(nil, stitched(), false)
+      end
+      table.insert(pages, 1, result)
+      local first
+      for _, item in ipairs(result.items or {}) do
+        first = tonumber(item.seq)
+        if first then
+          break
+        end
+      end
+      local exhausted = not result.hasOlder or not result.startCursor
+      if not at or exhausted or (first and first <= at) or n + 1 >= M.HISTORY_PAGES then
+        return done(nil, stitched(), exhausted)
+      end
+      step(result.startCursor, n + 1)
+    end, chat.host_id)
+  end
+  step(nil, 0)
+end
+
 ---@param chat paseo.Chat
 local function load_history(chat)
-  bridge.request("timeline.history", { agentId = chat.agent_id, limit = 60 }, function(err, result)
+  local at = chat.at
+  M.fetch_history(chat, at, function(err, result, loaded)
     if err or not result then
       return vim.schedule(function()
         -- SAID, not swallowed. An agent whose provider cannot resume it --
@@ -1467,6 +1528,13 @@ local function load_history(chat)
       local last = chat.order and chat.blocks[chat.order[#chat.order]]
       if last and last.id and (last.item.kind == "text" or last.item.kind == "thinking") then
         chat.open = { id = last.id, kind = last.item.kind }
+      end
+
+      -- Opened AT a message, from the search: put it at the top of the window.
+      -- Only if nothing newer asked for another one in the meantime.
+      if at and chat.at == at then
+        chat.at = nil
+        transcript.reveal_seq(chat, at, { loaded = loaded })
       end
 
       -- Everything up to here is now on screen, so live events at or below this
@@ -1503,7 +1571,7 @@ local function load_history(chat)
       end
       release(chat)
     end)
-  end, chat.host_id)
+  end)
 end
 
 ---Everything a chat needs once its agent is known: a clean buffer, the live
@@ -1793,7 +1861,11 @@ M.here = here
 ---`working` is for a caller that has just handed the agent its first prompt:
 ---the turn is already running, and the `turn_started` saying so fired before
 ---this chat subscribed.
----@param opts? { root?: string, local_root?: string, host_id?: string, remote?: boolean, focus?: boolean, agent_id?: string, title?: string, create?: boolean, surface?: "float"|"sidebar"|"buffer"|"native", working?: boolean, on_draft?: fun(draft: paseo.Chat) }
+---
+---`at` is a timeline seq: the chat opens with that message at the top of the
+---window, paging back through older history to reach it. The search's prompt
+---rows are what pass it.
+---@param opts? { root?: string, local_root?: string, host_id?: string, remote?: boolean, focus?: boolean, agent_id?: string, title?: string, create?: boolean, surface?: "float"|"sidebar"|"buffer"|"native", working?: boolean, at?: integer, on_draft?: fun(draft: paseo.Chat) }
 ---@param callback? fun(chat: paseo.Chat|nil, err: string|nil)
 function M.open(opts, callback)
   opts = opts or {}
@@ -1870,10 +1942,20 @@ function M.open(opts, callback)
   -- history.
   if chat.agent_id and chat.initialised then
     M.load_settings(chat)
+    -- Already open, asked for one message in it: on screen if it is loaded,
+    -- and if it is older than that, the history again, back far enough. The
+    -- subscription stays; `hold` keeps live events below the history.
+    if opts.at and not transcript.reveal_seq(chat, opts.at) then
+      transcript.reset(chat)
+      chat.at = opts.at
+      chat.backlog = chat.backlog or {}
+      load_history(chat)
+    end
     return callback(chat, nil)
   end
 
   if chat.agent_id then
+    chat.at = opts.at or chat.at
     notice(chat, "loading…")
     if opts.working and not chat.streaming then
       assume(chat)

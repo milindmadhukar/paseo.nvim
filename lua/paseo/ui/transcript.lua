@@ -248,6 +248,60 @@ local function row_of(chat, block)
   return mark and mark[1]
 end
 
+M.row_of = row_of
+
+---Put the cursor on the message at timeline `seq`, at the top of the window,
+---and stop following: a chat opened onto something you searched for is a chat
+---you are reading, and the next chunk must not drag you back to the end.
+---
+---The message is the first block AT OR AFTER `seq` -- a prompt's index seq and
+---the seq its block carries need not be the same number, but nothing sits
+---between them.
+---`opts.loaded` says everything that could be fetched back to it has been, so
+---the first block counts even when its seq is past `seq`.
+---@param chat table
+---@param seq integer
+---@param opts? { loaded?: boolean }
+---@return boolean found  False when that message is older than what is loaded.
+function M.reveal_seq(chat, seq, opts)
+  local buf, win = chat.conversation, chat.win_conversation
+  if not (buf and api.nvim_buf_is_valid(buf)) then
+    return false
+  end
+  local target, first
+  for _, id in ipairs(chat.order or {}) do
+    local block = chat.blocks[id]
+    local at = block and block.item and tonumber(block.item.seq)
+    if at then
+      first = first or at
+      if at >= seq then
+        target = block
+        break
+      end
+    end
+  end
+  -- Nothing loaded reaches back to it: the caller fetches further back.
+  if not target or (first and first > seq and not (opts and opts.loaded)) then
+    return false
+  end
+  local row = row_of(chat, target)
+  if not row then
+    return false
+  end
+  chat.sticky = false
+  if win and api.nvim_win_is_valid(win) and api.nvim_win_get_buf(win) == buf then
+    pcall(api.nvim_win_set_cursor, win, { row + 1, 0 })
+    api.nvim_win_call(win, function()
+      vim.cmd "normal! zt"
+    end)
+    chat.view = api.nvim_win_call(win, vim.fn.winsaveview)
+  else
+    -- Off screen: where `restore` puts it back when it comes up.
+    chat.view = { lnum = row + 1, topline = row + 1, col = 0 }
+  end
+  return true
+end
+
 ---Whether an item draws open before anyone has touched it.
 ---
 ---A tool card that is collapsed by default shows `◐ Shell  ls -la` and hides

@@ -1755,7 +1755,11 @@ end
 
 ---A session from the rail. An agent is a chat, shown in the middle; a
 ---terminal takes the middle with its PTY.
----@param session { kind: string, id: string, hostId?: string }
+---
+---`at` opens an agent at one message (see |paseo.ui.chat|.open). `cwd` and
+---`title` stand in for an agent the live directory does not have -- an
+---archived one, from the search.
+---@param session { kind: string, id: string, hostId?: string, at?: integer, cwd?: string, title?: string }
 function M.show_session(session)
   local s = surface()
   local here_chat = s and s.chat
@@ -1763,12 +1767,13 @@ function M.show_session(session)
   if session.kind == "agent" then
     local agent = require("paseo.agents").get(session.id, host_id)
     return require("paseo.ui.chat").open {
-      root = (agent and agent.cwd) or (here_chat and here_chat.root),
+      root = (agent and agent.cwd) or session.cwd or (here_chat and here_chat.root),
       host_id = host_id,
       remote = true,
       agent_id = session.id,
-      title = agent and agent.title,
+      title = (agent and agent.title) or session.title,
       surface = "native",
+      at = session.at,
     }
   end
   if session.kind == "terminal" then

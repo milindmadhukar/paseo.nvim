@@ -737,6 +737,136 @@ local function test_chips()
   end
 end
 
+--- A chat opens AT a message, paging back through history to reach it.
+---
+--- A chat loads its last sixty items and nothing older, so a search result for
+--- an early prompt opened onto the end of the conversation with the prompt
+--- nowhere on screen.
+local function test_open_at()
+  local bridge = require "paseo.bridge"
+  local chat = require "paseo.ui.chat"
+  local config = require "paseo.config"
+
+  local old_ensure, old_request = bridge.ensure, bridge.request
+  local old_settings = chat.load_settings
+  local dir = vim.fn.tempname()
+  vim.fn.mkdir(dir, "p")
+
+  -- 160 messages in three pages: 101-160 (the tail), 41-100, 1-40.
+  local asked = {}
+  local function page(from, to, older)
+    local items = {}
+    for seq = from, to do
+      items[#items + 1] = { kind = seq % 2 == 1 and "user" or "text", text = "msg " .. seq, seq = seq }
+    end
+    return {
+      items = items,
+      hasOlder = older,
+      startCursor = { epoch = "e", seq = from },
+      endCursor = { epoch = "e", seq = to },
+    }
+  end
+  local function history(args)
+    asked[#asked + 1] = args.cursor and args.cursor.seq or "tail"
+    if not args.cursor then
+      return page(101, 160, true)
+    elseif args.cursor.seq == 101 then
+      return page(41, 100, true)
+    end
+    return page(1, 40, false)
+  end
+
+  local ok, err = pcall(function()
+    config.setup {}
+    chat.load_settings = function() end
+    bridge.ensure = function(callback)
+      callback(nil)
+    end
+    bridge.request = function(op, args, callback)
+      if op == "timeline.history" then
+        return callback(nil, history(args))
+      end
+      callback(nil, {})
+    end
+
+    local probe = { agent_id = "a1" }
+    local got, loaded
+    chat.fetch_history(probe, nil, function(_, result, all)
+      got, loaded = result, all
+    end)
+    eq("open at: no target fetches only the tail", asked, { "tail" })
+    eq("open at: the tail is sixty items", #got.items, 60)
+    eq("open at: and more is left", loaded, false)
+
+    asked = {}
+    chat.fetch_history(probe, 50, function(_, result, all)
+      got, loaded = result, all
+    end)
+    eq("open at: pages back until the page holding it", asked, { "tail", 101 })
+    eq("open at: stitched oldest first", { got.items[1].seq, got.items[#got.items].seq }, { 41, 160 })
+    eq("open at: the newest page's cursor survives", got.endCursor.seq, 160)
+
+    asked = {}
+    chat.fetch_history(probe, 3, function(_, _, all)
+      loaded = all
+    end)
+    eq("open at: stops at the start of the conversation", asked, { "tail", 101, 41 })
+    eq("open at: and says everything is loaded", loaded, true)
+
+    -- Opened for real: the cursor on message 51, at the top of the window.
+    asked = {}
+    local opened
+    chat.open({ root = dir, remote = true, agent_id = "at-agent", title = "At", at = 51 }, function(c)
+      opened = c
+    end)
+    local function cursor_text()
+      local c = opened
+      if not (c and c.win_conversation and vim.api.nvim_win_is_valid(c.win_conversation)) then
+        return ""
+      end
+      local row = vim.api.nvim_win_get_cursor(c.win_conversation)[1]
+      return table.concat(vim.api.nvim_buf_get_lines(c.conversation, row - 1, row + 2, false), "\n")
+    end
+    truthy(
+      "open at: the cursor lands on that message",
+      vim.wait(2000, function()
+        return cursor_text():find("msg 51", 1, true) ~= nil
+      end),
+      cursor_text()
+    )
+    eq("open at: and the chat stops following", opened.sticky, false)
+
+    -- Open again at an even older one: the history is fetched again, deeper.
+    asked = {}
+    chat.open({ root = dir, remote = true, agent_id = "at-agent", at = 7 })
+    truthy(
+      "open at: an already open chat reaches further back",
+      vim.wait(2000, function()
+        return cursor_text():find("msg 7", 1, true) ~= nil
+      end),
+      cursor_text()
+    )
+    eq("open at: through every page", asked, { "tail", 101, 41 })
+
+    -- And one already loaded is just a jump: nothing fetched.
+    asked = {}
+    chat.open({ root = dir, remote = true, agent_id = "at-agent", at = 121 })
+    truthy("open at: a loaded message is a jump", cursor_text():find("msg 121", 1, true) ~= nil, cursor_text())
+    eq("open at: with nothing fetched", asked, {})
+
+    chat.close()
+  end)
+
+  bridge.ensure, bridge.request = old_ensure, old_request
+  chat.load_settings = old_settings
+  config.setup {}
+  go_home()
+  vim.fn.delete(dir, "rf")
+  if not ok then
+    error(err)
+  end
+end
+
 return {
   { "chat follows", test_chat_follow },
   { "surface memory", test_surface_memory },
@@ -744,4 +874,5 @@ return {
   { "stop", test_stop },
   { "pending", test_pending },
   { "chips", test_chips },
+  { "open at a message", test_open_at },
 }
