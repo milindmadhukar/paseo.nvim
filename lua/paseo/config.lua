@@ -411,8 +411,8 @@ local defaults = {
         -- workspace's sessions, rather than plain indentation. Off, as
         -- nvim-tree has it.
         indent_markers = false,
-        -- The `a agent  w workspace  g? keys` line under the last row.
-        hints = true,
+        -- OLD NAME for `ui.native.hints.rail`, read only when that is not
+        -- set. No default: the hints are off unless you ask for them.
         -- Cells, on the old float. The native surface's rail is as wide as
         -- `native.rail` says.
         width = 32,
@@ -474,6 +474,11 @@ local defaults = {
         -- Start something: the new-task screen.
         new = "<C-n>",
       },
+      -- KEY HINTS, off unless you ask: `winbar` is the `code  panel  rail
+      -- close` at the right of the conversation's winbar, `rail` the `a new
+      -- w worktree  g? keys` line under the rail's last row. `true` or `false`
+      -- sets both. `g?` in the rail lists its keys either way.
+      hints = { winbar = false, rail = false },
     },
 
     sidebar = {
@@ -621,6 +626,19 @@ function M.setup(opts)
     config.ui.native.keys.new = legacy_new
   end
 
+  -- `hints = true` is both of them; the rail's old home is read when the new
+  -- one does not say.
+  local hints = (ui_opts.native or {}).hints
+  if type(hints) == "boolean" then
+    config.ui.native.hints = { winbar = hints, rail = hints }
+  elseif type(config.ui.native.hints) ~= "table" then
+    config.ui.native.hints = vim.deepcopy(defaults.ui.native.hints)
+  end
+  local legacy_hints = ((ui_opts.float or {}).rail or {}).hints
+  if legacy_hints ~= nil and not (type(hints) == "table" and hints.rail ~= nil) and type(hints) ~= "boolean" then
+    config.ui.native.hints.rail = legacy_hints
+  end
+
   vim.validate("paseo.hosts", config.paseo.hosts, function(v)
     return v == nil or type(v) == "table"
   end, "a table keyed by host alias")
@@ -680,6 +698,8 @@ function M.setup(opts)
   vim.validate("ui.native.markdown", config.ui.native.markdown, "boolean")
   vim.validate("ui.native.rail", config.ui.native.rail, "number")
   vim.validate("ui.native.panel", config.ui.native.panel, "number")
+  vim.validate("ui.native.hints.winbar", config.ui.native.hints.winbar, "boolean")
+  vim.validate("ui.native.hints.rail", config.ui.native.hints.rail, "boolean")
   vim.validate("ui.buffer.open", config.ui.buffer.open, function(v)
     return v == "here" or v == "tab"
   end, '"here" or "tab"')

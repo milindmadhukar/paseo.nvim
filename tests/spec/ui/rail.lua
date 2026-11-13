@@ -712,6 +712,21 @@ local function test_tree()
       return l:find("#9", 1, true) ~= nil
     end, below) == 1, vim.inspect(below))
 
+    -- KEY HINTS ARE OPT-IN: no `a new  w worktree` line unless asked for.
+    local function hint_line()
+      for _, l in ipairs(rail.build(32).below[#rail.build(32).lines] or {}) do
+        if text_of(l):find("worktree", 1, true) then
+          return true
+        end
+      end
+      return false
+    end
+    local cfg = require("paseo.config").get().ui.native
+    eq("tree: no key hints under the rail by default", hint_line(), false)
+    cfg.hints.rail = true
+    eq("tree: and the line is there when asked for", hint_line(), true)
+    cfg.hints.rail = false
+
     -- A FINISHED AGENT'S SUBAGENTS ARE FOLDED, with how many on its row.
     truthy(
       "tree: folded, its subagents are not drawn",

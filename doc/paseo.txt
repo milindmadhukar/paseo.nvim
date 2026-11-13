@@ -369,14 +369,25 @@ ui.native                                                           table
           panel = 56,        -- the Settings/Changes/Usage split, in cells
           composer = 10,     -- the MOST rows the composer may grow to
           composer_min = 3,  -- ...and the fewest it rests at
+          hints = { winbar = false, rail = false },
         }
 <
+                                                *paseo-config.ui.native.hints*
+    `hints` are the KEY HINTS, OFF unless you ask for them: `winbar` is the
+    `code  panel  rail  close` at the right of the conversation's winbar,
+    `rail` the `a new  w worktree  g? keys` line under the rail's last row.
+    `hints = true` (or `false`) sets both. Either way `g?` in the rail lists
+    its keys, and every one of them is also a command and a function
+    (|paseo-native-api|). `ui.float.rail.hints` is the old name for `rail`,
+    read when `hints` does not set it.
+
                                                  *paseo-config.ui.native.keys*
     `keys` are the surface's own, bound in NORMAL mode on EVERY one of its
     buffers -- conversation, composer, rail and panel -- and only there:
     they are buffer-local, so a key that means something else in the rest of
     your editor keeps meaning it there. Each is a key, a LIST of keys, or
-    `false` to leave it unbound, and the winbar hints show what you chose.
+    `false` to leave it unbound, and the winbar hints, if you turned them on
+    (|paseo-config.ui.native.hints|), show what you chose.
 
       `rail`      the workspace rail, on or off             `<C-b>`
       `focus`     into the rail and back out                `<C-h>`
@@ -453,8 +464,7 @@ ui.float.rail                                                       table
 
     `indent_markers` draws nvim-tree's `│ └` down the left of a workspace's
     sessions instead of plain indentation. Default false, as nvim-tree.
-    `hints` is the `a agent  w workspace  g? keys` line under the last row.
-    Default true.
+    `hints` is the old name for |paseo-config.ui.native.hints| `rail`.
 
     Its keys are |paseo-config.ui.native.keys|.
 
@@ -1677,7 +1687,7 @@ ONE PASEO TAB, never one per agent: your code and Paseo, two tab pages, and
 the toggle moves between them so you never `gt`. Every pane is a REAL
 SPLIT: >
 
-    ┌ rail ┬ conversation  (winbar: agent · ⠹ 14s · keys) ┬ panel ┐
+    ┌ rail ┬ conversation  (winbar: agent · ⠹ 14s)        ┬ panel ┐
     │      ├ composer      (its bar: model, mode, spinner)  │       │
 <
     The conversation   MARKDOWN. With |paseo-config.ui.native| `markdown`
@@ -1914,8 +1924,6 @@ and an agent with subagents fold as nvim-tree's folders do. >
 
       ✗  upstream-0.16          +12 -0
          #120 merged
-
-      a agent  w workspace  g? keys
 <
 The workspace on screen is open and the rest closed until you open them. An
 agent's subagents are open while one of them runs and folded once they are
@@ -1927,7 +1935,7 @@ ever says where the cursor is. A workspace's agents are its own, by id, so two
 workspaces on one checkout do not mix them.
 
 EVERY REAL LINE IS A ROW. The pull request line, "no sessions yet" and the
-hints are virtual lines, so `j` `k`, counts, `gg` `G` and `/` are Vim's own
+key hints (|paseo-config.ui.native.hints|, off by default) are virtual lines, so `j` `k`, counts, `gg` `G` and `/` are Vim's own
 and never stop on decoration. The cursor sits on the name, as nvim-tree's
 `hijack_cursor` keeps it, and stays on its row when rows above it come and go.
 
@@ -2646,8 +2654,9 @@ the `:Paseo` commands, or these names, which exist for exactly that: >lua
   `<Plug>(paseo-new)`     start something (|paseo-new|)
   `<Plug>(paseo-rail)`    the rail, on or off (on the Paseo tab)
 
-A key you map to one of them is SHOWN where it matters: the full-screen
-winbar names your |:Paseo-native| key as the way back to your code.
+With |paseo-config.ui.native.hints| `winbar` on, a key you map to one of
+them is SHOWN where it matters: the full-screen winbar names your
+|:Paseo-native| key as the way back to your code.
 
 The surface's main keys are options (|paseo-config.ui.native.keys|). Every
 other built-in key -- the conversation's, the composer's, the rail's, the

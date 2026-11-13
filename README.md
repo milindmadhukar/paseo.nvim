@@ -451,7 +451,7 @@ split**. `<C-f>` goes here from the sidebar; `<C-c>` stops the turn, from the
 composer or the conversation, normal mode or insert.
 
 ```
-┌ rail ┬ conversation  (winbar: agent · ⠹ 14s · keys) ┬ panel ┐
+┌ rail ┬ conversation  (winbar: agent · ⠹ 14s)        ┬ panel ┐
 │      ├ composer      (its bar: model, mode, spinner)  │       │
 ```
 
@@ -631,14 +631,15 @@ while a check is pending.
   ✗  upstream-0.16          +12 -0
      #120 merged
   •  voice-mode-experiment
-
-  a agent  w workspace  g? keys
 ```
 
 The window itself is nvim-tree's: its background, cursor band and separator
 (`NvimTreeNormal`, `NvimTreeCursorLine`, `NvimTreeWinSeparator`) when your
 colourscheme defines them, and the status colours are its diagnostic ones.
-The groups are `PaseoTree*`, and `ui.theme` overrides any of them.
+It is one background top to bottom, and it always has a visible line on its
+edge: a separator your colourscheme paints in the background colour
+(catppuccin's) is replaced by the one the conversation draws against the
+panel. The groups are `PaseoTree*`, and `ui.theme` overrides any of them.
 
 The workspace on screen is open and the rest are closed until you open them;
 an agent's subagents are open while one of them runs, and folded once they
@@ -651,7 +652,7 @@ band only ever says where the cursor is. A workspace's agents are its own, by
 workspace id, so two workspaces on one checkout do not mix them.
 
 **Every real line is a row.** The pull request line, "no sessions yet" and
-the hints are virtual lines, so `j`/`k`, counts, `gg`/`G` and `/` are Vim's
+the key hints (if you turn them on) are virtual lines, so `j`/`k`, counts, `gg`/`G` and `/` are Vim's
 own and never stop on decoration. The cursor sits on the title, as nvim-tree's
 `hijack_cursor` keeps it, and stays on the row it was on when rows above it
 come and go.
@@ -684,7 +685,12 @@ lists them):
 
 It is 32 cells wide by default (`ui.native.rail`; `0` starts it hidden).
 `ui.float.rail.indent_markers = true` draws nvim-tree's `│ └` down the left
-of a workspace's sessions; `hints = false` drops the line of keys.
+of a workspace's sessions.
+
+**Key hints are off by default.** `ui.native.hints = { winbar = true, rail =
+true }` (or just `hints = true`) puts `code  panel  rail  close` on the
+conversation's winbar and `a new  w worktree  g? keys` under the rail. `g?`
+in the rail lists its keys either way.
 
 **Pinned workspaces lead it**, with a pin. `m` pins or unpins the one under the
 cursor. The pin is the daemon's, so it is the same pin the app's sidebar

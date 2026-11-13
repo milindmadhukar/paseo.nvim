@@ -566,7 +566,9 @@ local function test_keys()
 
   -- The rail's buffer is shared and built once: rebuild it with these keys.
   rail.reset()
-  config.setup { ui = { native = { keys = { rail = { "<C-b>", "<leader>e" }, panel = false } } } }
+  config.setup {
+    ui = { native = { keys = { rail = { "<C-b>", "<leader>e" }, panel = false }, hints = true } },
+  }
   local chat = new_chat "native-keys"
   native.open(chat)
   settle()
@@ -581,6 +583,39 @@ local function test_keys()
   truthy("keys: a key set to false is not bound", not bound(chat.composer, "<C-p>"))
   local bar = vim.wo[chat.win_conversation].winbar
   truthy("keys: and not advertised", not bar:find("panel", 1, true))
+  truthy("keys: a bound one is, with hints on", bar:find("rail", 1, true), bar)
+
+  native.close(chat)
+  native.reset()
+  config.setup(saved)
+  chat_mod.set_current(saved_current)
+end
+
+local function test_hints()
+  local native = require "paseo.ui.native"
+  local chat_mod = require "paseo.ui.chat"
+  local config = require "paseo.config"
+  local saved, saved_current = vim.deepcopy(config.get()), chat_mod.current()
+
+  -- The option's shapes: off by default, a boolean for both, the rail's old
+  -- home honoured only where the new one is silent.
+  config.setup {}
+  eq("hints: off by default", config.get().ui.native.hints, { winbar = false, rail = false })
+  config.setup { ui = { native = { hints = true } } }
+  eq("hints: true is both", config.get().ui.native.hints, { winbar = true, rail = true })
+  config.setup { ui = { float = { rail = { hints = true } } } }
+  eq("hints: the rail's old name still works", config.get().ui.native.hints.rail, true)
+  config.setup { ui = { float = { rail = { hints = true } }, native = { hints = { rail = false } } } }
+  eq("hints: but the new one wins", config.get().ui.native.hints.rail, false)
+
+  -- Off, the winbar is the agent and its status: no keys on the right.
+  config.setup {}
+  local chat = new_chat "native-hints"
+  native.open(chat)
+  settle()
+  local bar = vim.wo[chat.win_conversation].winbar
+  truthy("hints: the winbar names the agent", bar:find("native-hints", 1, true), bar)
+  truthy("hints: and advertises no keys", not bar:find("rail", 1, true), bar)
 
   native.close(chat)
   native.reset()
@@ -662,6 +697,7 @@ return {
   { "ui.native.layout", test_layout },
   { "ui.native.toggle", test_toggle },
   { "ui.native.keys", test_keys },
+  { "ui.native.hints", test_hints },
   { "ui.native.changes_async", test_changes_async },
   { "ui.native.workspaces", test_workspaces },
   { "ui.native.markdown", test_markdown },

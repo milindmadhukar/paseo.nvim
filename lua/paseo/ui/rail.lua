@@ -921,8 +921,9 @@ function M.build(width)
   end
 
   -- THE KEYS, where you are looking when you want them -- virtual, so no row
-  -- has to be skipped to get past them.
-  if M.options().hints ~= false then
+  -- has to be skipped to get past them. Only if you asked
+  -- (|paseo-config.ui.native| `hints.rail`): `g?` lists them regardless.
+  if require("paseo.config").get().ui.native.hints.rail then
     local last = #b.lines
     b.below[last] = b.below[last] or {}
     table.insert(b.below[last], { { "" } })

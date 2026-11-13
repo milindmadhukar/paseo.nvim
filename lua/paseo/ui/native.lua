@@ -958,7 +958,9 @@ function M.refresh(chat)
       { "  " .. require("paseo.ui.icons").status.waiting .. " waiting on you", "PaseoBadge" }
   end
 
-  local right = widgets.hints(hints(), nil, math.max(0, width - 30))
+  -- The keys on the right only if you asked (`hints.winbar`); otherwise the
+  -- title and status have the whole bar.
+  local right = config().hints.winbar and widgets.hints(hints(), nil, math.max(0, width - 30)) or {}
   pcall(function()
     vim.wo[win].winbar = render.to_winbar(
       widgets.row(render.truncate(left, math.max(4, width - render.width(right) - 2)), right, width)
