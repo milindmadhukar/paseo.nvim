@@ -582,7 +582,7 @@ end
 
 ---The session list, from wherever you are.
 ---
----`<C-s>`'s one meaning: the sessions, which are the rail. On a native tab
+---`<C-s>`'s one meaning: the sessions, which are the rail. On the Paseo tab
 ---that is the rail beside you; from the sidebar it is the native surface,
 ---opened for this chat, with the cursor in its rail.
 ---@param chat paseo.Chat
@@ -1063,8 +1063,8 @@ end
 
 ---Is this chat on screen, on any surface?
 ---
----A native tab answers for itself. The sidebar has no state object, so its
----answer is the conversation window itself.
+---The Paseo tab answers for the chat in its middle window. The sidebar has no
+---state object, so its answer is the conversation window itself.
 ---@param chat paseo.Chat
 ---@return boolean
 function M.showing(chat)
@@ -1091,8 +1091,8 @@ local function layout(chat, explicit, nopts)
   local surface = M._drawable(require("paseo.ui.surface").resolve(explicit))
   if surface == "native" then
     local native = require "paseo.ui.native"
-    -- `sidebar.close` closes the chat's windows WHEREVER they are, and on a
-    -- native tab they are the tab.
+    -- `sidebar.close` closes the chat's windows WHEREVER they are, and on the
+    -- Paseo tab they are its middle window and box.
     if not native.has(chat) then
       sidebar.close(chat)
     end
@@ -1792,7 +1792,7 @@ end
 ---  * `create = false`: an automatic re-point must never open a provider
 ---    picker. A workspace with no agent yet says so and waits.
 ---
----Focus follows the surface: a native tab is the whole screen, so you need to
+---Focus follows the surface: the Paseo tab is the whole screen, so you need to
 ---be able to type into it; the sidebar sits beside code you were editing, so it
 ---must not steal your cursor.
 ---
@@ -1821,9 +1821,8 @@ function M.follow(root, opts)
   -- of moving a surface off the tab you just left, so the one moment it
   -- matters is the moment a tab-aware test says "nothing open".
   local native = require "paseo.ui.native"
-  -- A native tab is the agent's own, not a window onto "wherever you are": a
-  -- workspace switch opens that workspace's agent in a tab of ITS own and
-  -- leaves this one where it is.
+  -- On the Paseo tab a workspace switch is a switch of the ROW: that
+  -- workspace's agents become the buffers, and its agent takes the middle.
   if native.has(chat) then
     M.open { root = root, surface = "native", focus = opts.focus ~= false, create = opts.offer == true }
     return true
@@ -1922,9 +1921,8 @@ function M.surface(name, opts)
 
   local native = require "paseo.ui.native"
   if name == "native" then
-    -- A TOGGLE IN AND OUT, not a close: back to the tab you came from, the
-    -- agent's tab left as it was so the next one lands straight on it. `q`
-    -- is what closes it.
+    -- Not the toggle (that is handled above): the chat onto the Paseo tab,
+    -- in its middle window. `q` is what closes the tab.
     if not native.has(chat) then
       sidebar.close(chat)
     end
@@ -1939,10 +1937,10 @@ function M.surface(name, opts)
   sidebar.open(chat)
 end
 
----`<C-f>`: from the sidebar beside your code, to the chat's native tab.
+---`<C-f>`: from the sidebar beside your code, to the Paseo tab.
 ---
----Not a key ON the native surface: a tab page is a place of its own, and
----`q` -- or `gt` -- is how you leave it. Declined silently; a notification
+---Not a key ON the native surface: the Paseo tab is a place of its own, and
+---`:Paseo native` -- or `q` -- is how you leave it. Declined silently; a notification
 ---for "this key does nothing here" is noise on a key people press by reflex.
 function M.fullscreen()
   local chat = current

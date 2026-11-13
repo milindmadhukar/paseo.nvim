@@ -56,7 +56,7 @@ local function check_core()
     end
   end
 
-  -- No UI library. Every surface -- the native tabs, the sidebar, popups and
+  -- No UI library. Every surface -- the Paseo tab, the sidebar, popups and
   -- dialogs -- is plain buffers. (nvzone/volt drew an older dashboard; a copy
   -- still installed is unused and can be removed.)
   if pcall(require, "volt") then

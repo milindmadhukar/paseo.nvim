@@ -60,8 +60,8 @@ local M = {}
 
 ---@class paseo.Config.UI
 ---@field surface "native"|"sidebar"  Which surface `:Paseo chat` opens on.
----                       "native" is the default: full screen, a tab page per
----                       agent, every pane a real split. The sidebar is the
+---                       "native" is the default: full screen, one Paseo tab
+---                       with every agent a buffer, every pane a real split. The sidebar is the
 ---                       narrower thing beside your code; <C-f> goes from it to
 ---                       native. "float" and "buffer" -- the old volt
 ---                       dashboard's mounts -- are accepted and mean "native".
@@ -234,8 +234,8 @@ local M = {}
 ---                       sits 10 above this and its children 15.
 ---@class paseo.Config.UI.Terminal
 ---
----A terminal is a SESSION now, opened from the rail on a native tab page of its
----own, so this no longer describes a surface of its own: `width`, `height`,
+---A terminal is a SESSION now, a buffer on the Paseo tab's row like an agent,
+---so this no longer describes a surface of its own: `width`, `height`,
 ---`row`, `col`, `list`, `zindex` and `backdrop` all belonged to the
 ---rail-and-pane window that used to open over the top, and are gone with it.
 ---@field keys paseo.Config.UI.Terminal.Keys
@@ -250,8 +250,8 @@ local M = {}
 ---first is a key you do not reach. That does take them from whatever is
 ---running inside -- right for `claude`, wrong for `tmux` -- so any of them can
 ---be `false`.
----@field next string|false   The next tab page, and the previous one -- an
----@field prev string|false   agent's or another terminal's.
+---@field next string|false   The workspace's next buffer, and the previous
+---@field prev string|false   one -- an agent or another terminal on the row.
 ---@field sessions string|false  Into the rail beside the terminal, and in the
 ---                      composer the session list. Was `keys.list`, which
 ---                      meant the rail.
@@ -438,10 +438,10 @@ local defaults = {
       end,
     },
 
-    -- EXPERIMENTAL. The native surface (`:Paseo native`): one tab page per
-    -- agent, every pane a real split -- the workspace rail on the left, the
-    -- conversation over the composer, a panel on the right when you ask for
-    -- one. See |paseo.ui.native|.
+    -- EXPERIMENTAL. The native surface (`:Paseo native`): one Paseo tab, every
+    -- agent a buffer in it, every pane a real split -- the workspace rail on
+    -- the left, the conversation over the composer, a panel on the right when
+    -- you ask for one. See |paseo.ui.native|.
     native = {
       -- The agent's prose as raw markdown, drawn by treesitter (and
       -- render-markdown.nvim if you have it) rather than hard-wrapped here.

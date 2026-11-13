@@ -357,8 +357,8 @@ local function start_terminal(task, preset)
         return vim.notify("paseo: could not start a terminal — " .. tostring(err), vim.log.levels.ERROR)
       end
       remember(task)
-      -- The terminal is on a tab of its own now; the draft has nothing left
-      -- to be. Closed AFTER, so its tab is not what the new one replaces.
+      -- The terminal is on the row now; the draft has nothing left to be.
+      -- Taken off the row AFTER the terminal is up.
       vim.schedule(function()
         abandon(task)
       end)
@@ -447,7 +447,7 @@ local function start_chat(task, prompt, images, done)
       unmount(task)
       return done(nil, agent_id)
     end
-    -- A new worktree: its chat is open on a tab of its own.
+    -- A new worktree: the row has switched to it, and its chat is open.
     abandon(task)
     done(nil, nil)
   end, { switch = switch })

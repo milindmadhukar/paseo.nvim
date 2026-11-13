@@ -22,7 +22,7 @@
 --- the old Terminals tab feel like a demo. What is per TERMINAL (a buffer, a
 --- libvterm channel, a subscription on the daemon) lives here, keyed by id.
 --- What is per WINDOW belongs to whatever is showing it -- see
---- |paseo.ui.native|, which gives it a tab page of its own.
+--- |paseo.ui.native|, which shows it as a buffer on the Paseo tab's row.
 
 local bridge = require "paseo.bridge"
 local hosts = require "paseo.hosts"

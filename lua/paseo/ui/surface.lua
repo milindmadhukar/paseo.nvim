@@ -20,7 +20,8 @@
 ---      workspace switch;
 ---   4. `ui.surface`, when nothing has been on screen yet this session.
 ---
---- There are two surfaces: the native one (a tab page per agent) and the
+--- There are two surfaces: the native one (one Paseo tab, every agent a
+--- buffer in it) and the
 --- sidebar. `"float"` and `"buffer"` named the old volt dashboard's two mounts;
 --- both resolve to the native surface now.
 ---
@@ -63,12 +64,12 @@ end
 ---The surface showing a chat right now, on the tab page you are on.
 ---@return paseo.SurfaceName|nil
 function M.on_screen()
-  -- A native tab is on screen when it is the tab you are on.
+  -- The Paseo tab is on screen when it is the tab you are on.
   local native = package.loaded["paseo.ui.native"]
   if native and native.chat() then
     return "native"
   end
-  -- A live conversation window off a native tab is the sidebar's. Only the
+  -- A live conversation window off the Paseo tab is the sidebar's. Only the
   -- current chat can hold one -- every open goes through `current`.
   local chat = require("paseo.ui.chat").current()
   if chat and require("paseo.ui.sidebar").is_open(chat) then

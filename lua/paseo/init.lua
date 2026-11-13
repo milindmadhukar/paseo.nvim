@@ -312,7 +312,7 @@ commands.chat = {
 }
 
 commands.native = {
-  desc = "Toggle the chat full screen: a tab page per agent, every pane a split",
+  desc = "Toggle the chat full screen: one Paseo tab, every agent a buffer",
   run = function()
     require("paseo.ui.chat").surface("native", { toggle = true })
   end,

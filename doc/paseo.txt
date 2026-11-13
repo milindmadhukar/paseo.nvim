@@ -83,8 +83,8 @@ Defaults: >lua
       },
 
       ui = {
-        surface = "native",       -- full screen, a tab page per agent;
-                                  -- or "sidebar"
+        surface = "native",       -- full screen, one Paseo tab, every
+                                  -- agent a buffer; or "sidebar"
         send_behavior = "steer",  -- mid-turn: "steer", "interrupt", "queue"
 
         style = "plate",          -- frame language
@@ -140,7 +140,7 @@ Defaults: >lua
       workspaces = {
         dir = ".workspaces",
         branch_prefix = "ws/",
-        open = "tab",             -- <CR> in the picker: a new tab, `tcd`'d in
+        open = "tcd",             -- <CR> in the picker: `tcd` this tab in
       },
 
       review = {
@@ -194,9 +194,9 @@ ui.surface                                       string, default `"native"`
 
     Which surface |:Paseo-chat| opens on. Two of them:
 
-      `"native"`   FULL SCREEN: one Neovim tab page per agent, every pane a
-                 real split. The default, because it is the surface with
-                 everything on it. See |paseo-native|.
+      `"native"`   FULL SCREEN: one Paseo tab, every agent a buffer in it,
+                 every pane a real split. The default, because it is the
+                 surface with everything on it. See |paseo-native|.
       `"sidebar"`  the narrow pane beside your code, for a conversation you
                  glance at rather than the thing you are doing.
 
@@ -205,8 +205,9 @@ ui.surface                                       string, default `"native"`
     says them keeps working.
 
     `<C-f>` from the sidebar goes full screen. It is not bound on the
-    full-screen surface: a tab page is a place of its own, and `q` -- or `gt`
-    -- is how you leave it. |:Paseo-sidebar| goes the other way.
+    full-screen surface: the Paseo tab is a place of its own, and
+    |:Paseo-native| -- or `q` -- is how you leave it. |:Paseo-sidebar| goes
+    the other way.
 
     `ui.surface` is only where the FIRST chat of a session opens. After that
     the surface is yours, not the conversation's: a chat opens on the one that
@@ -397,8 +398,8 @@ ui.native                                                           table
 
     They are where the two START. Drag either one wider or narrower (the
     mouse, `<C-w><`, `<C-w>>`, `:vertical resize`) and that width is kept:
-    through `<C-b>` off and on, on the next agent's tab, and after a restart,
-    in the same state file as the rail's toggle. A change in the editor's own
+    through `<C-b>` off and on, from one agent to the next, and after a
+    restart, in the same state file as the rail's toggle. A change in the editor's own
     size is not remembered, so a narrow terminal never shrinks it for good.
 
                         *paseo-config.ui.native.composer*
@@ -440,8 +441,7 @@ ui.float                                                            table
                                                   *paseo-config.ui.float.rail*
 ui.float.rail                                                       table
 
-    The workspace rail down the left of every agent's tab -- see
-    |paseo-rail|.
+    The workspace rail down the left of the Paseo tab -- see |paseo-rail|.
 
     `enabled` is only where the rail STARTS. The toggle is remembered across
     tabs and restarts, in `stdpath("state")/paseo/ui.json`, and once you have
@@ -497,9 +497,9 @@ ui.terminal                                                         table
     page of its own, so there is no geometry here.
 
     `width`, `height`, `row`, `col`, `list`, `zindex` and `backdrop` are GONE
-    with the rail-and-pane window they described. A terminal's tab is the size
-    of the tab page. A config still setting them is harmless -- nothing reads
-    them.
+    with the rail-and-pane window they described. A terminal is shown in the
+    middle window of the Paseo tab, at its size. A config still setting them
+    is harmless -- nothing reads them.
 
     `keys` renames or disables the keys out of a terminal: >lua
         terminal = { keys = { next = false, prev = false } }
@@ -509,10 +509,10 @@ ui.terminal                                                         table
                   stop going to it. `<C-g>`. The name is older than what it
                   does -- it used to land you on the old dashboard's tab bar
         terminal  back into the terminal: the other direction. `<C-l>`
-        next      the next tab page -- the next agent or terminal. `<C-j>`
+        next      the workspace's next buffer -- the next agent or
+                  terminal on the row (|paseo-native-buffers|). `<C-j>`
         prev      the previous one. `<C-k>`
-        sessions  into the rail, when it is up beside the terminal
-                  (|paseo-rail-sessions|). `<C-s>`
+        sessions  into the rail (|paseo-rail-sessions|). `<C-s>`
 
     All are bound in TERMINAL mode as well as normal, which is what makes
     them worth having and also what takes them from whatever is running
@@ -659,18 +659,23 @@ workspaces.branch_prefix                           string, default `"ws/"`
     passed. See |paseo-workspace-kinds|.
 
                                                 *paseo-config.workspaces.open*
-workspaces.open                               string|function, default `"tab"`
+workspaces.open                               string|function, default `"tcd"`
 
     What `<CR>` in the workspace picker does. The three strings all switch
     INSIDE this Neovim:
 
-        "tab"   a new tab page, `tcd`'d into the workspace. The default.
-        "tcd"   this tab's cwd. No new tab.
+        "tcd"   this tab's cwd. No new tab. The default.
+        "tab"   a new tab page, `tcd`'d into the workspace.
         "cd"    the editor's cwd. Everything follows.
 
-    A tab rather than a bare `cd` because chdir'ing in place leaves the
-    buffers, LSP clients and jumplist of the workspace you just left pointing
-    into it. One tab per unit of work keeps them apart for the price of a tab.
+    `"tcd"` because the plugin opens no tab pages you did not ask for, and a
+    `tcd` rather than a bare `cd` so it is the tab that moves and not the
+    editor. `"tab"` is for keeping the buffers, LSP clients and jumplist of
+    each workspace apart, for the price of a tab per workspace.
+
+    ON THE PASEO TAB none of these happen: picking a workspace there swaps
+    the row of agent buffers (|paseo-native-buffers|), as the rail does. A
+    function still gets the first word.
 
     A function is the escape hatch, and is how you spawn a GUI window per
     workspace instead -- which is what this used to do unconditionally, and
@@ -679,7 +684,7 @@ workspaces.open                               string|function, default `"tab"`
 
         open = function(ws)
           if not vim.g.neovide then
-            return false  -- decline: the built-in tab switch happens
+            return false  -- decline: the built-in switch happens
           end
           vim.fn.jobstart({ "neovide" },
             { cwd = ws.directory, detach = true })
@@ -689,7 +694,7 @@ workspaces.open                               string|function, default `"tab"`
     and switch in place in a terminal. Any other return value, `nil` included,
     means you handled it.
 
-    To keep the built-in switch and only decide what the new tab SHOWS, leave
+    To keep the built-in switch and only decide what the tab SHOWS, leave
     this alone and listen for |paseo-workspace-open-autocmd|.
 
     An open chat comes WITH you, whichever of the three you pick -- see
@@ -759,21 +764,21 @@ skills.method                                       `"link"`|`"copy"`, default `
 :Paseo chat                                                  *:Paseo-chat*
 
     Open, or close, the chat for this directory, on whichever surface
-    |paseo-config.ui.surface| names -- full screen, a tab page per agent, by
-    default. See |paseo-chat|.
+    |paseo-config.ui.surface| names -- full screen, one Paseo tab with every
+    agent a buffer, by default. See |paseo-chat|.
 
 :Paseo native                                              *:Paseo-native*
 :Paseo buf                                                    *:Paseo-buf*
 :Paseo tab                                                    *:Paseo-tab*
 
-    Toggle the chat FULL SCREEN: one tab page per agent, every pane a real
-    split. See |paseo-native|.
+    Toggle the chat FULL SCREEN: one Paseo tab, every agent a buffer in it,
+    every pane a real split. See |paseo-native|.
 
     A toggle IN AND OUT, not open-and-close. From your code it goes to the
-    agent's tab (the one you were last on); from the agent's tab it goes
-    back to the tab you came from, and leaves the agent's tab as it was, so
-    the next press lands straight back on it. `q` in the chat is what closes
-    the tab. Map it to one key in normal and terminal mode: >lua
+    Paseo tab, AS YOU LEFT IT -- the agent, terminal or subagent that was in
+    the middle is still there; from the Paseo tab it goes back to the tab you
+    came from. `q` in the chat is what closes the Paseo tab. Map it to one
+    key in normal and terminal mode: >lua
         vim.keymap.set({ "n", "t" }, [[<C-\>]], "<cmd>Paseo native<cr>")
 <
     `buf` and `tab` are the old volt dashboard's names, kept so keys bound to
@@ -931,7 +936,8 @@ skills.method                                       `"link"`|`"copy"`, default `
     from anywhere inside the project -- a workspace, or a repo in one.
 
     `edit` opens `<project>/.workspaces/workspace.toml` itself, as it is on
-    disk, in a tab of its own. With no manifest yet it opens the `init` screen.
+    disk, with `:edit` in the window you are in (from the Paseo tab, on your
+    code's tab). With no manifest yet it opens the `init` screen.
 
     `create <name> [repo,repo]` assembles worktrees, and is the only way to
     pick WHICH repos a workspace gets; `rm <name> [force]` dismantles one and
@@ -1137,11 +1143,12 @@ These names follow Paseo's model:
                    module or protocol names.
 
     Tab            A Paseo application surface that presents an agent
-                   session. paseo.nvim's full-screen surface gives each agent
-                   a Neovim TAB PAGE; neither is an isolation boundary.
+                   session. paseo.nvim shows each one as a BUFFER on the
+                   Paseo tab, so your bufferline is the app's row of tabs;
+                   neither is an isolation boundary.
 
-    Full screen    paseo.nvim's main surface (|paseo-native|): a tab page per
-                   agent, with the workspace rail, the conversation over the
+    Full screen    paseo.nvim's main surface (|paseo-native|): one Paseo tab,
+                   with the workspace rail, the agent in the middle over its
                    composer, and a panel split when you ask for one.
 
     Sidebar        The narrow surface beside your code, the other to the
@@ -1306,9 +1313,10 @@ switching branch is noticed straight away. Turn the whole thing off with
                                                           *paseo-workspaces-keys*
 In the workspace picker (|:Paseo-workspaces|) ~
 
-    <CR>      open it -- a new tab page `tcd`'d into the workspace, or
-              whatever |paseo-config.workspaces.open| says. An open chat
-              follows: |paseo-chat-follows|
+    <CR>      open it -- this tab `tcd`'d into the workspace, or whatever
+              |paseo-config.workspaces.open| says. On the Paseo tab, the row
+              of agent buffers is swapped instead. An open chat follows:
+              |paseo-chat-follows|
     <C-s>     its agent sessions
     <C-n>     create a workspace
     <C-d>     archive it -- refuses, and says what it would lose, if a member
@@ -1477,7 +1485,7 @@ require("paseo.ui.chat").follow({root}, {opts})              -> boolean
                                                  *paseo-workspace-open-autocmd*
 Opening a workspace (|paseo-workspaces-keys|) fires `User PaseoWorkspaceOpen`
 after the `tcd`, with the root in `data.root`. That is the seam for deciding
-what the new tab SHOWS -- a file picker, oil, a dashboard -- without replacing
+what the tab SHOWS -- a file picker, oil, a dashboard -- without replacing
 the switch itself: >lua
 
     vim.api.nvim_create_autocmd("User", {
@@ -1647,12 +1655,13 @@ trouble is worth looking at.
                                                   *paseo-native* *paseo-full*
 THE CHAT, FULL SCREEN -- the default surface. `:Paseo chat` and
 |:Paseo-native| toggle you in and out of it (back to the tab you came from,
-the agent's tab kept; `q` closes it), `:Paseo buf` and `:Paseo tab` are
-the same command, and |:Paseo-dash| opens it, so keys bound to the old names
-keep working. `<C-f>` goes here from the sidebar.
+and in again to the Paseo tab as you left it; `q` closes it), `:Paseo buf`
+and `:Paseo tab` are the same command, and |:Paseo-dash| opens it, so keys
+bound to the old names keep working. `<C-f>` goes here from the sidebar.
 
-Every pane is a REAL SPLIT, and EACH AGENT GETS A TAB PAGE OF ITS OWN, so two
-agents in one workspace are two tabs and `gt`/`gT` move between them: >
+ONE PASEO TAB, never one per agent: your code and Paseo, two tab pages, and
+the toggle moves between them so you never `gt`. Every pane is a REAL
+SPLIT: >
 
     ┌ rail ┬ conversation  (winbar: agent · ⠹ 14s · keys) ┬ panel ┐
     │      ├ composer      (its bar: model, mode, spinner)  │       │
@@ -1675,18 +1684,18 @@ agents in one workspace are two tabs and `gt`/`gT` move between them: >
                        so nothing waits on git or the daemon to show you it.
     1  2  3            in the panel: straight to Settings, Changes or Usage.
                        Its winbar is a tab strip that says which is which.
-    <C-n>              start something -- see |paseo-new|. A new agent opens
-                       in a tab of its own.
+    <C-n>              start something -- see |paseo-new|. A new agent joins
+                       the row of buffers (|paseo-native-buffers|).
     <C-c>              stop the turn, from the composer or the conversation,
                        normal mode or insert.
-    q                  close the tab. So does `:q` in the conversation or the
-                       box. The agent and your draft live on.
+    q                  close the Paseo tab. So does `:q` in the conversation
+                       or the box. The agents and your drafts live on.
 
 The panels: >
 
     1 Settings   mode, thinking level, model, feature toggles
-    2 Changes    what is changed on disk, per repo; <CR> opens one in a tab
-                 of its own (`:tabedit`)
+    2 Changes    what is changed on disk, per repo; <CR> opens one with your
+                 code: on the tab you came from, with `:edit`
     3 Usage      context window, tokens, cost, and this provider's 5-hour and
                  weekly limits
 <
@@ -1695,21 +1704,64 @@ and `q` closes it, back to the box you type in. See |paseo-chat-session|,
 |paseo-chat-lists| and |paseo-chat-usage|. Every workspace Paseo knows is
 |:Paseo-workspaces|, a picker.
 
-A TERMINAL OR A PROVIDER SUBAGENT opens in a tab of its own too, WITH THE RAIL
-down its left if the rail was up where you opened it, so you are never
-somewhere without a way to navigate. See |paseo-terminals| and
-|:Paseo-subagents|.
+                                                       *paseo-native-buffers*
+EVERY AGENT IS A BUFFER. The Paseo app shows a workspace's agents as a row of
+tabs over the chat; here that row is YOUR BUFFERLINE. Every live agent and
+terminal of the workspace on screen is a LISTED buffer --
+`paseo://agent/<title>`, `paseo://terminal/<name>` -- so a bufferline shows
+them by name, in the order they were started, and you move between them the
+way you move between any buffers.
 
-WHAT IS CURRENT FOLLOWS THE TAB. Entering an agent's tab makes its agent the
-current chat, so |:Paseo-mode|, |:Paseo-stop| and the rest act on the agent
-you are looking at.
+THE MIDDLE WINDOW SWAPS BUFFERS. `:bnext`, `:b N` or a click on the
+bufferline puts another agent there, and its composer, its keys and the
+rail's highlight come with it. A buffer key pressed in the box sends the
+agent to the middle and leaves the box its composer. The agent in the middle
+is the CURRENT chat, so |:Paseo-mode|, |:Paseo-stop| and the rest act on the
+agent you are looking at.
+
+NOTHING LOADS UNTIL YOU LOOK. An agent's history is fetched the first time
+its buffer is shown. A terminal's buffer becomes the live terminal the first
+time you enter it, keeping its place on the row; while a terminal is in the
+middle the composer is put away. See |paseo-terminals|.
+
+A WORKSPACE IS A SET OF BUFFERS. Picking another workspace -- on the rail, or
+in the picker while you are on the Paseo tab -- wipes the old row (a
+composer holding words you have not sent is kept), lists the new workspace's
+agents and `:tcd`s the Paseo tab into it. An agent started elsewhere -- the
+app, the CLI -- joins the row when the daemon reports it.
+
+LEAVING THE PASEO TAB UNLISTS THE ROW, so agents never show up among your
+code's buffers; coming back lists them again.
+
+A SUBAGENT IS A PEEK. Opening one -- from the rail or |:Paseo-subagents| --
+shows it in the middle window in place of its parent, unlisted, since it is
+not one of the workspace's agents. A provider subagent is read-only; a Paseo
+one has its composer, so you can talk to it. `q` goes back to the parent.
+
+`:bdelete` ON AN AGENT takes just that one off the row, and the neighbour
+takes the middle; backing out of a new task does the same. The agent itself
+lives on, on the rail.
+
+A bufferline that keeps a buffer list per tab page -- NvChad's tabufline,
+with its `t:bufs` -- shows the agents on the Paseo tab and your files on
+yours with nothing to configure. Map next/previous buffer to the
+bufferline's own per-tab functions rather than plain `:bnext`, which cycles
+every listed buffer in Neovim: >lua
+    vim.keymap.set("n", "<S-l>", function()
+      require("nvchad.tabufline").next()
+    end)
+    vim.keymap.set("n", "<S-h>", function()
+      require("nvchad.tabufline").prev()
+    end)
+<
 
 ONE BACKGROUND FOR EVERY PANE, the `PaseoBase` group: the editor's own under
-`ui.colors = "auto"`, the plugin's under `"fixed"`, the same across the tab
-either way. Only the box you type in is a step raised.
+`ui.colors = "auto"`, the plugin's under `"fixed"`, the same across the
+Paseo tab either way. Only the box you type in is a step raised.
 
-`<C-f>` IS NOT BOUND HERE. It is the sidebar's way to full screen; a tab page
-is a place of its own, and `q` -- or `gt` -- is how you leave it.
+`<C-f>` IS NOT BOUND HERE. It is the sidebar's way to full screen; the Paseo
+tab is a place of its own, and |:Paseo-native| -- or `q` -- is how you leave
+it.
 |:Paseo-sidebar| moves the chat back beside your code.
 
 NO UI LIBRARY. This replaced a dashboard drawn by nvzone/volt: a float (or a
@@ -1718,7 +1770,7 @@ splits; popups and dialogs are plain windows drawn as real text and driven
 from the keyboard; and the plugin needs nothing to draw any of it.
 
                                                                   *paseo-rail*
-THE WORKSPACE RAIL is the split down the left of every agent's tab: each
+THE WORKSPACE RAIL is the split down the left of the Paseo tab: each
 workspace in the project you are standing in, with what its agents are
 doing -- the desktop app's sidebar, laid out as it is: the project's tile
 and name, one row per workspace with its lines changed at the right, and a
@@ -1742,8 +1794,7 @@ and so do its subagent counts: every agent the app starts in a checkout gets
 a workspace of its own on that same directory, and one running agent spins
 only its own row. THE SESSION ON SCREEN has its title in the opened-file
 colour (`NvimTreeOpenedHL` where the colourscheme has one), and so does its
-workspace while that is folded. The rail is one buffer, shown in a window on
-every agent's tab.
+workspace while that is folded. The rail is one buffer, made once and kept.
 
                                                            *paseo-rail-colors*
 The WINDOW is nvim-tree's: its background, cursor band and separator
@@ -1765,11 +1816,12 @@ All of it is the daemon's, pushed as it changes: the stat on every save, the
 pull request every twenty seconds while a check is pending. A pushed change
 is written over its row in place.
 
-`<C-b>` shows and hides it, and the choice is remembered across tabs and
-restarts: a rail you hid stays hidden on the next agent's tab and the next
-session. `<C-h>` goes into it -- showing it first if it was hidden -- and
-`<C-h>`, `q` or `<Esc>` go back to where you were typing. It is 32 cells wide
-by default (|paseo-config.ui.native| `rail`; `0` starts it hidden). See
+`<C-b>` shows and hides it, in one paint -- the conversation is re-laid out
+in the same keypress, not a beat after -- and the choice is remembered across
+restarts: a rail you hid stays hidden next session. `<C-h>` goes into it --
+showing it first if it was hidden -- and `<C-h>`, `q` or `<Esc>` go back to
+where you were typing. It is 32 cells wide by default
+(|paseo-config.ui.native| `rail`; `0` starts it hidden). See
 |paseo-config.ui.float.rail| for the keys and the look.
 
 PINNED workspaces lead the rail, with a pin; `m` pins or unpins the one
@@ -1821,14 +1873,16 @@ under -- from the composer in either mode, from a terminal, or from any other
 buffer of the surface. In the rail, nvim-tree's keys where it has one for the
 job (`g?` lists them): >
 
-    <CR> o    a session: open it in a tab of its own (also a double click).
+    <CR> o    a session: put it in the middle (also a double click) -- a
+              subagent as a peek, another workspace's by swapping the row.
               A workspace: fold or unfold it
     l         unfold; on something open, step onto its first row; on a
               session, open it
     h <BS>    fold; on a row that does not fold, fold the one it is in and
               land on it
     <Tab> za  fold or unfold
-    O         open the workspace as a place: its agent, in a tab of its own
+    O         open the workspace as a place: its agents become the
+              buffers, the newest in the middle
     P         up to the parent
     < >       previous / next sibling
     K J       first / last sibling
@@ -1885,7 +1939,8 @@ to its default. Nothing is written until something is created.
 
 `Here` joins the workspace on screen, by id, so a second agent lands beside
 the first; the draft becomes that agent in place. A new worktree's agent
-opens on a tab of its own, and a terminal on one of its own.
+switches the row to that workspace; a terminal joins the row and takes the
+middle (|paseo-native-buffers|).
 
                                                            *paseo-chat-usage*
 The USAGE panel (`3` in the panel) answers two different questions, from two
@@ -2137,7 +2192,7 @@ In the composer ~
     <C-c>     stop the turn -- normal or insert. See |paseo-chat-stop|
     <C-t>     speak instead of typing. See |paseo-dictation|
     f         fork the complete conversation. See |paseo-fork|
-    q         close the chat -- on full screen, the agent's tab
+    q         close the chat -- on full screen, the Paseo tab
 
 The keys marked full screen are normal mode. The box is the size of what is
 in it: |paseo-config.ui.native| and |paseo-config.ui.sidebar| `composer` are a
@@ -2158,8 +2213,10 @@ In the conversation ~
     <C-s>     (full screen) the session on screen, in the rail
     <C-n>     (full screen) start an agent or a terminal. See |paseo-new|
     <C-c>     stop the turn. See |paseo-chat-stop|
-    gt  gT    (full screen) the next or previous agent's tab
-    q         close the chat -- on full screen, the agent's tab
+    :bnext    (full screen) the next agent -- any buffer key works on the
+              middle window. See |paseo-native-buffers|
+    q         close the chat -- on full screen, the Paseo tab; on a
+              subagent's peek, back to its parent
 
 In the panel ~
 
@@ -2182,7 +2239,8 @@ A list, with the keys every list here takes: >
     j k       move -- <Down> and <Up> too
     h l       the previous or next SECTION -- one per repo
     g G       the first or last row
-    <CR>      open the focused file, with `:tabedit`, in a tab of its own
+    <CR>      open the focused file with your code: on the tab you came
+              from, with `:edit`
     r         re-fetch
 <
 `r` is re-fetch on every panel, which is why the rail renames a terminal with
@@ -2496,8 +2554,8 @@ an earlier session -- goes on running without us, so quitting risks nothing and
 nothing is asked, however busy its agents are. The question is only worth
 asking about the daemon this Neovim started itself.
 
-Full screen, each agent has a tab page of its own, so `:q` in its
-conversation or its box closes that TAB, not Neovim; the agent lives on.
+Full screen, Paseo has a tab page of its own, so `:q` in the conversation or
+the box closes the Paseo TAB, not Neovim; the agents live on.
 
 With |paseo-config.quit.guard| on (it is off by default) and
 |paseo-config.quit.warn_active_agents| enabled, normal whole-editor
@@ -2521,7 +2579,7 @@ the `:Paseo` commands, or these names, which exist for exactly that: >lua
 <
   `<Plug>(paseo-native)`  in and out of the chat, full screen (|:Paseo-native|)
   `<Plug>(paseo-new)`     start something (|paseo-new|)
-  `<Plug>(paseo-rail)`    the rail, on or off (on an agent's tab)
+  `<Plug>(paseo-rail)`    the rail, on or off (on the Paseo tab)
 
 A key you map to one of them is SHOWN where it matters: the full-screen
 winbar names your |:Paseo-native| key as the way back to your code.
@@ -2646,10 +2704,10 @@ toggled by hand is yours from then on and is never folded back under you.
                           *paseo-terminals* *paseo-chat-terminals*
 Paseo runs TERMINALS as well as agents -- the `claude` or `codex` sessions you
 started in the app are PTYs on the daemon -- and A TERMINAL IS A SESSION. It
-lists on the rail under its workspace (|paseo-rail-sessions|), and opening one
-gives it A TAB PAGE OF ITS OWN, the way an agent gets one, with the rail down
-its left if the rail was up where you opened it. |:Paseo-term| goes into that
-tree.
+lists on the rail under its workspace (|paseo-rail-sessions|), and it is A
+BUFFER ON THE ROW like an agent (|paseo-native-buffers|): opening one puts it
+in the middle of the Paseo tab, the composer put away while it is there.
+|:Paseo-term| goes into that tree.
 
 It used to be a surface of its own: a rail of names, a title bar, the terminal
 and a backdrop -- four windows over the top of whatever you were looking at,
@@ -2666,11 +2724,11 @@ does not take are the whole of your way out. They are Neovim's own moves: >
     <C-g>     out of terminal mode, into normal mode, without closing
               anything
     <C-l>     back into the terminal
-    <C-j>     the next tab page -- the next agent or terminal; <C-k> the
-              previous one
-    <C-s>     into the rail, when it is up beside the terminal
-    q         (normal mode) close the tab; the terminal lives on, on the
-              daemon
+    <C-j>     the workspace's next buffer -- the next agent or terminal on
+              the row; <C-k> the previous one
+    <C-s>     into the rail
+    q         (normal mode) back to the agent; the terminal lives on, on
+              the daemon
 <
 THEY ARE BOUND IN TERMINAL MODE as well as normal -- all but `q`, which in
 terminal mode is a letter -- which is the only way any of them is worth

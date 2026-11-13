@@ -1,5 +1,5 @@
---- The workspace rail: the project's workspaces, down the left of every
---- native tab, each with what its agents are doing -- AS A FILE TREE.
+--- The workspace rail: the project's workspaces, down the left of the Paseo
+--- tab, each with what its agents are doing -- AS A FILE TREE.
 ---
 --- The desktop app's sidebar, and for the same reason it has one: it answers
 --- "which of them wants me" without leaving the conversation you are in -- a
@@ -20,10 +20,10 @@
 --- A REAL BUFFER IN A WINDOW OF ITS OWN (filetype `paseo-rail`), so the
 --- cursor IS the selection and 'cursorline' paints it.
 ---
---- The window belongs to |paseo.ui.native|, which splits one on every tab and
---- hands it over with `M.adopt`. This module owns the buffer, the data and the
---- drawing, and outlives any one tab so the list is not refetched on every
---- open.
+--- The window belongs to |paseo.ui.native|, which splits one on the Paseo tab
+--- and hands it over with `M.adopt`. This module owns the buffer, the data and
+--- the drawing, and outlives the window so the list is not refetched every
+--- time the rail is shown.
 
 local icons = require "paseo.ui.icons"
 local render = require "paseo.ui.render"
@@ -158,7 +158,7 @@ end
 
 ---Widths you dragged a split to, by name ("rail", "panel"). Same file, same
 ---read-once rule as `shown`: a rail you widened stays that wide through
----`<C-b>` off and on, on the next agent's tab, and after a restart.
+---`<C-b>` off and on, from one agent to the next, and after a restart.
 ---@type table<string, integer>|nil
 local widths
 
@@ -335,7 +335,7 @@ function M.load(done)
   cache.root, cache.loading = root, true
   local ws = require "paseo.workspaces"
   -- And the agents, which the rail draws from as much as from the list.
-  -- Nothing else on a native tab is sure to have asked, and without it the
+  -- Nothing else on the Paseo tab is sure to have asked, and without it the
   -- rail would have no statuses to show.
   pcall(require("paseo.agents").watch)
   ws.list(function(list, err)
@@ -494,8 +494,8 @@ local function contains(ws, path)
   return path == dir or vim.startswith(path, dir .. "/")
 end
 
----The chat whose surface the rail is drawn beside: the native tab's
----(|paseo.ui.native|).
+---The chat whose surface the rail is drawn beside: the one in the Paseo tab's
+---middle window (|paseo.ui.native|).
 ---@return table|nil
 function M.host_chat()
   local native = package.loaded["paseo.ui.native"]
@@ -518,7 +518,7 @@ function M.workspace(id)
   return nil
 end
 
----The workspace the native tab is showing, as a key into the list.
+---The workspace the Paseo tab is showing, as a key into the list.
 ---
 ---BY WORKSPACE ID when the agent on screen has one, and only then by
 ---directory. The directory alone cannot say which: every `paseo run` in a
@@ -990,7 +990,7 @@ end
 ---@type integer|nil
 local win
 
----`win` is a native tab's split (see `M.adopt`), not a float of ours: this
+---`win` is the Paseo tab's split (see `M.adopt`), not a float of ours: this
 ---module must neither move it nor close it.
 local adopted = false
 
@@ -1287,9 +1287,9 @@ function M.fold_all(want)
   M.draw()
 end
 
----Open the workspace under the cursor as its own place: its agent on a
----native tab of its own, from a native tab, and otherwise the full switch,
----tab and `tcd` and all, exactly as the picker does it.
+---Open the workspace under the cursor as its own place: on the Paseo tab, its
+---agents become the row of buffers, the newest in the middle; otherwise the
+---full switch, exactly as the picker does it.
 ---@param ws table
 local function open_workspace(ws)
   local native = package.loaded["paseo.ui.native"]
@@ -1299,8 +1299,8 @@ local function open_workspace(ws)
   require("paseo.workspaces").open(ws)
 end
 
----`<CR>`: what nvim-tree's `<CR>` does. A session opens -- on a native tab of
----its own; a provider subagent in the read-only viewer. A workspace is a
+---`<CR>`: what nvim-tree's `<CR>` does. A session opens in the Paseo tab's
+---middle window -- a subagent as a peek, read-only for a provider one. A workspace is a
 ---folder, and folds; `O` opens it as a place.
 function M.open_current()
   local row = cursor_row()
@@ -1721,8 +1721,8 @@ function M.style(w)
 end
 
 ---Make `w` THE rail window: the native surface's split, which this module
----did not open and must not move. One per native tab, so whichever tab is
----entered adopts its own.
+---did not open and must not move. The Paseo tab has one; it is adopted again
+---whenever that tab is entered or the rail is shown.
 ---@param w integer
 function M.adopt(w)
   win, adopted = w, true

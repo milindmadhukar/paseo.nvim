@@ -7,7 +7,7 @@
 --- driven, and tested, with no window at all.
 ---
 --- WHAT IS NOT ASKED: the project and the host. Both are where you already
---- are -- the directory this Neovim (or this agent's tab) is in, and the host
+--- are -- the directory this Neovim (or the Paseo tab) is in, and the host
 --- it is on -- so asking would only be a chance to pick something else by
 --- mistake. And not the workspace's NAME: the daemon names a worktree, its
 --- branch and its title from the first prompt, as the app does. See
@@ -199,8 +199,9 @@ end
 ---@param done fun(err: string|nil, agent_id: string|nil)
 ---@param opts? { switch?: boolean }  `switch`: point this Neovim at the new
 ---       worktree too (|paseo.workspaces|.open). Off on the full-screen
----       surface, where the agent's tab is already `tcd`'d into it and moving
----       the tab you came from as well would move your code.
+---       surface, where the Paseo tab is `tcd`'d into it when its row switches
+---       to that workspace, and moving the tab you came from as well would
+---       move your code.
 function M.chat(ctx, choice, prompt, images, done, opts)
   local first = {
     prompt = prompt,

@@ -203,11 +203,11 @@ function M.busy(node)
   return false
 end
 
----Which session the native tab is showing.
+---Which session the Paseo tab is showing.
 ---@param chat? table
 ---@return { kind?: string, id?: string }
 function M.on_screen(chat)
-  -- A native tab shows one agent: the chat's own -- a draft's too, once its
+  -- The middle window shows one agent: the chat's own -- a draft's too, once its
   -- first message has made it one.
   if chat then
     return { kind = "agent", id = chat.agent_id }
@@ -250,7 +250,8 @@ end
 
 -- ----------------------------------------------------------------- actions
 
----Open a session on a native tab of its own; a provider subagent in the
+---Open a session in the Paseo tab's middle window: an agent or a terminal as
+---a buffer of the row, a subagent as a peek -- a provider one in the
 ---read-only viewer.
 ---@param node table
 ---@param chat table  The chat on screen.

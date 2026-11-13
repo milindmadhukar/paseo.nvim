@@ -2,7 +2,8 @@
 ---
 --- One of the plugin's two surfaces. This is the everyday one -- narrow, beside
 --- your code, always answerable. The other is |paseo.ui.native|, which trades
---- the code view for a tab page per agent, with room for the rail and a panel.
+--- the code view for one Paseo tab, every agent a buffer in it, with room for
+--- the rail and a panel.
 ---
 --- Both are views onto the SAME `paseo.Chat`: the same conversation buffer, the
 --- same composer buffer, the same block table. Switching surface therefore
