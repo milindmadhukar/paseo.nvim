@@ -12,15 +12,58 @@ local function current_root()
   return chat and chat.root or assert(vim.uv.cwd())
 end
 
-local function fetch_catalogue(cwd, callback, host_id)
+---How long a kept catalogue is answered from before it is asked for again
+---(in the background: the kept one is still what you see). Models come and
+---go on the scale of a provider update, not of a keypress.
+M.CATALOGUE_TTL = 5 * 60 * 1000
+
+---Where the catalogue for `cwd` on `host_id` is kept in |paseo.store|.
+---@param cwd string
+---@param host_id? string
+---@return string
+function M.catalogue_key(cwd, host_id)
+  local host = require("paseo.hosts").get(host_id)
+  return ("providers\0%s\0%s"):format(host and host.id or tostring(host_id), cwd)
+end
+
+---A catalogue still discovering -- any provider `loading` -- is handed over
+---but not kept: the next open should ask again rather than show it.
+---@param entries table[]|nil
+---@return boolean
+local function settled(entries)
+  for _, entry in ipairs(entries or {}) do
+    if entry.status == "loading" then
+      return false
+    end
+  end
+  return entries ~= nil
+end
+
+---The provider catalogue as the daemon reports it, uncached.
+---@param cwd string
+---@param host_id? string
+---@param done fun(entries: table[]|nil, err: string|nil, keep?: boolean)
+function M.fetch_catalogue(cwd, host_id, done)
   bridge.ensure(function(err)
     if err then
-      return callback(nil, err)
+      return done(nil, err)
     end
     bridge.request("providers", { cwd = cwd, hostId = host_id }, function(fetch_err, result)
-      callback(result and result.entries or nil, fetch_err)
+      local entries = result and result.entries or nil
+      done(entries, fetch_err, settled(entries))
     end, host_id)
   end, host_id)
+end
+
+---From |paseo.store|: the kept catalogue at once, the daemon's when there is
+---none. The new-task screen and its terminal presets ask together, and share
+---one request. A copy each, so a caller's draft cannot edit the kept one.
+local function fetch_catalogue(cwd, callback, host_id)
+  require("paseo.store").get(M.catalogue_key(cwd, host_id), M.CATALOGUE_TTL, function(done)
+    M.fetch_catalogue(cwd, host_id, done)
+  end, function(entries, err)
+    callback(entries and vim.deepcopy(entries) or nil, err)
+  end)
 end
 
 ---Resolve the first slash only: some model ids themselves contain slashes.

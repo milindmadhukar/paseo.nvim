@@ -240,6 +240,9 @@ local function test_provider_setup()
     -- must not open one.
     local ready = catalogue.entries
     catalogue.entries = { { provider = "pi", status = "unavailable", models = {} } }
+    -- A daemon that CHANGED: what was kept from it (|paseo.store|) goes, as
+    -- it would once its time was up.
+    require("paseo.store").invalidate()
     local wins_before_empty = #vim.api.nvim_list_wins()
     local empty_err
     create.review({ cwd = "/work" }, function(selection, review_err)

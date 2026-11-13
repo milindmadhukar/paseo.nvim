@@ -156,6 +156,9 @@ function M.run(filter)
           -- |paseo.ui.surface| remembers it for the session, which here would
           -- mean one suite's `:Paseo sidebar` deciding the next one's default.
           require("paseo.ui.surface").reset()
+          -- Nor what one suite's stubbed daemon said: |paseo.store| keeps
+          -- answers across calls, and the next suite's stub says otherwise.
+          require("paseo.store").invalidate()
           flush()
         end
       end

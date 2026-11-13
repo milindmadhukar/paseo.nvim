@@ -105,13 +105,20 @@ local function test_draft()
 
     -- THE RACE. Two mode changes in flight, and the first to come back is not
     -- the first that was sent. A stale reply must be dropped, not applied.
+    --
+    -- Nothing kept, so both are real round trips (|paseo.store| would answer
+    -- the mode it has already seen without asking).
+    require("paseo.store").invalidate()
     hold = true
-    local codex = draft_model.groups(draft)[3]
-    draft_model.apply(draft, codex, { id = "auto" }, function() end)
+    -- Two DIFFERENT questions: the same one twice is one request now.
+    draft.modeId = "auto"
+    draft_model.refresh_features(draft, true, function() end)
     draft.modeId = "default"
     draft_model.refresh_features(draft, true, function() end)
-    draft_model.refresh_features(draft, true, function() end)
     eq("draft: every change in flight is counted", #held, 2)
+    -- The same question again while it is out is the same request, not a third.
+    draft_model.refresh_features(draft, true, function() end)
+    eq("draft: and asking again shares the one in flight", #held, 2)
     truthy("draft: and the card holds its height meanwhile", draft_model.groups(draft)[5].rows >= 1)
     held[1](
       nil,

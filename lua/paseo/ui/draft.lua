@@ -224,7 +224,10 @@ end
 
 -- ------------------------------------------------------------- round trips
 
----What this provider and mode support, asked fresh.
+---How long a model's features are answered from what was kept.
+M.FEATURES_TTL = 5 * 60 * 1000
+
+---What this provider and mode support.
 ---
 ---Guarded by a generation counter AND by identity: changing mode twice in
 ---quick succession leaves two requests in flight, and the first to come back
@@ -243,11 +246,24 @@ function M.refresh_features(draft, keep_values, done)
   draft.loading = true
   done()
 
-  bridge.request("providers.features", {
-    provider = draft.provider,
-    cwd = draft.cwd,
-    modeId = draft.modeId,
-  }, function(err, result)
+  -- Kept per provider, model, directory and mode (|paseo.store|): the
+  -- new-task screen asks this on every open, for the model it opened on last
+  -- time, and waited a round trip for the answer it had a minute ago.
+  local key = ("features\0%s\0%s\0%s\0%s"):format(
+    tostring(draft.host_id),
+    tostring(draft.provider),
+    tostring(draft.cwd),
+    tostring(draft.modeId)
+  )
+  require("paseo.store").get(key, M.FEATURES_TTL, function(fetched)
+    bridge.request("providers.features", {
+      provider = draft.provider,
+      cwd = draft.cwd,
+      modeId = draft.modeId,
+    }, function(err, result)
+      fetched(result, err)
+    end, draft.host_id)
+  end, function(result, err)
     vim.schedule(function()
       if request ~= draft.request or entry ~= draft.entry or model ~= draft.model then
         return
@@ -284,7 +300,7 @@ function M.refresh_features(draft, keep_values, done)
       draft.loading = false
       done()
     end)
-  end, draft.host_id)
+  end)
 end
 
 ---Select a provider by id, keeping nothing: its modes, models, thinking
@@ -374,7 +390,13 @@ end
 ---@param done? fun()
 function M.load(draft, done)
   done = done or function() end
-  bridge.request("providers", { cwd = draft.cwd }, function(err, result)
+  -- Asked fresh, whatever is kept -- `r` means "ask the daemon" -- and kept
+  -- for the next screen (|paseo.store|).
+  local create = require "paseo.ui.create"
+  require("paseo.store").refresh(create.catalogue_key(draft.cwd, draft.host_id), function(fetched)
+    create.fetch_catalogue(draft.cwd, draft.host_id, fetched)
+  end, function(entries, err)
+    local result = entries and { entries = vim.deepcopy(entries) } or nil
     vim.schedule(function()
       if err then
         vim.notify(
@@ -404,7 +426,7 @@ function M.load(draft, done)
       draft.provider = draft.entry.provider .. "/" .. draft.model.id
       M.refresh_features(draft, true, done)
     end)
-  end, draft.host_id)
+  end)
 end
 
 ---What `M.review` hands back: exactly the four fields `agent.ensure` takes.
