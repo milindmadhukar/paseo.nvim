@@ -110,7 +110,10 @@ end
 local function at_bottom(chat)
   local win = chat.win_conversation
   if not (win and api.nvim_win_is_valid(win)) then
-    return false
+    -- Off screen, the answer is what it was when you last looked. It used to
+    -- be "no", so a chat that was following stopped the moment another agent
+    -- took the window, and came back at the line it had been parked on.
+    return chat.sticky ~= false
   end
   -- `w$` is the last line VISIBLE in the window. A buffer shorter than the
   -- window has it equal to the count, so a fresh chat follows from the start.
@@ -145,6 +148,94 @@ end
 M.follow = follow
 M.at_bottom = at_bottom
 M.to_bottom = to_bottom
+
+-- ------------------------------------------------------------ where you were
+
+---Conversation buffer -> chat, for the one `WinScrolled` that serves them all.
+---@type table<integer, table>
+local tracked = setmetatable({}, { __mode = "v" })
+
+---Remember where `win` is: following (its last line on screen) or not, and
+---the view to put back when the chat comes back.
+---
+---YOUR SCROLLING DECIDES, nothing else. `G` reaches the bottom, so the chat
+---follows again; `<C-u>`, `k` past the top, the wheel, all leave it, so it
+---stays where you put it. `to_bottom` scrolls too, and only confirms "yes".
+---@param chat table
+---@param win integer
+local function note(chat, win)
+  if not (api.nvim_win_is_valid(win) and api.nvim_win_get_buf(win) == chat.conversation) then
+    return
+  end
+  chat.sticky = vim.fn.line("w$", win) >= api.nvim_buf_line_count(chat.conversation)
+  chat.view = api.nvim_win_call(win, vim.fn.winsaveview)
+end
+
+---Follow `chat`'s conversation buffer around the windows it is shown in.
+---Safe to call repeatedly.
+---@param chat table
+function M.track(chat)
+  local buf = chat.conversation
+  if not (buf and api.nvim_buf_is_valid(buf)) then
+    return
+  end
+  if chat.sticky == nil then
+    chat.sticky = true
+  end
+  if tracked[buf] == nil then
+    tracked[buf] = chat
+  end
+  if M._augroup then
+    return
+  end
+  M._augroup = api.nvim_create_augroup("paseo.transcript", { clear = true })
+  api.nvim_create_autocmd("WinScrolled", {
+    group = M._augroup,
+    desc = "paseo: a transcript remembers where you scrolled it",
+    callback = function(args)
+      -- One event for every window that moved: `v:event` names them all,
+      -- `<amatch>` only the first (and is all there is when it was fired
+      -- by hand).
+      local wins = { [args.match] = true }
+      for id in pairs(vim.v.event or {}) do
+        wins[id] = true
+      end
+      for id in pairs(wins) do
+        local win = tonumber(id)
+        if win and api.nvim_win_is_valid(win) then
+          local chat_ = tracked[api.nvim_win_get_buf(win)]
+          if chat_ then
+            note(chat_, win)
+          end
+        end
+      end
+    end,
+  })
+end
+
+---Put a chat that is back in its window where you left it.
+---
+---Following, it goes to the end, which has moved on while you were away.
+---Scrolled up, it stays scrolled up: switching agent, workspace or window and
+---back is not asking to lose your place.
+---@param chat table
+function M.restore(chat)
+  local win = chat.win_conversation
+  if not (win and api.nvim_win_is_valid(win)) then
+    return
+  end
+  if chat.sticky ~= false or not chat.view then
+    to_bottom(chat)
+    return
+  end
+  local view = vim.deepcopy(chat.view)
+  local count = api.nvim_buf_line_count(chat.conversation)
+  view.lnum = math.min(view.lnum or 1, count)
+  view.topline = math.min(view.topline or 1, count)
+  api.nvim_win_call(win, function()
+    vim.fn.winrestview(view)
+  end)
+end
 
 ---@param chat table
 ---@param block table

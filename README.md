@@ -521,6 +521,11 @@ side: **nothing is opened for you, and nothing is closed for you.**
   adds it to the row beside the rest. The Paseo tab's directory (`tcd`)
   follows whichever agent is in the middle. An agent started elsewhere — the
   app, the CLI — shows up on the rail, and is on the row once you open it.
+- **Each agent keeps its place.** Scroll up in a transcript and it stays
+  there — new output does not drag you down, and switching to another agent,
+  workspace or window and back finds it where you left it. `G` to the bottom
+  and it sticks again, following what the agent writes next. An agent you
+  were following while it was off screen comes back at its new end.
 - **Leaving the Paseo tab unlists the row**, so agents never show up among
   your code's buffers; coming back lists them again.
 - **A subagent is a peek.** Opening one (from the rail or `gs`) shows it in

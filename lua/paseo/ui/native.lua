@@ -1475,6 +1475,9 @@ function M.show(chat, opts)
     end
   end
 
+  -- Asked before the swap: a chat already in the middle is where you are
+  -- looking, and has nothing to put back.
+  local arriving = api.nvim_win_get_buf(s.conv) ~= chat.conversation or s.chat ~= chat
   put(s.conv, chat.conversation)
   set_options(s.conv, CONVERSATION)
   ensure_composer(s, chat)
@@ -1513,6 +1516,12 @@ function M.show(chat, opts)
     transcript.redraw(chat)
   end
   require("paseo.ui.sidebar").fit_composer(chat)
+  -- After the re-lay, which would undo it. `:bnext`, a bufferline click and
+  -- the rail all come in here, and none of them goes through `chat.layout`:
+  -- back where you left it, or at the end if you were following.
+  if arriving then
+    transcript.restore(chat)
+  end
   require("paseo.ui.chat").set_current(chat)
   M.refresh(chat)
   require("paseo.ui.composer").refresh(chat)

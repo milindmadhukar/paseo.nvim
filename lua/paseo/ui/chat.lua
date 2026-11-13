@@ -26,6 +26,8 @@ local M = {}
 ---@field composer integer      bufnr
 ---@field win_conversation integer|nil
 ---@field win_composer integer|nil
+---@field sticky boolean|nil   Following the end of the transcript (|paseo-scroll|).
+---@field view table|nil      Where you had it scrolled, for when it comes back.
 ---@field streaming boolean
 ---@field spinner uv.uv_timer_t|nil  Ticking only while `streaming`.
 ---@field frame integer|nil     Set while a spinner timer is live. Not a frame
@@ -867,6 +869,7 @@ local function make_buffers(chat)
     end, vim.tbl_extend("force", conv, { desc = "paseo: stop the turn" }))
 
     watch_size(chat)
+    transcript.track(chat)
   end
 
   if not (chat.composer and vim.api.nvim_buf_is_valid(chat.composer)) then
@@ -1116,17 +1119,16 @@ local function layout(chat, explicit, nopts)
       sidebar.close(chat)
     end
     native.open(chat, nopts)
-    transcript.to_bottom(chat)
+    transcript.restore(chat)
     return
   end
   require("paseo.ui.native").release(chat)
   sidebar.open(chat)
-  -- AT THE END, NOT WHERE YOU LEFT IT. A window put back on a conversation
-  -- buffer gets that buffer's last cursor position, so coming back to a
-  -- workspace -- or reopening a chat at all -- showed whatever you had last
-  -- scrolled to, and the newest thing the agent said was a scroll away.
-  -- Opening a chat is asking what is happening NOW.
-  transcript.to_bottom(chat)
+  -- WHERE YOU LEFT IT. A chat that was following goes to the end, which has
+  -- moved on while it was off screen; one you had scrolled up in stays
+  -- scrolled up (`transcript.restore`). It used to go to the end every time,
+  -- and switching away and back lost whatever you had been rereading.
+  transcript.restore(chat)
 end
 
 -- ------------------------------------------------------------------- history

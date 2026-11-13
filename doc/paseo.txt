@@ -1651,6 +1651,15 @@ code, for when the conversation is a thing you glance at rather than the thing
 you are doing. `<C-f>` from it goes full screen. The row at its top says which
 session you are looking at, with the surface's own keys on the end of it.
 
+                                                              *paseo-scroll*
+EACH TRANSCRIPT KEEPS ITS PLACE. Scroll up in one and it stays there: new
+output does not drag you back down, and switching to another agent, another
+workspace or another window and back finds it where you left it. `G` to the
+bottom and it sticks again, following whatever the agent writes next. A chat
+you were following while it was off screen comes back at its NEW end, not at
+the line it was on when you left. Your scrolling is the only thing that
+decides: reaching the last line turns following on, leaving it turns it off.
+
                                                   *paseo-chat-agent-messages*
 MESSAGES FROM OTHER AGENTS. When another agent sends this one a message, or
 the daemon tells it a child agent finished, failed or needs a permission, the

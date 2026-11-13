@@ -769,6 +769,91 @@ local function test_api()
   chat_mod.set_current(saved_current)
 end
 
+---Fill a chat with more than a screenful.
+---@param chat table
+---@param n integer
+---@param tag string
+local function fill(chat, n, tag)
+  for i = 1, n do
+    transcript.upsert(chat, { kind = "assistant", id = tag .. i, text = tag .. " line " .. i })
+  end
+end
+
+---Where the middle window is: its top line, and whether its last is on screen.
+---@param chat table
+---@return integer top, boolean bottom
+local function where(chat)
+  local win = chat.win_conversation
+  return vim.fn.line("w0", win), vim.fn.line("w$", win) >= api.nvim_buf_line_count(chat.conversation)
+end
+
+---Scroll the middle window the way a key would, and let `WinScrolled` see it.
+---@param chat table
+---@param keys string
+local function scroll(chat, keys)
+  api.nvim_win_call(chat.win_conversation, function()
+    vim.cmd("normal! " .. api.nvim_replace_termcodes(keys, true, false, true))
+  end)
+  -- `WinScrolled` is the main loop's, and a script never gets back to it on
+  -- its own. Fire it as the main loop would, naming the window.
+  local win = chat.win_conversation
+  api.nvim_exec_autocmds("WinScrolled", { pattern = tostring(win), data = { win = win } })
+end
+
+local function test_sticky()
+  local native = require "paseo.ui.native"
+  local chat_mod = require "paseo.ui.chat"
+  local saved_current = chat_mod.current()
+
+  local a = new_chat "sticky-a"
+  local b = new_chat "sticky-b"
+  native.open(a)
+  fill(a, 200, "a")
+  local _, bottom = where(a)
+  eq("sticky: a new chat follows from the start", bottom, true)
+  fill(a, 5, "more")
+  _, bottom = where(a)
+  eq("sticky: and keeps following what lands", bottom, true)
+
+  -- SCROLL UP AND IT STAYS. The next chunk does not drag you back down.
+  scroll(a, "gg")
+  local top = where(a)
+  eq("sticky: scrolled to the top", top, 1)
+  eq("sticky: which is not following", a.sticky, false)
+  fill(a, 5, "while-up")
+  eq("sticky: a chunk while scrolled up leaves you there", (where(a)), 1)
+
+  -- SWITCH AWAY AND BACK: still where you were.
+  native.open(b)
+  fill(a, 5, "while-away")
+  native.open(a)
+  eq("sticky: back from another agent, still where you left it", (where(a)), 1)
+  api.nvim_set_current_win(a.win_conversation)
+  vim.cmd("buffer " .. b.conversation)
+  settle()
+  vim.cmd("buffer " .. a.conversation)
+  settle()
+  eq("sticky: and through :buffer too", (where(a)), 1)
+
+  -- G, AND IT FOLLOWS AGAIN.
+  scroll(a, "G")
+  eq("sticky: G is following again", a.sticky, true)
+  fill(a, 5, "after-G")
+  _, bottom = where(a)
+  eq("sticky: so what lands next scrolls into view", bottom, true)
+
+  -- FOLLOWING WHILE AWAY: back at the new end, not the old one.
+  native.open(b)
+  fill(a, 50, "away-following")
+  native.open(a)
+  _, bottom = where(a)
+  eq("sticky: following while off screen lands at the new end", bottom, true)
+
+  native.close(a)
+  native.reset()
+  chat_mod.set_current(saved_current)
+end
+
 return {
   { "ui.native.layout", test_layout },
   { "ui.native.toggle", test_toggle },
@@ -781,4 +866,5 @@ return {
   { "ui.native.uniform", test_uniform },
   { "ui.native.novolt", test_without_volt },
   { "ui.native.api", test_api },
+  { "ui.native.sticky", test_sticky },
 }
