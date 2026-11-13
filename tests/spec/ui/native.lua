@@ -420,8 +420,9 @@ vim.cmd "qa!"
   os.remove(out)
 end
 
----A WORKSPACE IS A SET OF BUFFERS: opening an agent of another workspace
----replaces the set, and a subagent is a peek that leaves the set alone.
+---THE ROW IS WHAT YOU OPENED: agents of any workspace, side by side, in the
+---order you opened them; nothing opened or closed for you. A subagent is a
+---peek that leaves the row alone.
 local function test_workspaces()
   local native = require "paseo.ui.native"
   local chat_mod = require "paseo.ui.chat"
@@ -467,49 +468,47 @@ local function test_workspaces()
 
   local ok, err = pcall(function()
     local a1 = new_chat "ws-a1"
-    a1.root = one
+    a1.root, a1.local_root = one, one
     native.open(a1)
-    local listed = native.listed()
-    eq("workspaces: the workspace's agents are the row", #listed, 2)
-    local a2 = listed[2]
-    eq("workspaces: in the order they started", a2.agent_id, "ws-a2")
-    eq("workspaces: each a listed buffer", vim.bo[a2.conversation].buflisted, true)
-    truthy(
-      "workspaces: under its agent's title",
-      api.nvim_buf_get_name(a2.conversation):find("paseo://agent/second", 1, true) ~= nil,
-      api.nvim_buf_get_name(a2.conversation)
-    )
-    eq("workspaces: the tab is in the workspace", vim.fn.resolve(vim.fn.getcwd()), one)
+    eq("row: opening an agent is that agent alone -- nothing else is opened", native.listed(), { a1 })
+    eq("row: listed", vim.bo[a1.conversation].buflisted, true)
+    eq("row: the tab stands where it works", vim.fn.resolve(vim.fn.getcwd()), one)
 
-    -- Another workspace's agent: the set is replaced.
-    local a2_buf = a2.conversation
+    -- Another workspace's agent JOINS the row: nothing is closed for it.
     local b1 = new_chat "ws-b1"
-    b1.root = two
-    chat_mod.set_current(b1)
+    b1.root, b1.local_root = two, two
     native.open(b1)
-    eq("workspaces: switching replaces the row", native.listed(), { b1 })
-    eq("workspaces: the old agents' buffers are gone", api.nvim_buf_is_valid(a2_buf), false)
-    eq("workspaces: and the tab's directory followed", vim.fn.resolve(vim.fn.getcwd()), two)
-    eq("workspaces: on the one Paseo tab", api.nvim_get_current_tabpage(), native.tab())
+    eq("row: another workspace's agent joins the row", native.listed(), { a1, b1 })
+    eq("row: the first is still a live, listed buffer", vim.bo[a1.conversation].buflisted, true)
+    eq("row: the tab follows the agent in the middle", vim.fn.resolve(vim.fn.getcwd()), two)
+
+    -- A second agent of the first workspace, opened: one more, at the end.
+    local a2 = new_chat "ws-a2"
+    a2.root, a2.local_root = one, one
+    native.open(a2)
+    eq("row: in the order you opened them", native.listed(), { a1, b1, a2 })
+
+    -- The daemon reporting agents does not open any.
+    native.sync()
+    eq("row: an agent change opens nothing", #native.listed(), 3)
+
+    -- Back to one already open: the same buffer, no duplicate.
+    native.open(a1)
+    eq("row: reopening is the same buffer", native.listed(), { a1, b1, a2 })
+    eq("row: and the tab went back with it", vim.fn.resolve(vim.fn.getcwd()), one)
+    eq("row: on the one Paseo tab", api.nvim_get_current_tabpage(), native.tab())
 
     -- A SUBAGENT IS A PEEK: in the middle, off the row.
+    native.open(b1)
     local sub = new_chat "ws-sub"
-    sub.root = two
+    sub.root, sub.local_root = two, two
     native.open(sub)
-    eq(
-      "peek: the subagent takes the middle",
-      api.nvim_win_get_buf(sub.win_conversation),
-      sub.conversation
-    )
-    eq("peek: the row is unchanged", native.listed(), { b1 })
+    eq("peek: the subagent takes the middle", api.nvim_win_get_buf(sub.win_conversation), sub.conversation)
+    eq("peek: the row is unchanged", native.listed(), { a1, b1, a2 })
     eq("peek: and it is not listed", vim.bo[sub.conversation].buflisted, false)
     -- `q` goes back to the parent, not out of Paseo.
     native.close(sub)
-    eq(
-      "peek: q goes back to the parent",
-      api.nvim_win_get_buf(b1.win_conversation),
-      b1.conversation
-    )
+    eq("peek: q goes back to the parent", api.nvim_win_get_buf(b1.win_conversation), b1.conversation)
     truthy("peek: with the Paseo tab still up", native.any())
 
     -- A read-only buffer -- a provider subagent's transcript -- the same way.

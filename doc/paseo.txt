@@ -1705,12 +1705,14 @@ and `q` closes it, back to the box you type in. See |paseo-chat-session|,
 |:Paseo-workspaces|, a picker.
 
                                                        *paseo-native-buffers*
-EVERY AGENT IS A BUFFER. The Paseo app shows a workspace's agents as a row of
-tabs over the chat; here that row is YOUR BUFFERLINE. Every live agent and
-terminal of the workspace on screen is a LISTED buffer --
-`paseo://agent/<title>`, `paseo://terminal/<name>` -- so a bufferline shows
-them by name, in the order they were started, and you move between them the
-way you move between any buffers.
+EVERY AGENT YOU OPEN IS A BUFFER. The Paseo app shows the agents you have
+open as a row of tabs over the chat; here that row is YOUR BUFFERLINE. Every
+agent and terminal you open -- from the rail, the picker, anywhere -- is a
+LISTED buffer -- `paseo://agent/<title>`, `paseo://terminal/<name>` -- so a
+bufferline shows them by name, in the order you opened them, and you move
+between them the way you move between any buffers. Agents of different
+workspaces sit side by side: NOTHING IS OPENED FOR YOU, AND NOTHING IS
+CLOSED FOR YOU.
 
 THE MIDDLE WINDOW SWAPS BUFFERS. `:bnext`, `:b N` or a click on the
 bufferline puts another agent there, and its composer, its keys and the
@@ -1724,18 +1726,18 @@ its buffer is shown. A terminal's buffer becomes the live terminal the first
 time you enter it, keeping its place on the row; while a terminal is in the
 middle the composer is put away. See |paseo-terminals|.
 
-A WORKSPACE IS A SET OF BUFFERS. Picking another workspace -- on the rail, or
-in the picker while you are on the Paseo tab -- wipes the old row (a
-composer holding words you have not sent is kept), lists the new workspace's
-agents and `:tcd`s the Paseo tab into it. An agent started elsewhere -- the
-app, the CLI -- joins the row when the daemon reports it.
+ANOTHER WORKSPACE IS ONE MORE BUFFER. Opening an agent of another workspace
+-- on the rail, or in the picker while you are on the Paseo tab -- adds it to
+the row beside the rest. The Paseo tab's directory (`:tcd`) follows whichever
+agent is in the middle. An agent started elsewhere -- the app, the CLI --
+shows up on the rail, and is on the row once you open it.
 
 LEAVING THE PASEO TAB UNLISTS THE ROW, so agents never show up among your
 code's buffers; coming back lists them again.
 
 A SUBAGENT IS A PEEK. Opening one -- from the rail or |:Paseo-subagents| --
 shows it in the middle window in place of its parent, unlisted, since it is
-not one of the workspace's agents. A provider subagent is read-only; a Paseo
+not one of the agents you opened. A provider subagent is read-only; a Paseo
 one has its composer, so you can talk to it. `q` goes back to the parent.
 
 `:bdelete` ON AN AGENT takes just that one off the row, and the neighbour
@@ -1753,6 +1755,34 @@ every listed buffer in Neovim: >lua
     vim.keymap.set("n", "<S-h>", function()
       require("nvchad.tabufline").prev()
     end)
+<
+                                                        *paseo-rail-offset*
+THE ROW STARTS PAST THE RAIL, the way it starts past nvim-tree, once your
+bufferline knows the rail's filetype, `paseo-rail`. The plugin redraws the
+tabline whenever the rail opens or closes. bufferline.nvim: >lua
+    options = {
+      offsets = { { filetype = "NvimTree" }, { filetype = "paseo-rail" } },
+    }
+<
+NvChad's tabufline knows one filetype (`treeOffsetFt`), so replace its
+`treeOffset` module in `chadrc.lua`: >lua
+    tabufline = {
+      modules = {
+        treeOffset = function()
+          for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+            local ft = vim.bo[vim.api.nvim_win_get_buf(win)].ft
+            local hl = (ft == "NvimTree" and "NvimTree")
+              or (ft == "paseo-rail" and "PaseoTree")
+            if hl then
+              return "%#" .. hl .. "Normal#"
+                .. string.rep(" ", vim.api.nvim_win_get_width(win))
+                .. "%#" .. hl .. "WinSeparator#│"
+            end
+          end
+          return ""
+        end,
+      },
+    },
 <
 
 ONE BACKGROUND FOR EVERY PANE, the `PaseoBase` group: the editor's own under
@@ -1881,8 +1911,8 @@ job (`g?` lists them): >
     h <BS>    fold; on a row that does not fold, fold the one it is in and
               land on it
     <Tab> za  fold or unfold
-    O         open the workspace as a place: its agents become the
-              buffers, the newest in the middle
+    O         open the workspace as a place: its newest agent, one
+              more buffer on the row
     P         up to the parent
     < >       previous / next sibling
     K J       first / last sibling
@@ -1938,9 +1968,8 @@ what you did last. A remembered model the provider no longer offers falls back
 to its default. Nothing is written until something is created.
 
 `Here` joins the workspace on screen, by id, so a second agent lands beside
-the first; the draft becomes that agent in place. A new worktree's agent
-switches the row to that workspace; a terminal joins the row and takes the
-middle (|paseo-native-buffers|).
+the first; the draft becomes that agent in place. A new worktree's agent, or a
+terminal, joins the row and takes the middle (|paseo-native-buffers|).
 
                                                            *paseo-chat-usage*
 The USAGE panel (`3` in the panel) answers two different questions, from two

@@ -8,20 +8,21 @@
 ---   ┌ rail ┬ conversation (winbar: agent · status · keys) ┬ panel ┐
 ---   │      ├ composer (its own bar: model, mode, the spinner) │       │
 ---
---- EVERY AGENT IS A BUFFER. The workspace on screen has its agents -- and its
---- terminals -- listed as buffers, so a bufferline shows them the way the app
---- shows its row of agent tabs, and moving between them is moving between
---- buffers (`:bnext`, your bufferline's keys). The middle window holds the
---- agent you are looking at; the composer under it follows whichever
---- conversation buffer is put there.
+--- EVERY AGENT YOU OPEN IS A BUFFER. Open an agent or a terminal -- from
+--- the rail, the picker, anywhere -- and it is a listed buffer on the Paseo
+--- tab, so a bufferline shows what you have open the way the app shows its
+--- row of agent tabs, and moving between them is moving between buffers. Any
+--- workspace's, side by side, in the order you opened them. Nothing is
+--- opened for you and nothing is closed for you: `:bdelete` takes one off,
+--- `q` closes the tab.
 ---
---- A WORKSPACE IS A SET OF BUFFERS. Picking another one in the rail wipes the
---- old set and lists the new workspace's agents, and the tab's directory
---- (`:tcd`) follows. Leaving the Paseo tab unlists them, so they never show up
---- among your code's buffers; coming back lists them again.
+--- The middle window holds the one you are looking at; the composer under
+--- it, and the tab's directory (`:tcd`), follow whichever is put there.
+--- Leaving the Paseo tab unlists them, so they never show up among your
+--- code's buffers; coming back lists them again.
 ---
 --- A SUBAGENT IS A PEEK. It is shown in the middle window in place of its
---- parent, unlisted -- it is not one of the workspace's agents -- and `q`
+--- parent, unlisted -- it is not one of the agents you opened -- and `q`
 --- goes back to the parent.
 ---
 --- The rail is |paseo.ui.rail|'s buffer. The conversation and composer are
@@ -56,14 +57,10 @@ local ns = api.nvim_create_namespace "paseo.native"
 ---@field panel string|nil
 ---@field chat table|nil        The chat in the middle, or the last one there
 ---                             while a terminal is.
----@field ws string|nil         The workspace whose agents are listed.
----@field ws_dir string|nil
----@field set table[]           Those agents' chats, in the order they started.
----@field terms table[]         Its terminals: `{ id, host_id, title, buf }`.
+---@field set table[]           The chats you opened, in the order you did.
+---@field terms table[]         The terminals you opened: `{ id, host_id, title, buf }`.
 ---@field peek { parent: table, buf?: integer }|nil  A subagent in the middle.
 ---@field swapping boolean|nil  Set while this module moves buffers itself.
----@field reopen_panel string|nil  The panel a workspace switch closed, put
----                             back once the new agent is in the middle.
 
 ---@type paseo.NativeSurface|nil
 local S
@@ -302,25 +299,11 @@ local function add(s, chat)
   list_one(s, chat.conversation)
 end
 
----The row in the order the agents started, as the app's tabs are -- an agent
----opened before its workspace was known would otherwise lead it -- and a
----per-tab bufferline's own list (NvChad's `t:bufs`, which records buffers in
----the order they were listed) put in that order too.
+---A per-tab bufferline's own list (NvChad's `t:bufs`, which records buffers
+---as they are listed) kept in the row's order -- the order you opened them
+---in -- through the unlisting and relisting of leaving and coming back.
 ---@param s paseo.NativeSurface
 order = function(s)
-  local agents = require "paseo.agents"
-  local rank = {}
-  for i, chat in ipairs(s.set) do
-    local agent = chat.agent_id and agents.get(chat.agent_id, chat.host_id)
-    rank[chat] = { agent and agent.createdAt or "\255", i }
-  end
-  table.sort(s.set, function(a, b)
-    local x, y = rank[a], rank[b]
-    if x[1] ~= y[1] then
-      return x[1] < y[1]
-    end
-    return x[2] < y[2]
-  end)
   if api.nvim_get_current_tabpage() ~= s.tab or type(vim.t.bufs) ~= "table" then
     return
   end
@@ -412,41 +395,6 @@ local function add_term(s, terminal, host_id)
   s.terms[#s.terms + 1] = term
   list_one(s, term.buf)
   return term
-end
-
----Does this chat's composer hold words you have not sent?
----@param chat table
----@return boolean
-local function has_draft(chat)
-  if not valid_buf(chat.composer) then
-    return false
-  end
-  for _, line in ipairs(api.nvim_buf_get_lines(chat.composer, 0, -1, false)) do
-    if vim.trim(line) ~= "" then
-      return true
-    end
-  end
-  return false
-end
-
----Out of the set, for good: the workspace is being left.
----
----A chat whose composer holds an unsent prompt, or that is on screen
----somewhere else (the sidebar), is unlisted and kept; any other is disposed
----of -- its buffers wiped, the agent untouched.
----@param chat table
-local function drop(chat)
-  local chats = require "paseo.ui.chat"
-  if valid_buf(chat.conversation) then
-    pcall(function()
-      vim.bo[chat.conversation].buflisted = false
-    end)
-  end
-  local elsewhere = valid_win(chat.win_conversation) and not (S and chat.win_conversation == S.conv)
-  if has_draft(chat) or elsewhere or chats.current() == chat then
-    return
-  end
-  chats.dispose(chat)
 end
 
 -- ------------------------------------------------------------------ leaving
@@ -578,6 +526,9 @@ local function open_rail(s)
   if valid_win(from) then
     api.nvim_set_current_win(from)
   end
+  -- A bufferline that offsets past a sidebar (nvim-tree's way) measures it
+  -- when it draws: tell it the sidebar is there.
+  pcall(vim.cmd.redrawtabline)
 end
 
 ---Is the rail showing on the Paseo tab, and is that the tab you are on?
@@ -617,6 +568,7 @@ function M.toggle_rail()
     s.rail = nil
     pcall(api.nvim_win_close, win, true)
     require("paseo.ui.rail").set_visible(false)
+    pcall(vim.cmd.redrawtabline)
     M.back()
   else
     require("paseo.ui.rail").set_visible(true)
@@ -1109,161 +1061,25 @@ local function unbind(chat)
   chat.native_keys = nil
 end
 
--- --------------------------------------------------------------- workspaces
+-- ---------------------------------------------------------------- the row
 
----A workspace `open_workspace` is opening, for the `M.open` that follows.
----@type table|nil
-local pending_ws
-
----The workspace a chat's agent is in, and whether that agent is a subagent.
+---Is this chat's agent a Paseo subagent -- a peek, not one of the row's?
 ---@param chat table
----@return string|nil id, table|nil agent, boolean subagent
-local function workspace_of(chat)
+---@return boolean
+local function is_subagent(chat)
   local agent = chat.agent_id and require("paseo.agents").get(chat.agent_id, chat.host_id)
-  if not agent then
-    return nil, nil, false
-  end
-  local parent = agent.labels and agent.labels[require("paseo.subagents").PARENT_LABEL]
-  return agent.workspaceId, agent, parent ~= nil
+  return agent ~= nil and agent.labels ~= nil and agent.labels[require("paseo.subagents").PARENT_LABEL] ~= nil
 end
 
----The workspace record for an id: the rail's, which knows its directory and
----host, else what the agent says about it.
----@param id string
----@param agent table|nil
----@param host_id string|nil
----@return table
-local function workspace_record(id, agent, host_id)
-  return require("paseo.ui.rail").workspace(id)
-    or { id = id, directory = agent and agent.cwd, hostId = host_id }
-end
-
----List the workspace's agents and terminals that are not in the set yet.
----
----Its top-level agents only: a Paseo subagent whose parent is here is under
----that parent, as the rail draws it, and is reached as a peek.
----@param s paseo.NativeSurface
----@param ws table
----@param host_id string|nil
-local function populate(s, ws, host_id)
-  local tree = require "paseo.ui.tree"
-  local chats = require "paseo.ui.chat"
-  local parent_label = require("paseo.subagents").PARENT_LABEL
-  host_id = ws.hostId or host_id
-  local list = tree.workspace_agents(ws, host_id)
-  local ids = {}
-  for _, agent in ipairs(list) do
-    ids[agent.id] = true
-  end
-  for _, agent in ipairs(list) do
-    local parent = agent.labels and agent.labels[parent_label]
-    if not (parent and ids[parent]) then
-      local chat = chats.prepare {
-        agent_id = agent.id,
-        host_id = host_id,
-        root = agent.cwd or ws.directory,
-        title = agent.title,
-      }
-      if chat then
-        add(s, chat)
-      end
-    end
-  end
-  for _, terminal in ipairs(tree.workspace_terminals(ws, host_id)) do
-    add_term(s, terminal, host_id)
-  end
-  order(s)
-end
-
----Make `ws` the workspace whose agents are the buffers: the old set goes, the
----new one is listed, and the tab's directory follows.
----@param s paseo.NativeSurface
----@param ws table
----@param keep table  The chat being opened, kept whatever happens.
----@param key string  What the set is remembered by: the workspace's id, or
----                   `dir:<path>` for a directory with none.
-local function switch_workspace(s, ws, keep, key)
-  -- The new chat into the windows FIRST: wiping a buffer a window is showing
-  -- closes the window, and the middle one going takes the Paseo tab.
-  if s.chat and s.chat ~= keep then
-    unbind(s.chat)
-    if s.chat.win_conversation == s.conv then
-      s.chat.win_conversation, s.chat.win_composer = nil, nil
-    end
-    s.chat = nil
-  end
-  if s.panel then
-    s.reopen_panel = s.panel
-    close_panel(s)
-  end
-  if valid_buf(keep.conversation) then
-    put(s.conv, keep.conversation)
-  end
-  if valid_win(s.comp) and valid_buf(keep.composer) then
-    put(s.comp, keep.composer)
-  end
-  for _, chat in ipairs(s.set) do
-    -- Already the new workspace's -- a new task that has just become one of
-    -- its agents -- stays as it is rather than being wiped and refetched.
-    local agent = chat.agent_id and require("paseo.agents").get(chat.agent_id, chat.host_id)
-    local theirs = ws.id and agent and agent.workspaceId == ws.id
-    if chat ~= keep and not theirs then
-      drop(chat)
-    end
-  end
-  for _, term in ipairs(s.terms) do
-    if valid_buf(term.buf) then
-      pcall(function()
-        vim.bo[term.buf].buflisted = false
-      end)
-      -- A terminal never shown is an empty buffer of ours; one that was
-      -- shown is |paseo.ui.terminal|'s, attached, and stays its business.
-      if not require("paseo.ui.terminal").view(term.id, term.host_id) then
-        pcall(api.nvim_buf_delete, term.buf, { force = true })
-      end
-    end
-  end
-  local kept = {}
-  for _, chat in ipairs(s.set) do
-    local agent = chat.agent_id and require("paseo.agents").get(chat.agent_id, chat.host_id)
-    if chat ~= keep and ws.id and agent and agent.workspaceId == ws.id then
-      kept[#kept + 1] = chat
-    end
-  end
-  s.set, s.terms, s.peek = kept, {}, nil
-  s.ws, s.ws_dir = key, ws.local_directory or ws.directory
-  -- The workspace's directory: the tab is the workspace's, wherever in it
-  -- the agent happens to be working.
-  local dir = s.ws_dir or keep.local_root or keep.root
-  if dir and vim.fn.isdirectory(dir) == 1 then
-    api.nvim_win_call(s.conv, function()
-      pcall(vim.cmd.tcd, vim.fn.fnameescape(dir))
-    end)
-  end
-  populate(s, ws, keep.host_id)
-end
-
----Catch the set up with the daemon: agents started since (here, in the app),
----titles that changed, and the workspace of a chat that did not know it yet.
+---Keep the row's names current: an agent's title arrives after it starts,
+---and a terminal can be renamed from the rail. Nothing is added or taken
+---away here -- the row is what you opened.
 function M.sync()
   local s = surface()
   if not s then
     return
   end
   local chats = require "paseo.ui.chat"
-  if (not s.ws or s.ws:sub(1, 4) == "dir:") and s.chat then
-    local id, agent = workspace_of(s.chat)
-    if id then
-      s.ws = id
-      s.ws_dir = s.ws_dir or (agent and agent.cwd)
-    end
-  end
-  if s.ws and s.ws:sub(1, 4) ~= "dir:" then
-    local agent = s.chat
-      and s.chat.agent_id
-      and require("paseo.agents").get(s.chat.agent_id, s.chat.host_id)
-    populate(s, workspace_record(s.ws, agent, s.chat and s.chat.host_id), s.chat and s.chat.host_id)
-  end
   for _, chat in ipairs(s.set) do
     chats.name_conversation(chat)
   end
@@ -1602,8 +1418,7 @@ function M.show(chat, opts)
     return M.open(chat, opts)
   end
   local old = s.chat
-  local panel = s.panel or s.reopen_panel
-  s.reopen_panel = nil
+  local panel = s.panel
   if old ~= chat then
     if s.panel then
       close_panel(s)
@@ -1623,6 +1438,15 @@ function M.show(chat, opts)
   s.chat = chat
   chat.win_conversation, chat.win_composer = s.conv, s.comp
   chat.surface = "native"
+  -- The tab stands where the agent in the middle works: `:e`, telescope and
+  -- `:Paseo explain` from here start in its workspace.
+  local dir = chat.local_root or chat.root
+  if dir and dir ~= vim.fn.getcwd(-1, api.nvim_tabpage_get_number(s.tab)) and vim.fn.isdirectory(dir) == 1 then
+    -- `silent`: a `:tcd` run from a keypress echoes the new directory.
+    api.nvim_win_call(s.conv, function()
+      pcall(vim.cmd, "silent tcd " .. vim.fn.fnameescape(dir))
+    end)
+  end
   require("paseo.ui.composer").style(chat)
   bind(chat)
   require("paseo.ui.surface").remember "native"
@@ -1661,16 +1485,14 @@ end
 
 ---Put `chat` on the Paseo tab, making the tab if there is none.
 ---
----An agent of another workspace switches the set; a subagent is a peek; any
----other chat -- one of this workspace's, a new task, a chat whose agent the
----editor has not heard about yet -- joins the set.
+---WHAT YOU OPEN IS WHAT IS THERE. The chat joins the row -- whatever
+---workspace it is in, beside whatever else you have open -- and nothing else
+---is added or taken away. A subagent is the exception: a peek in place of
+---its parent, off the row.
 ---@param chat table
----@param opts? { focus?: boolean, ws?: table }
+---@param opts? { focus?: boolean }
 function M.open(chat, opts)
   opts = opts or {}
-  if pending_ws then
-    opts.ws, pending_ws = opts.ws or pending_ws, nil
-  end
   watch()
   local s = surface()
   if not s then
@@ -1681,40 +1503,12 @@ function M.open(chat, opts)
     api.nvim_set_current_tabpage(s.tab)
   end
 
-  local id, agent, sub = workspace_of(chat)
-  if opts.ws and opts.ws.id then
-    id = opts.ws.id
-  end
-  -- No workspace id to go by -- the daemon has not said, or this is a chat
-  -- for a directory -- but a directory other than the one the tab is in:
-  -- that is somewhere else too.
-  local dir = chat.local_root or chat.root
-  if not id and not sub and s.ws_dir and dir and dir ~= s.ws_dir then
-    id = "dir:" .. dir
-  end
-  if sub and s.chat and s.chat ~= chat then
+  if is_subagent(chat) and s.chat and s.chat ~= chat and not index_of(s, chat) then
     -- Back goes to the agent the peek started from, however many subagents
     -- deep it went.
     s.peek = { parent = s.peek and s.peek.parent or s.chat }
-  elseif id and id ~= s.ws then
-    local ws = opts.ws
-    if not ws then
-      ws = id:sub(1, 4) == "dir:" and { directory = dir, hostId = chat.host_id }
-        or workspace_record(id, agent, chat.host_id)
-    end
-    switch_workspace(s, ws, chat, id)
-    add(s, chat)
-  elseif not sub then
+  else
     s.peek = nil
-    if not s.ws and not s.ws_dir then
-      local dir = chat.local_root or chat.root
-      if dir and vim.fn.isdirectory(dir) == 1 then
-        s.ws_dir = dir
-        api.nvim_win_call(s.conv, function()
-          pcall(vim.cmd.tcd, vim.fn.fnameescape(dir))
-        end)
-      end
-    end
     add(s, chat)
   end
 
@@ -1933,8 +1727,9 @@ function M.show_session(session)
   end
 end
 
----A workspace from the rail: its agents become the buffers, the newest in
----the middle. One with no agent yet gets the new-task screen.
+---A workspace from the rail: its newest agent, opened -- one buffer more on
+---the row, the rest of the workspace a pick away on the rail. One with no
+---agent yet gets the new-task screen.
 ---@param ws table
 function M.open_workspace(ws)
   local s = surface()
@@ -1955,9 +1750,6 @@ function M.open_workspace(ws)
       end
     end
   end
-  -- The rail's record of the workspace -- its directory, its host -- goes
-  -- with the open, for the switch to list its agents by.
-  pending_ws = ws
   if newest then
     return M.show_session { kind = "agent", id = newest.id, hostId = host_id }
   end
@@ -2004,7 +1796,6 @@ end
 function M.reset()
   S = nil
   origin = nil
-  pending_ws = nil
   last_panel = "Settings"
   if timer then
     timer:stop()

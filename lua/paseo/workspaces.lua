@@ -687,8 +687,8 @@ function M.open(ws)
     how = "tcd"
   end
 
-  -- ON THE PASEO TAB, a workspace is a set of agent buffers: switching is
-  -- the rail's switch, not a move of your editor. (After a handler of yours,
+  -- ON THE PASEO TAB, opening a workspace opens its agent there -- one more
+  -- buffer on the row -- rather than moving your editor. (After a handler of yours,
   -- which is the one thing that outranks it.)
   local native = package.loaded["paseo.ui.native"]
   if native and native.on_tab() then

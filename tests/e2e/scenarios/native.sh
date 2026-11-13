@@ -1,7 +1,8 @@
-# The native surface, against a real daemon: ONE Paseo tab, every agent of
-# the workspace a listed buffer in it, the spinner while a turn runs, markdown
-# prose, the panels, `:bnext` between agents, a workspace switch replacing the
-# row, and a changed file opening with your code rather than in a tab.
+# The native surface, against a real daemon: ONE Paseo tab, every agent you
+# open a listed buffer in it -- from any workspace, nothing opened or closed
+# for you -- the spinner while a turn runs, markdown prose, the panels,
+# `:bnext` between agents, and a changed file opening with your code rather
+# than in a tab.
 source "$(dirname "$0")/../lib.sh"
 
 repo="$(fresh_repo)"
@@ -26,26 +27,36 @@ send_prompt "long"
 wait_idle 60
 
 # A second agent IN THE SAME WORKSPACE -- the app's `+` -- started outside
-# Neovim: it joins the row by itself.
+# Neovim. It is on the rail, NOT on the row: nothing opens by itself.
 wsid="$("$E" lua 'require("paseo.agents").get(require("paseo.ui.chat").current().agent_id).workspaceId')"
 [ -n "$wsid" ] && [ "$wsid" != "vim.NIL" ] || fail "the agent has no workspace id"
 "$D" paseo run --provider fake/scripted --cwd "$repo" --workspace "$wsid" --title "second" "echo second" >/dev/null 2>&1 \
   || fail "seed 2"
+"$E" wait 'vim.iter(require("paseo.agents").all()):any(function(a) return a.title == "second" end)' 15 \
+  || fail "the second agent never reached Neovim"
+sleep 1
+[ "$("$E" lua '#require("paseo.ui.native").listed()')" = "1" ] || fail "an agent opened by itself"
 
-# EVERY AGENT OF THE WORKSPACE IS A LISTED BUFFER, named after it.
-"$E" wait '#require("paseo.ui.native").listed() == 2' 15 || fail "the workspace's two agents are not both on the row"
+# Opening it is what puts it on the row, named after it.
+"$E" lua '(function() for _, a in ipairs(require("paseo.agents").all()) do
+    if a.title == "second" then require("paseo.ui.native").show_session { kind = "agent", id = a.id }; return a.id end
+  end end)()' >/dev/null
+"$E" wait '#require("paseo.ui.native").listed() == 2' 15 || fail "opening the second agent did not add it to the row"
 names="$("$E" lua 'table.concat(vim.tbl_map(function(c) return vim.fn.fnamemodify(vim.api.nvim_buf_get_name(c.conversation), ":t") end, require("paseo.ui.native").listed()), ",")')"
-case "$names" in *first*second*|*second*first*) ;; *) fail "buffers not named after their agents: $names" ;; esac
+case "$names" in *first*second*) ;; *) fail "buffers not named after their agents, in the order opened: $names" ;; esac
 [ "$("$E" lua 'vim.iter(require("paseo.ui.native").listed()):all(function(c) return vim.bo[c.conversation].buflisted end)')" = "true" ] \
   || fail "the agents are not listed"
+settle
 
-# `:bnext` in the middle window: the other agent, its composer under it, and
+# A buffer command in the middle window: the other agent, its composer under it, and
 # still the one tab.
 before="$("$E" lua 'require("paseo.ui.chat").current().agent_id')"
 "$E" keys Escape
 "$E" lua 'vim.api.nvim_set_current_win(require("paseo.ui.chat").current().win_conversation)' >/dev/null
-"$E" keys ':bnext' Enter
-"$E" wait "require(\"paseo.ui.chat\").current().agent_id ~= \"$before\"" 15 || fail ":bnext did not move to the other agent"
+# (`:bprevious`: plain `:bnext` from the newest buffer wraps to this Neovim's
+# own empty buffer. A per-tab bufferline's next/prev never leaves the row.)
+"$E" keys ':bprevious' Enter
+"$E" wait "require(\"paseo.ui.chat\").current().agent_id ~= \"$before\"" 15 || fail ":bprevious did not move to the other agent"
 "$E" wait 'vim.api.nvim_win_get_buf(require("paseo.ui.chat").current().win_composer) == require("paseo.ui.chat").current().composer' 10 \
   || fail "the composer did not follow the agent"
 [ "$("$E" lua '#vim.api.nvim_list_tabpages()')" = "2" ] || fail "moving between agents made a tab"
@@ -77,15 +88,16 @@ echo "changed" >>"$repo/README.md"
 [ "$("$E" lua 'vim.iter(require("paseo.ui.native").listed()):any(function(c) return vim.bo[c.conversation].buflisted end)')" = "false" ] \
   || fail "the agents are still listed on your code's tab"
 
-# Back in, and to ANOTHER WORKSPACE: the row is replaced, the tab follows.
+# Back in, and an agent of ANOTHER WORKSPACE: it joins the row, nothing is
+# closed for it, and the tab stands where it works.
 "$E" keys ':Paseo native' Enter
 "$E" wait 'require("paseo.ui.native").chat() ~= nil' 10 || fail "did not come back to the Paseo tab"
 "$E" lua "(function() for _, a in ipairs(require(\"paseo.agents\").all()) do
     if a.cwd == \"$other\" then require(\"paseo.ui.native\").show_session { kind = \"agent\", id = a.id }; return a.id end
   end end)()" >/dev/null
 "$E" wait "require(\"paseo.ui.chat\").current().root == \"$other\"" 15 || fail "the other workspace's agent did not open"
-"$E" wait '#require("paseo.ui.native").listed() == 1' 10 || fail "the row was not replaced: $("$E" lua '#require("paseo.ui.native").listed()')"
+"$E" wait '#require("paseo.ui.native").listed() == 3' 10 || fail "the row is not all three: $("$E" lua '#require("paseo.ui.native").listed()')"
 [ "$("$E" lua 'vim.fn.getcwd()')" = "$other" ] || fail "the Paseo tab did not follow: $("$E" lua 'vim.fn.getcwd()')"
-[ "$("$E" lua '#vim.api.nvim_list_tabpages()')" = "2" ] || fail "switching workspace made a tab"
+[ "$("$E" lua '#vim.api.nvim_list_tabpages()')" = "2" ] || fail "another workspace made a tab"
 settle
-"$E" shot native-switched >/dev/null
+"$E" shot native-mixed >/dev/null

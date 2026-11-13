@@ -471,12 +471,13 @@ composer or the conversation, normal mode or insert.
 
 #### Every agent is a buffer
 
-The Paseo app shows a workspace's agents as a row of tabs over the chat. Here
-that row is **your bufferline**: every live agent and terminal of the
-workspace on screen is a **listed buffer** — `paseo://agent/<title>`,
-`paseo://terminal/<name>` — so a bufferline shows them by name, in the order
-they were started, and you move between them the way you move between any
-buffers.
+The Paseo app shows the agents you have open as a row of tabs over the chat.
+Here that row is **your bufferline**: every agent and terminal **you open** —
+from the rail, the picker, anywhere — is a **listed buffer**
+(`paseo://agent/<title>`, `paseo://terminal/<name>`), so a bufferline shows
+them by name, in the order you opened them, and you move between them the way
+you move between any buffers. Agents of different workspaces sit side by
+side: **nothing is opened for you, and nothing is closed for you.**
 
 - **The middle window swaps buffers.** `:bnext`, `:b N` or a click on the
   bufferline puts another agent there, and its composer, its keys and the
@@ -486,11 +487,11 @@ buffers.
   time its buffer is shown; a terminal's buffer becomes the live terminal the
   first time you enter it, keeping its place on the row. A terminal in the
   middle puts the composer away; going back to an agent brings it back.
-- **A workspace is a set of buffers.** Picking another workspace — on the
-  rail, or in the picker while you are on the Paseo tab — wipes the old row
-  (a composer holding words you have not sent is kept), lists the new
-  workspace's agents and `tcd`s the Paseo tab into it. An agent started
-  elsewhere — the app, the CLI — joins the row when the daemon reports it.
+- **Another workspace is one more buffer.** Opening an agent of another
+  workspace — on the rail, or in the picker while you are on the Paseo tab —
+  adds it to the row beside the rest. The Paseo tab's directory (`tcd`)
+  follows whichever agent is in the middle. An agent started elsewhere — the
+  app, the CLI — shows up on the rail, and is on the row once you open it.
 - **Leaving the Paseo tab unlists the row**, so agents never show up among
   your code's buffers; coming back lists them again.
 - **A subagent is a peek.** Opening one (from the rail or `gs`) shows it in
@@ -509,6 +510,35 @@ buffer in Neovim:
 ```lua
 vim.keymap.set("n", "<S-l>", function() require("nvchad.tabufline").next() end)
 vim.keymap.set("n", "<S-h>", function() require("nvchad.tabufline").prev() end)
+```
+
+**The row starts past the rail**, the way it starts past nvim-tree, if you tell
+your bufferline about it — the rail's filetype is `paseo-rail`, and the plugin
+redraws the tabline whenever the rail opens or closes. bufferline.nvim:
+
+```lua
+options = { offsets = { { filetype = "NvimTree" }, { filetype = "paseo-rail" } } }
+```
+
+NvChad's tabufline knows one filetype (`treeOffsetFt`), so replace its
+`treeOffset` module in `chadrc.lua`:
+
+```lua
+tabufline = {
+  modules = {
+    treeOffset = function()
+      for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+        local ft = vim.bo[vim.api.nvim_win_get_buf(win)].ft
+        local hl = (ft == "NvimTree" and "NvimTree") or (ft == "paseo-rail" and "PaseoTree")
+        if hl then
+          return "%#" .. hl .. "Normal#" .. string.rep(" ", vim.api.nvim_win_get_width(win))
+            .. "%#" .. hl .. "WinSeparator#│"
+        end
+      end
+      return ""
+    end,
+  },
+},
 ```
 
 The panels:
@@ -624,7 +654,7 @@ lists them):
 | `l` | unfold; on something open, step onto its first row; on a session, open it |
 | `h` / `<BS>` | fold; on a row that does not fold, fold the one it is in and land on it |
 | `<Tab>` / `za` | fold or unfold |
-| `O` | open the workspace as a place: its agents become the buffers, the newest in the middle |
+| `O` | open the workspace as a place: its newest agent, one more buffer on the row |
 | `P` / `<` `>` / `K` `J` | the parent; the previous and next sibling; the first and last |
 | `W` / `E` | fold everything (the cursor stays in its workspace); unfold everything |
 | `a` / `w` / `t` | start an agent in the workspace under the cursor, an agent in a new workspace, a terminal (`c` too) |
