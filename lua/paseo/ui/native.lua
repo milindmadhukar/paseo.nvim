@@ -1840,6 +1840,13 @@ function M.remove(chat)
     return
   end
   local next_chat = s.set[at or 1] or s.set[(at or 1) - 1] or s.set[#s.set]
+  if not M.has(chat) then
+    -- Not in the middle any more -- a terminal is, say, started from the new
+    -- task being removed. Whatever has the middle keeps it; the neighbour is
+    -- only what `q` there goes back to.
+    s.chat = next_chat
+    return
+  end
   unbind(chat)
   if chat.win_conversation == s.conv then
     chat.win_conversation, chat.win_composer = nil, nil

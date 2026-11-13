@@ -174,6 +174,14 @@ local function test_layout()
   eq("native: unlisted", vim.bo[b.conversation].buflisted, false)
   native.open(b)
 
+  -- Removing one that is no longer in the middle -- a terminal it started
+  -- has it -- takes it off the row and leaves the middle alone.
+  native.open(a)
+  native.remove(b)
+  eq("native: removing one off screen leaves the middle", api.nvim_win_get_buf(middle), a.conversation)
+  eq("native: and it is off the row", native.listed(), { a })
+  native.open(b)
+
   -- CLOSING takes the Paseo tab and leaves the chats.
   native.close(b)
   eq("native: closing takes the Paseo tab", #api.nvim_list_tabpages(), tabs_before)

@@ -328,9 +328,11 @@ local function abandon(task)
   unmount(task)
   local chats = require "paseo.ui.chat"
   local native = require "paseo.ui.native"
-  if native.has(chat) then
+  if native.any() then
     -- Off the row, the agent before it back in the middle: backing out of a
-    -- new task is not leaving Paseo.
+    -- new task is not leaving Paseo. Off the row EVEN WHEN it is no longer in
+    -- the middle -- a terminal it started is -- or a stale "new agent" is
+    -- left among the workspace's buffers.
     native.remove(chat)
   elseif chats.current() == chat then
     pcall(chats.close)
