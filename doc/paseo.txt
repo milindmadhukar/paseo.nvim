@@ -912,8 +912,10 @@ skills.method                                       `"link"`|`"copy"`, default `
 :Paseo subagents                                      *:Paseo-subagents*
 
     The subagents of the agent session in the chat; `gs` in the conversation
-    opens the same list. The header counts them -- `2 of 3 subagents running`
-    -- and keeps the total once they finish, so one can still be read.
+    opens the same list. The rail counts them beside the workspace --
+    `running/total` -- and keeps the total once they finish, so one can still
+    be read. (The bar over the box used to say it too; once is enough.) The
+    count is `require("paseo.subagents").counts(agent_id)`.
 
     The list is a float, and it is LIVE: a running subagent has a spinner and
     a clock, and one that starts, finishes or fails while the list is open

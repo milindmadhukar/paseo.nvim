@@ -110,13 +110,15 @@ local function test_subagents()
     end, 10)
     eq("subagents: a removed one is gone", #subagents.list "parent", 2)
 
-    -- The header says it, and shrinks it to the numbers.
+    -- NOT on the composer's bar any more: the rail says it, beside the
+    -- workspace. The count is still the API's.
     local sidebar = require "paseo.ui.sidebar"
     local chat = { agent_id = "parent", root = "/tmp", provider = "claude" }
     local text = table.concat(vim.tbl_map(function(cell)
       return cell[1]
     end, sidebar.header(chat)))
-    truthy("subagents: the header counts them", text:find("1 of 2 subagents running (gs)", 1, true) ~= nil, text)
+    eq("subagents: the bar over the box does not count them", text:find("subagent", 1, true), nil)
+    eq("subagents: the count is still there to ask for", { subagents.counts "parent" }, { 1, 2 })
 
     -- THE LIVE LIST `gs` OPENS. A picker was a snapshot: a fixed glyph for
     -- running, and no update while you read it.
