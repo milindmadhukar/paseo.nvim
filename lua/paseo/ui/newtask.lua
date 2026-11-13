@@ -329,7 +329,9 @@ local function abandon(task)
   local chats = require "paseo.ui.chat"
   local native = require "paseo.ui.native"
   if native.has(chat) then
-    native.close(chat)
+    -- Off the row, the agent before it back in the middle: backing out of a
+    -- new task is not leaving Paseo.
+    native.remove(chat)
   elseif chats.current() == chat then
     pcall(chats.close)
   end

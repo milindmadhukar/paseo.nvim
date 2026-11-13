@@ -275,11 +275,15 @@ local function test_workspace_open()
 
   local start_tabs = #vim.api.nvim_list_tabpages()
 
-  -- The default. A tab of its own, tcd'd in: the objection that produced the
-  -- GUI spawn -- that chdir leaves the old workspace's buffers behind -- is
-  -- answered by the tab, not by a second process.
+  -- The default. THIS tab, tcd'd in: the plugin opens no tab pages you did
+  -- not ask for. `tcd` rather than `cd`, so it is the tab that moved and not
+  -- the editor.
   config.setup {}
-  eq("open: the default switches in this Neovim", config.defaults().workspaces.open, "tab")
+  eq(
+    "open: the default switches in this Neovim, in this tab",
+    config.defaults().workspaces.open,
+    "tcd"
+  )
 
   local seen
   local au = vim.api.nvim_create_autocmd("User", {
@@ -290,23 +294,28 @@ local function test_workspace_open()
   })
 
   truthy("open: it opens", workspaces.open(ws))
-  eq("open: in a new tab page", #vim.api.nvim_list_tabpages(), start_tabs + 1)
+  eq("open: with no tab page of its own", #vim.api.nvim_list_tabpages(), start_tabs)
   eq("open: whose cwd is the workspace", vim.fn.resolve(vim.fn.getcwd()), resolved)
   eq("open: and it announces the root, so a config can fill the tab", seen, dir)
-  -- `tcd`, not `cd`: the tab we came from must not have moved with it.
+  truthy(
+    "open: the editor's own directory did not move",
+    vim.fn.resolve(vim.fn.getcwd(-1, -1)) ~= resolved,
+    vim.fn.getcwd(-1, -1)
+  )
+  go_home()
+
+  -- "tab" is a tab page per workspace, for people who want one.
+  local tabs = #vim.api.nvim_list_tabpages()
+  config.setup { workspaces = { open = "tab" } }
+  workspaces.open(ws)
+  eq("open: `tab` opens a tab page", #vim.api.nvim_list_tabpages(), tabs + 1)
+  eq("open: and lands in the workspace", vim.fn.resolve(vim.fn.getcwd()), resolved)
   vim.cmd.tabclose()
   truthy(
     "open: the tab it came from kept its cwd",
     vim.fn.resolve(vim.fn.getcwd()) ~= resolved,
     vim.fn.getcwd()
   )
-
-  -- "tcd" is the same switch without the tab, for people who keep one.
-  local tabs = #vim.api.nvim_list_tabpages()
-  config.setup { workspaces = { open = "tcd" } }
-  workspaces.open(ws)
-  eq("open: `tcd` reuses this tab", #vim.api.nvim_list_tabpages(), tabs)
-  eq("open: and still lands in the workspace", vim.fn.resolve(vim.fn.getcwd()), resolved)
 
   -- The escape hatch, which is how the Neovide spawn comes back.
   local spawned
@@ -333,8 +342,9 @@ local function test_workspace_open()
     },
   }
   workspaces.open(ws)
-  eq("open: declining falls back to the built-in switch", #vim.api.nvim_list_tabpages(), tabs + 1)
-  vim.cmd.tabclose()
+  eq("open: declining falls back to the built-in switch", vim.fn.resolve(vim.fn.getcwd()), resolved)
+  eq("open: which opens no tab", #vim.api.nvim_list_tabpages(), tabs)
+  go_home()
 
   -- A function that throws must not strand you on the picker with nothing
   -- open. The error is reported; the workspace still opens.
@@ -346,7 +356,7 @@ local function test_workspace_open()
     },
   }
   truthy("open: a broken handler still opens the workspace", workspaces.open(ws))
-  vim.cmd.tabclose()
+  go_home()
 
   -- A workspace with no directory is the one case that cannot open.
   eq("open: nothing to open without a directory", workspaces.open { name = "x" }, false)

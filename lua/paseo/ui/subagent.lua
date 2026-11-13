@@ -1,4 +1,4 @@
---- A provider subagent's conversation, read-only, in a tab of its own.
+--- A provider subagent's conversation, read-only: a peek in place of its parent's.
 ---
 --- READ-ONLY IS THE PROTOCOL'S ANSWER, NOT A SHORTCUT. Paseo lists a provider
 --- subagent, fetches its timeline and pushes what it does next, and has no
@@ -80,7 +80,7 @@ function M.title(view)
     end
   end
   local s = current or view.subagent
-  local text = (" %s %s · %s · read-only  ·  i tell the parent  q close"):format(
+  local text = (" %s %s · %s · read-only  ·  i tell the parent  q back"):format(
     require("paseo.ui.icons").tool.sub_agent or "",
     s.title,
     s.status
@@ -113,25 +113,32 @@ function M.open(subagent, opts)
   vim.bo[buf].modifiable = false
   pcall(vim.api.nvim_buf_set_name, buf, ("paseo://subagent/%s/%s"):format(subagent.parent, subagent.id))
 
-  -- From a native tab whose rail is up, the rail comes too: see
-  -- |paseo.ui.native|.rail_beside. Asked BEFORE the new tab exists.
-  local native = package.loaded["paseo.ui.native"]
-  local keep_rail = native ~= nil and native.rail_shown()
-
-  vim.cmd "tabnew"
-  local scratch = vim.api.nvim_get_current_buf()
-  local win = vim.api.nvim_get_current_win()
-  vim.api.nvim_win_set_buf(win, buf)
-  if scratch ~= buf and vim.api.nvim_buf_is_valid(scratch) then
-    pcall(vim.api.nvim_buf_delete, scratch, { force = true })
+  -- A PEEK, NEVER A TAB. On the Paseo tab it takes the middle window in
+  -- place of the agent, unlisted -- it is not one of the workspace's agents --
+  -- and `q` puts the agent back. Beside your code (the sidebar), it takes the
+  -- conversation's window the same way; anywhere else, the window you are in.
+  local native = require "paseo.ui.native"
+  local parent_chat = opts.parent_chat
+  local win = native.peek(buf)
+  local back
+  if win then
+    back = native.unpeek
+  else
+    local sidebar_win = parent_chat and parent_chat.win_conversation
+    win = (sidebar_win and vim.api.nvim_win_is_valid(sidebar_win)) and sidebar_win
+      or vim.api.nvim_get_current_win()
+    local before = vim.api.nvim_win_get_buf(win)
+    vim.api.nvim_win_set_buf(win, buf)
+    vim.api.nvim_set_current_win(win)
+    back = function()
+      if vim.api.nvim_win_is_valid(win) and vim.api.nvim_buf_is_valid(before) then
+        vim.api.nvim_win_set_buf(win, before)
+      end
+    end
   end
   vim.wo[win].wrap = true
   vim.wo[win].number = false
   vim.wo[win].relativenumber = false
-  if keep_rail then
-    native.rail_beside()
-    vim.api.nvim_set_current_win(win)
-  end
 
   local view = {
     conversation = buf,
@@ -159,7 +166,12 @@ function M.open(subagent, opts)
       transcript.toggle_at_cursor(view)
     end, vim.tbl_extend("force", map, { desc = "paseo: expand/collapse" }))
   end
-  vim.keymap.set("n", "q", "<cmd>tabclose<cr>", vim.tbl_extend("force", map, { desc = "paseo: close" }))
+  vim.keymap.set(
+    "n",
+    "q",
+    back,
+    vim.tbl_extend("force", map, { desc = "paseo: back to the agent" })
+  )
   vim.keymap.set("n", "i", function()
     M.tell_parent(view)
   end, vim.tbl_extend("force", map, { desc = "paseo: tell the parent agent about this subagent" }))

@@ -382,21 +382,21 @@ local function test_ws_edit()
   vim.fn.mkdir(inside, "p")
   local path = manifest.path(project)
   local fd = assert(io.open(path, "w"))
-  fd:write "# mine, by hand\nbranch_prefix = \"ws/\"\n"
+  fd:write '# mine, by hand\nbranch_prefix = "ws/"\n'
   fd:close()
 
   local tabs = #vim.api.nvim_list_tabpages()
   in_dir(inside, function()
     vim.cmd "Paseo ws edit"
   end)
-  eq("ws edit: in a tab of its own", #vim.api.nvim_list_tabpages(), tabs + 1)
+  eq("ws edit: in this tab, no tab of its own", #vim.api.nvim_list_tabpages(), tabs)
   eq("ws edit: the manifest of the project around the cwd", vim.api.nvim_buf_get_name(0), path)
   eq(
     "ws edit: as it is on disk, not a re-render",
     vim.api.nvim_buf_get_lines(0, 0, 1, false)[1],
     "# mine, by hand"
   )
-  vim.cmd "tabclose"
+  vim.cmd "silent! bwipeout!"
 end
 
 local function test_workspace_scope()

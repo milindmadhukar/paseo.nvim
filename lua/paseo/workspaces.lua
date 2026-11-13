@@ -635,11 +635,12 @@ end
 ---setup dressed up as a rule: over ssh, or in any terminal Neovim, there is no
 ---GUI to spawn and `<CR>` appeared to do nothing at all.
 ---
----The switch is a new tab page with its own `tcd`, not a bare `cd`, because the
----objection that produced the spawn is real -- chdir'ing in place leaves the
----buffers, LSP clients and jumplist of the workspace you just left pointing
----into it. A tab keeps them apart at the cost of one tab. `workspaces.open`
----picks something else, up to and including spawning that GUI window.
+---The switch is a `tcd` of the tab you are on: the plugin opens no tab pages
+---you did not ask for. `workspaces.open = "tab"` gives each workspace a tab
+---page of its own instead, which keeps the buffers, LSP clients and jumplist
+---of the one you left out of the one you entered; a function can do anything,
+---up to and including spawning a GUI window. On the Paseo tab it is none of
+---these: the workspace's agents become the buffers (|paseo.ui.native|).
 ---
 ---An open chat comes WITH you (`paseo.ui.chat.follow`). It used to stay on the
 ---agent in the workspace you just left, which on the full-screen surface meant
@@ -683,7 +684,16 @@ function M.open(ws)
     end
     -- Errored, or declined on purpose. Either way the workspace still has to
     -- open, and the built-in switch is the thing that always works.
-    how = "tab"
+    how = "tcd"
+  end
+
+  -- ON THE PASEO TAB, a workspace is a set of agent buffers: switching is
+  -- the rail's switch, not a move of your editor. (After a handler of yours,
+  -- which is the one thing that outranks it.)
+  local native = package.loaded["paseo.ui.native"]
+  if native and native.on_tab() then
+    native.open_workspace(ws)
+    return true
   end
 
   if how == "tab" then

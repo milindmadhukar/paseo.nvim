@@ -422,8 +422,14 @@ function M.edit(root, m, notes)
 
   -- A buffer may already be sitting on this path -- a second run, or the file
   -- simply being open. Reuse it rather than failing on a duplicate name.
+  -- With your code, not on a tab of its own: off the Paseo tab if that is
+  -- where you are, into a new buffer in the window you are in.
+  local native = package.loaded["paseo.ui.native"]
+  if native and native.on_tab() then
+    native.leave()
+  end
   local buf = vim.fn.bufnr(path)
-  vim.cmd "tabnew"
+  vim.cmd "enew"
   if buf ~= -1 then
     vim.api.nvim_win_set_buf(0, buf)
   else

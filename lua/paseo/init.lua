@@ -123,7 +123,11 @@ commands.ws = {
         vim.notify("paseo: no workspace.toml here or above; opening the setup screen", vim.log.levels.INFO)
         return commands.ws.run(where and { "init", where } or { "init" })
       end
-      vim.cmd.tabedit(vim.fn.fnameescape(path))
+      local native = package.loaded["paseo.ui.native"]
+      if native and native.on_tab() then
+        return native.edit(path)
+      end
+      vim.cmd.edit(vim.fn.fnameescape(path))
       return
     end
 

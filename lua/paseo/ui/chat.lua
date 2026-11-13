@@ -739,6 +739,64 @@ local function name_buffer(buf, prefix, root)
   end
 end
 
+---What a chat's conversation buffer is called: `paseo://agent/<title>`, so a
+---bufferline -- which shows a buffer's tail -- reads like the app's row of
+---agent tabs. A draft has no title yet and is the new task.
+---@param chat paseo.Chat
+---@return string
+function M.label(chat)
+  if chat.agent_id then
+    local agent = require("paseo.agents").get(chat.agent_id, chat.host_id)
+    local title = (agent and agent.title) or chat.title
+    if title and vim.trim(title) ~= "" then
+      return title
+    end
+    return "agent " .. chat.agent_id:sub(1, 8)
+  end
+  return chat.title or "new agent"
+end
+
+---(Re)name a chat's conversation buffer after its agent, when that changed.
+---
+---A slash in a title is not a path: it would cut the tail a bufferline shows
+---down to the last word, so it is drawn as a lookalike instead. Two agents
+---with one title get ` (2)`, ` (3)`.
+---
+---Renaming leaves Neovim's alternate-file buffer behind under the OLD name
+---(`:file` semantics), unlisted and empty; it is wiped here, or every title an
+---agent ever had would pile up in `:ls!`.
+---@param chat paseo.Chat
+function M.name_conversation(chat)
+  local buf = chat.conversation
+  if not (buf and vim.api.nvim_buf_is_valid(buf)) then
+    return
+  end
+  local title = vim.trim((M.label(chat):gsub("[/\\]", "\u{2215}"):gsub("%s+", " ")))
+  local want = "paseo://agent/" .. (title ~= "" and title or "untitled")
+  if vim.b[buf].paseo_named == want then
+    return
+  end
+  local old = vim.api.nvim_buf_get_name(buf)
+  for n = 1, 50 do
+    local try = n == 1 and want or ("%s (%d)"):format(want, n)
+    if try == old or pcall(vim.api.nvim_buf_set_name, buf, try) then
+      break
+    end
+  end
+  vim.b[buf].paseo_named = want
+  if old ~= "" and old ~= vim.api.nvim_buf_get_name(buf) then
+    local stale = vim.fn.bufnr(old)
+    if
+      stale > 0
+      and stale ~= buf
+      and vim.fn.buflisted(stale) == 0
+      and #vim.fn.win_findbuf(stale) == 0
+    then
+      pcall(vim.api.nvim_buf_delete, stale, { force = true })
+    end
+  end
+end
+
 local function make_buffers(chat)
   -- Every built-in key here goes through `keys.set`, so `keys.conversation`
   -- and `keys.composer` can move or unbind it (|paseo-config.keys|).
@@ -749,7 +807,7 @@ local function make_buffers(chat)
     vim.bo[chat.conversation].bufhidden = "hide"
     vim.bo[chat.conversation].filetype = "markdown"
     vim.bo[chat.conversation].modifiable = false
-    name_buffer(chat.conversation, "chat", chat.root)
+    M.name_conversation(chat)
 
     -- The conversation buffer had no keymaps at all: there was nothing on it
     -- to act on. Now a tool card can be opened to see what the command
@@ -1027,7 +1085,8 @@ end
 ---default and turned the buffer dashboard or the sidebar into a float.
 ---@param chat paseo.Chat
 ---@param explicit? "float"|"sidebar"|"buffer"
-local function layout(chat, explicit)
+---@param nopts? { focus?: boolean }
+local function layout(chat, explicit, nopts)
   make_buffers(chat)
   local surface = M._drawable(require("paseo.ui.surface").resolve(explicit))
   if surface == "native" then
@@ -1037,10 +1096,11 @@ local function layout(chat, explicit)
     if not native.has(chat) then
       sidebar.close(chat)
     end
-    native.open(chat)
+    native.open(chat, nopts)
     transcript.to_bottom(chat)
     return
   end
+  require("paseo.ui.native").release(chat)
   sidebar.open(chat)
   -- AT THE END, NOT WHERE YOU LEFT IT. A window put back on a conversation
   -- buffer gets that buffer's last cursor position, so coming back to a
@@ -1293,6 +1353,73 @@ function M.discard(chat)
   end
 end
 
+---A chat for an agent, its buffers made, and nothing else: not on screen, not
+---subscribed, no history asked for. The native surface lists a workspace's
+---agents as buffers this way, and `M.open` does the rest the first time one
+---is actually looked at.
+---@param opts { agent_id: string, host_id?: string, root?: string, title?: string }
+---@return paseo.Chat|nil
+function M.prepare(opts)
+  local host = hosts.get(opts.host_id)
+  if not (host and opts.agent_id) then
+    return nil
+  end
+  local key = hosts.key(host.id, opts.agent_id)
+  local chat = chats[key]
+  if not chat then
+    chat = {
+      root = opts.root,
+      local_root = opts.root and hosts.to_local(host.id, opts.root) or nil,
+      host_id = host.id,
+      agent_id = opts.agent_id,
+      title = opts.title,
+      streaming = false,
+      pending = {},
+      images = {},
+    }
+    chats[key] = chat
+  end
+  make_buffers(chat)
+  return chat
+end
+
+---The chat whose conversation buffer `buf` is.
+---@param buf integer
+---@return paseo.Chat|nil
+function M.by_buffer(buf)
+  for _, chat in pairs(chats) do
+    if chat.conversation == buf then
+      return chat
+    end
+  end
+  return nil
+end
+
+---Every chat this Neovim holds. For the native surface and the tests.
+---@return paseo.Chat[]
+function M.all()
+  local out = {}
+  for _, chat in pairs(chats) do
+    out[#out + 1] = chat
+  end
+  return out
+end
+
+---Forget a chat AND wipe its buffers -- the native surface leaving a
+---workspace. The agent is untouched: opening it again builds a fresh chat and
+---fetches its history.
+---@param chat paseo.Chat
+function M.dispose(chat)
+  M.discard(chat)
+  for _, buf in ipairs { chat.conversation, chat.composer } do
+    if buf and vim.api.nvim_buf_is_valid(buf) then
+      pcall(vim.api.nvim_buf_delete, buf, { force = true })
+    end
+  end
+  chat.conversation, chat.composer = nil, nil
+  chat.win_conversation, chat.win_composer = nil, nil
+end
+
 ---Where a chat opens when nobody said which directory.
 ---
 ---THE DIRECTORY YOU ARE STANDING IN, resolved to the unit of work that
@@ -1399,7 +1526,7 @@ function M.open(opts, callback)
 
   -- Already up where it should be: laying it out again is the churn above.
   if not (reused and not opts.surface) then
-    layout(chat, opts.surface)
+    layout(chat, opts.surface, { focus = opts.focus })
   end
   if opts.focus ~= false and chat.win_composer and vim.api.nvim_win_is_valid(chat.win_composer) then
     -- Not unconditional: the composer window need not be up, and
@@ -1627,7 +1754,7 @@ end
 function M.toggle()
   local chat = current
   -- Full screen, it is a toggle IN AND OUT: see `surface`.
-  if chat and require("paseo.ui.native").is_open(chat) then
+  if require("paseo.ui.native").on_tab() then
     return require("paseo.ui.native").leave()
   end
   if chat and visible(chat) then
@@ -1768,6 +1895,18 @@ end
 function M.surface(name, opts)
   name = M._drawable(name)
   local chat = current
+  -- THE TOGGLE: out to your code from the Paseo tab, and back in to it as
+  -- you left it -- whatever was in the middle, not the current chat dragged
+  -- over the top of a terminal you were in.
+  if name == "native" and opts and opts.toggle then
+    local native = require "paseo.ui.native"
+    if native.on_tab() then
+      return native.leave()
+    end
+    if native.enter() then
+      return
+    end
+  end
   if not chat then
     -- ON THE SURFACE THAT WAS ASKED FOR, not on the default one first.
     return M.open({ surface = name }, function(opened)
@@ -1786,9 +1925,6 @@ function M.surface(name, opts)
     -- A TOGGLE IN AND OUT, not a close: back to the tab you came from, the
     -- agent's tab left as it was so the next one lands straight on it. `q`
     -- is what closes it.
-    if opts and opts.toggle and native.is_open(chat) then
-      return native.leave()
-    end
     if not native.has(chat) then
       sidebar.close(chat)
     end
@@ -1798,6 +1934,7 @@ function M.surface(name, opts)
   if native.has(chat) then
     native.close(chat)
   end
+  native.release(chat)
   chat.surface = "sidebar"
   sidebar.open(chat)
 end

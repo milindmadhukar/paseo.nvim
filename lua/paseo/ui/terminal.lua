@@ -131,8 +131,11 @@ end
 ---@param terminal paseo.Terminal
 ---@param win? integer  The window it is about to be shown in, so the first
 ---attach runs at the size it will be drawn at rather than at 24x80.
+---@param opts? { buf?: integer }  `buf`: an empty buffer to attach in rather
+---than a new one -- the native surface's placeholder for this terminal, which
+---already has its name and its place on the bufferline.
 ---@return paseo.TerminalView
-function M.ensure(terminal, win)
+function M.ensure(terminal, win, opts)
   local id = terminal.id
   local host_id = terminal.hostId or hosts.selected()
   local view_key = key(host_id, id)
@@ -144,7 +147,13 @@ function M.ensure(terminal, win)
 
   listen()
 
-  local buf = api.nvim_create_buf(false, true)
+  local given = opts and opts.buf
+  local fresh = given
+    and api.nvim_buf_is_valid(given)
+    and vim.bo[given].buftype ~= "terminal"
+    and api.nvim_buf_line_count(given) <= 1
+    and (api.nvim_buf_get_lines(given, 0, 1, false)[1] or "") == ""
+  local buf = fresh and given or api.nvim_create_buf(false, true)
   -- NOT `bufhidden = "wipe"`: this buffer outlives being shown. Swapping the
   -- window to another terminal would wipe it, taking the channel and leaving
   -- the daemon streaming into nothing.

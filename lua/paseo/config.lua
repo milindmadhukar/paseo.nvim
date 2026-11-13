@@ -273,11 +273,11 @@ local M = {}
 ---@field open "tab"|"tcd"|"cd"|fun(ws: paseo.PaseoWorkspace): boolean?
 ---                       What `<CR>` in the workspace picker does. The three
 ---                       strings all switch INSIDE this Neovim:
----                         "tab" -- new tab page, `tcd`'d into the workspace.
----                                  The default: a tab is the cheapest thing
----                                  that keeps the buffers of the workspace you
----                                  just left out of the one you just entered.
----                         "tcd" -- this tab's cwd, no new tab.
+---                         "tcd" -- this tab's cwd, no new tab. The default:
+---                                  the plugin opens no tab pages you did not
+---                                  ask for.
+---                         "tab" -- a new tab page, `tcd`'d into the workspace,
+---                                  for keeping each workspace's buffers apart.
 ---                         "cd"  -- the editor's cwd. Everything follows.
 ---                       A function is the escape hatch, and it is how you
 ---                       spawn a GUI window per workspace instead:
@@ -286,7 +286,7 @@ local M = {}
 ---                             { cwd = ws.directory, detach = true })
 ---                         end
 ---                       Return `false` from it to DECLINE -- the built-in
----                       "tab" switch then happens instead, which is what lets
+---                       "tcd" switch then happens instead, which is what lets
 ---                       one config do both (spawn when `vim.g.neovide`, switch
 ---                       in place in a terminal). Any other return value, `nil`
 ---                       included, means you handled it.
@@ -542,7 +542,7 @@ local defaults = {
     -- In this Neovim, not a new GUI window. Spawning one was the author's
     -- habit and it is a terrible default: in a terminal Neovim over ssh there
     -- is nothing to spawn, and `<CR>` did nothing you could see.
-    open = "tab",
+    open = "tcd",
   },
 
   review = {
@@ -629,7 +629,7 @@ function M.setup(opts)
   end, "a configured host alias")
   if config.paseo.hosts then
     if next(config.paseo.hosts) == nil then
-      error("paseo.hosts must contain at least one host")
+      error "paseo.hosts must contain at least one host"
     end
     for alias, host in pairs(config.paseo.hosts) do
       vim.validate("paseo.hosts key", alias, "string")

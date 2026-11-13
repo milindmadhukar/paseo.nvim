@@ -64,10 +64,11 @@ local function build(results)
             { repos.relative(repo, change.path) or change.path, "PaseoPath" },
           },
           activate = function()
-            -- In a tab of its own: the panel is a split on the agent's tab,
-            -- and editing over it would take the panel's window. The agent's
-            -- tab stays where it was, a `gT` away.
-            vim.cmd.tabedit(vim.fn.fnameescape(file))
+            -- WITH YOUR CODE: back on the tab you came from, an ordinary
+            -- buffer among your others. Editing here would take the panel's
+            -- window; a tab of its own was a third place to keep track of.
+            -- `:Paseo native` comes back to the agent.
+            require("paseo.ui.native").edit(file)
           end,
         }
       end

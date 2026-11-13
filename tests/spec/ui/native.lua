@@ -1,4 +1,4 @@
---- The native surface: a tab page per agent, out of plain splits.
+--- The native surface: one Paseo tab, every agent a buffer in it.
 
 local t = require "tests.spec.helpers"
 local eq, truthy = t.eq, t.truthy
@@ -7,21 +7,14 @@ local api = vim.api
 
 local transcript = require "paseo.ui.transcript"
 
+---A chat registered with |paseo.ui.chat| (so a buffer put in the middle is
+---recognised as its), already initialised (so nothing dials a daemon).
 ---@param id string
 ---@return table
 local function new_chat(id)
-  local chat = {
-    root = vim.uv.cwd(),
-    agent_id = id,
-    title = id,
-    provider = "test",
-    streaming = false,
-    pending = {},
-    images = {},
-    conversation = api.nvim_create_buf(false, true),
-    composer = api.nvim_create_buf(false, true),
-  }
-  vim.bo[chat.conversation].filetype = "markdown"
+  local chat = require("paseo.ui.chat").prepare { agent_id = id, root = vim.uv.cwd(), title = id }
+  chat.provider = "test"
+  chat.initialised = true
   transcript.reset(chat)
   transcript.upsert(chat, { kind = "user", text = "hello" })
   return chat
@@ -57,40 +50,97 @@ local function test_layout()
   local saved_current = chat_mod.current()
 
   local tabs_before = #api.nvim_list_tabpages()
+  local home = api.nvim_get_current_tabpage()
   local a = new_chat "native-a"
   native.open(a)
 
-  eq("native: an agent opens on a tab page of its own", #api.nvim_list_tabpages(), tabs_before + 1)
+  eq("native: Paseo is one tab page", #api.nvim_list_tabpages(), tabs_before + 1)
+  local tab = native.tab()
   eq("native: rail, conversation and composer", #api.nvim_tabpage_list_wins(0), 3)
-  eq("native: the conversation window holds the conversation", api.nvim_win_get_buf(a.win_conversation), a.conversation)
-  eq("native: the composer window holds the composer", api.nvim_win_get_buf(a.win_composer), a.composer)
-  eq("native: every window is a split, not a float", api.nvim_win_get_config(a.win_conversation).relative, "")
+  eq(
+    "native: the conversation window holds the conversation",
+    api.nvim_win_get_buf(a.win_conversation),
+    a.conversation
+  )
+  eq(
+    "native: the composer window holds the composer",
+    api.nvim_win_get_buf(a.win_composer),
+    a.composer
+  )
+  eq(
+    "native: every window is a split, not a float",
+    api.nvim_win_get_config(a.win_conversation).relative,
+    ""
+  )
   eq("native: the cursor lands in the box", api.nvim_get_current_win(), a.win_composer)
   eq("native: and it is the current chat", chat_mod.current(), a)
   truthy("native: the conversation has a winbar", (vim.wo[a.win_conversation].winbar or "") ~= "")
-  truthy("native: naming the agent", vim.wo[a.win_conversation].winbar:find("native-a", 1, true) ~= nil)
-  eq("native: and the surface knows it is on screen", require("paseo.ui.surface").on_screen(), "native")
+  truthy(
+    "native: naming the agent",
+    vim.wo[a.win_conversation].winbar:find("native-a", 1, true) ~= nil
+  )
+  eq(
+    "native: and the surface knows it is on screen",
+    require("paseo.ui.surface").on_screen(),
+    "native"
+  )
+  -- THE AGENT IS A BUFFER: listed, so a bufferline shows it, under its
+  -- agent's name, which is what a bufferline prints.
+  eq("native: the agent is a listed buffer", vim.bo[a.conversation].buflisted, true)
+  truthy(
+    "native: named after the agent",
+    api.nvim_buf_get_name(a.conversation):find("paseo://agent/native-a", 1, true) ~= nil,
+    api.nvim_buf_get_name(a.conversation)
+  )
+  eq("native: the composer is not", vim.bo[a.composer].buflisted, false)
 
-  -- A SECOND AGENT IS A SECOND TAB.
+  -- A SECOND AGENT IS A SECOND BUFFER, in the same windows on the same tab.
+  local middle, box = a.win_conversation, a.win_composer
   local b = new_chat "native-b"
   native.open(b)
-  eq("native: a second agent gets a second tab", #api.nvim_list_tabpages(), tabs_before + 2)
+  eq("native: a second agent opens no second tab", #api.nvim_list_tabpages(), tabs_before + 1)
+  eq("native: it is on the Paseo tab", api.nvim_get_current_tabpage(), tab)
+  eq("native: in the same middle window", b.win_conversation, middle)
+  eq("native: which holds its conversation", api.nvim_win_get_buf(middle), b.conversation)
+  eq("native: and its composer took the box", api.nvim_win_get_buf(box), b.composer)
+  eq("native: the first let go of the windows", a.win_conversation, nil)
   eq("native: which is now current", chat_mod.current(), b)
-  truthy("native: the two do not share a tab", a.native_tab ~= b.native_tab)
+  eq("native: both are on the row, in order", native.listed(), { a, b })
+  eq(
+    "native: both listed",
+    { vim.bo[a.conversation].buflisted, vim.bo[b.conversation].buflisted },
+    { true, true }
+  )
 
-  -- Opening the first again goes BACK to its tab rather than making a third.
-  native.open(a)
-  eq("native: reopening an agent goes to its tab", #api.nvim_list_tabpages(), tabs_before + 2)
-  eq("native: and lands on it", api.nvim_get_current_tabpage(), a.native_tab)
+  -- `:b N`, `:bnext`, a bufferline click: the buffer is put in the middle by
+  -- somebody else, and the composer, the keys and `current` follow it.
+  api.nvim_set_current_win(middle)
+  vim.cmd("buffer " .. a.conversation)
+  settle()
+  eq("native: an agent's buffer in the middle makes it current", chat_mod.current(), a)
+  eq("native: its composer comes with it", api.nvim_win_get_buf(box), a.composer)
+  eq("native: and it has the windows again", a.win_conversation, middle)
+  eq("native: the cursor stays where you moved it", api.nvim_get_current_win(), middle)
 
-  -- WHAT IS CURRENT FOLLOWS THE TAB. Plain `gt` -- not our own open -- has to
-  -- move it, or `:Paseo mode` changes the agent you are not looking at.
-  vim.cmd("tabnext " .. api.nvim_tabpage_get_number(b.native_tab))
+  -- A buffer key pressed in the BOX: the composer keeps its window and the
+  -- agent goes to the middle.
+  api.nvim_set_current_win(box)
+  vim.cmd("buffer " .. b.conversation)
   settle()
-  eq("native: entering a tab makes its agent current", chat_mod.current(), b)
-  vim.cmd("tabnext " .. api.nvim_tabpage_get_number(a.native_tab))
-  settle()
-  eq("native: and back", chat_mod.current(), a)
+  eq(
+    "native: from the box, the agent goes to the middle",
+    api.nvim_win_get_buf(middle),
+    b.conversation
+  )
+  eq("native: and the box holds its composer", api.nvim_win_get_buf(box), b.composer)
+
+  -- LEAVING UNLISTS: the agents are not among your code's buffers.
+  native.leave()
+  eq("native: leaving goes to the tab you came from", api.nvim_get_current_tabpage(), home)
+  eq("native: and unlists the agents", vim.bo[a.conversation].buflisted, false)
+  native.open(b)
+  eq("native: coming back is the same tab", api.nvim_get_current_tabpage(), tab)
+  eq("native: and lists them again", vim.bo[a.conversation].buflisted, true)
 
   -- `<C-b>` takes the rail away and brings it back.
   native.toggle_rail()
@@ -116,13 +166,23 @@ local function test_layout()
   eq("native: a drag is remembered", require("paseo.ui.rail").width "rail", 37)
   require("paseo.ui.rail").set_width("rail", 32)
 
-  -- CLOSING takes the tab and leaves the chat.
+  -- REMOVING one is `:bdelete`-shaped: off the row, the neighbour in the
+  -- middle, the tab still up.
+  native.remove(b)
+  eq("native: a removed chat leaves the row", native.listed(), { a })
+  eq("native: and the neighbour takes the middle", api.nvim_win_get_buf(middle), a.conversation)
+  eq("native: unlisted", vim.bo[b.conversation].buflisted, false)
+  native.open(b)
+
+  -- CLOSING takes the Paseo tab and leaves the chats.
   native.close(b)
-  eq("native: closing takes its tab", #api.nvim_list_tabpages(), tabs_before + 1)
+  eq("native: closing takes the Paseo tab", #api.nvim_list_tabpages(), tabs_before)
   eq("native: and forgets its windows", b.win_conversation, nil)
   truthy("native: but not its buffers", api.nvim_buf_is_valid(b.conversation))
+  eq("native: which are no longer listed", vim.bo[a.conversation].buflisted, false)
 
   -- `:q` in the conversation takes the whole tab, not half of it.
+  native.open(a)
   api.nvim_set_current_win(a.win_conversation)
   vim.cmd "quit"
   settle()
@@ -158,9 +218,20 @@ local function test_markdown()
   local width = api.nvim_win_get_width(chat.win_conversation)
   local tick = api.nvim_buf_get_changedtick(chat.conversation)
   native.toggle_rail()
-  truthy("native: the rail toggle changed the width", api.nvim_win_get_width(chat.win_conversation) ~= width)
-  eq("native: and prose was not rewritten for it", api.nvim_buf_get_changedtick(chat.conversation), tick)
-  eq("native: the transcript is drawn at the new width at once", chat.rendered_width, transcript.width(chat))
+  truthy(
+    "native: the rail toggle changed the width",
+    api.nvim_win_get_width(chat.win_conversation) ~= width
+  )
+  eq(
+    "native: and prose was not rewritten for it",
+    api.nvim_buf_get_changedtick(chat.conversation),
+    tick
+  )
+  eq(
+    "native: the transcript is drawn at the new width at once",
+    chat.rendered_width,
+    transcript.width(chat)
+  )
   native.toggle_rail()
 
   -- Off the native surface it is drawn as it always was.
@@ -168,7 +239,10 @@ local function test_markdown()
   eq("native: closing turns markdown mode off", chat.markdown, nil)
   lines = text(chat.conversation)
   -- `render.wrap` reflows by word, so the code's indentation is what goes.
-  truthy("native: so the other surfaces get their own rendering back", not has(lines, "    local x = 1"))
+  truthy(
+    "native: so the other surfaces get their own rendering back",
+    not has(lines, "    local x = 1")
+  )
 
   native.reset()
   chat_mod.set_current(saved_current)
@@ -241,7 +315,11 @@ local function test_uniform()
 
     local base = api.nvim_get_hl(0, { name = "PaseoBase" })
     if mode == "auto" then
-      eq("native: under auto the base tier IS the editor's background", base.bg, api.nvim_get_hl(0, { name = "Normal" }).bg)
+      eq(
+        "native: under auto the base tier IS the editor's background",
+        base.bg,
+        api.nvim_get_hl(0, { name = "Normal" }).bg
+      )
     else
       local want = theme.FIXED[vim.o.background == "light" and "light" or "dark"].bg
       eq("native: under fixed it is the plugin's own", base.bg, tonumber(want:sub(2), 16))
@@ -309,10 +387,23 @@ vim.cmd "qa!"
   local env = vim.fn.environ()
   env.PASEO_TEST_NOVOLT = "1"
   local result = vim
-    .system({ "nvim", "--headless", "-i", "NONE", "-u", vim.fs.joinpath(t.repo_root, "tests", "minimal_init.lua"), "-c", "luafile " .. script }, { env = env, text = true })
+    .system(
+      {
+        "nvim",
+        "--headless",
+        "-i",
+        "NONE",
+        "-u",
+        vim.fs.joinpath(t.repo_root, "tests", "minimal_init.lua"),
+        "-c",
+        "luafile " .. script,
+      },
+      { env = env, text = true }
+    )
     :wait(60000)
   local fh = io.open(out)
-  local said = fh and fh:read "*a" or ("no output; exit " .. tostring(result.code) .. "\n" .. (result.stderr or ""))
+  local said = fh and fh:read "*a"
+    or ("no output; exit " .. tostring(result.code) .. "\n" .. (result.stderr or ""))
   if fh then
     fh:close()
   end
@@ -321,35 +412,117 @@ vim.cmd "qa!"
   os.remove(out)
 end
 
----A tab that is not an agent's -- the read-only subagent view -- gets the
----rail too. The regression: `tabnew` left you on a bare tab, rail gone.
-local function test_rail_beside()
+---A WORKSPACE IS A SET OF BUFFERS: opening an agent of another workspace
+---replaces the set, and a subagent is a peek that leaves the set alone.
+local function test_workspaces()
   local native = require "paseo.ui.native"
   local chat_mod = require "paseo.ui.chat"
+  local agents = require "paseo.agents"
+  local tree = require "paseo.ui.tree"
   local saved_current = chat_mod.current()
-  local chat = new_chat "native-side-rail"
-  native.open(chat)
-  eq("native: the rail is up on the agent's tab", native.rail_shown(), true)
 
-  vim.cmd "tabnew"
-  local tab = api.nvim_get_current_tabpage()
-  local viewer = api.nvim_get_current_win()
-  native.rail_beside()
-  local rails = 0
-  for _, win in ipairs(api.nvim_tabpage_list_wins(tab)) do
-    if vim.bo[api.nvim_win_get_buf(win)].filetype == "paseo-rail" then
-      rails = rails + 1
-    end
+  local one, two = vim.fn.resolve(vim.fn.tempname()), vim.fn.resolve(vim.fn.tempname())
+  vim.fn.mkdir(one, "p")
+  vim.fn.mkdir(two, "p")
+  local records = {
+    ["ws-a1"] = { id = "ws-a1", workspaceId = "w1", cwd = one, title = "first", createdAt = "1" },
+    ["ws-a2"] = { id = "ws-a2", workspaceId = "w1", cwd = one, title = "second", createdAt = "2" },
+    ["ws-b1"] = { id = "ws-b1", workspaceId = "w2", cwd = two, title = "other", createdAt = "3" },
+    ["ws-sub"] = {
+      id = "ws-sub",
+      workspaceId = "w2",
+      cwd = two,
+      title = "helper",
+      createdAt = "4",
+      labels = { [require("paseo.subagents").PARENT_LABEL] = "ws-b1" },
+    },
+  }
+  local old_get, old_agents, old_terms = agents.get, tree.workspace_agents, tree.workspace_terminals
+  agents.get = function(id)
+    return records[id]
   end
-  eq("native: a non-agent tab gets the rail beside it", rails, 1)
-  eq("native: and the cursor stays where it was", api.nvim_get_current_win(), viewer)
-  native.rail_beside()
-  eq("native: asking twice does not add a second", #api.nvim_tabpage_list_wins(tab), 2)
-  vim.cmd "tabclose"
+  tree.workspace_agents = function(ws)
+    local out = {}
+    for _, record in pairs(records) do
+      if record.workspaceId == ws.id then
+        out[#out + 1] = record
+      end
+    end
+    table.sort(out, function(x, y)
+      return x.createdAt < y.createdAt
+    end)
+    return out
+  end
+  tree.workspace_terminals = function()
+    return {}
+  end
 
-  native.close(chat)
+  local ok, err = pcall(function()
+    local a1 = new_chat "ws-a1"
+    a1.root = one
+    native.open(a1)
+    local listed = native.listed()
+    eq("workspaces: the workspace's agents are the row", #listed, 2)
+    local a2 = listed[2]
+    eq("workspaces: in the order they started", a2.agent_id, "ws-a2")
+    eq("workspaces: each a listed buffer", vim.bo[a2.conversation].buflisted, true)
+    truthy(
+      "workspaces: under its agent's title",
+      api.nvim_buf_get_name(a2.conversation):find("paseo://agent/second", 1, true) ~= nil,
+      api.nvim_buf_get_name(a2.conversation)
+    )
+    eq("workspaces: the tab is in the workspace", vim.fn.resolve(vim.fn.getcwd()), one)
+
+    -- Another workspace's agent: the set is replaced.
+    local a2_buf = a2.conversation
+    local b1 = new_chat "ws-b1"
+    b1.root = two
+    chat_mod.set_current(b1)
+    native.open(b1)
+    eq("workspaces: switching replaces the row", native.listed(), { b1 })
+    eq("workspaces: the old agents' buffers are gone", api.nvim_buf_is_valid(a2_buf), false)
+    eq("workspaces: and the tab's directory followed", vim.fn.resolve(vim.fn.getcwd()), two)
+    eq("workspaces: on the one Paseo tab", api.nvim_get_current_tabpage(), native.tab())
+
+    -- A SUBAGENT IS A PEEK: in the middle, off the row.
+    local sub = new_chat "ws-sub"
+    sub.root = two
+    native.open(sub)
+    eq(
+      "peek: the subagent takes the middle",
+      api.nvim_win_get_buf(sub.win_conversation),
+      sub.conversation
+    )
+    eq("peek: the row is unchanged", native.listed(), { b1 })
+    eq("peek: and it is not listed", vim.bo[sub.conversation].buflisted, false)
+    -- `q` goes back to the parent, not out of Paseo.
+    native.close(sub)
+    eq(
+      "peek: q goes back to the parent",
+      api.nvim_win_get_buf(b1.win_conversation),
+      b1.conversation
+    )
+    truthy("peek: with the Paseo tab still up", native.any())
+
+    -- A read-only buffer -- a provider subagent's transcript -- the same way.
+    local view = api.nvim_create_buf(false, true)
+    local win = native.peek(view)
+    eq("peek: a viewer goes in the middle", api.nvim_win_get_buf(win), view)
+    native.unpeek()
+    eq("peek: and back", api.nvim_win_get_buf(b1.win_conversation), b1.conversation)
+
+    native.close(b1)
+  end)
+
+  agents.get, tree.workspace_agents, tree.workspace_terminals = old_get, old_agents, old_terms
   native.reset()
   chat_mod.set_current(saved_current)
+  require("tests.spec.helpers").go_home()
+  vim.fn.delete(one, "rf")
+  vim.fn.delete(two, "rf")
+  if not ok then
+    error(err, 0)
+  end
 end
 
 local function test_keys()
@@ -410,7 +583,10 @@ local function test_changes_async()
     end
     return ""
   end
-  truthy("changes: the panel is up before git has answered", panel_text():find("loading", 1, true) ~= nil)
+  truthy(
+    "changes: the panel is up before git has answered",
+    panel_text():find("loading", 1, true) ~= nil
+  )
   truthy(
     "changes: and fills in when it does",
     vim.wait(3000, function()
@@ -433,8 +609,8 @@ local function test_toggle()
   local a = new_chat "native-toggle"
   native.open(a)
   settle()
-  local agent_tab = a.native_tab
-  truthy("toggle: the agent is on a tab of its own", agent_tab ~= home)
+  local agent_tab = native.tab()
+  truthy("toggle: Paseo is on a tab of its own", agent_tab ~= home)
 
   -- `:Paseo native` ON the agent's tab goes back where you came from...
   chat_mod.surface("native", { toggle = true })
@@ -455,7 +631,7 @@ return {
   { "ui.native.toggle", test_toggle },
   { "ui.native.keys", test_keys },
   { "ui.native.changes_async", test_changes_async },
-  { "ui.native.rail_beside", test_rail_beside },
+  { "ui.native.workspaces", test_workspaces },
   { "ui.native.markdown", test_markdown },
   { "ui.native.panels", test_panels },
   { "ui.native.uniform", test_uniform },

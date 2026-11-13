@@ -502,6 +502,22 @@ function M.host_chat()
   return native and native.chat() or nil
 end
 
+---A workspace of the list the rail holds, by id. What the native surface
+---needs to switch to one: its directory and host, not only its id.
+---@param id string|nil
+---@return table|nil
+function M.workspace(id)
+  if not id then
+    return nil
+  end
+  for _, ws in ipairs(cache.list or {}) do
+    if ws.id == id then
+      return ws
+    end
+  end
+  return nil
+end
+
 ---The workspace the native tab is showing, as a key into the list.
 ---
 ---BY WORKSPACE ID when the agent on screen has one, and only then by
