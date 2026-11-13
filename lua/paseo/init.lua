@@ -244,6 +244,13 @@ commands.agents = {
   end,
 }
 
+commands.search = {
+  desc = "Search every workspace, agent, prompt you sent, and past chat",
+  run = function()
+    M.search()
+  end,
+}
+
 commands.new = {
   desc = "A new session (Local, or `worktree`), or `agent`: one more in the session on screen",
   run = function(args)
@@ -374,6 +381,12 @@ function M.agents()
   require("paseo.pickers.sessions").here()
 end
 
+---Search everything in one picker -- workspaces, agents, every prompt you
+---sent, and archived chats -- with a preview of each. See |:Paseo-search|.
+function M.search()
+  require("paseo.pickers.search").open()
+end
+
 ---Start something from wherever you are: a new session, Local or in a new
 ---worktree, or (`scope = "agent"`) an agent in the session on screen -- see
 ---|paseo-new|.
@@ -431,7 +444,7 @@ function M.setup(opts)
   -- One per action of |paseo-native-api|, and one per panel: `<Plug>(paseo-rail)`,
   -- `<Plug>(paseo-panel-changes)`. `<Plug>(paseo-native)` is the toggle.
   local native = require "paseo.native"
-  local plugs = { native = native.toggle }
+  local plugs = { native = native.toggle, search = M.search }
   for name, action in pairs(native.ACTIONS) do
     if name ~= "toggle" then
       plugs[name] = action.run

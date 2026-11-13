@@ -76,7 +76,7 @@ local function test_commands()
     eq(
       ":Paseo completes to the nine commands",
       vim.fn.getcompletion("Paseo ", "cmdline"),
-      { "agents", "ask", "explain", "new", "settings", "stop", "workspaces", "ws" }
+      { "agents", "ask", "explain", "new", "search", "settings", "stop", "workspaces", "ws" }
     )
     eq(":Paseo ask completes qf too", vim.fn.getcompletion("Paseo ask q", "cmdline"), { "qf" })
     eq(":Paseo settings completes its groups", vim.fn.getcompletion("Paseo settings th", "cmdline"), { "thinking" })

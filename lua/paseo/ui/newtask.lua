@@ -652,6 +652,9 @@ local function mount(task)
   map(nkeys.focus, function()
     require("paseo.ui.native").focus_rail()
   end, "into the workspace rail")
+  map(nkeys.search, function()
+    require("paseo.pickers.search").open()
+  end, "search workspaces, agents and chats")
 
   -- From the box to the choices: `<Tab>` in normal mode, where it means
   -- nothing in a composer.

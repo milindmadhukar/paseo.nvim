@@ -57,6 +57,7 @@ Optional:
     screenshot straight off the clipboard (|paseo-images|)
   - `arecord`, `rec` (sox) or `ffmpeg`, for dictation (|paseo-dictation|)
   - `gh`, for pull-request status on the rail (|paseo-config.ui.pr|)
+  - telescope.nvim, for |:Paseo-search| with a fuzzy sorter and a preview
 
 No build step and no UI library: every surface is plain buffers and windows.
 
@@ -125,6 +126,12 @@ readers and the microphone.
                                                              *:Paseo-agents*
 :Paseo agents           The agents in the workspace containing the current
                         directory, in a chooser (|paseo-agents-keys|).
+
+                                                             *:Paseo-search*
+:Paseo search           Search every workspace, live agent, prompt you
+                        sent, and archived chat in one picker, with a
+                        preview of the chat (|paseo-search|). `<C-k>` on
+                        Paseo's buffers.
 
                                                            *:Paseo-settings*
 :Paseo settings [group] The chat agent's settings card: permission mode,
@@ -212,6 +219,7 @@ On the full screen, from any of its buffers (|paseo-config.ui.native|):
     <C-s>       into the rail, on the agent on screen
     <C-p>       the panel: Settings, Changes, Usage
     <C-n>       a new session (|paseo-new|)
+    <C-k>       search workspaces, agents and chats (|paseo-search|)
 
 Every one of these can be moved or unbound: |paseo-config.keys|.
 
@@ -390,8 +398,9 @@ the agents. It takes every key except these (|paseo-config.ui.terminal|):
 
     <C-g>       out of terminal mode, without closing anything
     <C-l>       back into the terminal
-    <C-j> <C-k> the next / previous agent or terminal
+    <C-j>       the next agent or terminal (`prev` is unbound by default)
     <C-s>       into the rail
+    <C-k>       search workspaces, agents and chats (|paseo-search|)
     q           (normal mode) back to the agent; the terminal keeps running
 
                                                             *paseo-subagents*
@@ -574,6 +583,38 @@ list, so the chooser above is used instead.
 
 The settings themselves are cards (|paseo-settings|).
 
+                                                                *paseo-search*
+Search ~
+|:Paseo search| (`<C-k>` on Paseo's buffers, `<Plug>(paseo-search)`) is the
+app's Ctrl+K, with one addition: it also searches what you said. It shows one
+list of:
+
+    agent       every live agent, the ones waiting on you first; matched
+                on its title, workspace, branch and provider
+    ws          every workspace; matched on its title, project and branch
+    prompt      every message you have sent in a live chat, newest first,
+                from the daemon's prompt index; matched on the message
+                and the chat's title
+    archived    up to 200 archived chats, most recent first; matched on
+                the title, workspace, branch and project
+
+A prompt is matched by what you typed into it. The agent's replies are not
+searched. An empty query lists the kinds in the order above, and typing
+ranks them all together. With telescope installed (|paseo-requirements|)
+the sorter is yours and the preview window shows the chat: the end of it,
+or, for a prompt, everything from that message on. `<CR>` opens what you
+picked:
+  - an agent, in a chat;
+  - a workspace, as |:Paseo-workspaces| would;
+  - a prompt, in its chat with that message at the top. Older history is
+    loaded back to it, up to 600 items.
+Without telescope the list opens in the chooser above (|paseo-choose|),
+with no preview.
+
+The workspaces and live agents show at once. The prompt lists and archived
+chats arrive together a moment later, and are kept for 30 seconds, so the
+next search opens with all of them.
+
 ==============================================================================
 9. CONFIGURATION                                         *paseo-configuration*
 
@@ -603,15 +644,16 @@ is optional. >lua
           composer = 10,
           composer_min = 3,
           keys = { rail = "<C-b>", focus = "<C-h>", sessions = "<C-s>",
-                   panel = "<C-p>", new = "<C-n>", new_agent = false },
+                   panel = "<C-p>", new = "<C-n>", new_agent = false,
+                   search = "<C-k>" },
           hints = { winbar = false, rail = false },
         },
         sidebar = { width = 40, min_width = 60, composer = 8,
                     composer_min = 3, position = "right" },
         answer = { width = 96, min_width = 54, backdrop = true, zindex = 190 },
         terminal = {
-          keys = { next = "<C-j>", prev = "<C-k>", sessions = "<C-s>",
-                   chrome = "<C-g>", terminal = "<C-l>" },
+          keys = { next = "<C-j>", prev = false, sessions = "<C-s>",
+                   search = "<C-k>", chrome = "<C-g>", terminal = "<C-l>" },
           presets = {},
         },
         pr = { enabled = true, ttl = 60 },
@@ -702,7 +744,8 @@ ui.native           The full-screen surface:
   keys                the surface's keys, on all its buffers: a key, a list
                       of keys, or `false`. `rail`, `focus`, `sessions`,
                       `panel`, `new` (a new session), `new_agent` (a new
-                      agent in the session on screen; unbound by default).
+                      agent in the session on screen; unbound by default),
+                      `search` (|paseo-search|).
   hints               key hints on the winbar and under the rail; `true` or
                       `false` sets both. Off by default.
                                                      *paseo-config.ui.sidebar*
@@ -718,8 +761,9 @@ ui.answer           The question and plan overlay: `width` (a cap, in cells),
                                                     *paseo-config.ui.terminal*
                                                                               
 ui.terminal.keys    The keys a terminal keeps for itself
-                    (|paseo-terminal-keys|): `next`, `prev`, `sessions`,
-                    `chrome`, `terminal`. `false` unbinds one.
+                    (|paseo-terminal-keys|): `next`, `prev` (unbound by
+                    default), `sessions`, `search`, `chrome`, `terminal`.
+                    `false` unbinds one.
 ui.terminal.presets Extra entries for the new-terminal choices: `"lazygit"`,
                     or `{ label = "Lazygit", command = ... }`.
                                                           *paseo-config.ui.pr*
@@ -850,6 +894,8 @@ paste_image({path})         Attach an image to the chat: the clipboard's, or
 workspaces({opts})          |:Paseo-workspaces|. {opts}: `all`.
                                                               *paseo.agents()*
 agents()                    |:Paseo-agents|.
+                                                              *paseo.search()*
+search()                    |:Paseo-search|.
                                                                 *paseo.native*
 native                      `require("paseo.native")`, below.
 
@@ -1074,7 +1120,7 @@ One per |paseo-native-api| action, in normal and terminal mode:
     <Plug>(paseo-panel-usage)       <Plug>(paseo-new)
     <Plug>(paseo-new-agent)         <Plug>(paseo-worktree)
     <Plug>(paseo-next)              <Plug>(paseo-prev)
-    <Plug>(paseo-stop)
+    <Plug>(paseo-stop)              <Plug>(paseo-search)
 
 On the full screen, the hint for "back to your code" shows the key you mapped
 to `<Plug>(paseo-native)` (or to `<cmd>Paseo<cr>`).

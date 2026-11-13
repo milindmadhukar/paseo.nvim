@@ -20,6 +20,7 @@ every pane a real split, and the keys are Vim's.
 | Pasting a screenshot | `wl-paste` (Wayland), `xclip` (X11) or `pngpaste` (macOS) |
 | Dictation | `arecord`, `rec` (sox) or `ffmpeg` |
 | Pull-request status | `gh` |
+| Search with a preview | [telescope.nvim](https://github.com/nvim-telescope/telescope.nvim) |
 
 There's no build step and no UI library. The one dependency, the sidecar's
 `@getpaseo/client`, is installed into `sidecar/` on first use.
@@ -78,6 +79,7 @@ vim.keymap.set("n", "<leader>as", "<cmd>Paseo settings<cr>")        -- mode, mod
 | `:Paseo explain [kind]` | Explain code with the bundled review rubric, sent at once |
 | `:Paseo workspaces [all]` | This project's workspaces (`all`: every project's) |
 | `:Paseo agents` | The agents in this workspace |
+| `:Paseo search` | Search every workspace, agent, prompt you sent, and past chat (`<C-k>` on Paseo's buffers) |
 | `:Paseo settings [mode\|thinking\|model\|features]` | The chat agent's settings; `mode`, `thinking` and `model` open straight in your picker |
 | `:Paseo stop` | Interrupt the agent's turn |
 | `:Paseo ws init\|edit\|create\|rm\|ls\|status` | Multi-repo workspaces |
@@ -101,6 +103,7 @@ Everything else is a key inside the chat or a Lua function.
 | `<C-b>` `<C-h>` | full screen | the rail: show or hide it / go in and out |
 | `<C-p>` | full screen | the Settings / Changes / Usage panel |
 | `<C-n>` | full screen | a new session (Local or a new worktree) |
+| `<C-k>` | full screen, terminals | search workspaces, agents and chats |
 | `q` | chat | close it |
 
 The rail uses nvim-tree's keys: `l`/`h` unfold and fold, `a` starts a new
@@ -135,6 +138,16 @@ something else, and the next chip joins the same message. A chip is plain
 text: delete it and that reference no longer goes. `<C-f>` takes the chat
 full screen and, from there, back beside the code. `review.surface =
 "native"` sends asks to the full-screen tab instead.
+
+### Search everything
+
+`:Paseo search`, or `<C-k>` on any of Paseo's buffers, works like the app's
+Ctrl+K, with one difference: it also searches what you said. It opens one
+telescope list of every workspace, every live agent, every prompt you have
+sent in any chat, and your archived chats, so you can type at all of them at
+once. The preview shows the chat. `<CR>` on a prompt opens its chat with that
+message at the top, loading older history if it has to. Without telescope it
+opens in Paseo's own chooser, which has no preview.
 
 ### Choices open in your picker
 
@@ -189,6 +202,7 @@ paseo.toggle_feature()               -- Fast
 paseo.toggle_plan()
 paseo.paste_image("~/shot.png")      -- from a code buffer
 paseo.stop()
+paseo.search()                       -- :Paseo search
 
 local native = require("paseo.native")   -- the full-screen surface
 native.toggle_rail()

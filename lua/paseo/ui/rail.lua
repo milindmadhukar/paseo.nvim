@@ -1662,6 +1662,14 @@ local function keymap(keys)
     { keys.focus, keys.back, "back to the conversation", configured = true },
     { keys.sessions, keys.back, "back to the conversation", configured = true },
     { keys.toggle, keys.on_toggle, "hide the workspace rail", configured = true },
+    {
+      keys.search,
+      function()
+        require("paseo.pickers.search").open()
+      end,
+      "search workspaces, agents and chats",
+      configured = true,
+    },
   }
 end
 

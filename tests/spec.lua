@@ -64,6 +64,7 @@ local files = {
   "chat",
   "perf",
   "archive",
+  "pickers.search",
 }
 
 ---Every `.lua` under `tests/spec/`, as module suffixes -- so a new file that

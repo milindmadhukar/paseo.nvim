@@ -260,6 +260,8 @@ local M = {}
 ---@field sessions string|false  Into the rail beside the terminal, and in the
 ---                      composer the session list. Was `keys.list`, which
 ---                      meant the rail.
+---@field search string|false  The search over every workspace, agent and
+---                      chat (|:Paseo-search|), as on the surface's buffers.
 ---@field chrome string|false  OUT OF THE PTY, into normal mode, without
 ---                      closing anything: the terminal stays on screen and the
 ---                      keystrokes stop going to it. The name is from when it
@@ -488,6 +490,10 @@ local defaults = {
         -- tabs). Unbound: the rail's `A` does it, and every Ctrl key here is
         -- someone's.
         new_agent = false,
+        -- Search every workspace, agent and chat -- the prompts you sent
+        -- included -- in one picker: the app's Ctrl+K. Buffer-local like the
+        -- rest, so a global `<C-k>` (window up, say) is untouched outside.
+        search = "<C-k>",
       },
       -- KEY HINTS, off unless you ask: `winbar` is the `code  panel  rail
       -- close` at the right of the conversation's winbar, `rail` the `a session
@@ -522,8 +528,11 @@ local defaults = {
     terminal = {
       keys = {
         next = "<C-j>",
-        prev = "<C-k>",
+        -- Unbound: `<C-k>` is the search, as on every Paseo buffer, and
+        -- `next` comes round to the previous one anyway.
+        prev = false,
         sessions = "<C-s>",
+        search = "<C-k>",
         -- `<C-g>` rather than anything more obvious, because every obvious
         -- chord is one a shell already uses: `<C-a>`/`<C-e>` are line ends,
         -- `<C-w>` deletes a word, `<C-l>` clears the screen. In readline

@@ -77,7 +77,7 @@ M.PANELS = { "Settings", "Changes", "Usage" }
 local last_panel = "Settings"
 
 ---The surface's own keys (`ui.native.keys`): each a key, a list, or false.
----@return { rail: any, focus: any, sessions: any, panel: any, new: any, new_agent: any }
+---@return { rail: any, focus: any, sessions: any, panel: any, new: any, new_agent: any, search: any }
 local function nkeys()
   return require("paseo.config").get().ui.native.keys or {}
 end
@@ -463,6 +463,7 @@ local function rail_keys()
     toggle = keys.rail,
     focus = keys.focus,
     sessions = keys.sessions,
+    search = keys.search,
     on_toggle = function()
       M.toggle_rail()
     end,
@@ -695,6 +696,10 @@ function M.bind_terminal(buf)
     vim.cmd.stopinsert()
     M.focus_rail()
   end, "the sessions, in the rail")
+  map({ "n", "t" }, keys.search, function()
+    vim.cmd.stopinsert()
+    require("paseo.pickers.search").open()
+  end, "search workspaces, agents and chats")
   map("n", "q", function()
     local s = here()
     if s and s.chat and valid_buf(s.chat.conversation) then
@@ -838,6 +843,9 @@ local function show_panel(t, name)
   end
   surface(nkeys().panel, M.toggle_panel, "close the panel")
   surface(nkeys().rail, M.toggle_rail, "show or hide the workspace rail")
+  surface(nkeys().search, function()
+    require("paseo.pickers.search").open()
+  end, "search workspaces, agents and chats")
   for i, panel_name in ipairs(M.PANELS) do
     map(tostring(i), function()
       M.panel(panel_name)
@@ -1088,6 +1096,13 @@ local function bind(chat)
         require("paseo.new").open(require("paseo.new").context(chat), { scope = "agent" })
       end,
       "a new agent in this session",
+    },
+    {
+      keys.search,
+      function()
+        require("paseo.pickers.search").open()
+      end,
+      "search workspaces, agents and chats",
     },
   }
   chat.native_keys = {}
