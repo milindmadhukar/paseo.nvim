@@ -28,7 +28,7 @@ local function display(ws, widths)
     (ws.group or ws.project or "?"):sub(1, widths.project),
     (ws.name or "?"):sub(1, widths.name),
     shape,
-    agents.summary(ws.directory or "")
+    agents.summary(ws)
   )
 end
 

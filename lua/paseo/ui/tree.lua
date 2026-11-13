@@ -26,35 +26,14 @@ M.INDENT = "    "
 
 -- -------------------------------------------------------------------- data
 
----The agents of a workspace.
----
----BY WORKSPACE ID wherever the agents carry one: every `paseo run` in a
----checkout makes a workspace of its own on the SAME directory, so listing by
----directory would draw one checkout's agents under every one of them. By
----directory only when nothing in it carries an id -- an older sidecar.
+---The agents of a workspace: |paseo.agents|.for_workspace -- by workspace id,
+---since every `paseo run` in a checkout makes a workspace of its own on the
+---SAME directory -- in the order they were started.
 ---@param ws { id?: string, directory?: string, hostId?: string }
 ---@param host_id? string
 ---@return table[]
 function M.workspace_agents(ws, host_id)
-  local agents = require "paseo.agents"
-  host_id = ws.hostId or host_id
-  local dir = ws.directory or ""
-  local in_dir = dir ~= "" and agents.for_root(dir, host_id) or {}
-  local any_id = false
-  for _, agent in ipairs(in_dir) do
-    any_id = any_id or agent.workspaceId ~= nil
-  end
-  local list
-  if ws.id and (any_id or #in_dir == 0) then
-    list = {}
-    for _, agent in ipairs(agents.all(host_id)) do
-      if agent.workspaceId == ws.id then
-        list[#list + 1] = agent
-      end
-    end
-  else
-    list = in_dir
-  end
+  local list = require("paseo.agents").for_workspace(ws, host_id)
   -- In the order they were started, so a new one lands at the bottom rather
   -- than wherever its title sorts.
   table.sort(list, function(a, b)

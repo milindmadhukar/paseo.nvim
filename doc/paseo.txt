@@ -1667,7 +1667,10 @@ doing -- the desktop app's sidebar, with the same rule deciding the state: >
     ○  dim              no agent has run here
 <
 A workspace shows its MOST URGENT agent: one waiting on you among three
-running says `!`. THE WORKSPACE ON SCREEN -- the one the agent you are
+running says `!`. Only its OWN agents count, matched by workspace id, and so
+do its subagent counts: every agent the app starts in a checkout gets a
+workspace of its own on that same directory, and one running agent spins only
+its own row. THE WORKSPACE ON SCREEN -- the one the agent you are
 talking to belongs to -- has a green band across its row, the bar on the left
 and a green name. It is matched by the agent's workspace id, not by directory,
 so of several workspaces on one checkout only the right one is marked. The

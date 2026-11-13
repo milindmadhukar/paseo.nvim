@@ -260,12 +260,27 @@ end
 ---waiting on a permission among three running says the permission.
 local BUCKET_RANK = { needs_input = 1, failed = 2, running = 3, attention = 4, done = 5 }
 
----One bucket for every agent under `root`, or `"none"` with no agents at all.
----@param root string
+---The agents a workspace (or a bare root) holds: |paseo.agents|.for_workspace
+---for a workspace, |paseo.agents|.for_root for a directory.
+---@param where string|table
+---@param host_id? string
+---@return table[]
+local function held(where, host_id)
+  if type(where) == "table" then
+    return M.for_workspace(where, host_id)
+  end
+  return M.for_root(where, host_id)
+end
+M.held = held
+
+---One bucket for every agent in a workspace, or `"none"` with no agents at
+---all. Pass the WORKSPACE, not its directory, wherever there is one: see
+---`M.for_workspace` for why the directory alone answers for the wrong rows.
+---@param where string|table  A workspace, or a root directory.
 ---@return "needs_input"|"failed"|"running"|"attention"|"done"|"none"
-function M.workspace_bucket(root, host_id)
+function M.workspace_bucket(where, host_id)
   local best
-  for _, agent in ipairs(M.for_root(root, host_id)) do
+  for _, agent in ipairs(held(where, host_id)) do
     local bucket = M.bucket(agent)
     if not best or BUCKET_RANK[bucket] < BUCKET_RANK[best] then
       best = bucket
@@ -318,12 +333,54 @@ function M.for_root(root, host_id)
   return out
 end
 
----A one-line summary of a root's agents, for a picker column.
----@param root string
+---The agents of one workspace.
+---
+---BY WORKSPACE ID for every agent that carries one. Every `paseo run` -- and
+---every agent the app starts -- in a checkout makes a workspace of its own on
+---the SAME directory: fifteen of them on one repository is ordinary. Matched by
+---directory, each of those rows answered for all fifteen workspaces' agents,
+---so three running agents set every row in the project spinning.
+---
+---By directory only for what has no id to match on: an agent from an older
+---sidecar, or a workspace with no id (a `ws` checkout the daemon has not
+---registered).
+---
+---`ws.directory` and never `ws.local_directory`: agents' cwds are the
+---daemon's paths, and a remote host's workspace is mapped to a local one only
+---for the editor's sake.
+---@param ws { id?: string, directory?: string, hostId?: string }
+---@param host_id? string
+---@return table[]
+function M.for_workspace(ws, host_id)
+  host_id = ws.hostId or host_id
+  local dir = ws.directory or ""
+  local in_dir = dir ~= "" and M.for_root(dir, host_id) or {}
+  if not ws.id then
+    return in_dir
+  end
+  local out = {}
+  local seen = {}
+  for _, agent in ipairs(M.all(host_id)) do
+    if agent.workspaceId == ws.id then
+      out[#out + 1] = agent
+      seen[agent] = true
+    end
+  end
+  for _, agent in ipairs(in_dir) do
+    if agent.workspaceId == nil and not seen[agent] then
+      out[#out + 1] = agent
+    end
+  end
+  return out
+end
+
+---A one-line summary of a workspace's (or a root's) agents, for a picker
+---column.
+---@param where string|table  A workspace, or a root directory.
 ---@return string
-function M.summary(root, host_id)
-  local host = hosts.get(host_id)
-  local list = M.for_root(root, host and host.id)
+function M.summary(where, host_id)
+  local host = hosts.get(type(where) == "table" and where.hostId or host_id)
+  local list = held(where, host and host.id)
   if #list == 0 then
     return host and subscribed[host.id] and "" or "…"
   end

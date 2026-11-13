@@ -792,10 +792,17 @@ function M.agent_sessions(ws, callback)
       local dir = normalise(ws.directory)
       local out = {}
       for _, agent in ipairs(result.entries or {}) do
-        -- Matched on workspaceId when the daemon reports one, and on directory
-        -- otherwise: agents created before this plugin existed have a cwd but
-        -- may predate the workspace they now sit in.
-        if agent.workspaceId == ws.id or normalise(agent.cwd) == dir then
+        -- Matched on workspaceId when the agent carries one, and on directory
+        -- only when it does not: many workspaces share one checkout's
+        -- directory, and the directory would list every one's agents under
+        -- each. Same rule as |paseo.agents|.for_workspace.
+        local match
+        if agent.workspaceId ~= nil and ws.id then
+          match = agent.workspaceId == ws.id
+        else
+          match = normalise(agent.cwd) == dir
+        end
+        if match then
           out[#out + 1] = agent
         end
       end

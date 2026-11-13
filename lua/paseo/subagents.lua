@@ -232,16 +232,23 @@ function M.counts(parent, host_id)
   return running, total
 end
 
----Subagents of every agent working under `root`: what the workspace rail
----badges a row with. A Paseo subagent working in the same workspace as its
----parent is ONE subagent, not also an agent with subagents of its own counted
----twice -- the parent's list is what it is counted in.
----@param root string
+---Subagents of every agent in a workspace: what the workspace rail badges a
+---row with. A Paseo subagent working in the same workspace as its parent is
+---ONE subagent, not also an agent with subagents of its own counted twice --
+---the parent's list is what it is counted in.
+---
+---Pass the WORKSPACE wherever there is one: its agents are matched by id
+---(|paseo.agents|.for_workspace), and a directory alone would count every
+---workspace on that checkout.
+---@param where string|table  A workspace, or a root directory.
 ---@param host_id? string
 ---@return integer running, integer total
-function M.counts_under(root, host_id)
+function M.counts_under(where, host_id)
   local running, total = 0, 0
-  for _, agent in ipairs(require("paseo.agents").for_root(root, host_id)) do
+  if type(where) == "table" then
+    host_id = where.hostId or host_id
+  end
+  for _, agent in ipairs(require("paseo.agents").held(where, host_id)) do
     M.track(agent.id, host_id)
     local r, t = M.counts(agent.id, host_id)
     running, total = running + r, total + t

@@ -37,6 +37,31 @@ local function test_buckets()
   eq("rail: a workspace answers with its most urgent agent", agents.workspace_bucket(root, host), "needs_input")
   eq("rail: and a sibling directory is not inside it", agents.workspace_bucket(root .. "-other", host), "failed")
   eq("rail: no agents is none", agents.workspace_bucket(root .. "-nobody", host), "none")
+
+  -- MANY WORKSPACES, ONE DIRECTORY. Every agent the app starts in a checkout
+  -- gets a workspace of its own on the same path; matched by directory, the
+  -- one running agent set every row in the project spinning.
+  agents._apply {
+    kind = "snapshot",
+    hostId = host,
+    entries = {
+      { id = "busy", status = "running", cwd = root, workspaceId = "wks_busy" },
+      { id = "quiet", status = "idle", cwd = root, workspaceId = "wks_quiet" },
+      { id = "legacy", status = "idle", cwd = root },
+    },
+  }
+  local busy = { id = "wks_busy", directory = root, hostId = host }
+  local quiet = { id = "wks_quiet", directory = root, hostId = host }
+  local empty = { id = "wks_empty", directory = root, hostId = host }
+  eq("rail: the running agent's own workspace spins", agents.workspace_bucket(busy, host), "running")
+  eq("rail: a sibling on the same directory does not", agents.workspace_bucket(quiet, host), "done")
+  eq("rail: one whose agents are elsewhere answers for the id-less one only", agents.workspace_bucket(empty, host), "done")
+  eq("rail: and the row says the same", require("paseo.ui.rail").bucket(quiet), "done")
+  eq("rail: a workspace lists its own agents", #agents.for_workspace(quiet, host), 2)
+  eq("rail: by id, plus the agent with no id to match", vim.tbl_map(function(a)
+    return a.id
+  end, require("paseo.ui.tree").workspace_agents(quiet, host)), { "legacy", "quiet" })
+  eq("rail: the picker's summary is the workspace's", agents.summary(quiet, host), "2 idle")
   agents._apply { kind = "snapshot", hostId = host, entries = {} }
 
   -- The glyphs the user asked for, by bucket.

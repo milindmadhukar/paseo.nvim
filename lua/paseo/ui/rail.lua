@@ -306,9 +306,9 @@ end
 ---@param ws table
 ---@return string
 function M.bucket(ws)
-  local bucket = require("paseo.agents").workspace_bucket(ws.directory or "", ws.hostId)
+  local bucket = require("paseo.agents").workspace_bucket(ws, ws.hostId)
   if bucket == "done" or bucket == "attention" or bucket == "none" then
-    local running = require("paseo.subagents").counts_under(ws.directory or "", ws.hostId)
+    local running = require("paseo.subagents").counts_under(ws, ws.hostId)
     if running > 0 then
       return "running"
     end
@@ -322,7 +322,7 @@ end
 ---@param ws table
 ---@return table[]|nil
 function M.subagent_badge(ws)
-  local running, total = require("paseo.subagents").counts_under(ws.directory or "", ws.hostId)
+  local running, total = require("paseo.subagents").counts_under(ws, ws.hostId)
   if total == 0 then
     return nil
   end

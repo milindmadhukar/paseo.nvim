@@ -473,7 +473,9 @@ sidebar, and it uses the same rule to decide the state:
 | hollow dot | no agent has run here |
 
 A workspace shows its **most urgent** agent, so one waiting on you among three
-running shows the `!`. **The workspace on screen** (the one the agent you are
+running shows the `!`. Only its **own** agents count, matched by workspace id:
+every agent the app starts in a checkout gets a workspace of its own on that
+same directory, and one running agent spins only its own row. **The workspace on screen** (the one the agent you are
 talking to belongs to) has a green band across its row, a bar and a green
 name. It is matched by the agent's workspace, not the directory, so when
 several workspaces share one checkout only the right one is marked.
