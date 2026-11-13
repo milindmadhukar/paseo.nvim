@@ -643,6 +643,11 @@ function M.cycle(delta)
   end
   local at = 1
   local shown = api.nvim_win_get_buf(s.conv)
+  -- A draft's choices are its conversation, for where you are in the row.
+  local draft = require("paseo.ui.newtask").chat_of(shown)
+  if draft and draft.conversation then
+    shown = draft.conversation
+  end
   for i, buf in ipairs(list) do
     if buf == shown then
       at = i
@@ -1550,6 +1555,9 @@ function M.show(chat, opts)
   if arriving then
     transcript.restore(chat)
   end
+  -- A draft coming back: its choices, as you left them, not the empty
+  -- conversation under them.
+  require("paseo.ui.newtask").show(chat)
   require("paseo.ui.chat").set_current(chat)
   M.refresh(chat)
   require("paseo.ui.composer").refresh(chat)

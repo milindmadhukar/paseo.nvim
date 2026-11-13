@@ -574,34 +574,30 @@ local function to_composer(task)
   end
 end
 
----Focus the choices.
+local place
+
+---Focus the choices -- putting them back first, if the window lost them.
 ---@param task paseo.NewTask
 local function to_options(task)
-  local win = win_of(task)
+  local win = win_of(task) or (place(task) and win_of(task))
   if win then
     pcall(vim.cmd.stopinsert)
     api.nvim_set_current_win(win)
   end
 end
 
----Put the choices in the draft chat's conversation window.
+---Make the choices buffer, its view and its keys. Once per task: the buffer
+---is `bufhidden=hide`, so switching to another agent and back finds it as it
+---was -- what you picked, where the cursor was. |unmount| deletes it.
 ---@param task paseo.NewTask
-local function mount(task)
+local function build(task)
   local chat = task.chat
-  local win = chat.win_conversation
-  if not (win and api.nvim_win_is_valid(win)) then
-    return
-  end
   local buf = api.nvim_create_buf(false, true)
   task.buf = buf
-  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].bufhidden = "hide"
   vim.bo[buf].filetype = M.FILETYPE
   vim.bo[buf].modifiable = false
   pcall(api.nvim_buf_set_name, buf, ("paseo://new/%d"):format(buf))
-  api.nvim_win_set_buf(win, buf)
-  vim.wo[win].wrap = false
-  vim.wo[win].cursorline = false
-  vim.wo[win].fillchars = "eob: "
 
   local keys = require "paseo.ui.keys"
   local view = require("paseo.ui.panels.settings").new({
@@ -657,18 +653,48 @@ local function mount(task)
   end, "search workspaces, agents and chats")
 
   -- From the box to the choices: `<Tab>` in normal mode, where it means
-  -- nothing in a composer.
-  task.composer_keys = {}
-  if chat.composer and api.nvim_buf_is_valid(chat.composer) then
-    for _, lhs in ipairs(keys.resolve("composer", "<Tab>")) do
-      vim.keymap.set("n", lhs, function()
-        to_options(task)
-      end, { buffer = chat.composer, nowait = true, silent = true, desc = "paseo: the choices" })
-      task.composer_keys[#task.composer_keys + 1] = lhs
+  -- nothing in a composer. Bound once: a rebuilt screen finds them there.
+  if not task.composer_keys then
+    task.composer_keys = {}
+    if chat.composer and api.nvim_buf_is_valid(chat.composer) then
+      for _, lhs in ipairs(keys.resolve("composer", "<Tab>")) do
+        vim.keymap.set("n", lhs, function()
+          to_options(task)
+        end, { buffer = chat.composer, nowait = true, silent = true, desc = "paseo: the choices" })
+        task.composer_keys[#task.composer_keys + 1] = lhs
+      end
     end
   end
+end
 
+---Put the choices in the draft chat's conversation window -- building them
+---first if they are not there -- and draw.
+---@param task paseo.NewTask
+---@return boolean placed
+function place(task)
+  local win = task.chat.win_conversation
+  if not (win and api.nvim_win_is_valid(win)) then
+    return false
+  end
+  if not (task.buf and api.nvim_buf_is_valid(task.buf)) then
+    build(task)
+  end
+  if api.nvim_win_get_buf(win) ~= task.buf then
+    api.nvim_win_set_buf(win, task.buf)
+  end
+  vim.wo[win].wrap = false
+  vim.wo[win].cursorline = false
+  vim.wo[win].fillchars = "eob: "
   draw(task)
+  return true
+end
+
+---The first time: the screen, and the daemon asked what there is.
+---@param task paseo.NewTask
+local function mount(task)
+  if not place(task) then
+    return
+  end
   load(task, function()
     draw(task)
   end)
@@ -783,6 +809,41 @@ function M.pick(chat, group_id)
     end)
   end)
   return true
+end
+
+---A draft chat is back in a window (|paseo.ui.native|.show, the sidebar):
+---put its choices there again, in place of the empty conversation under them.
+---@param chat table
+---@return boolean shown  False when `chat` is not a draft being set up.
+function M.show(chat)
+  local task = tasks[chat]
+  if not task then
+    return false
+  end
+  return place(task)
+end
+
+---The draft chat whose choices `buf` is, if it is one: so `:b`, the
+---bufferline and the native surface's cycling treat the screen as the chat.
+---@param buf integer
+---@return table|nil
+function M.chat_of(buf)
+  for chat, task in pairs(tasks) do
+    if task.buf == buf then
+      return chat
+    end
+  end
+  return nil
+end
+
+---The chat is going away by some other road (`:bdelete`, the surface
+---leaving): the screen and its keys go with it.
+---@param chat table
+function M.forget(chat)
+  local task = tasks[chat]
+  if task then
+    unmount(task)
+  end
 end
 
 ---Redraw every open screen (a resize).

@@ -391,6 +391,11 @@ opens the list in your picker (|paseo-pick|), and so does the base branch's
 new session (and a worktree's branch), and titles the agent from your
 message.
 Everything you pick is remembered per project and pre-filled next time.
+`:Paseo settings mode`, `thinking` and `model` on a draft open its own lists.
+
+A draft is a buffer like an agent's, and you can have several. Switch to
+another agent or terminal and back, and the draft's choices and what you
+typed are as you left them; `q` on the choices throws it away.
 
                                                              *paseo-terminals*
                                                          *paseo-terminal-keys*

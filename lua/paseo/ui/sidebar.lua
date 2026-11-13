@@ -452,6 +452,8 @@ function M.open(chat)
   chat.win_conversation = api.nvim_get_current_win()
   api.nvim_win_set_buf(chat.win_conversation, chat.conversation)
   style(chat.win_conversation)
+  -- A draft's choices stand in for its (empty) conversation.
+  require("paseo.ui.newtask").show(chat)
 
   -- The composer sits under the conversation, small: it is where you type one
   -- question, not where you write a document. It opens at its FLOOR and grows

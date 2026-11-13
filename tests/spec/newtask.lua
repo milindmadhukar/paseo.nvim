@@ -299,7 +299,100 @@ local function test_draft_pick()
   workspaces.branches, bridge.request, pick.select = old.branches, old.request, old.select
   chats.set_current(old.current)
   native.reset()
-  vim.fn.delete(dir, "rf")
+  -- Later: a PR lookup the surface scheduled still runs in it.
+  vim.defer_fn(function()
+    vim.fn.delete(dir, "rf")
+  end, 5000)
+  if not ok then
+    error(failure, 0)
+  end
+end
+
+---Two drafts, and switching between them: each one's choices are where you
+---left them, not wiped the moment another buffer took the window.
+local function test_draft_back()
+  local newtask = require "paseo.ui.newtask"
+  local create = require "paseo.ui.create"
+  local terminals = require "paseo.terminals"
+  local workspaces = require "paseo.workspaces"
+  local bridge = require "paseo.bridge"
+  local chats = require "paseo.ui.chat"
+  local native = require "paseo.ui.native"
+  local old = {
+    catalogue = create.catalogue,
+    presets = terminals.presets,
+    branches = workspaces.branches,
+    request = bridge.request,
+    current = chats.current(),
+  }
+  local dir = repo()
+  local ok, failure = pcall(function()
+    create.catalogue = function(_, cb)
+      cb(ENTRIES, nil)
+    end
+    terminals.presets = function(_, cb)
+      cb { { label = "Shell" } }
+    end
+    workspaces.branches = function(_, cb)
+      cb { "main" }
+    end
+    bridge.request = function(op, _, cb)
+      if op == "providers.features" then
+        return cb(nil, { features = {} })
+      end
+      cb(nil, {})
+    end
+    local ctx = { root = dir, local_root = dir, host_id = "local" }
+
+    local a = newtask.open(ctx, {})
+    local ta = newtask.task(a)
+    vim.wait(500, function()
+      return ta.draft ~= nil and not ta.draft.loading
+    end)
+    ta.draft.modeId = "plan"
+    api.nvim_buf_set_lines(a.composer, 0, -1, false, { "first draft" })
+
+    local b = newtask.open(ctx, {})
+    local tb = newtask.task(b)
+    vim.wait(500, function()
+      return tb.draft ~= nil and not tb.draft.loading
+    end)
+    local middle = a.win_conversation or b.win_conversation
+    eq("draft back: the second draft is in the middle", api.nvim_win_get_buf(middle), tb.buf)
+    truthy("draft back: the first one's choices were kept", ta.buf and api.nvim_buf_is_valid(ta.buf))
+    eq("draft back: and the screen maps back to its chat", newtask.chat_of(ta.buf), a)
+    eq("draft back: as the chat of that buffer", chats.by_buffer(ta.buf), a)
+
+    native.show(a)
+    eq("draft back: coming back shows its choices", api.nvim_win_get_buf(middle), ta.buf)
+    eq("draft back: what was picked is still picked", ta.draft.modeId, "plan")
+    eq("draft back: and what was typed", api.nvim_buf_get_lines(a.composer, 0, -1, false)[1], "first draft")
+    truthy("draft back: drawn", text(ta.buf):find("Test", 1, true) ~= nil, text(ta.buf))
+
+    -- CYCLING from a draft goes to its neighbour, whose choices show.
+    native.cycle(1)
+    vim.wait(200, function()
+      return api.nvim_win_get_buf(middle) == tb.buf
+    end)
+    eq("draft back: the next buffer is the other draft, on its choices", api.nvim_win_get_buf(middle), tb.buf)
+
+    -- Gone by another road: the task goes with it.
+    native.remove(a)
+    chats.dispose(a)
+    eq("draft back: a disposed draft leaves no task", newtask.task(a), nil)
+    truthy("draft back: nor its screen", not api.nvim_buf_is_valid(ta.buf or -1))
+
+    native.close(b)
+    chats.discard(b)
+  end)
+  create.catalogue, terminals.presets = old.catalogue, old.presets
+  workspaces.branches, bridge.request = old.branches, old.request
+  chats.set_current(old.current)
+  native.reset()
+  -- Later: a PR lookup the surface scheduled still runs in it.
+  vim.defer_fn(function()
+    vim.fn.delete(dir, "rf")
+  end, 5000)
   if not ok then
     error(failure, 0)
   end
@@ -343,6 +436,7 @@ end
 return {
   { "newtask.screen", test_newtask },
   { "newtask.draft_pick", test_draft_pick },
+  { "newtask.draft_back", test_draft_back },
   { "newtask.isolation", test_isolation },
   { "newtask.project_root", test_project_root },
 }

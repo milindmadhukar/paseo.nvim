@@ -1748,7 +1748,8 @@ function M.by_buffer(buf)
       return chat
     end
   end
-  return nil
+  -- A draft's choices stand where its conversation would: the same chat.
+  return require("paseo.ui.newtask").chat_of(buf)
 end
 
 ---Every chat this Neovim holds. For the native surface and the tests.
@@ -1799,6 +1800,8 @@ end
 ---fetches its history.
 ---@param chat paseo.Chat
 function M.dispose(chat)
+  -- A draft's choices screen and its keys go with it (`:bdelete` on one).
+  require("paseo.ui.newtask").forget(chat)
   M.discard(chat)
   for _, buf in ipairs { chat.conversation, chat.composer } do
     if buf and vim.api.nvim_buf_is_valid(buf) then
