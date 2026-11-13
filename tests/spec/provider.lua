@@ -18,7 +18,7 @@ local function test_provider_setup()
   local config = require "paseo.config"
   local sidebar = require "paseo.ui.sidebar"
   local old_ensure, old_request = bridge.ensure, bridge.request
-  local old_select, old_current = vim.ui.select, chat.current
+  local old_select, old_current = require("paseo.ui.choose").select, chat.current
   local old_toggle, old_load = session.toggle, chat.load_settings
   local old_preference = config.get().paseo.provider
   local requests = {}
@@ -88,7 +88,7 @@ local function test_provider_setup()
     local chosen, select_count
     local chosen_model = "gpt-5.6-sol"
     select_count = 0
-    vim.ui.select = function(items, _, callback)
+    require("paseo.ui.choose").select = function(items, _, callback)
       select_count = select_count + 1
       if items[1] and items[1].provider then
         return callback(items[#items])
@@ -310,7 +310,7 @@ local function test_provider_setup()
     )
   end)
   bridge.ensure, bridge.request = old_ensure, old_request
-  vim.ui.select, chat.current = old_select, old_current
+  require("paseo.ui.choose").select, chat.current = old_select, old_current
   session.toggle, chat.load_settings = old_toggle, old_load
   config.get().paseo.provider = old_preference
   if not ok then

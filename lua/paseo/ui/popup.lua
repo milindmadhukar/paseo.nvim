@@ -36,6 +36,68 @@ local function body_rows()
   return math.max(3, (vim.o.lines - 4) - TITLE_ROWS)
 end
 
+---The window every Paseo popup and chooser is drawn in: centred, a rounded
+---edge in the surface's own colour (a padding ring rather than a box), over a
+---dimmed backdrop. Entered.
+---@param buf integer
+---@param opts { width: integer, height: integer, zindex?: integer, ns?: integer }
+---@return integer win, integer backdrop_win, integer backdrop_buf
+function M.frame(buf, opts)
+  local zindex = opts.zindex or 60
+  local backdrop = api.nvim_create_buf(false, true)
+  vim.bo[backdrop].bufhidden = "wipe"
+  local backdrop_win = api.nvim_open_win(backdrop, false, {
+    relative = "editor",
+    row = 0,
+    col = 0,
+    width = vim.o.columns,
+    height = vim.o.lines,
+    focusable = false,
+    style = "minimal",
+    border = "none",
+    -- Under this window, over everything else. The permission dialog asks for
+    -- 200 and must stay on top of both.
+    zindex = zindex - 5,
+  })
+  vim.wo[backdrop_win].winblend = 20
+
+  local win = api.nvim_open_win(buf, true, {
+    relative = "editor",
+    row = math.max(0, math.floor((vim.o.lines - opts.height) / 2)),
+    col = math.max(0, math.floor((vim.o.columns - opts.width) / 2)),
+    width = opts.width,
+    height = opts.height,
+    style = "minimal",
+    border = "rounded",
+    zindex = zindex,
+  })
+  require("paseo.ui.style").pin(win)
+
+  local ns = opts.ns or api.nvim_create_namespace "paseo.popup"
+  api.nvim_win_set_hl_ns(win, ns)
+  api.nvim_set_hl(ns, "Normal", { link = "PaseoNormal" })
+  api.nvim_set_hl(ns, "NormalFloat", { link = "PaseoNormal" })
+  api.nvim_set_hl(ns, "FloatBorder", { link = "PaseoNormalBorder" })
+  api.nvim_set_hl(ns, "CursorLine", { link = "PaseoRowHover" })
+  return win, backdrop_win, backdrop
+end
+
+---Move a frame to fit a new height, still centred.
+---@param win integer
+---@param width integer
+---@param height integer
+function M.refit(win, width, height)
+  if win and api.nvim_win_is_valid(win) then
+    pcall(api.nvim_win_set_config, win, {
+      relative = "editor",
+      row = math.max(0, math.floor((vim.o.lines - height) / 2)),
+      col = math.max(0, math.floor((vim.o.columns - width) / 2)),
+      width = width,
+      height = height,
+    })
+  end
+end
+
 ---@class paseo.Popup
 ---@field buf integer
 ---@field ns integer
@@ -158,45 +220,12 @@ function M.open(opts)
     end
   end
 
-  handle.backdrop = api.nvim_create_buf(false, true)
-  handle.backdrop_win = api.nvim_open_win(handle.backdrop, false, {
-    relative = "editor",
-    row = 0,
-    col = 0,
-    width = vim.o.columns,
-    height = vim.o.lines,
-    focusable = false,
-    style = "minimal",
-    border = "none",
-    -- Under this window, over everything else. The permission dialog asks for
-    -- 200 and must stay on top of both.
-    zindex = (opts.zindex or 60) - 5,
-  })
-  vim.wo[handle.backdrop_win].winblend = 20
-
   -- Measure first: the only honest height for a layout whose size depends on
   -- how many models this provider has.
   handle.h = measure()
 
-  handle.win = api.nvim_open_win(handle.buf, true, {
-    relative = "editor",
-    row = math.max(0, math.floor((vim.o.lines - handle.h) / 2)),
-    col = math.max(0, math.floor((vim.o.columns - handle.w) / 2)),
-    width = handle.w,
-    height = handle.h,
-    style = "minimal",
-    border = "rounded",
-    zindex = opts.zindex or 60,
-  })
-  require("paseo.ui.style").pin(handle.win)
-
-  -- The card look: the border glyphs are drawn in the surface's own colour, so
-  -- what you see is a padding ring rather than a box. Window-local, so nothing
-  -- else in the editor is repainted.
-  api.nvim_win_set_hl_ns(handle.win, handle.ns)
-  api.nvim_set_hl(handle.ns, "Normal", { link = "PaseoNormal" })
-  api.nvim_set_hl(handle.ns, "NormalFloat", { link = "PaseoNormal" })
-  api.nvim_set_hl(handle.ns, "FloatBorder", { link = "PaseoNormalBorder" })
+  handle.win, handle.backdrop_win, handle.backdrop =
+    M.frame(handle.buf, { width = handle.w, height = handle.h, zindex = opts.zindex, ns = handle.ns })
 
   render.to_buffer(handle.buf, plain_ns, 0, -1, all_lines())
   vim.bo[handle.buf].modifiable = false
@@ -231,7 +260,7 @@ function M.open(opts)
   -- ACROSS THE TICK IT OPENED ON. `nvim_open_win` above enters the window,
   -- but every one of these is opened from an asynchronous callback -- the
   -- daemon answering `providers` -- and whatever the editor was in the middle
-  -- of lands after it: a surface re-fitting itself, telescope restoring the
+  -- of lands after it: a surface re-fitting itself, a picker restoring the
   -- window it was opened from, a composer that takes focus when its panes are
   -- rebuilt. The screen was then up with the cursor somewhere else, and the
   -- only way to answer it was to click it first. Claimed once, on the next

@@ -404,7 +404,7 @@ local function apply(task, group, entry, done)
       return done()
     end
     local list = task.branches or {}
-    return vim.ui.select(list, { prompt = "Cut the worktree from…" }, function(branch)
+    return require("paseo.ui.choose").select(list, { prompt = "Cut the worktree from…" }, function(branch)
       if branch then
         task.base = branch ~= (task.iso and task.iso.base) and branch or nil
       end

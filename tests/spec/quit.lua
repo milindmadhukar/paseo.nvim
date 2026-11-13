@@ -11,7 +11,7 @@ local function test_quit()
   local daemon = require "paseo.daemon"
   local old_running, old_ready, old_active = bridge.running, agents.ready, agents.active
   local old_started = daemon.started_here
-  local old_select = vim.ui.select
+  local old_select = require("paseo.ui.choose").select
 
   local ok, failure = pcall(function()
     eq("quit: active-agent warnings default on", config.defaults().quit.warn_active_agents, true)
@@ -44,7 +44,7 @@ local function test_quit()
       return active
     end
     local choice, prompts = nil, 0
-    vim.ui.select = function(_, opts, done)
+    require("paseo.ui.choose").select = function(_, opts, done)
       prompts = prompts + 1
       truthy(
         "quit: explains that daemon work continues",
@@ -151,7 +151,7 @@ local function test_quit()
 
   bridge.running, agents.ready, agents.active = old_running, old_ready, old_active
   daemon.started_here = old_started
-  vim.ui.select = old_select
+  require("paseo.ui.choose").select = old_select
   config.setup {}
   truthy("quit: cases completed", ok, failure)
 end

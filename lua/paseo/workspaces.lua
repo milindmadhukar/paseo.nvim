@@ -782,7 +782,7 @@ end
 
 ---Archive a workspace, asking the one question worth asking.
 ---
----Lifted out of the telescope picker, where it was a local, so the Workspaces
+---Lifted out of the workspace list, where it was a local, so the Workspaces
 ---panel offers the same act rather than a second implementation of it that
 ---forgets the refusal path.
 ---
@@ -804,7 +804,7 @@ function M.confirm_archive(ws, after)
 
       if not force and err:find "refusing" then
         vim.schedule(function()
-          vim.ui.select({ "No, keep it", "Yes, discard that work" }, {
+          require("paseo.ui.choose").select({ "No, keep it", "Yes, discard that work" }, {
             prompt = err:gsub("\n.*", "") .. " — discard?",
           }, function(choice)
             if choice and choice:find "Yes" then
@@ -846,7 +846,7 @@ function M.remove_project(ids, label, after)
     #ids,
     #ids == 1 and "" or "s"
   )
-  vim.ui.select({ "No", "Yes, remove it" }, { prompt = prompt }, function(choice)
+  require("paseo.ui.choose").select({ "No", "Yes, remove it" }, { prompt = prompt }, function(choice)
     if not (choice and choice:find "Yes") then
       return
     end

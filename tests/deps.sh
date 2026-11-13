@@ -14,8 +14,6 @@ mkdir -p "$dir"
 # (No UI library: every surface is plain buffers.)
 repos=(
   lewis6991/gitsigns.nvim         # the hunk under the cursor
-  nvim-telescope/telescope.nvim   # the pickers
-  nvim-lua/plenary.nvim           # telescope's own dependency
 )
 
 for repo in "${repos[@]}"; do

@@ -270,7 +270,7 @@ function M.apply(chat, group, entry, done)
   choices[#choices + 1] = { id = "future", label = "Use for this agent's future turns" }
   choices[#choices + 1] = { id = "cancel", label = "Cancel" }
 
-  vim.ui.select(choices, {
+  require("paseo.ui.choose").select(choices, {
     prompt = "Change model to " .. (entry.label or entry.id) .. "?",
     format_item = function(choice)
       return choice.label

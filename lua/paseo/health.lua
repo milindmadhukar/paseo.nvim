@@ -47,7 +47,6 @@ local function check_core()
 
   for name, why in pairs {
     ["gitsigns"] = "finding the hunk under the cursor (`:Paseo ask hunk`)",
-    ["telescope"] = "the workspace and agent-session pickers",
   } do
     if pcall(require, name) then
       ok(("%s is available (%s)"):format(name, why))

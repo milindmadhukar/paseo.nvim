@@ -1669,8 +1669,8 @@ function M.actions()
   return out
 end
 
----`.`: the row's actions as a menu -- the Paseo app's right-click, through
----`vim.ui.select`, so it is whatever picker you have. A refetch can redraw the
+---`.`: the row's actions as a menu -- the Paseo app's right-click, in the
+---one chooser (|paseo.ui.choose|). A refetch can redraw the
 ---rail while it is open; the action runs on the row you opened it on, found
 ---again by key, not on whatever is on that line now.
 function M.menu()
@@ -1683,46 +1683,43 @@ function M.menu()
   local title = row.node and (row.node.item.title or row.node.item.name or row.node.item.id)
     or row.ws.name
     or vim.fs.basename(row.ws.directory or "")
-  local width = 0
-  for _, item in ipairs(items) do
-    width = math.max(width, vim.fn.strdisplaywidth(item.label))
+  local entries = {}
+  for i, item in ipairs(items) do
+    entries[i] = { id = item.lhs, text = item.label, right = { { item.lhs, "PaseoDim" } }, value = item }
   end
-  vim.ui.select(items, {
-    prompt = tostring(title),
-    kind = "paseo.rail",
-    format_item = function(item)
-      local gap = width - vim.fn.strdisplaywidth(item.label) + 2
-      return item.label .. string.rep(" ", gap) .. item.lhs
-    end,
-  }, function(choice)
-    if not choice then
-      return
-    end
-    -- After the picker has closed, so an action that asks (`d`) can open
-    -- one of its own.
-    vim.schedule(function()
-      if not M.win() then
-        return
-      end
-      local at
-      if rows[line] and rows[line].key == key then
-        at = line
-      else
-        for l, r in pairs(rows) do
-          if r.key == key then
-            at = l
-            break
+  require("paseo.ui.choose").open {
+    title = tostring(title),
+    items = entries,
+    -- The rows are the rail's own keys; digits would be a second alphabet.
+    numbers = false,
+    on_pick = function(entry)
+      local choice = entry.value
+      -- After the picker has closed, so an action that asks (`d`) can open
+      -- one of its own.
+      vim.schedule(function()
+        if not M.win() then
+          return
+        end
+        local at
+        if rows[line] and rows[line].key == key then
+          at = line
+        else
+          for l, r in pairs(rows) do
+            if r.key == key then
+              at = l
+              break
+            end
           end
         end
-      end
-      if not at then
-        return vim.notify("paseo: that row is gone", vim.log.levels.INFO)
-      end
-      api.nvim_set_current_win(win)
-      place(at)
-      choice.fn()
-    end)
-  end)
+        if not at then
+          return vim.notify("paseo: that row is gone", vim.log.levels.INFO)
+        end
+        api.nvim_set_current_win(win)
+        place(at)
+        choice.fn()
+      end)
+    end,
+  }
 end
 
 ---`<RightMouse>`: the menu, on the row you clicked.

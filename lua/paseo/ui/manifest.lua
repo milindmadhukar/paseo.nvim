@@ -332,7 +332,7 @@ function M.choose_base(draft, name, done)
   end
 
   choices[#choices + 1] = "other…"
-  vim.ui.select(choices, {
+  require("paseo.ui.choose").select(choices, {
     prompt = ("base branch for %s"):format(name),
   }, function(choice)
     if not choice then

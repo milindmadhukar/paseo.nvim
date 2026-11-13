@@ -28,7 +28,6 @@ abstracts Claude / Codex / OpenCode and owns agent sessions, status, and termina
 {
   "milindmadhukar/paseo.nvim",
   dependencies = {
-    "nvim-telescope/telescope.nvim",
     "lewis6991/gitsigns.nvim",
   },
   event = "VeryLazy",
@@ -49,7 +48,6 @@ which reads like a broken install.
 | Needed for | |
 |---|---|
 | Everything | Neovim 0.11+, `git`, a Nerd Font |
-| The workspace and agent-session pickers | telescope.nvim |
 | The hunk under the cursor | gitsigns.nvim |
 | Agents | the Paseo daemon running, and `bun` or node ≥ 22 |
 | Pasting images | `wl-paste` (Wayland), `xclip` (X11) or `pngpaste` (macOS) |

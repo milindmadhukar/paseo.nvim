@@ -36,7 +36,7 @@ local function test_fork()
     ensure = bridge.ensure,
     request = bridge.request,
     input = vim.ui.input,
-    select = vim.ui.select,
+    select = require("paseo.ui.choose").select,
     prompt = prompt.open,
     create = workspaces.create,
     open = workspaces.open,
@@ -64,7 +64,7 @@ local function test_fork()
     -- The destination menu. Answered BY ID rather than by index, so the test
     -- says which fork it is asking for and keeps saying it if the order
     -- changes.
-    vim.ui.select = function(items, opts, done)
+    require("paseo.ui.choose").select = function(items, opts, done)
       menu = { items = items, opts = opts }
       for _, item in ipairs(items) do
         if item.id == destination then
@@ -320,7 +320,7 @@ local function test_fork()
   end)
 
   bridge.ensure, bridge.request = old.ensure, old.request
-  vim.ui.input, vim.ui.select = old.input, old.select
+  vim.ui.input, require("paseo.ui.choose").select = old.input, old.select
   prompt.open = old.prompt
   workspaces.create, workspaces.open, workspaces.get = old.create, old.open, old.get
   workspaces.for_dir = old.for_dir

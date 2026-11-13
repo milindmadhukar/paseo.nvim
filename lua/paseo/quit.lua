@@ -55,7 +55,7 @@ local function ask(proceed)
   end
   prompting = true
   local noun = #active == 1 and "agent session is" or "agent sessions are"
-  vim.ui.select({ "Quit Neovim", "Cancel" }, {
+  require("paseo.ui.choose").select({ "Quit Neovim", "Cancel" }, {
     prompt = ("%d active Paseo %s still working. Paseo work will continue on the daemon; quitting only closes this Neovim client."):format(
       #active,
       noun

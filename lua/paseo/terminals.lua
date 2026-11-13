@@ -501,7 +501,7 @@ function M.kill(id, host_id)
   local name = item and M.label(item) or id
   -- Killing a terminal kills whatever is running in it, and "whatever" is
   -- routinely an agent mid-turn. Asked rather than assumed.
-  vim.ui.select({ "no", "yes" }, { prompt = ("Kill %s?"):format(name) }, function(choice)
+  require("paseo.ui.choose").select({ "no", "yes" }, { prompt = ("Kill %s?"):format(name) }, function(choice)
     if choice ~= "yes" then
       return
     end

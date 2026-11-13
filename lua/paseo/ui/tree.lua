@@ -313,7 +313,7 @@ function M.remove(node, chat)
     return vim.notify("paseo: a provider subagent ends with its parent's turn", vim.log.levels.INFO)
   end
   local id = node.item.id
-  vim.ui.select({ "no", "yes" }, { prompt = "Archive this agent?" }, function(choice)
+  require("paseo.ui.choose").select({ "no", "yes" }, { prompt = "Archive this agent?" }, function(choice)
     if choice ~= "yes" then
       return
     end

@@ -10,50 +10,33 @@ local workspaces = require "paseo.workspaces"
 local M = {}
 
 ---@param agent table
----@param width integer
----@return string
-local function display(agent, width)
+---@return paseo.ChooseItem
+local function item(agent)
   local icons = require "paseo.ui.icons"
   local state = agent.requiresAttention and icons.status.permission
     or (agent.status == "idle" and " " or icons.status.running)
-  return ("%s %-" .. width .. "s  %s"):format(
-    state,
-    agent.provider or "?",
-    agent.title or agent.id:sub(1, 12)
-  )
+  return {
+    id = agent.id,
+    value = agent,
+    cells = {
+      { state .. " ", agent.requiresAttention and "PaseoBadge" or "PaseoToolRunning" },
+      { agent.title or agent.id:sub(1, 12), "PaseoText" },
+    },
+    right = { { agent.provider or "?", "PaseoDim" } },
+  }
 end
 
 ---@param ws paseo.PaseoWorkspace
----@param opts? table
-function M.open(ws, opts)
-  opts = opts or {}
-
-  local ok, pickers = pcall(require, "telescope.pickers")
-  if not ok then
-    return vim.notify("paseo: telescope is not available", vim.log.levels.ERROR)
-  end
-  local finders = require "telescope.finders"
-  local actions = require "telescope.actions"
-  local state = require "telescope.actions.state"
-  local conf = require("telescope.config").values
-
+function M.open(ws)
   workspaces.agent_sessions(ws, function(agent_sessions, err)
     if err then
       return vim.notify("paseo: " .. err, vim.log.levels.ERROR)
     end
 
     vim.schedule(function()
-      local width = 0
-      for _, agent in ipairs(agent_sessions) do
-        width = math.max(width, #(agent.provider or "?"))
-      end
-
-      local function start_new(bufnr)
-        if bufnr then
-          actions.close(bufnr)
-        end
-        -- The new-task screen, HERE: in this workspace, by id. It used to
-        -- ask for a title first; the daemon titles it from the prompt.
+      local function start_new()
+        -- The new-task screen, HERE: in this workspace, by id. The daemon
+        -- titles the agent from the prompt.
         local ctx = require("paseo.new").context() or {}
         require("paseo.new").open({
           root = ws.directory,
@@ -66,73 +49,51 @@ function M.open(ws, opts)
 
       if #agent_sessions == 0 then
         vim.notify("paseo: no agent sessions in this workspace yet", vim.log.levels.INFO)
-        return start_new(nil)
+        return start_new()
       end
 
-      pickers
-        .new(opts, {
-          prompt_title = "Agent sessions · " .. (ws.name or ws.directory),
-          finder = finders.new_table {
-            results = agent_sessions,
-            entry_maker = function(agent)
-              return {
-                value = agent,
-                display = display(agent, width),
-                ordinal = (agent.title or "") .. " " .. (agent.provider or ""),
-              }
-            end,
-          },
-          sorter = conf.generic_sorter(opts),
-          attach_mappings = function(bufnr, map)
-            actions.select_default:replace(function()
-              local entry = state.get_selected_entry()
-              actions.close(bufnr)
-              if entry then
-                -- Opening an EXISTING agent session: the chat fetches its timeline,
-                -- so you land in the conversation as it stands rather than a
-                -- blank window.
-                require("paseo.ui.chat").open {
-                  root = ws.directory,
-                  agent_id = entry.value.id,
-                  title = entry.value.title,
-                }
-              end
-            end)
+      local items = {}
+      for i, agent in ipairs(agent_sessions) do
+        items[i] = item(agent)
+      end
 
-            map({ "i", "n" }, "<C-n>", function()
-              start_new(bufnr)
-            end)
-
-            map({ "i", "n" }, "<C-y>", function()
-              local entry = state.get_selected_entry()
-              if entry then
-                require("paseo.agents").copy_id(entry.value)
-              end
-            end)
-
-            map({ "i", "n" }, "<C-d>", function()
-              local entry = state.get_selected_entry()
-              if not entry then
-                return
-              end
-              actions.close(bufnr)
-              require("paseo.bridge").request(
-                "agent.archive",
-                { agentId = entry.value.id },
-                function(archive_err)
-                  vim.notify(
-                    archive_err and ("paseo: " .. archive_err)
-                      or ("paseo: archived " .. (entry.value.title or "agent session")),
-                    archive_err and vim.log.levels.ERROR or vim.log.levels.INFO
-                  )
-                end
+      require("paseo.ui.choose").open {
+        title = "Agents · " .. (ws.name or ws.directory),
+        items = items,
+        on_pick = function(row)
+          -- An EXISTING agent session: the chat fetches its timeline, so you
+          -- land in the conversation as it stands.
+          require("paseo.ui.chat").open {
+            root = ws.directory,
+            agent_id = row.value.id,
+            title = row.value.title,
+          }
+        end,
+        verbs = {
+          { "n", "new", function(_, handle)
+            handle.close()
+            start_new()
+          end },
+          { "y", "copy id", function(row)
+            if row then
+              require("paseo.agents").copy_id(row.value)
+            end
+          end },
+          { "d", "archive", function(row, handle)
+            if not row then
+              return
+            end
+            handle.close()
+            require("paseo.bridge").request("agent.archive", { agentId = row.value.id }, function(archive_err)
+              vim.notify(
+                archive_err and ("paseo: " .. archive_err)
+                  or ("paseo: archived " .. (row.value.title or "agent session")),
+                archive_err and vim.log.levels.ERROR or vim.log.levels.INFO
               )
             end)
-
-            return true
-          end,
-        })
-        :find()
+          end },
+        },
+      }
     end)
   end)
 end

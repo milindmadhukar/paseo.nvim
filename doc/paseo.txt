@@ -45,7 +45,6 @@ Hard:
   - Neovim 0.11+
   - `git`
   - a Nerd Font -- every surface draws glyphs from one; see |paseo-glyphs|
-  - telescope.nvim, for the workspace and agent-session pickers
   - gitsigns.nvim, for finding the hunk under the cursor (|:Paseo-ask|)
 
 NO BUILD STEP, NO BINARY, NO UI LIBRARY. Every surface is plain Neovim buffers

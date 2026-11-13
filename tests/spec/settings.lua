@@ -94,7 +94,7 @@ local function test_settings()
   -- affect future turns on the source agent.
   local session = require "paseo.ui.session"
   local bridge = require "paseo.bridge"
-  local old_select, old_request = vim.ui.select, bridge.request
+  local old_select, old_request = require("paseo.ui.choose").select, bridge.request
   local old_fork = package.loaded["paseo.fork"]
   local old_chat = package.loaded["paseo.ui.chat"]
   local prompts, forks, mutations = 0, 0, 0
@@ -113,7 +113,7 @@ local function test_settings()
     end,
   }
   package.loaded["paseo.ui.chat"] = { load_settings = function() end }
-  vim.ui.select = function(_, _, done)
+  require("paseo.ui.choose").select = function(_, _, done)
     prompts = prompts + 1
     done(choice)
   end
@@ -144,7 +144,7 @@ local function test_settings()
   -- dialog used to have one "fork into a new workspace" and `f` had another,
   -- and a model change could only ever branch into a directory of its own.
   local offered = {}
-  vim.ui.select = function(items, _, done)
+  require("paseo.ui.choose").select = function(items, _, done)
     prompts = prompts + 1
     offered = vim.tbl_map(function(item)
       return item.id
@@ -182,7 +182,7 @@ local function test_settings()
   end)
   eq("settings: future turns uses the in-place model change", mutations, 1)
 
-  vim.ui.select, bridge.request = old_select, old_request
+  require("paseo.ui.choose").select, bridge.request = old_select, old_request
   package.loaded["paseo.fork"] = old_fork
   package.loaded["paseo.ui.chat"] = old_chat
 end

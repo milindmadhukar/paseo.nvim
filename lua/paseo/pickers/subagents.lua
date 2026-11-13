@@ -27,8 +27,7 @@ function M.open_one(s, parent)
   require("paseo.ui.subagent").open(s, { host_id = parent.host_id, parent_chat = parent })
 end
 
----The live list -- see |paseo.ui.subagents|. Not a telescope picker any more:
----a picker is a snapshot, and a list of things that are running has to move.
+---The live list -- see |paseo.ui.subagents|.
 ---@param parent? table  The parent's chat; the current one when absent.
 function M.open(parent)
   parent = parent or require("paseo.ui.chat").current()

@@ -510,7 +510,7 @@ local function test_sessions()
     truthy("actions: nor a workspace's pin", not on_agent:find("Pin", 1, true), on_agent)
 
     local fork, forked = require "paseo.fork", {}
-    local saved_fork, saved_select = fork.start, vim.ui.select
+    local saved_fork, saved_open = fork.start, require("paseo.ui.choose").open
     local fork_ok, fork_err = pcall(function()
       fork.start = function(source)
         forked[#forked + 1] = source
@@ -520,14 +520,13 @@ local function test_sessions()
       eq("fork: from its workspace's directory", forked[1] and forked[1].root, root .. "/a")
 
       local offered
-      vim.ui.select = function(items, opts, on_choice)
-        offered = opts.prompt
-        for _, item in ipairs(items) do
-          if item.label == "Fork this agent" then
-            return on_choice(item)
+      require("paseo.ui.choose").open = function(opts)
+        offered = opts.title
+        for _, entry in ipairs(opts.items) do
+          if entry.value.label == "Fork this agent" then
+            return opts.on_pick(entry)
           end
         end
-        on_choice(nil)
       end
       rail.menu()
       vim.wait(200, function()
@@ -536,7 +535,7 @@ local function test_sessions()
       eq("menu: titled with the row", offered, "first agent")
       eq("menu: a choice runs on the row it was opened on", forked[2] and forked[2].agent_id, "s-1")
     end)
-    fork.start, vim.ui.select = saved_fork, saved_select
+    fork.start, require("paseo.ui.choose").open = saved_fork, saved_open
     if not fork_ok then
       error(fork_err, 0)
     end
