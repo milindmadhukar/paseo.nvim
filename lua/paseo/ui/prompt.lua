@@ -95,7 +95,7 @@ function M.open(opts, callback)
   opts = opts or {}
   finish(nil)
 
-  require("paseo.ui.hl").setup()
+  require("paseo.ui.hl").tokens()
 
   local width = math.max(20, math.min(vim.o.columns - 4, 78))
   local buf = api.nvim_create_buf(false, true)

@@ -85,7 +85,7 @@ function M.open(opts, handlers)
   handlers = handlers or {}
   finish(nil)
 
-  require("paseo.ui.hl").setup()
+  require("paseo.ui.hl").tokens()
 
   local icons = require "paseo.ui.icons"
   local anchor = opts.anchor

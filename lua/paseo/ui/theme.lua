@@ -47,19 +47,40 @@ local function hex(value)
   return value and ("#%06x"):format(value) or nil
 end
 
+---A global group's attributes, its links followed by hand.
+---
+---NOT `link = false`. That resolves through the highlight namespace of the
+---window drawn LAST -- in practice the current one -- so asked from the
+---composer, whose `winhl` maps `Normal` to `PaseoCard`, it answered PaseoCard:
+---a lifted background and no foreground. Every popup re-derived the theme, so
+---each one opened from a surface washed the colours out a step further.
+---@param name string
+---@return table
+local function resolve(name)
+  for _ = 1, 10 do
+    local ok, group = pcall(api.nvim_get_hl, 0, { name = name })
+    if not ok or type(group) ~= "table" then
+      return {}
+    end
+    if not group.link then
+      return group
+    end
+    name = group.link
+  end
+  return {}
+end
+
 ---Resolve a group's foreground, following links.
 ---@param name string
 ---@return string|nil
 local function fg_of(name)
-  local ok, group = pcall(api.nvim_get_hl, 0, { name = name, link = false })
-  return ok and hex(group.fg) or nil
+  return hex(resolve(name).fg)
 end
 
 ---@param name string
 ---@return string|nil
 local function bg_of(name)
-  local ok, group = pcall(api.nvim_get_hl, 0, { name = name, link = false })
-  return ok and hex(group.bg) or nil
+  return hex(resolve(name).bg)
 end
 
 ---Blend two colours, or give up gracefully.
@@ -577,8 +598,8 @@ local function tree_groups(t)
     "PaseoTreeSubagent",
     "PaseoTreeMeta",
   } do
-    local ok, group = pcall(api.nvim_get_hl, 0, { name = out[name].link, link = false })
-    if ok and group.fg then
+    local group = resolve(out[name].link)
+    if group.fg then
       out[name] = { fg = group.fg }
     end
   end

@@ -231,6 +231,39 @@ local function test_theme()
   end
 end
 
+local function test_theme_ignores_winhl()
+  -- THE COLOURSCHEME'S `Normal`, NOT THE DRAWN WINDOW'S. `nvim_get_hl` with
+  -- `link = false` resolves through the highlight namespace of whichever window
+  -- was drawn last, so deriving while the cursor sat in the composer
+  -- (`winhl=Normal:PaseoCard`) read PaseoCard as "the editor background" and
+  -- found no text colour at all. Every popup re-derived, so every popup opened
+  -- from a surface washed the colours out a little further.
+  local api = vim.api
+  local theme = require "paseo.ui.theme"
+  local hl = require "paseo.ui.hl"
+  local scheme_before = vim.g.colors_name
+
+  api.nvim_set_hl(0, "Normal", { fg = 0xcdd6f4, bg = 0x1e1e2e })
+  api.nvim_set_hl(0, "PaseoTestWinhl", { bg = 0x28283d })
+
+  vim.cmd "vsplit"
+  local win = api.nvim_get_current_win()
+  vim.wo[win].winhl = "Normal:PaseoTestWinhl"
+  -- The bug only shows once the window has been drawn.
+  vim.cmd "redraw!"
+
+  hl.setup()
+  local palette = theme.palette()
+  eq("ui: the theme reads Normal's bg, not the current window's winhl", palette.bg, "#1e1e2e")
+  eq("ui: and Normal's fg", palette.text, "#cdd6f4")
+
+  pcall(api.nvim_win_close, win, true)
+  if scheme_before then
+    pcall(vim.cmd.colorscheme, scheme_before)
+  end
+  hl.setup()
+end
+
 local function test_rail_colors()
   -- STANDALONE: the rail's colours are its own whatever else is installed.
   -- With nvim-tree's groups defined (catppuccin's shape: the tree a shade
@@ -421,6 +454,7 @@ end
 return {
   { "ui.style", test_style },
   { "ui.theme", test_theme },
+  { "ui.theme_winhl", test_theme_ignores_winhl },
   { "ui.rail_colors", test_rail_colors },
   { "ui.layout", test_layout },
   { "ui.animate", test_animate },

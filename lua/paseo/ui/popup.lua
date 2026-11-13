@@ -116,7 +116,7 @@ function M.open(opts)
   -- (|paseo.ui.keys|).
   local plain_ns = require("paseo.ui.hl").ns
 
-  require("paseo.ui.hl").setup()
+  require("paseo.ui.hl").tokens()
 
   local handle
   handle = {

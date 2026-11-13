@@ -152,7 +152,7 @@ end
 ---@param opts paseo.ChooseOpts
 ---@return paseo.Chooser
 function M.open(opts)
-  require("paseo.ui.hl").setup()
+  require("paseo.ui.hl").tokens()
 
   local from = api.nvim_get_current_win()
   if api.nvim_get_mode().mode ~= "n" then
