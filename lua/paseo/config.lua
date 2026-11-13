@@ -30,6 +30,11 @@ local M = {}
 ---                          failing until you go and start it by hand, which
 ---                          is precisely the trip out of Neovim this plugin
 ---                          exists to remove.
+---@field prewarm boolean? Shortly after startup, if a local daemon is ALREADY
+---                        running, connect to it and fetch what the first
+---                        open needs (agents, the rail's workspaces, the
+---                        provider catalogue). Never starts a daemon. Default
+---                        true. See `paseo.prewarm`.
 ---@field provider string? `provider/model` for agents this plugin creates.
 ---                        Unset means "ask the daemon what is ready" -- which
 ---                        is the only answer that survives a different host.
@@ -340,6 +345,7 @@ local defaults = {
     -- url, home, password and provider are all deliberately absent rather than
     -- nil-valued: absent means "work it out", and a discovered endpoint is
     -- right on a host that moved the daemon. Set `url` to pin it.
+    prewarm = true,
   },
 
   ui = {

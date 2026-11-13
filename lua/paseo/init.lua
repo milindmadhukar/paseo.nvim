@@ -623,6 +623,10 @@ function M.setup(opts)
     require("paseo.perf").enable()
   end
 
+  -- Connect and fetch what the first open needs, a moment after startup --
+  -- only if a local daemon is already running. See |paseo.prewarm|.
+  require("paseo.prewarm").schedule()
+
   -- Guard the standard interactive routes. Existing command-line
   -- abbreviations and mappings are preserved; configs with a central quit
   -- router can call `require("paseo.quit").guard` directly.

@@ -177,6 +177,21 @@ paseo.provider                                            string, unset
     `"claude/claude-sonnet-5"`. Unset means "ask the daemon what is ready",
     which is the only answer that survives moving to another host.
 
+                                                  *paseo-config.paseo.prewarm*
+paseo.prewarm                                         boolean, default true
+
+    A moment after Neovim starts -- after `VimEnter`, off the startup path --
+    connect to the local daemon and fetch what the first open needs: the
+    agent directory, the rail's workspaces for the project you are in, and
+    the provider catalogue the new-task screen opens on. The first
+    |:Paseo-chat| then has nothing left to wait for but its own conversation.
+
+    ONLY IF A DAEMON IS ALREADY RUNNING: it is probed first, without
+    blocking, and with no answer nothing else happens. Starting Neovim never
+    starts a daemon (that is |paseo-config.paseo.autostart|'s, when you ask
+    for an agent), and a remote host is never dialled at startup. `false`
+    turns it off.
+
                                                 *paseo-config.paseo.autostart*
 paseo.autostart                                       boolean, default true
 

@@ -147,20 +147,11 @@ end
 ---@field info table|nil    The decoded /api/status body.
 ---@field needs_password boolean
 
----Probe one endpoint.
----
----A **401 still means "found it"** -- the daemon is there and wants a
----password. Treating it as a miss and moving to the next candidate is how you
----end up reporting "no daemon" about a daemon that is running.
 ---@param endpoint paseo.Endpoint
 ---@param timeout? integer seconds
----@return paseo.Probe
-function M.probe(endpoint, timeout)
-  if vim.fn.executable "curl" == 0 then
-    return { reachable = false, needs_password = false }
-  end
-
-  local cmd = {
+---@return string[]
+local function probe_cmd(endpoint, timeout)
+  return {
     "curl",
     "-s",
     "-m",
@@ -169,10 +160,13 @@ function M.probe(endpoint, timeout)
     "\n%{http_code}",
     endpoint.status,
   }
-  local ok, res = pcall(function()
-    return vim.system(cmd, { text = true }):wait()
-  end)
-  if not ok or res.code ~= 0 then
+end
+
+---What a finished curl says about the endpoint.
+---@param res vim.SystemCompleted|nil
+---@return paseo.Probe
+local function read_probe(res)
+  if not res or res.code ~= 0 then
     return { reachable = false, needs_password = false }
   end
 
@@ -194,6 +188,45 @@ function M.probe(endpoint, timeout)
     info = type(decoded) == "table" and decoded or nil,
     needs_password = false,
   }
+end
+
+---Probe one endpoint, waiting for the answer. For `:checkhealth`, which
+---prints as it goes; the connection path uses |M.probe_async|.
+---
+---A **401 still means "found it"** -- the daemon is there and wants a
+---password. Treating it as a miss and moving to the next candidate is how you
+---end up reporting "no daemon" about a daemon that is running.
+---@param endpoint paseo.Endpoint
+---@param timeout? integer seconds
+---@return paseo.Probe
+function M.probe(endpoint, timeout)
+  if vim.fn.executable "curl" == 0 then
+    return { reachable = false, needs_password = false }
+  end
+  local ok, res = pcall(function()
+    return vim.system(probe_cmd(endpoint, timeout), { text = true }):wait()
+  end)
+  return read_probe(ok and res or nil)
+end
+
+---|M.probe| without blocking: the editor keeps answering keys while curl
+---waits -- up to its timeout, for a candidate that is not there. `callback`
+---runs on the main loop.
+---@param endpoint paseo.Endpoint
+---@param timeout? integer seconds
+---@param callback fun(probe: paseo.Probe)
+function M.probe_async(endpoint, timeout, callback)
+  if vim.fn.executable "curl" == 0 then
+    return callback { reachable = false, needs_password = false }
+  end
+  local ok = pcall(vim.system, probe_cmd(endpoint, timeout), { text = true }, function(res)
+    vim.schedule(function()
+      callback(read_probe(res))
+    end)
+  end)
+  if not ok then
+    callback { reachable = false, needs_password = false }
+  end
 end
 
 ---The `paseo` CLI, if the one on PATH is actually the CLI.
@@ -254,8 +287,15 @@ function M.start(opts, callback)
       -- exit with a daemon that then answers is still a success. Reachability
       -- is the only thing worth believing.
       local deadline = vim.uv.now() + (opts.timeout or 20) * 1000
+      local answered
+      -- Asked without blocking: this polls for up to twenty seconds, and each
+      -- probe of a candidate that is not up yet is a curl waiting on a port.
       local function poll()
-        local endpoint = M.resolve()
+        M.resolve_async(function(endpoint)
+          answered(endpoint)
+        end)
+      end
+      answered = function(endpoint)
         if endpoint then
           -- What answered is what WE started: nothing else was reachable when
           -- this began -- `start` is only ever called after a full probe came
@@ -276,6 +316,26 @@ function M.start(opts, callback)
       poll()
     end)
   end)
+end
+
+---The first candidate that answers, without blocking: candidates are probed
+---in order, each after the last has answered (the order is the preference).
+---@param callback fun(endpoint: paseo.Endpoint|nil, probe: paseo.Probe|nil)
+function M.resolve_async(callback)
+  local list = M.candidates()
+  local function try(i)
+    local endpoint = list[i]
+    if not endpoint then
+      return callback(nil, nil)
+    end
+    M.probe_async(endpoint, nil, function(probe)
+      if probe.reachable then
+        return callback(endpoint, probe)
+      end
+      try(i + 1)
+    end)
+  end
+  try(1)
 end
 
 ---The first candidate that answers.

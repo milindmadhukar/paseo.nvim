@@ -246,7 +246,51 @@ local function test_gitfs()
   vim.fn.delete(root, "rf")
 end
 
+--- Prewarm connects only to a daemon that is already there, and only once.
+local function test_prewarm()
+  local prewarm = require "paseo.prewarm"
+  local daemon = require "paseo.daemon"
+  local bridge = require "paseo.bridge"
+  local config = require "paseo.config"
+  local old_resolve, old_ensure, old_running = daemon.resolve_async, bridge.ensure, bridge.running
+  local ensured = 0
+  bridge.running = function()
+    return false
+  end
+  bridge.ensure = function(cb)
+    ensured = ensured + 1
+    cb "stubbed"
+  end
+  local ok, err = pcall(function()
+    config.setup { paseo = { prewarm = true } }
+    daemon.resolve_async = function(cb)
+      cb(nil)
+    end
+    prewarm.reset()
+    prewarm.run()
+    eq("prewarm: no daemon answering, no bridge", ensured, 0)
+
+    daemon.resolve_async = function(cb)
+      cb { ws = "ws://127.0.0.1:1/ws" }
+    end
+    prewarm.reset()
+    prewarm.run()
+    eq("prewarm: a daemon answering is connected to", ensured, 1)
+    prewarm.run()
+    eq("prewarm: once a session", ensured, 1)
+
+    config.setup { paseo = { prewarm = false } }
+    prewarm.reset()
+    prewarm.run()
+    eq("prewarm: off is off", ensured, 1)
+  end)
+  daemon.resolve_async, bridge.ensure, bridge.running = old_resolve, old_ensure, old_running
+  config.setup { paseo = { prewarm = false } }
+  truthy("prewarm: the cases ran", ok, err)
+end
+
 return {
+  { "perf: prewarm only finds, never starts", test_prewarm },
   { "perf: git locations off the disk", test_gitfs },
   { "perf: conceal off for a burst of writes, and back", test_quietly },
   { "perf: streamed chunks share a draw", test_stream_coalescing },

@@ -78,7 +78,10 @@ require("paseo").setup {
   paseo = {
     -- url and home are absent by default: absent means "discover the daemon".
     -- Set url to pin it, e.g. "ws://127.0.0.1:6767/ws".
-    cli = "paseo",
+    prewarm = true,               -- a moment after startup, if a local daemon
+                                  -- is ALREADY running, connect and fetch
+                                  -- what the first open needs. Never starts
+                                  -- one; never dials a remote host.
   },
 
   ui = {
@@ -2097,7 +2100,18 @@ Measured against a live daemon:
 | `ws://127.0.0.1:6767/ws` | ~1–10 ms | The real API. |
 
 So: a small Bun sidecar holding one WebSocket, speaking newline-delimited JSON
-to Lua over stdio, spawned once per Neovim session.
+to Lua over stdio, spawned once per Neovim session — a moment after startup
+when a local daemon is already running (`paseo.prewarm`), otherwise on the
+first thing that needs it. Booting it to its `ready` line is about 200 ms.
+
+**Requests run at once**, ordered only where order matters
+(`sidecar/bridge-dispatch.ts`): `connect` and `close` are barriers; requests
+about the same terminal, agent or dictation stream keep their order, as do
+the ones that may create a workspace for the same directory; everything else
+is concurrent. It used to be one queue, which put a `providers` call — it
+waits up to 15 s for a directory's discovery — in front of the conversation
+you had just opened. `:Paseo perf` shows, per request, the time it spent
+queued against the time the daemon took.
 
 Not raw WebSocket in Lua — the frame codec is easy, but the actual surface is
 subscriptions with server-issued IDs, snapshot-then-update ordering, timeline
@@ -2112,7 +2126,8 @@ unchanged (`wss://` + password), so this extends to a VPS later for free.
 **Finding it.** 6767 is the daemon's default port, not a constant. Candidates
 are tried in order — `paseo.url`, `$PASEO_ENDPOINT`, `daemon.listen` from
 `$PASEO_HOME/config.json`, and `127.0.0.1:6767` *only* when no config named a
-port. Each is probed with `GET /api/status`. A `401` counts as *reachable*: the
+port. Each is probed with `GET /api/status` — without blocking the editor, one
+after another. A `401` counts as *reachable*: the
 daemon is there and wants a password, and treating it as a miss is how you
 report "no daemon" about a running one.
 

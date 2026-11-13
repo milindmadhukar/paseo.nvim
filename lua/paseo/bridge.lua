@@ -283,20 +283,23 @@ local function connection_options(state, host, connection, callback)
     return callback(options, err)
   end
 
-  local endpoint = select(1, daemon.resolve())
-  if endpoint then
-    return callback({ url = endpoint.ws, password = hosts.secret(connection.password) }, nil)
-  end
-  if connection.autostart == false or config.get().paseo.autostart == false then
-    return callback(nil, "no local Paseo daemon answered; see :checkhealth paseo")
-  end
-  vim.notify("paseo: no daemon answered — starting one…", vim.log.levels.INFO)
-  daemon.start({}, function(started, err)
-    if not started then
-      return callback(nil, err or "could not start the local daemon")
+  -- Probed WITHOUT BLOCKING: a curl per candidate, and up to three seconds
+  -- each for one that is not there, used to be time the editor stood still.
+  daemon.resolve_async(function(endpoint)
+    if endpoint then
+      return callback({ url = endpoint.ws, password = hosts.secret(connection.password) }, nil)
     end
-    vim.notify("paseo: daemon up", vim.log.levels.INFO)
-    callback({ url = started.ws, password = hosts.secret(connection.password) }, nil)
+    if connection.autostart == false or config.get().paseo.autostart == false then
+      return callback(nil, "no local Paseo daemon answered; see :checkhealth paseo")
+    end
+    vim.notify("paseo: no daemon answered — starting one…", vim.log.levels.INFO)
+    daemon.start({}, function(started, err)
+      if not started then
+        return callback(nil, err or "could not start the local daemon")
+      end
+      vim.notify("paseo: daemon up", vim.log.levels.INFO)
+      callback({ url = started.ws, password = hosts.secret(connection.password) }, nil)
+    end)
   end)
 end
 

@@ -164,8 +164,14 @@ function M.run(out)
   local first_root = vim.uv.cwd()
   local first_chat, other
   local steps = {
+    -- A moment after startup, as a person would take before reaching for an
+    -- agent. With nothing done at startup (the baseline) this changes
+    -- nothing; with |paseo.prewarm| it is the time the prewarm has.
+    function(next)
+      pause(tonumber(vim.env.BENCH_SETTLE) or 1500, next)
+    end,
     -- COLD: from nothing to a conversation on screen. Includes the sidecar's
-    -- boot and the connection, which only the first open of a session pays.
+    -- boot and the connection, unless something already paid for them.
     function(next)
       measure("chat.open.cold", function()
         vim.cmd "Paseo chat"

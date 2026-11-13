@@ -37,7 +37,8 @@ require("gitsigns").setup {}
 -- The plugin has no `plugin/` directory, so `:Paseo` and the ColorScheme hook
 -- that keeps the highlight groups alive both come from `setup()` -- exactly as
 -- they do for someone with `opts = {}` in their lazy spec.
-require("paseo").setup {}
+-- No prewarm: it probes for a daemon, and the one it would find is yours.
+require("paseo").setup { paseo = { prewarm = false } }
 
 vim.opt.swapfile = false
 
