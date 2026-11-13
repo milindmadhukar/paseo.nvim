@@ -215,7 +215,52 @@ local function test_permission_relay()
   end
 end
 
+--- A plan's badge says which Implement was taken, even when the only word on
+--- it is the daemon's. `permission_resolved` lands after the local answer with
+--- just `{behavior, selectedActionId}`, and used to overwrite the badge with a
+--- bare "allowed" -- which is also all a plan approved in the app ever got.
+local function test_permission_plan_badge()
+  local permission = require "paseo.ui.permission"
+  local transcript = require "paseo.ui.transcript"
+
+  local chat = { conversation = vim.api.nvim_create_buf(false, true) }
+  transcript.reset(chat)
+
+  local function plan_request(id)
+    return {
+      id = id,
+      kind = "plan",
+      name = "ExitPlanMode",
+      input = { plan = "do it" },
+      actions = {
+        { id = "reject", label = "Reject", behavior = "deny", intent = "dismiss" },
+        { id = "implement", label = "Implement", behavior = "allow", intent = "implement" },
+        {
+          id = "implement_resume",
+          label = "Implement with Bypass",
+          behavior = "allow",
+          intent = "implement_resume",
+        },
+      },
+    }
+  end
+
+  permission.reconcile(chat, { plan_request "p1", plan_request "p2", plan_request "p3" })
+  local function badge(id)
+    return chat.blocks[chat.permission_blocks[id]].item.resolution
+  end
+
+  permission.resolved(chat, "p1", { behavior = "allow", selectedActionId = "implement_resume" })
+  eq("plan badge: the daemon's resume names its button", badge "p1", "implemented (Implement with Bypass)")
+  permission.resolved(chat, "p2", { behavior = "allow", selectedActionId = "implement" })
+  eq("plan badge: a plain Implement is implemented", badge "p2", "implemented")
+  permission.resolved(chat, "p3", { behavior = "deny", selectedActionId = "reject" })
+  eq("plan badge: a reject is still planning", badge "p3", "rejected, still planning")
+  permission.close()
+end
+
 return {
+  { "plan_badge", test_permission_plan_badge },
   { "relay", test_permission_relay },
   { "sync", test_permission_sync },
   { "held", test_permission_held },

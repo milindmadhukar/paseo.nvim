@@ -530,6 +530,27 @@ function M.offer(chat, request)
   end
 end
 
+---A plan's badge, from the daemon's own resolution.
+---
+---`permission_resolved` arrives AFTER the local answer and carries only
+---`{behavior, selectedActionId}`, so without this it overwrote "implemented
+---(Implement with Bypass)" with a bare "allowed" -- and a plan approved in the
+---Paseo app never said which Implement it was.
+---@param request table|nil
+---@param resolution table
+---@return string|nil
+local function plan_badge(request, resolution)
+  if not plan.parse(request) then
+    return nil
+  end
+  for _, action in ipairs(type(request.actions) == "table" and request.actions or {}) do
+    if type(action) == "table" and action.id == resolution.selectedActionId then
+      return plan.label(action)
+    end
+  end
+  return plan.label { behavior = resolution.behavior }
+end
+
 ---Answered, by whoever answered it -- including the Paseo desktop app.
 ---@param chat table
 ---@param request_id string
@@ -565,7 +586,11 @@ function M.resolved(chat, request_id, resolution)
   local block = blocks[request_id] and chat.blocks and chat.blocks[blocks[request_id]]
   if block then
     local label = resolution
-      and (resolution.label or (resolution.behavior == "allow" and "allowed" or "denied"))
+      and (
+        resolution.label
+        or plan_badge(block.item.request, resolution)
+        or (resolution.behavior == "allow" and "allowed" or "denied")
+      )
     block.item.resolution = label or "answered"
     -- The answers themselves, not just the sentence about them: the card ticks
     -- the option that was taken, and matching labels against a badge string is
