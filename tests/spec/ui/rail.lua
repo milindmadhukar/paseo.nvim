@@ -644,6 +644,57 @@ local function test_sessions()
     end
     rail.open_current()
     eq("rail: <CR> on a draft's row brings it back", native.chat(), d1)
+
+    -- `d` ON A DRAFT'S ROW throws it away, asked first -- and on a
+    -- workspace's row archives the workspace: the one way to clear one with
+    -- no agent left in it.
+    local pick, ws_mod = require "paseo.ui.pick", require "paseo.workspaces"
+    local saved_confirm, saved_archive = pick.confirm, ws_mod.confirm_archive
+    local d_ok, d_err = pcall(function()
+      local asked, archived = {}, nil
+      pick.confirm = function(prompt, _, cb)
+        asked[#asked + 1] = prompt
+        cb(true)
+      end
+      ws_mod.confirm_archive = function(ws)
+        archived = ws
+      end
+      local function to_line(needle)
+        api.nvim_set_current_win(rail.win())
+        for line, l in ipairs(api.nvim_buf_get_lines(api.nvim_win_get_buf(rail.win()), 0, -1, false)) do
+          if l:find(needle, 1, true) then
+            api.nvim_win_set_cursor(rail.win(), { line, 0 })
+            return
+          end
+        end
+        error("no row for " .. needle)
+      end
+
+      to_line "fix the invoice"
+      truthy("actions: a draft offers Discard", table.concat(labels(), ","):find("Discard this draft=d", 1, true))
+      vim.api.nvim_feedkeys("d", "x", false)
+      eq("rail: d on a draft asks first", asked[1], "Discard this draft?")
+      truthy("rail: and it is off the row", not vim.tbl_contains(native.listed(), d1))
+      vim.wait(300, function()
+        return not text():find("fix the invoice", 1, true)
+      end)
+      truthy("rail: and off the rail", not text():find("fix the invoice", 1, true), text())
+      eq("rail: and you are still in the rail", api.nvim_get_current_win(), rail.win())
+
+      to_line "alpha"
+      truthy(
+        "actions: a workspace offers Archive",
+        table.concat(labels(), ","):find("Archive this workspace=d", 1, true)
+      )
+      vim.api.nvim_feedkeys("d", "x", false)
+      eq("rail: d on a workspace asks first", asked[2], "Archive workspace alpha?")
+      eq("rail: and archives that one", archived and archived.id, "ws-a")
+    end)
+    pick.confirm, ws_mod.confirm_archive = saved_confirm, saved_archive
+    if not d_ok then
+      error(d_err, 0)
+    end
+
     native.remove(d1)
     native.remove(d2)
     native.close(chat)

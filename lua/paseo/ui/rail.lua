@@ -1512,6 +1512,61 @@ local function on_session(fn)
   end
 end
 
+---`d`: whatever "get rid of it" means for the row under the cursor, asked
+---first. An agent is archived and a terminal killed (|paseo.ui.tree|.remove);
+---a draft is thrown away, as `q` on its choices does; a workspace is archived,
+---as `d` in |:Paseo-workspaces| does -- the one way to clear a workspace that
+---has no agent left in it to archive.
+function M.remove()
+  local row = cursor_row()
+  if not row then
+    return
+  end
+  local pick = require "paseo.ui.pick"
+
+  if row.kind == "draft" and row.chat then
+    local draft = row.chat
+    return pick.confirm("Discard this draft?", { yes = "Discard" }, function(yes)
+      if not yes then
+        return
+      end
+      local from = api.nvim_get_current_win()
+      if not require("paseo.ui.newtask").discard(draft) then
+        -- A draft chat with no screen of its own: off the row all the same.
+        require("paseo.ui.native").remove(draft)
+        require("paseo.ui.chat").discard(draft)
+        require("paseo.drafts").remove(draft.draft_id)
+      end
+      -- Taking the one in the middle opens its neighbour there; you were in
+      -- the rail, so stay in it.
+      if api.nvim_win_is_valid(from) and from ~= api.nvim_get_current_win() then
+        pcall(api.nvim_set_current_win, from)
+      end
+      M.draw()
+    end)
+  end
+
+  if row.kind == "workspace" then
+    local ws = row.ws
+    if not (ws and ws.id) then
+      return
+    end
+    local label = ws.name or ws.directory or ws.id
+    return pick.confirm(("Archive workspace %s?"):format(label), { yes = "Archive" }, function(yes)
+      if yes then
+        require("paseo.workspaces").confirm_archive(ws, function()
+          M.load(nil, { force = true })
+        end)
+      end
+    end)
+  end
+
+  local node, chat = row.node, M.host_chat()
+  if node and chat then
+    require("paseo.ui.tree").remove(node, chat)
+  end
+end
+
 -- ----------------------------------------------------------------- buffer
 
 ---The rail's `<C-h>`: `<C-w>h`, as from any window. The rail is the leftmost
@@ -1704,11 +1759,15 @@ local function keymap(keys)
     },
     {
       "d",
-      on_session(function(node, chat)
-        require("paseo.ui.tree").remove(node, chat)
-      end),
-      "archive this agent / kill this terminal",
+      M.remove,
+      "archive this agent or workspace / kill this terminal / discard this draft",
       menu = function(row)
+        if row.kind == "draft" then
+          return "Discard this draft"
+        end
+        if row.kind == "workspace" then
+          return row.ws.id and "Archive this workspace"
+        end
         if row.node and row.node.kind == "terminal" then
           return "Kill this terminal"
         end

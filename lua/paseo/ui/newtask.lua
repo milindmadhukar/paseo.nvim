@@ -1048,6 +1048,19 @@ function M.chat_of(buf)
   return nil
 end
 
+---Throw a draft away from outside its own screen -- the rail's `d` on its
+---row -- as `q` on the choices does: off the row, out of the saved drafts.
+---@param chat table
+---@return boolean handled  False when `chat` is not a draft being set up.
+function M.discard(chat)
+  local task = tasks[chat]
+  if not task then
+    return false
+  end
+  abandon(task)
+  return true
+end
+
 ---The chat is going away by some other road (`:bdelete`, the surface
 ---leaving): the screen and its keys go with it.
 ---@param chat table

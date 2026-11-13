@@ -340,7 +340,8 @@ The keys follow nvim-tree's (`g?` lists them):
     f           fork the agent
     y           copy the agent's ID
     R           rename the terminal
-    d           archive the agent / kill the terminal (asks first)
+    d           archive the agent or the workspace, kill the terminal,
+                discard the draft (asks first)
     m           pin or unpin the workspace
     r           re-fetch
     .           everything you can do to this row, in a chooser (also a
@@ -401,15 +402,15 @@ Everything you pick is remembered per project and pre-filled next time.
 A draft is a buffer like an agent's (`paseo://new/new session` on the
 bufferline, its choices), and you can have several. Switch to
 another agent or terminal and back, and the draft's choices and what you
-typed are as you left them; `q` on the choices throws it away. Each draft
-is a row on the rail, under the workspace it was opened on, named by the
-first line you wrote ("new session" until then); `<CR>` on it goes back.
+typed are as you left them; `q` on the choices, or `d` on its rail row,
+throws it away. Each draft is a row on the rail, under the workspace it was
+opened on, named by the first line you wrote ("new session" until then); `<CR>` on it goes back.
 
 Drafts are kept across restarts, in `stdpath("state")/paseo/drafts.json`:
 the drafts you quit with come back the next time the Paseo tab opens, the
 text in the box and the choices above it, with what you opened still in the
-middle. A draft leaves the file when it is sent, or thrown away with `q` or
-`:bdelete`. Only text is kept: an image attached to a draft is not.
+middle. A draft leaves the file when it is sent, or thrown away with `q`, `d` on
+the rail or `:bdelete`. Only text is kept: an image attached to a draft is not.
 A draft opened and left untouched (nothing typed, nothing picked) is not
 kept.
 
