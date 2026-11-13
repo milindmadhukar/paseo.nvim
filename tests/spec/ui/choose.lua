@@ -88,10 +88,33 @@ local function test_choose()
   eq("choose: a verb acts on the row under the cursor", verbed, 2)
   local footer = api.nvim_buf_get_lines(handle.buf, -2, -1, false)[1]
   truthy("choose: verbs are listed in the footer", footer:find("drop", 1, true), footer)
+  truthy("choose: and so is cancel, however many verbs", footer:find("cancel", 1, true), footer)
+  eq("choose: the selection is a band, whatever cursorlineopt says", vim.wo[handle.win].cursorlineopt, "line")
   handle.update { { id = 0, text = "zero" }, { id = 1, text = "one" }, { id = 2, text = "two" } }
   eq("choose: update keeps the cursor on the same item", handle.current().id, 2)
   handle.close()
   truthy("choose: close closes", not api.nvim_win_is_valid(handle.win))
+
+  -- Right-hand fields line up as columns, whatever their widths.
+  local cols = choose.open {
+    title = "Columns",
+    items = {
+      { id = 1, text = "a", right = { { "local     " }, { "idle" } } },
+      { id = 2, text = "b", right = { { "worktree  " }, { "1 running" } } },
+    },
+    on_pick = function() end,
+  }
+  local rows = api.nvim_buf_get_lines(cols.buf, 0, -1, false)
+  local function col_of(word)
+    for _, row in ipairs(rows) do
+      local at = row:find(word, 1, true)
+      if at then
+        return vim.fn.strdisplaywidth(row:sub(1, at - 1))
+      end
+    end
+  end
+  eq("choose: right-hand fields start at one column", col_of "local", col_of "worktree")
+  cols.close()
 
   -- confirm: the safe answer is first.
   local answer

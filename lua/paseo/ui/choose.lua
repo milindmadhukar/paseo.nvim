@@ -69,6 +69,18 @@ local function cells(item)
   return { { item.text or tostring(item.value or ""), item.hl or "PaseoText" } }
 end
 
+---The footer's keys: pick, the list's own verbs, cancel.
+---@param opts paseo.ChooseOpts
+---@return { [1]: string, [2]: string }[]
+function M.hints(opts)
+  local hints = { { "<CR>", "pick" } }
+  for _, verb in ipairs(opts.verbs or {}) do
+    hints[#hints + 1] = { verb[1], verb[2] }
+  end
+  hints[#hints + 1] = { "q", "cancel" }
+  return hints
+end
+
 ---How wide the chooser wants to be for these items.
 ---@param opts paseo.ChooseOpts
 ---@return integer
@@ -77,9 +89,15 @@ local function measure_width(opts)
     return math.min(opts.width, vim.o.columns - 4)
   end
   local want = vim.fn.strdisplaywidth(opts.title) + 4
+  local left, right = 0, 0
   for _, item in ipairs(opts.items) do
-    want = math.max(want, render.width(cells(item)) + render.width(item.right or {}) + 10)
+    left = math.max(left, render.width(cells(item)))
+    right = math.max(right, render.width(item.right or {}))
   end
+  want = math.max(want, left + right + 10)
+  -- Room for every key in the footer: a hint that does not fit is dropped,
+  -- and a dropped hint is a key nobody finds.
+  want = math.max(want, render.width(widgets.hints(M.hints(opts), "PaseoDim")) + 6)
   return math.max(40, math.min(want, 96, vim.o.columns - 8))
 end
 
@@ -100,6 +118,12 @@ function M.lines(opts, width)
 
   local rows = {}
   local numbers = opts.numbers ~= false
+  -- The right-hand cells start at ONE column for every row, so a list whose
+  -- right side is several fields reads as columns.
+  local right_w = 0
+  for _, item in ipairs(opts.items) do
+    right_w = math.max(right_w, render.width(item.right or {}))
+  end
   if #opts.items == 0 then
     out[#out + 1] = { { "   " .. (opts.empty or "nothing here"), "PaseoDim" } }
   end
@@ -107,25 +131,19 @@ function M.lines(opts, width)
     local lead = (numbers and i <= 9) and (" %d  "):format(i) or "    "
     local line = { { lead, "PaseoDim" } }
     local right = item.right or {}
-    local rw = render.width(right)
-    local left_w = math.max(4, inner - #lead - (rw > 0 and rw + 2 or 0))
+    local left_w = math.max(4, inner - #lead - (right_w > 0 and right_w + 2 or 0))
     vim.list_extend(line, render.pad(render.truncate(cells(item), left_w), left_w))
-    if rw > 0 then
+    if right_w > 0 then
       line[#line + 1] = { "  " }
-      vim.list_extend(line, right)
+      vim.list_extend(line, render.pad(right, right_w))
     end
     out[#out + 1] = line
     rows[#out] = i
   end
 
   out[#out + 1] = {}
-  local hints = { { "<CR>", "pick" } }
-  for _, verb in ipairs(opts.verbs or {}) do
-    hints[#hints + 1] = { verb[1], verb[2] }
-  end
-  hints[#hints + 1] = { "q", "cancel" }
   local footer = { { " " } }
-  vim.list_extend(footer, widgets.hints(hints, "PaseoDim", inner - 1))
+  vim.list_extend(footer, widgets.hints(M.hints(opts), "PaseoDim", inner - 1))
   out[#out + 1] = footer
   return out, rows
 end
@@ -162,6 +180,9 @@ function M.open(opts)
   })
   handle.win = win
   vim.wo[win].cursorline = true
+  -- The band IS the selection: a global `cursorlineopt=number` must not
+  -- reduce it to a highlighted line number in a window with none.
+  vim.wo[win].cursorlineopt = "line"
   vim.wo[win].wrap = false
   vim.bo[buf].filetype = M.FILETYPE
 

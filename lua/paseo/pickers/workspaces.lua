@@ -169,7 +169,7 @@ function M.open(opts)
               M.open(opts)
             end)
           end) },
-          { "a", opts.all and "this project" or "all projects", function(_, handle)
+          { "a", opts.all and "this project" or "all", function(_, handle)
             handle.close()
             M.open(vim.tbl_extend("force", opts, { all = not opts.all }))
           end },
