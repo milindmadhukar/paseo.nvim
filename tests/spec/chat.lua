@@ -561,10 +561,186 @@ local function test_pending()
   vim.api.nvim_buf_delete(buf, { force = true })
 end
 
+--- Asking about code: a chip in the composer of the chat beside your code.
+---
+--- What `:Paseo ask` does now -- Copilot's "Add to chat" -- and the things that
+--- make a chip an attachment rather than decoration: the token is the
+--- reference, deleting it takes the reference out, and what it points at goes
+--- to the agent ahead of the question.
+local function test_chips()
+  local bridge = require "paseo.bridge"
+  local chat = require "paseo.ui.chat"
+  local native = require "paseo.ui.native"
+  local sidebar = require "paseo.ui.sidebar"
+  local surface = require "paseo.ui.surface"
+  local config = require "paseo.config"
+
+  local old_ensure, old_request = bridge.ensure, bridge.request
+  local old_settings = chat.load_settings
+  local dir = vim.fn.tempname()
+  vim.fn.mkdir(dir, "p")
+  local file = dir .. "/a.lua"
+  vim.fn.writefile({ "one", "two", "three", "four" }, file)
+  local tabs = #vim.api.nvim_list_tabpages()
+  local sent
+
+  local ok, err = pcall(function()
+    eq("chips: review.surface is sidebar or native", pcall(config.setup, { review = { surface = "float" } }), false)
+    config.setup {}
+    eq("chips: the sidebar by default", config.get().review.surface, "sidebar")
+    surface.reset()
+    chat.load_settings = function() end
+    bridge.ensure = function(callback)
+      callback(nil)
+    end
+    bridge.request = function(op, args, callback)
+      if op == "agent.find" then
+        return callback(nil, { id = "chip-agent", provider = "test" })
+      end
+      if op == "timeline.history" then
+        return callback(nil, { items = {} })
+      end
+      if op == "agent.send" then
+        sent = args
+      end
+      callback(nil, {})
+    end
+
+    vim.cmd("edit " .. vim.fn.fnameescape(file))
+    local code = vim.api.nvim_get_current_win()
+    local function item(token, context)
+      return { token = token, context = context, root = dir, abs = file }
+    end
+    local function composer()
+      local c = chat.current()
+      return c and table.concat(vim.api.nvim_buf_get_lines(c.composer, 0, -1, false), "\n") or ""
+    end
+
+    -- The default surface is native: the sidebar is review.surface's doing.
+    chat.add_ref(item("@a.lua:2-3", "CONTEXT A"))
+    truthy("chips: the chat comes up", vim.wait(1000, function()
+      return chat.current() ~= nil and composer():find("@a.lua:2-3", 1, true) ~= nil
+    end), composer())
+    local mine = chat.current()
+    truthy("chips: in the sidebar, beside the code", sidebar.is_open(mine))
+    eq("chips: not the Paseo tab", native.has(mine), false)
+    eq("chips: the code stays on this tab", vim.api.nvim_win_get_tabpage(code), vim.api.nvim_get_current_tabpage())
+    eq("chips: you are in the composer", vim.api.nvim_get_current_win(), mine.win_composer)
+    eq("chips: one reference", #mine.refs, 1)
+
+    local ns = vim.api.nvim_get_namespaces()["paseo.composer.chips"]
+    local marks = vim.api.nvim_buf_get_extmarks(mine.composer, ns, 0, -1, { details = true })
+    eq("chips: painted", #marks, 1)
+    eq("chips: as a PaseoRef", marks[1] and marks[1][4].hl_group, "PaseoRef")
+
+    -- The same place twice is one chip.
+    vim.cmd "stopinsert"
+    chat.add_ref(item("@a.lua:2-3", "CONTEXT A2"))
+    eq("chips: the same place twice is one reference", #mine.refs, 1)
+    local _, count = composer():gsub("@a%.lua:2%-3", "")
+    eq("chips: and one token", count, 1)
+    eq("chips: saying what it says now", mine.refs[1].context, "CONTEXT A2")
+
+    -- A token that STARTS another is still its own chip.
+    chat.add_ref(item("@a.lua:2", "CONTEXT B"))
+    eq("chips: a second chip joins the first", #mine.refs, 2)
+
+    -- Delete the short one by hand: it goes, the long one stays.
+    vim.api.nvim_buf_set_lines(mine.composer, 0, -1, false, { "@a.lua:2-3 why?" })
+    chat.prune_refs(mine)
+    eq("chips: a deleted chip takes its reference out", #mine.refs, 1)
+    eq("chips: and only that one", mine.refs[1].token, "@a.lua:2-3")
+    chat.prune_refs(mine)
+    vim.api.nvim_buf_set_lines(mine.composer, 0, -1, false, { "@a.lua:2- why?" })
+    chat.prune_refs(mine)
+    eq("chips: so does a half-deleted one", #mine.refs, 0)
+
+    -- Sent: the context first, then the question with its token.
+    vim.api.nvim_buf_set_lines(mine.composer, 0, -1, false, { "" })
+    chat.add_ref(item("@a.lua:4", "CONTEXT D"))
+    vim.cmd "stopinsert"
+    vim.api.nvim_buf_set_lines(mine.composer, 0, -1, false, { "why @a.lua:4?" })
+    vim.api.nvim_set_current_win(mine.win_composer)
+    vim.api.nvim_feedkeys(vim.keycode "<CR>", "x", false)
+    truthy("chips: sent", vim.wait(500, function()
+      return sent ~= nil
+    end))
+    local prompt = sent and sent.prompt or ""
+    local at_context, at_question = prompt:find("CONTEXT D", 1, true), prompt:find("why @a.lua:4?", 1, true)
+    truthy("chips: the reference goes", at_context ~= nil, prompt)
+    truthy("chips: ahead of the question", at_context and at_question and at_context < at_question or false, prompt)
+    eq("chips: the composer is empty after", composer(), "")
+    eq("chips: and holds no references", #mine.refs, 0)
+
+    -- <C-f> both ways: full screen, and back beside the code.
+    chat.fullscreen()
+    truthy("chips: <C-f> goes full screen", native.has(mine))
+    chat.fullscreen()
+    truthy("chips: and <C-f> there comes back to the sidebar", sidebar.is_open(mine) and not native.has(mine))
+    eq("chips: on the code's tab", vim.api.nvim_win_get_tabpage(mine.win_conversation), vim.api.nvim_win_get_tabpage(code))
+
+    -- Full screen, and you ask from the code: the chat comes to the sidebar.
+    chat.fullscreen()
+    native.leave()
+    chat.add_ref(item("@a.lua:1", "CONTEXT E"))
+    truthy("chips: a full-screen chat comes beside the code to take one", vim.wait(500, function()
+      return sidebar.is_open(mine) and not native.has(mine)
+    end))
+    eq("chips: one sidebar on the tab", #vim.tbl_filter(function(win)
+      return vim.api.nvim_win_get_buf(win) == mine.conversation
+    end, vim.api.nvim_tabpage_list_wins(0)), 1)
+
+    -- NO AGENT THERE YET: the question used to be dropped on the floor while
+    -- the new-task screen opened empty. Now the screen opens in the sidebar,
+    -- and the chip is in it.
+    vim.cmd "stopinsert"
+    chat.close()
+    chat.forget()
+    local bare = vim.fn.tempname()
+    vim.fn.mkdir(bare, "p")
+    local other = bare .. "/b.lua"
+    vim.fn.writefile({ "x" }, other)
+    vim.cmd("edit " .. vim.fn.fnameescape(other))
+    local find = bridge.request
+    bridge.request = function(op, args, callback)
+      if op == "agent.find" then
+        return callback(nil, nil)
+      end
+      return find(op, args, callback)
+    end
+    chat.add_ref { token = "@b.lua:1", context = "CONTEXT F", root = bare, abs = other }
+    truthy("chips: with no agent, the new-task screen takes the chip", vim.wait(1000, function()
+      local c = chat.current()
+      return c ~= nil and c.draft ~= nil and composer():find("@b.lua:1", 1, true) ~= nil
+    end), composer())
+    local draft = chat.current()
+    truthy("chips: in the sidebar", draft ~= nil and sidebar.is_open(draft) and not native.has(draft))
+    eq("chips: holding the reference", draft and #draft.refs, 1)
+    bridge.request = find
+    vim.cmd "stopinsert"
+    pcall(vim.cmd, "silent! bwipeout! " .. vim.fn.fnameescape(other))
+  end)
+
+  vim.cmd "stopinsert"
+  chat.close()
+  chat.forget()
+  surface.reset()
+  bridge.ensure, bridge.request = old_ensure, old_request
+  chat.load_settings = old_settings
+  while #vim.api.nvim_list_tabpages() > tabs do
+    vim.cmd "tabclose!"
+  end
+  pcall(vim.cmd, "silent! bwipeout! " .. vim.fn.fnameescape(file))
+  if not ok then
+    error(err, 0)
+  end
+end
+
 return {
   { "chat follows", test_chat_follow },
   { "surface memory", test_surface_memory },
   { "follow", test_follow },
   { "stop", test_stop },
   { "pending", test_pending },
+  { "chips", test_chips },
 }

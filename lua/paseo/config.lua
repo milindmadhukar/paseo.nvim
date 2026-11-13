@@ -67,8 +67,8 @@ local M = {}
 ---@field surface "native"|"sidebar"  Which surface `:Paseo` opens on.
 ---                       "native" is the default: full screen, one Paseo tab
 ---                       with every agent a buffer, every pane a real split. The sidebar is the
----                       narrower thing beside your code; <C-f> goes from it to
----                       native. "float" and "buffer" -- the old volt
+---                       narrower thing beside your code; <C-f> goes between
+---                       the two. "float" and "buffer" -- the old volt
 ---                       dashboard's mounts -- are accepted and mean "native".
 ---@field send_behavior "steer"|"interrupt"|"queue"  What sending does while
 ---                       the agent is mid-turn. "steer" (the default, as in the
@@ -110,7 +110,7 @@ local M = {}
 ---@field animate boolean|paseo.Config.UI.Animate  Motion. `false` is instant.
 ---@field float paseo.Config.UI.Float
 ---@field sidebar paseo.Config.UI.Sidebar
----@field ask paseo.Config.UI.Answer
+---@field answer paseo.Config.UI.Answer
 ---@field terminal paseo.Config.UI.Terminal
 ---@field pr paseo.Config.UI.PR
 
@@ -330,6 +330,10 @@ local M = {}
 ---                       other Paseo agents working in this tree, so the review
 ---                       agent can interrogate them about who made a change.
 ---                       Off means the prompt is the reference and nothing else.
+---@field surface "sidebar"|"native"  Where `:Paseo ask` and `:Paseo explain`
+---                       put the chat. "sidebar" (the default) keeps it beside
+---                       the code you asked about, whatever `ui.surface` says;
+---                       "native" puts it on the Paseo tab.
 
 ---@class paseo.Config.Quit
 ---@field guard boolean  Install the quit guard (ZZ/ZQ, `:q`/`:wq`/`:x`
@@ -558,6 +562,8 @@ local defaults = {
 
   review = {
     agents = true,
+    -- Asking about code keeps the code on screen: the chat opens beside it.
+    surface = "sidebar",
   },
 
   quit = {
@@ -692,6 +698,9 @@ function M.setup(opts)
   vim.validate("ui.pr.enabled", config.ui.pr.enabled, "boolean")
   vim.validate("ui.pr.ttl", config.ui.pr.ttl, "number")
   vim.validate("review.agents", config.review.agents, "boolean")
+  vim.validate("review.surface", config.review.surface, function(v)
+    return v == "sidebar" or v == "native"
+  end, '"sidebar" or "native"')
   vim.validate("quit.warn_active_agents", config.quit.warn_active_agents, "boolean")
   vim.validate("ui.send_behavior", config.ui.send_behavior, function(v)
     return v == "steer" or v == "interrupt" or v == "queue"

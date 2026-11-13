@@ -98,8 +98,10 @@ readers and the microphone.
                         opens the screen with "New worktree" chosen.
 
                                                                 *:Paseo-ask*
-:Paseo ask [kind]       Ask an agent about code. A small box takes your
-                        question (|paseo-ask-box|). {kind}:
+:Paseo ask [kind]       Ask an agent about code. The code becomes a chip
+                        in the composer of the chat beside it, and you
+                        write the question there (|paseo-ask-chips|).
+                        {kind}:
                           `hunk`    the git hunk under the cursor: the
                                     buffer, unsaved edits included, against
                                     `HEAD` (so a staged hunk counts)
@@ -110,9 +112,9 @@ readers and the microphone.
                         Without {kind}: the hunk, else the cursor line.
 
                                                             *:Paseo-explain*
-:Paseo explain [kind]   Like `ask`, with the question already written: the
-                        bundled explain-change rubric. The same {kind}s,
-                        except `qf`.
+:Paseo explain [kind]   Like `ask`, with the question already written and
+                        sent: the bundled explain-change rubric. The same
+                        {kind}s, except `qf`.
 
                                                          *:Paseo-workspaces*
 :Paseo workspaces [all] The workspaces in this project, in a chooser
@@ -163,8 +165,12 @@ code and back again; `q` takes the tab down, and the agents live on.
 
                                                           *paseo-chat-sidebar*
 Sidebar ~
-The chat in a split beside your code (|paseo-config.ui.sidebar|). `<C-f>`
-goes from it to full screen. Open it with
+The chat in a split beside your code (|paseo-config.ui.sidebar|). It is
+where |:Paseo-ask| and |:Paseo-explain| put the chat, so the code you asked
+about stays on screen (|paseo-config.review.surface|). `<C-f>` moves the
+chat between it and full screen, both ways: from the Paseo tab it comes back
+beside the code on the tab you came from, and the other agents open there
+stay where they are. There is one sidebar per tab. Open it yourself with
 `require("paseo.ui.chat").surface("sidebar")`.
 
                                                              *paseo-chat-keys*
@@ -184,7 +190,7 @@ completion and undo all work, and it grows with what you write.
     <C-c>       stop the turn (normal or insert)
     f           fork the conversation (|paseo-fork|)
     <C-s>       into the rail, on this agent
-    <C-f>       (sidebar) go full screen
+    <C-f>       between the sidebar and full screen
     q           close the chat
 
 In the conversation ~
@@ -408,22 +414,35 @@ app shows, numbered in that order:
 |:Paseo-ask| and |:Paseo-explain| send an agent a REFERENCE: the file's
 absolute path and the line range, not the lines themselves, so the agent
 reads the file as it is now. (A pure deletion is the exception: its lines are
-no longer in the file, so the hunk is quoted.) The agent is the one for the
-workspace the file is in; with none, one is started.
+no longer in the file, so the hunk is quoted.) The reference is taken when
+you press the key, not when you send.
 
-                                                               *paseo-ask-box*
-The ask box ~
-A small float takes the question, sends it, and lets the chat come up behind
-the answer. It is a real buffer, so `<CR>` in insert mode is a new line.
+                                                  *paseo-ask-chips* *paseo-ask-box*
+Chips ~
+`:Paseo ask` opens the chat beside your code, in the sidebar, puts the
+reference in its composer as a chip, and leaves you in insert mode after it:
+>
+    @lua/paseo/ref.lua:42-58 why does this skip deletions?
+<
+The chip is the attachment, the way `[Image #1]` is for an image
+(|paseo-images|). It is plain text, so you can move over it, yank it and
+undo it, and the agent reads `@path:lines` as a mention. Delete it, or any
+character of it, and the reference no longer goes. When you send, what each
+chip points at goes ahead of your question.
 
-    <CR>        (normal) send
-    <M-CR>      send, from normal or insert mode
-    <Esc> q     cancel
+Chips stack. Go back to the code (`<C-w>p`), ask about another hunk or
+selection, and the next chip joins the message you are writing. The same
+place twice is one chip. A whole file is `@path`, and `:Paseo ask qf` adds
+the whole quickfix list as `@quickfix`, whoever built it: a review workflow
+of your own (|paseo-git|), `:grep`, diagnostics.
 
-An empty box cancels.
+Which chat: the one in the sidebar, if the file is inside the directory it
+works in. Otherwise the agent for the file's repository, brought beside the
+code if it was full screen. With no agent there yet, the new-task screen
+(|paseo-new|) opens in the sidebar with the chip already in its composer.
 
-`:Paseo ask qf` asks about every quickfix entry at once, whoever built the
-list: a review workflow of your own (|paseo-git|), `:grep`, diagnostics.
+`:Paseo explain` adds the chip and the rubric, and sends them at once. On a
+new-task screen it waits for you to send.
 
 With |paseo-config.review.agents| the agent is told about the other agents
 working in the same tree.
@@ -550,7 +569,7 @@ is optional. >lua
       voice = { enabled = true, key = "<C-t>", recorder = nil, rate = 16000 },
       workspaces = { dir = ".workspaces", branch_prefix = "ws/",
                      open = "tcd" },
-      review = { agents = true },
+      review = { agents = true, surface = "sidebar" },
       quit = { guard = false, warn_active_agents = true },
       keys = { conversation = {}, composer = {}, rail = {}, panel = {} },
       skills = { dirs = { "~/.claude/skills" },
@@ -602,7 +621,8 @@ Surfaces ~
                                                      *paseo-config.ui.surface*
                                                                               
 ui.surface          `"native"` (full screen, the default) or `"sidebar"`:
-                    where |:Paseo| opens.
+                    where |:Paseo| opens. Asking about code has its own,
+                    |paseo-config.review.surface|.
                                                *paseo-config.ui.send_behavior*
                                                                               
 ui.send_behavior    What sending does mid-turn: `"steer"` (default),
@@ -708,6 +728,10 @@ workspaces.open     How opening a workspace moves you: `"tcd"` (default),
                                                   *paseo-config.review.agents*
 review.agents       Tell the agent you ask about code about the other agents
                     working in the same tree. Default `true`.
+                                                 *paseo-config.review.surface*
+review.surface      Where |:Paseo-ask| and |:Paseo-explain| put the chat:
+                    `"sidebar"` (default), beside the code, whatever
+                    `ui.surface` says; or `"native"`, the Paseo tab.
                                                     *paseo-config.quit.guard*
                                        *paseo-config.quit.warn_active_agents*
                                                                   *paseo-quit*

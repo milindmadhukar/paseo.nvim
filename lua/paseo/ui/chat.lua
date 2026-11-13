@@ -477,22 +477,142 @@ function M.prune_images(chat)
   end
 end
 
+-- --------------------------------------------------------------- references
+
+---Does `token` stand on its own somewhere in `text`, starting at `init`?
+---
+---A WHOLE token, not a substring. `@a.lua:4` is the start of `@a.lua:4-9`, so
+---a plain find would keep a single-line chip you deleted alive for as long as
+---a range chip on the same line survived. What may follow a token is anything
+---that cannot continue it: the end, a space, punctuation -- and a full stop
+---only when it ends the sentence, since `@a.lua` would otherwise match
+---`@a.lua.bak`.
+---@param text string
+---@param token string
+---@param init? integer
+---@return integer|nil start, integer|nil finish
+local function find_token(text, token, init)
+  local from = init or 1
+  while true do
+    local s, e = text:find(token, from, true)
+    if not s then
+      return nil
+    end
+    local after = text:sub(e + 1, e + 1)
+    local ok = not after:match "[%w%-_/:#]"
+    if after == "." then
+      ok = not text:sub(e + 2, e + 2):match "%w"
+    end
+    if ok then
+      return s, e
+    end
+    from = s + 1
+  end
+end
+
+---THE TOKEN IS THE ATTACHMENT, exactly as `[Image #n]` is for an image. Drop
+---every reference whose `@path:lines` is no longer in the composer: deleting
+---the chip, or any character of it, is how you take a reference back out.
+---Only ever at a send or another add -- never per keystroke -- so `u` after
+---deleting one brings it back.
+---@param chat paseo.Chat
+function M.prune_refs(chat)
+  local refs = chat.refs
+  if not refs or #refs == 0 or not (chat.composer and vim.api.nvim_buf_is_valid(chat.composer)) then
+    return
+  end
+  local text = table.concat(vim.api.nvim_buf_get_lines(chat.composer, 0, -1, false), "\n")
+  local kept = {}
+  for _, entry in ipairs(refs) do
+    if find_token(text, entry.token) then
+      kept[#kept + 1] = entry
+    end
+  end
+  chat.refs = kept
+end
+
+local chips = vim.api.nvim_create_namespace "paseo.composer.chips"
+
+---Paint every attachment in the composer as a chip: each reference token and
+---each image placeholder. The highlight is the only decoration; the text is
+---plain text you can move over, yank and undo.
+---@param chat paseo.Chat
+local function paint_chips(chat)
+  local buf = chat.composer
+  if not (buf and vim.api.nvim_buf_is_valid(buf)) then
+    return
+  end
+  vim.api.nvim_buf_clear_namespace(buf, chips, 0, -1)
+  local refs = chat.refs or {}
+  if #refs == 0 and #(chat.images or {}) == 0 then
+    return
+  end
+  for row, line in ipairs(vim.api.nvim_buf_get_lines(buf, 0, -1, false)) do
+    local spans = {}
+    for _, entry in ipairs(refs) do
+      local s, e = find_token(line, entry.token)
+      while s do
+        spans[#spans + 1] = { s, e }
+        s, e = find_token(line, entry.token, e + 1)
+      end
+    end
+    local from = 1
+    while true do
+      local s, e = line:find("%[Image #%d+%]", from)
+      if not s then
+        break
+      end
+      spans[#spans + 1] = { s, e }
+      from = e + 1
+    end
+    for _, span in ipairs(spans) do
+      pcall(vim.api.nvim_buf_set_extmark, buf, chips, row - 1, span[1] - 1, {
+        end_col = span[2],
+        hl_group = "PaseoRef",
+        priority = 150,
+      })
+    end
+  end
+end
+
+M.paint_chips = paint_chips
+
 ---@param chat paseo.Chat
 ---@param alternate? boolean  The other send key: see |M.send_behavior|.
 local function send(chat, alternate)
   M.prune_images(chat)
+  M.prune_refs(chat)
   local body = vim.api.nvim_buf_get_lines(chat.composer, 0, -1, false)
   local text = vim.trim(table.concat(body, "\n"))
+  local refs = chat.refs or {}
 
-  if text == "" and #chat.pending == 0 and #chat.images == 0 then
+  if text == "" and #chat.pending == 0 and #chat.images == 0 and #refs == 0 then
     return
   end
   chat.recall = nil
 
-  -- Context blocks queued by `attach` go BEFORE the prose, so the agent reads
-  -- the code first and the question second.
+  -- What the chips point at goes BEFORE the prose, so the agent reads the
+  -- code first and the question second. The question keeps its `@path:lines`
+  -- tokens, and each block below starts with the same label, so "why does
+  -- @a.lua:4-9 do that" names something the agent has just been given.
   local parts = {}
   vim.list_extend(parts, chat.pending)
+  for _, entry in ipairs(refs) do
+    parts[#parts + 1] = entry.context
+  end
+  -- The sibling agents once per directory the chips point into, not once per
+  -- chip: three hunks in one repo are one list of who has been working there.
+  local seen = {}
+  for _, entry in ipairs(refs) do
+    local root = entry.root or chat.local_root or chat.root
+    if root and not seen[root] then
+      seen[root] = true
+      local others = require("paseo.explain").siblings(root)
+      if others then
+        parts[#parts + 1] = others
+      end
+    end
+  end
   if text ~= "" then
     parts[#parts + 1] = text
   end
@@ -512,9 +632,10 @@ local function send(chat, alternate)
   -- a prompt typed in the Paseo app would appear only once. The timeline is
   -- the single source of truth for what was said, whoever said it.
   vim.api.nvim_buf_set_lines(chat.composer, 0, -1, false, { "" })
-  local attached = chat.images
+  local attached, pending = chat.images, chat.pending
   chat.pending = {}
   chat.images = {}
+  chat.refs = {}
   -- The composer grew with the prompt, so it has to shrink back with it.
   -- Explicitly rather than through the autocmd: a `nvim_buf_set_lines` is not
   -- a user edit, and leaving it to `TextChanged` is how a four-line prompt
@@ -532,8 +653,11 @@ local function send(chat, alternate)
     ---A start that failed hands the words back: it must not eat the prompt.
     local function give_back(err)
       M.set_streaming(chat, false)
-      vim.api.nvim_buf_set_lines(chat.composer, 0, -1, false, vim.split(prompt, "\n"))
-      chat.images = attached
+      -- What you WROTE, chips and all, not the assembled prompt: the
+      -- references go back to being chips rather than coming back as the
+      -- paragraphs they were rendered into.
+      vim.api.nvim_buf_set_lines(chat.composer, 0, -1, false, body)
+      chat.images, chat.pending, chat.refs = attached, pending, refs
       M.fit_composer(chat)
       notice(chat, "could not start: " .. tostring(err), "error")
     end
@@ -759,6 +883,9 @@ end
 ---caller should not have to know which one is up.
 ---@param chat paseo.Chat
 local function fit_composer(chat)
+  -- Every programmatic write to the composer comes through here (see the
+  -- `TextChanged` autocmd), so this is the one place the chips are painted.
+  paint_chips(chat)
   sidebar.fit_composer(chat)
 end
 
@@ -1170,6 +1297,52 @@ function M.showing(chat)
   return chat.surface == "sidebar" and sidebar.is_open(chat)
 end
 
+---The chat into the sidebar, beside your code.
+---
+---From the Paseo tab it LEAVES it: the sidebar sits next to code, and the code
+---is on the tab you came from. The chat comes off the Paseo tab's row the way a
+---buffer does (`native.remove`), so the other agents you had open there stay
+---where they were -- the neighbour takes the middle, and only the last one
+---takes the tab with it.
+---
+---One sidebar per tab: another chat's sidebar on this tab closes first.
+---Opening a second chat used to put a second column beside the first.
+---@param chat paseo.Chat
+function M.to_sidebar(chat)
+  local native = require "paseo.ui.native"
+  local from = vim.api.nvim_get_current_tabpage()
+  if native.has(chat) then
+    native.remove(chat)
+  end
+  if native.on_tab() then
+    -- `remove` may have put the neighbour up, and that switches to the Paseo
+    -- tab; the tab you were on is where the sidebar goes.
+    if from ~= native.tab() and vim.api.nvim_tabpage_is_valid(from) then
+      vim.api.nvim_set_current_tabpage(from)
+    else
+      native.leave()
+    end
+  end
+  native.release(chat)
+  local tab = vim.api.nvim_get_current_tabpage()
+  for _, other in pairs(chats) do
+    local win = other.win_conversation
+    if other ~= chat and other.surface == "sidebar" and win and vim.api.nvim_win_is_valid(win)
+      and vim.api.nvim_win_get_tabpage(win) == tab
+    then
+      sidebar.close(other)
+    end
+  end
+  -- Up on ANOTHER tab is not up here: `sidebar.open` would take its
+  -- "already open" branch and leave this tab without one.
+  local own = chat.win_conversation
+  if own and vim.api.nvim_win_is_valid(own) and vim.api.nvim_win_get_tabpage(own) ~= tab then
+    sidebar.close(chat)
+  end
+  chat.surface = "sidebar"
+  sidebar.open(chat)
+end
+
 ---Put the chat on screen, on the surface |paseo.ui.surface| resolves: the one
 ---asked for, else the one on screen, else the one you last used, else
 ---`ui.surface`.
@@ -1196,8 +1369,7 @@ local function layout(chat, explicit, nopts)
     transcript.restore(chat)
     return
   end
-  require("paseo.ui.native").release(chat)
-  sidebar.open(chat)
+  M.to_sidebar(chat)
   -- WHERE YOU LEFT IT. A chat that was following goes to the end, which has
   -- moved on while it was off screen; one you had scrolled up in stays
   -- scrolled up (`transcript.restore`). It used to go to the end every time,
@@ -1432,7 +1604,7 @@ local draft_count = 0
 ---and answers `done(err)` on failure, `done(nil, agent_id)` to bind the agent
 ---it made to this chat, or `done(nil)` when it pointed the editor at a chat
 ---of its own.
----@param opts { root: string, local_root?: string, host_id?: string, settings: table, project?: string, start?: fun(prompt: string, images: table[], done: fun(err: string|nil, agent_id: string|nil)), banner?: string }
+---@param opts { root: string, local_root?: string, host_id?: string, settings: table, project?: string, start?: fun(prompt: string, images: table[], done: fun(err: string|nil, agent_id: string|nil)), banner?: string, surface?: "sidebar"|"native" }
 ---@return paseo.Chat
 function M.draft(opts)
   local host = assert(hosts.get(opts.host_id), "unknown Paseo host")
@@ -1445,10 +1617,11 @@ function M.draft(opts)
     streaming = false,
     pending = {},
     images = {},
+    refs = {},
   }
   chats[key] = chat
   current = chat
-  layout(chat)
+  layout(chat, opts.surface)
   make_draft(chat, key, opts)
   return chat
 end
@@ -1490,6 +1663,7 @@ function M.prepare(opts)
       streaming = false,
       pending = {},
       images = {},
+      refs = {},
     }
     chats[key] = chat
   end
@@ -1619,7 +1793,7 @@ M.here = here
 ---`working` is for a caller that has just handed the agent its first prompt:
 ---the turn is already running, and the `turn_started` saying so fired before
 ---this chat subscribed.
----@param opts? { root?: string, local_root?: string, host_id?: string, remote?: boolean, focus?: boolean, agent_id?: string, title?: string, create?: boolean, surface?: "float"|"sidebar"|"buffer", working?: boolean }
+---@param opts? { root?: string, local_root?: string, host_id?: string, remote?: boolean, focus?: boolean, agent_id?: string, title?: string, create?: boolean, surface?: "float"|"sidebar"|"buffer"|"native", working?: boolean, on_draft?: fun(draft: paseo.Chat) }
 ---@param callback? fun(chat: paseo.Chat|nil, err: string|nil)
 function M.open(opts, callback)
   opts = opts or {}
@@ -1670,6 +1844,7 @@ function M.open(opts, callback)
       streaming = false,
       pending = {},
       images = {},
+      refs = {},
     }
     chats[key] = chat
   end
@@ -1777,51 +1952,163 @@ function M.open(opts, callback)
       end
       callback(nil, nil)
       vim.schedule(function()
-        require("paseo.new").open({
+        local draft = require("paseo.new").open({
           root = root,
           local_root = local_root,
           host_id = host.id,
           preferred = preferred,
-        }, {})
+        }, { surface = opts.surface, kind = opts.on_draft and "chat" or nil })
+        -- What the caller was carrying -- a chip, from `add_ref` -- goes on
+        -- the draft rather than being dropped with this empty chat.
+        if draft and opts.on_draft then
+          opts.on_draft(draft)
+        end
       end)
     end, host.id)
   end, host.id)
 end
 
----Queue a reference as context for the next send, and open the composer on it.
----@param ref_text string
----@param opts? { root?: string, prompt?: string }
-function M.attach(ref_text, opts)
-  opts = opts or {}
-  M.open({ root = opts.root }, function(chat)
-    if not chat then
-      return
+---Is this chat on screen on the tab page you are looking at?
+---
+---`sidebar.is_open` asks only whether the conversation WINDOW is valid, and a
+---window on another tab page is perfectly valid -- so a chat left behind by a
+---`tabnew` workspace switch counted as open, and the first press of the chat
+---key closed something invisible instead of opening something here.
+---@param chat table
+---@return boolean
+local function visible(chat)
+  if require("paseo.ui.native").has(chat) then
+    return require("paseo.ui.native").is_open(chat)
+  end
+  local win = chat.win_conversation
+  if not (win and vim.api.nvim_win_is_valid(win)) then
+    return false
+  end
+  return vim.api.nvim_win_get_tabpage(win) == vim.api.nvim_get_current_tabpage()
+end
+
+---@class paseo.ChatRefItem
+---@field token string    What the composer shows: `@path:12-20`, `@quickfix`.
+---@field context string  What the agent is sent for it, rendered when the
+---                       chip was added (|paseo.ref|.render).
+---@field root string     Where an agent for it would work.
+---@field abs? string     The file, so an open chat that covers it is used.
+
+---Is `abs` inside the directory this chat works in?
+---@param chat paseo.Chat
+---@param abs string|nil
+---@return boolean
+local function covers(chat, abs)
+  local root = chat.local_root or chat.root
+  if not (root and abs) then
+    return false
+  end
+  root = vim.fs.normalize(root)
+  abs = vim.fs.normalize(abs)
+  return abs == root or vim.startswith(abs, root .. "/")
+end
+
+---The chip, in the composer, and you in the composer after it.
+---@param chat paseo.Chat
+---@param item paseo.ChatRefItem
+---@param opts { prompt?: string, send?: boolean }
+local function put_chip(chat, item, opts)
+  if not (chat.composer and vim.api.nvim_buf_is_valid(chat.composer)) then
+    return
+  end
+  M.prune_refs(chat)
+  chat.refs = chat.refs or {}
+  local known
+  for _, entry in ipairs(chat.refs) do
+    if entry.token == item.token then
+      known = entry
     end
-    vim.schedule(function()
-      table.insert(chat.pending, ref_text)
+  end
+  local lines = vim.api.nvim_buf_get_lines(chat.composer, 0, -1, false)
+  if known then
+    -- The same place twice: one chip, saying what it says NOW.
+    known.context = item.context
+  else
+    chat.refs[#chat.refs + 1] = { token = item.token, context = item.context, root = item.root }
+    local tail = lines[#lines] or ""
+    local gap = (tail == "" or tail:match "%s$") and "" or " "
+    lines[#lines] = tail .. gap .. item.token .. " "
+  end
+  if opts.prompt then
+    vim.list_extend(lines, vim.split(opts.prompt, "\n", { plain = true }))
+  end
+  vim.api.nvim_buf_set_lines(chat.composer, 0, -1, false, lines)
+  -- Before the cursor move, so the line it lands on is on screen.
+  M.fit_composer(chat)
 
-      -- Shown in the composer, not hidden: you can see exactly what is about to
-      -- be sent, and delete the line if you change your mind.
-      local existing = vim.api.nvim_buf_get_lines(chat.composer, 0, -1, false)
-      local note = ("> attached: %s"):format(vim.split(ref_text, "\n")[1])
-      if #existing == 1 and existing[1] == "" then
-        existing = {}
-      end
-      table.insert(existing, 1, note)
-      if opts.prompt then
-        vim.list_extend(existing, vim.split(opts.prompt, "\n"))
-      end
-      vim.api.nvim_buf_set_lines(chat.composer, 0, -1, false, existing)
-      -- Before the cursor move, so the line it lands on is on screen: this
-      -- path can write a whole prompt into a three-row box.
-      M.fit_composer(chat)
+  if opts.send and not chat.draft then
+    return send(chat)
+  end
+  local win = chat.win_composer
+  if not (win and vim.api.nvim_win_is_valid(win)) then
+    return
+  end
+  vim.api.nvim_set_current_win(win)
+  local last = vim.api.nvim_buf_line_count(chat.composer)
+  local len = #(vim.api.nvim_buf_get_lines(chat.composer, last - 1, last, false)[1] or "")
+  pcall(vim.api.nvim_win_set_cursor, win, { last, len })
+  if not opts.prompt then
+    -- The next thing you do is type the question.
+    vim.cmd.startinsert { bang = true }
+  end
+end
 
-      vim.api.nvim_set_current_win(chat.win_composer)
-      vim.api.nvim_win_set_cursor(chat.win_composer, { #existing, 0 })
-      if not opts.prompt then
-        vim.cmd.startinsert { bang = true }
+---A reference, as a chip in the chat's composer: Copilot's "Add to chat".
+---
+---The chat it goes to is the one BESIDE YOUR CODE (`review.surface`, the
+---sidebar by default), so asking about a hunk never takes the hunk off
+---screen. If the chat open there already covers the file, it is the one: the
+---chip joins whatever you were writing, and several can be stacked before
+---anything is sent. Otherwise it is the chat for the file's repository, moved
+---beside the code if it was full screen. With no agent there yet, the
+---new-task screen opens in its place with the chip already in it -- the
+---question is never dropped.
+---
+---Visual mode is left first: the reference has already been read from it.
+---@param item paseo.ChatRefItem
+---@param opts? { prompt?: string, send?: boolean, surface?: "sidebar"|"native" }
+---              `prompt` is written after the chip; `send` sends at once
+---              (`:Paseo explain`), except on a draft, which waits for you.
+function M.add_ref(item, opts)
+  opts = opts or {}
+  local where = opts.surface or config.get().review.surface or "sidebar"
+  if vim.fn.mode():match "^[vV\22]" then
+    vim.api.nvim_feedkeys(vim.keycode "<Esc>", "nx", false)
+  end
+
+  local chat = current
+  if chat and chat.composer and covers(chat, item.abs) then
+    local native = require "paseo.ui.native"
+    local here_already = (where == "sidebar" and chat.surface == "sidebar" and visible(chat))
+      or (where == "native" and native.has(chat))
+    if not here_already then
+      if where == "sidebar" then
+        M.to_sidebar(chat)
+      else
+        native.open(chat, { focus = false })
       end
-    end)
+    end
+    return put_chip(chat, item, opts)
+  end
+
+  M.open({
+    root = item.root,
+    surface = where,
+    focus = false,
+    on_draft = function(draft)
+      put_chip(draft, item, opts)
+    end,
+  }, function(opened)
+    if opened then
+      vim.schedule(function()
+        put_chip(opened, item, opts)
+      end)
+    end
   end)
 end
 
@@ -1884,25 +2171,6 @@ function M.close()
     return native.close(chat)
   end
   sidebar.close(chat)
-end
-
----Is this chat on screen on the tab page you are looking at?
----
----`sidebar.is_open` asks only whether the conversation WINDOW is valid, and a
----window on another tab page is perfectly valid -- so a chat left behind by a
----`tabnew` workspace switch counted as open, and the first press of the chat
----key closed something invisible instead of opening something here.
----@param chat table
----@return boolean
-local function visible(chat)
-  if require("paseo.ui.native").has(chat) then
-    return require("paseo.ui.native").is_open(chat)
-  end
-  local win = chat.win_conversation
-  if not (win and vim.api.nvim_win_is_valid(win)) then
-    return false
-  end
-  return vim.api.nvim_win_get_tabpage(win) == vim.api.nvim_get_current_tabpage()
 end
 
 function M.toggle()
@@ -2083,29 +2351,33 @@ function M.surface(name, opts)
     native.open(chat)
     return
   end
-  if native.has(chat) then
-    native.close(chat)
-  end
-  native.release(chat)
-  chat.surface = "sidebar"
-  sidebar.open(chat)
+  M.to_sidebar(chat)
+  transcript.restore(chat)
 end
 
----`<C-f>`: from the sidebar beside your code, to the Paseo tab.
+---`<C-f>`: between the sidebar beside your code and the Paseo tab, both ways.
 ---
----Not a key ON the native surface: the Paseo tab is a place of its own, and
----`:Paseo` -- or `q` -- is how you leave it. Declined silently; a notification
----for "this key does nothing here" is noise on a key people press by reflex.
+---From the sidebar it goes full screen; from the Paseo tab it takes the chat
+---in the middle back beside the code, on the tab you came from. The answer
+---overlay is anchored to the conversation WINDOW, and the swap closes it -- so
+---without the reopen a question you were halfway through disappears on the
+---way. Reopened rather than migrated.
 function M.fullscreen()
   local chat = current
-  if chat and require("paseo.ui.native").has(chat) then
-    return
-  end
-  -- The answer overlay is anchored to the conversation WINDOW, and the swap
-  -- closes it -- so without this a question you were halfway through
-  -- disappears on `<C-f>`. Reopened rather than migrated.
+  local native = require "paseo.ui.native"
   local pending = require("paseo.ui.answer").showing()
-  local result = M.surface "native"
+  local result
+  if native.on_tab() then
+    chat = native.chat()
+    if not chat or require("paseo.ui.newtask").task(chat) then
+      -- A terminal or a new-task screen in the middle: nothing to move.
+      return
+    end
+    current = chat
+    result = M.surface "sidebar"
+  else
+    result = M.surface "native"
+  end
   if chat and pending then
     vim.schedule(function()
       require("paseo.ui.permission").reopen(chat)

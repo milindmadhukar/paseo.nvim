@@ -59,8 +59,10 @@ vim.keymap.set("n", "<leader>as", "<cmd>Paseo settings<cr>")        -- mode, mod
    with Settings, Changes and Usage.
 3. When the agent asks for permission, a dialog opens. `y` allows, `n` denies,
    and `1`–`9` pick a specific action.
-4. Back in your code, put the cursor on a hunk and run `:Paseo ask`. Type
-   your question and the agent gets the file and line range.
+4. Back in your code, put the cursor on a hunk and run `:Paseo ask`. The
+   chat opens beside your code with the hunk as a chip, `@path:42-58`, in
+   its composer. Type your question and send it; the agent gets the file and
+   line range.
 5. `:Paseo` again takes you back to your code.
 
 ## Commands
@@ -70,7 +72,7 @@ vim.keymap.set("n", "<leader>as", "<cmd>Paseo settings<cr>")        -- mode, mod
 | `:Paseo` | Open or close the chat |
 | `:Paseo new [worktree]` | Start an agent here, in a new worktree, or a terminal |
 | `:Paseo ask [hunk\|visual\|file\|cursor\|qf]` | Ask about code; `qf` covers the whole quickfix list |
-| `:Paseo explain [kind]` | Explain code, with the bundled review rubric |
+| `:Paseo explain [kind]` | Explain code with the bundled review rubric, sent at once |
 | `:Paseo workspaces [all]` | This project's workspaces (`all`: every project's) |
 | `:Paseo agents` | The agents in this workspace |
 | `:Paseo settings [mode\|thinking\|model\|features]` | The chat agent's settings |
@@ -119,6 +121,16 @@ Dragging an image file onto the terminal, or pasting one copied in a file
 manager, also attaches it: the terminal sends the path, and the plugin
 recognises it. Your terminal's own paste key on a raw screenshot sends
 Neovim nothing at all, so use `p` for those.
+
+### Asking about code
+
+`:Paseo ask` works like Copilot's "Add to chat". The hunk, selection or file
+becomes a chip in the composer of the chat in the sidebar, beside your code,
+and you write the question after it. Go back to the code and ask about
+something else, and the next chip joins the same message. A chip is plain
+text: delete it and that reference no longer goes. `<C-f>` takes the chat
+full screen and, from there, back beside the code. `review.surface =
+"native"` sends asks to the full-screen tab instead.
 
 ### Lists look the same everywhere
 

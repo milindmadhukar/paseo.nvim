@@ -12,7 +12,7 @@
 ---
 --- So there is one answer, held here, and it is asked in one order:
 ---
----   1. what the caller asked for -- `:Paseo`, `:Paseo sidebar`,
+---   1. what the caller asked for -- `:Paseo`, `:Paseo ask` (the sidebar),
 ---      `<C-f>`;
 ---   2. what is ON SCREEN right now -- a session picked from the rail stays
 ---      on the native surface you picked it from;

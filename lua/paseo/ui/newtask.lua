@@ -658,7 +658,7 @@ end
 ---own, the sidebar its window. The composer is focused, in insert mode, so
 ---the first thing you do is type.
 ---@param ctx paseo.StartContext
----@param opts { kind?: "chat"|"terminal", where?: "here"|"worktree" }
+---@param opts { kind?: "chat"|"terminal", where?: "here"|"worktree", surface?: "sidebar"|"native" }
 ---@return table chat  The draft chat.
 function M.open(ctx, opts)
   if api.nvim_get_mode().mode == "t" then
@@ -693,6 +693,7 @@ function M.open(ctx, opts)
     project = ctx.project,
     settings = {},
     banner = "new task",
+    surface = opts.surface,
     start = function(prompt, images, done)
       start_chat(task, prompt, images, done)
     end,

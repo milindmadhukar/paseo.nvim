@@ -1,7 +1,8 @@
 --- Pointing the chat at something.
 ---
 --- Thin on purpose. The chat window owns the conversation; this only decides
---- WHAT gets attached and whether you are asked to type a question first.
+--- WHAT gets attached (|paseo.ui.chat|.add_ref puts it in the composer as a
+--- chip) and whether it is sent at once.
 
 local chat = require "paseo.ui.chat"
 local ref = require "paseo.ref"
@@ -75,14 +76,8 @@ local function siblings(root)
   }, "\n")
 end
 
----`text` with the sibling-agent block appended, when there is one.
----@param text string
----@param root string
----@return string
-local function with_siblings(text, root)
-  local block = siblings(root)
-  return block and (text .. "\n\n" .. block) or text
-end
+-- `chat.send` adds the block once per message, however many chips it carries.
+M.siblings = siblings
 
 ---@param kind? "cursor"|"visual"|"hunk"|"file"
 ---@return paseo.Ref|nil
@@ -94,50 +89,49 @@ local function locate(kind)
   return location
 end
 
----Explain the hunk, selection or file, using the rubric.
+---A reference as a chip: |paseo.ui.chat|.add_ref's item.
+---@param location paseo.Ref
+---@return paseo.ChatRefItem
+local function chip(location)
+  return {
+    token = ref.token(location),
+    -- Rendered NOW, not at send: by the time you have written the question
+    -- the cursor has moved off the hunk, and the file may have too.
+    context = ref.render(location),
+    root = location.root,
+    abs = location.abs,
+  }
+end
+
+---Explain the hunk, selection or file, using the rubric: the chip and the
+---rubric, sent at once. Copilot's `/explain`.
 ---@param kind? "cursor"|"visual"|"hunk"|"file"
 function M.explain(kind)
   local location = locate(kind)
   if not location then
     return
   end
-  chat.ask(M.RUBRIC, {
-    root = location.root,
-    context = with_siblings(ref.render(location), location.root),
-  })
+  chat.add_ref(chip(location), { prompt = M.RUBRIC, send = true })
 end
 
----Ask about the hunk, selection or file: a box, your question, then send.
+---Ask about the hunk, selection or file: Copilot's "Add to chat".
 ---
----This is the common case, and it used to open the entire chat surface with
----the reference queued in its composer -- a lot of window for one sentence,
----and it put you in the conversation before you had said anything. Now the
----box takes the question and the chat opens behind the answer.
+---The reference becomes a chip in the composer of the chat beside your code,
+---`@lua/paseo/ref.lua:42-58`, and you are left in that composer to write the
+---question. Ask again from somewhere else and the next chip joins it, so
+---one message can point at three hunks. Deleting a chip takes the reference
+---back out, exactly as deleting `[Image #1]` does an image.
 ---
----Still NOT `vim.ui.input`. |paseo.ui.prompt| is a real buffer for the same
----reason the composer is one: a one-line field throws away your keymaps,
----completion and undo, and cannot hold a question with a blank line in it.
+---This used to be a floating box that took one question and sent it, with
+---the answer landing wherever the chat last was -- usually the Paseo tab, so
+---asking about a hunk took the hunk off screen.
 ---@param kind? "cursor"|"visual"|"hunk"|"file"
 function M.ask(kind)
   local location = locate(kind)
   if not location then
     return
   end
-
-  -- Rendered NOW, not in the callback. The box is a window and you may be in
-  -- it for a while; by the time you send, the cursor has moved off the hunk
-  -- and `ref.get()` would answer about wherever it now sits.
-  local context = with_siblings(ref.render(location), location.root)
-
-  require("paseo.ui.prompt").open({
-    title = ref.format(location),
-    root = location.root,
-  }, function(question)
-    if not question then
-      return
-    end
-    chat.ask(question, { root = location.root, context = context })
-  end)
+  chat.add_ref(chip(location))
 end
 
 ---Ask about the whole quickfix list -- every location under review at once.
@@ -155,6 +149,7 @@ function M.quickfix()
   end
 
   local repos = require "paseo.repos"
+  local first
   local lines, root =
     {
       "The changes currently under review. The code is not quoted -- open the",
@@ -167,6 +162,7 @@ function M.quickfix()
       local absolute = vim.fn.fnamemodify(name, ":p")
       local repo = repos.resolve(absolute)
       root = root or (repo and repo.worktree)
+      first = first or absolute
 
       -- ABSOLUTE, for the same reason |paseo.Ref| carries `abs`: `root` is the
       -- FIRST entry's worktree, and in a workspace the rest of the list comes
@@ -188,17 +184,12 @@ function M.quickfix()
   end
 
   root = root or assert(vim.uv.cwd())
-  local context = with_siblings(table.concat(lines, "\n"), root)
-
-  require("paseo.ui.prompt").open({
-    title = ("quickfix · %d entries"):format(#lines - 2),
+  chat.add_ref {
+    token = "@quickfix",
+    context = table.concat(lines, "\n"),
     root = root,
-  }, function(question)
-    if not question then
-      return
-    end
-    chat.ask(question, { root = root, context = context })
-  end)
+    abs = first,
+  }
 end
 
 function M.attach()

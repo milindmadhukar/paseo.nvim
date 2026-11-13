@@ -219,6 +219,19 @@ function M.format(ref)
   return ("%s:%d-%d"):format(ref.path, ref.lnum, ref.end_lnum)
 end
 
+---The reference as a chip in the composer: `@path:12-20`, `@path:12`, or
+---`@path` for a whole file. The `@` is the mention agents already read --
+---Claude Code and Copilot both take `@path` as "this file" -- so the token
+---also reads naturally inside a question.
+---@param ref paseo.Ref
+---@return string
+function M.token(ref)
+  if ref.kind == "file" then
+    return "@" .. ref.path
+  end
+  return "@" .. M.format(ref)
+end
+
 ---The reference rendered for an agent.
 ---
 ---A LOCATION, not a quotation. The agent is told which file and which lines

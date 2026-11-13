@@ -821,6 +821,10 @@ function M.groups(t)
     groups.PaseoChipFocus = plate(c.blue, bg.bg2, 72)
     groups.PaseoChipWarn = plate(c.yellow, bg.bg2, 80)
     groups.PaseoChipDanger = plate(c.red, bg.bg2, 78)
+    -- An attachment in the composer -- `@path:12-20`, `[Image #1]` -- on the
+    -- card it is typed into. Not bold: it sits inside a sentence you are
+    -- writing, and should read as a mention there rather than a button.
+    groups.PaseoRef = plate(c.blue, bg.bg2, 78, { bold = false })
 
     groups.PaseoKeycap = plate(c.blue, bg.bg1, 76)
     groups.PaseoKeycapDim = { fg = c.grey, bg = bg.bg1 }
@@ -878,6 +882,7 @@ function M.groups(t)
     groups.PaseoChipFocus = { fg = c.blue, bold = true, reverse = true }
     groups.PaseoChipWarn = { fg = c.yellow, bold = true }
     groups.PaseoChipDanger = { fg = c.red, bold = true }
+    groups.PaseoRef = { fg = c.blue, underline = true }
 
     groups.PaseoKeycap = { fg = c.blue, bold = true }
     groups.PaseoKeycapDim = { fg = c.grey }

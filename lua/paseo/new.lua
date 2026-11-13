@@ -298,13 +298,15 @@ end
 ---Start something, from wherever you are. The screen, with `opts` choosing
 ---what it opens on (the rail's `w` opens on a worktree, `t` on a terminal).
 ---@param ctx paseo.StartContext|nil  nil: from the current directory.
----@param opts? { kind?: "chat"|"terminal", where?: "here"|"worktree" }
+---@param opts? { kind?: "chat"|"terminal", where?: "here"|"worktree", surface?: "sidebar"|"native" }
+---@return table|nil chat  The draft chat the screen is on.
 function M.open(ctx, opts)
   ctx = ctx or M.context()
   if not ctx then
-    return notify "nowhere to start anything"
+    notify "nowhere to start anything"
+    return nil
   end
-  require("paseo.ui.newtask").open(ctx, opts or {})
+  return require("paseo.ui.newtask").open(ctx, opts or {})
 end
 
 ---The context, from the chat on screen if there is one, else from where this

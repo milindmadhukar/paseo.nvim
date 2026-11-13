@@ -15,12 +15,10 @@ local function test_explain_quickfix()
     local attached
     local real_chat = package.loaded["paseo.ui.chat"]
     package.loaded["paseo.ui.chat"] = {
-      attach = function(text, opts)
-        attached = { text = text, opts = opts, via = "attach" }
-      end,
-      -- What `qfask` uses now: the box takes the question, then this sends.
-      ask = function(prompt, opts)
-        attached = { text = opts and opts.context, opts = opts, prompt = prompt, via = "ask" }
+      -- What the quickfix ask is now: one chip in the composer beside the
+      -- code, `@quickfix`, carrying the list.
+      add_ref = function(item, opts)
+        attached = { item = item, opts = opts }
       end,
       attach_events = function() end,
     }
@@ -58,54 +56,37 @@ local function test_explain_quickfix()
 
       require("paseo.explain").quickfix()
 
-      -- The box, not the chat: `qfask` asks what you want to know before it
-      -- opens anything. Nothing is sent until it is answered.
+      truthy("explain: the list becomes a chip", attached ~= nil)
+      local item = attached and attached.item or {}
+      eq("explain: named @quickfix in the composer", item.token, "@quickfix")
+      eq("explain: nothing is sent until you have written the question", attached and attached.opts, nil)
       truthy(
-        "explain: the ask box opens rather than the chat",
-        require("paseo.ui.prompt").is_open()
+        "explain: paths are ABSOLUTE, so entries from sibling worktrees resolve",
+        (item.context or ""):find "\n%- /.*f%.txt:%d+" ~= nil,
+        item.context
       )
-      truthy("explain: and nothing is sent until it is answered", attached == nil)
+      truthy(
+        "explain: the root is a worktree the entries came from",
+        item.root ~= nil and vim.startswith(item.root, root) or false,
+        vim.inspect(item)
+      )
+      truthy("explain: and the first entry's file says which chat covers it", item.abs ~= nil)
 
-      vim.api.nvim_buf_set_lines(vim.api.nvim_get_current_buf(), 0, -1, false, { "what broke?" })
-      vim.cmd "stopinsert"
-      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<CR>", true, false, true), "x", false)
-      vim.wait(300, function()
-        return attached ~= nil
-      end)
+      -- The sibling block is added at SEND, once per message; it is still
+      -- explain's to write.
+      local others = require("paseo.explain").siblings(item.root) or ""
+      truthy("explain: sibling agents are listed for the review agent to ask", others:find "ag_theirs" ~= nil, others)
+      truthy(
+        "explain: but not paseo.nvim's own agents -- that would be a loop",
+        others:find "ag_ours" == nil,
+        others
+      )
 
-      truthy("explain: answering the box sends", attached ~= nil)
-      eq("explain: the question is the prompt", attached and attached.prompt, "what broke?")
-      eq("explain: and the list rides along as context", attached and attached.via, "ask")
-      if attached then
-        truthy(
-          "explain: paths are ABSOLUTE, so entries from sibling worktrees resolve",
-          attached.text:find "\n%- /.*f%.txt:%d+" ~= nil,
-          attached.text
-        )
-        truthy(
-          "explain: the root is a worktree the entries came from",
-          attached.opts and attached.opts.root ~= nil and vim.startswith(attached.opts.root, root)
-            or false,
-          vim.inspect(attached.opts)
-        )
-        truthy(
-          "explain: sibling agents are listed for the review agent to ask",
-          attached.text:find "ag_theirs" ~= nil,
-          attached.text
-        )
-        truthy(
-          "explain: but not paseo.nvim's own agents -- that would be a loop",
-          attached.text:find "ag_ours" == nil,
-          attached.text
-        )
-      end
-
-      -- An empty list must not even open the box.
+      -- An empty list adds nothing.
       attached = nil
       vim.fn.setqflist({}, " ", { title = "spec", items = {} })
       require("paseo.explain").quickfix()
-      truthy("explain: an empty quickfix list sends nothing", attached == nil)
-      truthy("explain: and does not open the box either", not require("paseo.ui.prompt").is_open())
+      truthy("explain: an empty quickfix list adds nothing", attached == nil)
     end)
 
     package.loaded["paseo.agents"] = real_agents
