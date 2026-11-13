@@ -3150,11 +3150,18 @@ OWN, so `gt`/`gT` move between agents.
                        in its own tab; on a workspace, that workspace's agent.
     <C-b>              the rail on or off.
     <C-h>  <C-s>       into the rail.
-    <C-p>              a split on the right: Settings, Changes, Usage, off.
+    <C-p>              the panel split on the right, on or off -- reopened
+                       on the one you last looked at, with the cursor in it.
+    1  2  3            in the panel: Settings, Changes, Usage. Its bar is a
+                       tab strip that says so.
     <C-n>              start an agent or a terminal; a draft opens in a new
                        tab.
     q                  close the tab. So does `:q` in the conversation or the
                        box. The agent lives on.
+
+A provider subagent opened from here (`gs`, then <CR>) is read-only, in a tab
+of its own -- and keeps the rail down the left when the rail was up where you
+opened it, so you are never somewhere without a way to navigate.
 
 Every pane sits on one background, the `PaseoBase` group: the editor's own
 under `ui.colors = "auto"`, the plugin's under `"fixed"`. Only the box you

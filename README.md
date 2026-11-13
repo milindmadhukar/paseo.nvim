@@ -607,9 +607,13 @@ between them.
 - **The rail** is the dashboard's workspace rail in a split on the left.
   `<CR>` on an agent opens it in its own tab, and `<CR>` on a workspace opens
   that workspace's agent. `<C-b>` toggles the rail, `<C-h>`/`<C-s>` go into it.
-- **`<C-p>`** cycles a split on the right through Settings, Changes and Usage,
-  then closes it. They are the dashboard's panels drawn as real lines, with the
-  same keys.
+- **`<C-p>`** opens a split on the right and puts you in it, on the panel you
+  last looked at. **`1` `2` `3`** in it jump straight to Settings, Changes or
+  Usage, and its bar shows which is which. `<C-p>` again closes it. They are
+  the dashboard's panels drawn as real lines, with the same keys. (It used to
+  step Settings → Changes → Usage → closed, so Usage was three presses away.)
+- **A provider subagent** (`gs`, then `<CR>`) opens read-only in a tab of its
+  own, **with the rail** if the rail was up on the tab you opened it from.
 - **`<C-n>`** starts an agent or a terminal. A new agent's draft opens in a new
   tab.
 - **What is current follows the tab.** Entering a tab makes its agent the

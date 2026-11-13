@@ -11,7 +11,8 @@
 --- The rail is |paseo.ui.rail|'s buffer -- one buffer, shown in a window on
 --- every native tab. The conversation and composer are the chat's own buffers,
 --- exactly as the sidebar shows them. The panel is the dashboard's Settings,
---- Changes or Usage, drawn as real lines by |paseo.ui.render|. `<C-p>` cycles it.
+--- Changes or Usage, drawn as real lines by |paseo.ui.render|. `<C-p>` toggles
+--- it; `1` `2` `3` in it pick which.
 ---
 --- WHAT IS CURRENT FOLLOWS THE TAB. `:Paseo mode`, `:Paseo stop` and every
 --- other command act on |paseo.ui.chat|'s current chat, so entering a native
@@ -42,8 +43,12 @@ local ns = api.nvim_create_namespace "paseo.native"
 ---@type table<integer, paseo.NativeTab>
 local tabs = {}
 
----The panels `<C-p>` steps through, and the module that draws each one.
+---The panels, in the order of their number keys (`1` `2` `3` in the panel),
+---and the module that draws each one.
 M.PANELS = { "Settings", "Changes", "Usage" }
+
+---The panel `<C-p>` reopens: the one you last looked at, per session.
+local last_panel = "Settings"
 
 ---Not `gp`, which the chat's buffers already give to reopening a question.
 local PANEL_KEY = "<C-p>"
@@ -199,6 +204,50 @@ local function open_rail(t)
   end
 end
 
+---Defined with the autocmds below; declared here for `rail_beside`.
+local watch
+
+---Rails on tab pages that are not agent tabs -- a provider subagent's
+---read-only view, opened from a native tab. Keyed by tab page.
+---@type table<integer, integer>
+local side_rails = {}
+
+---Is the rail showing on the native tab you are looking at?
+---@return boolean
+function M.rail_shown()
+  local t = entry(api.nvim_get_current_tabpage())
+  return t ~= nil and valid_win(t.rail)
+end
+
+---Put the workspace rail down the left of THIS tab page, which is not an
+---agent tab -- the read-only subagent view.
+---
+---Opening a subagent used to put you on a bare tab page: the rail you had
+---been navigating by was simply gone until you went back. The rail is one
+---buffer, so the same one goes here, and TabEnter points it at this window
+---whenever you come back to this tab.
+function M.rail_beside()
+  local tab = api.nvim_get_current_tabpage()
+  if valid_win(side_rails[tab]) then
+    return side_rails[tab]
+  end
+  local rail = require "paseo.ui.rail"
+  local width = math.max(16, config().rail > 0 and config().rail or 32)
+  local from = api.nvim_get_current_win()
+  vim.cmd(("topleft %dvsplit"):format(width))
+  local win = api.nvim_get_current_win()
+  api.nvim_win_set_buf(win, rail.buf(rail_keys()))
+  vim.wo[win].winfixwidth = true
+  side_rails[tab] = win
+  rail.adopt(win)
+  rail.load()
+  watch()
+  if valid_win(from) then
+    api.nvim_set_current_win(from)
+  end
+  return win
+end
+
 ---`<C-s>`: into the rail, on the session on screen -- opening it first.
 function M.focus_rail()
   local t = entry(api.nvim_get_current_tabpage())
@@ -307,10 +356,17 @@ local function show_panel(t, name)
     fillchars = "eob: ",
     winhl = M.WINHL .. ",CursorLine:PaseoRowHover",
   })
-  vim.wo[t.panel_win].winbar = render.to_winbar {
-    { "  " .. name, "PaseoHeader" },
-    { "   " .. PANEL_KEY .. " next · r reload · q close", "PaseoDim" },
-  }
+  -- A TAB STRIP, not a title: every panel is one key away, and the strip
+  -- says which. `<C-p>` used to step Settings -> Changes -> Usage -> closed,
+  -- so reaching Usage was three presses and going back to Settings was four.
+  local strip = { { " ", "PaseoDim" } }
+  for i, panel_name in ipairs(M.PANELS) do
+    local here = panel_name == name
+    strip[#strip + 1] = { (" %d %s "):format(i, panel_name), here and "PaseoChipFocus" or "PaseoDim" }
+  end
+  strip[#strip + 1] = { "   r reload · q close", "PaseoDim" }
+  vim.wo[t.panel_win].winbar = render.to_winbar(strip)
+  last_panel = name
 
   local panel = require("paseo.ui.panels." .. name:lower())
   if type(panel.load) == "function" then
@@ -324,7 +380,12 @@ local function show_panel(t, name)
   local function map(lhs, fn, desc)
     vim.keymap.set("n", lhs, fn, { buffer = t.panel_buf, nowait = true, silent = true, desc = "paseo: " .. desc })
   end
-  map(PANEL_KEY, M.cycle_panel, "next panel")
+  map(PANEL_KEY, M.toggle_panel, "close the panel")
+  for i, panel_name in ipairs(M.PANELS) do
+    map(tostring(i), function()
+      M.panel(panel_name)
+    end, "the " .. panel_name .. " panel")
+  end
   map("q", function()
     close_panel(t)
     M.back()
@@ -348,28 +409,25 @@ local function show_panel(t, name)
   end
 end
 
----`<C-p>`: Settings, then Changes, then Usage, then nothing.
-function M.cycle_panel()
+---`<C-p>`: the panel, on or off.
+---
+---On: the panel you last looked at (Settings the first time), with the cursor
+---in it -- `1` `2` `3` there jump straight to Settings, Changes or Usage.
+---Off: closed, and back to the box you type in.
+function M.toggle_panel()
   local t = entry(api.nvim_get_current_tabpage())
   if not t then
     return
   end
-  local at = 0
-  for i, name in ipairs(M.PANELS) do
-    if name == t.panel then
-      at = i
-    end
-  end
-  local focus_panel = valid_win(t.panel_win) and api.nvim_get_current_win() == t.panel_win
-  if at == #M.PANELS then
+  if valid_win(t.panel_win) then
     close_panel(t)
     return M.back()
   end
-  show_panel(t, M.PANELS[at + 1])
-  if focus_panel and valid_win(t.panel_win) then
-    api.nvim_set_current_win(t.panel_win)
-  end
+  M.panel(last_panel)
 end
+
+---Kept for callers of the old name: it toggles now. See |M.toggle_panel|.
+M.cycle_panel = M.toggle_panel
 
 ---Open a panel by name and put the cursor in it.
 ---@param name string
@@ -526,7 +584,7 @@ local function bind(chat)
     { keys.toggle, M.toggle_rail, "show or hide the workspace rail" },
     { keys.focus, M.focus_rail, "into the workspace rail" },
     { keys.sessions, M.focus_rail, "the sessions, in the rail" },
-    { PANEL_KEY, M.cycle_panel, "Settings / Changes / Usage" },
+    { PANEL_KEY, M.toggle_panel, "the panel: Settings / Changes / Usage" },
     {
       new,
       function()
@@ -573,7 +631,7 @@ end
 local augroup
 
 ---The autocmds that keep `current`, the rail and the bookkeeping honest.
-local function watch()
+watch = function()
   if augroup then
     return
   end
@@ -583,8 +641,15 @@ local function watch()
     group = augroup,
     desc = "paseo: the agent on this native tab is the current one",
     callback = function()
-      local t = entry(api.nvim_get_current_tabpage())
+      local tab = api.nvim_get_current_tabpage()
+      local t = entry(tab)
       if not t then
+        -- A tab with a rail of its own that is not an agent's (the
+        -- read-only subagent view): the rail follows you there too.
+        if valid_win(side_rails[tab]) then
+          require("paseo.ui.rail").adopt(side_rails[tab])
+          require("paseo.ui.rail").draw()
+        end
         return
       end
       require("paseo.ui.chat").set_current(t.chat)

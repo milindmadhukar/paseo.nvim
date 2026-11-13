@@ -113,6 +113,11 @@ function M.open(subagent, opts)
   vim.bo[buf].modifiable = false
   pcall(vim.api.nvim_buf_set_name, buf, ("paseo://subagent/%s/%s"):format(subagent.parent, subagent.id))
 
+  -- From a native tab whose rail is up, the rail comes too: see
+  -- |paseo.ui.native|.rail_beside. Asked BEFORE the new tab exists.
+  local native = package.loaded["paseo.ui.native"]
+  local keep_rail = native ~= nil and native.rail_shown()
+
   vim.cmd "tabnew"
   local scratch = vim.api.nvim_get_current_buf()
   local win = vim.api.nvim_get_current_win()
@@ -123,6 +128,10 @@ function M.open(subagent, opts)
   vim.wo[win].wrap = true
   vim.wo[win].number = false
   vim.wo[win].relativenumber = false
+  if keep_rail then
+    native.rail_beside()
+    vim.api.nvim_set_current_win(win)
+  end
 
   local view = {
     conversation = buf,

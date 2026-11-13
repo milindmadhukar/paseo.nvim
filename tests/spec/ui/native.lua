@@ -154,21 +154,37 @@ local function test_panels()
   native.open(chat)
   local base = #api.nvim_tabpage_list_wins(0)
 
-  local seen = {}
-  for _, want in ipairs(native.PANELS) do
-    native.cycle_panel()
-    eq("native: " .. want .. " opens a split", #api.nvim_tabpage_list_wins(0), base + 1)
+  local function shown()
     for _, win in ipairs(api.nvim_tabpage_list_wins(0)) do
       local buf = api.nvim_win_get_buf(win)
       if vim.bo[buf].filetype == "paseo-panel" then
-        seen[#seen + 1] = api.nvim_buf_get_name(buf):match "panel/(%a+)/"
-        truthy("native: the " .. want .. " panel has lines", api.nvim_buf_line_count(buf) >= 1)
+        return api.nvim_buf_get_name(buf):match "panel/(%a+)/", buf
       end
     end
   end
-  eq("native: the panels cycle in order", seen, { "settings", "changes", "usage" })
-  native.cycle_panel()
-  eq("native: and a fourth press closes it", #api.nvim_tabpage_list_wins(0), base)
+
+  -- `<C-p>` TOGGLES. It used to step Settings -> Changes -> Usage -> closed,
+  -- so reaching Usage was three presses.
+  native.toggle_panel()
+  eq("native: <C-p> opens a split", #api.nvim_tabpage_list_wins(0), base + 1)
+  eq("native: on Settings the first time", (shown()), "settings")
+
+  -- Every panel one key away, from inside it.
+  for i, want in ipairs(native.PANELS) do
+    local _, buf = shown()
+    vim.api.nvim_feedkeys(tostring(i), "x", false)
+    local name, now = shown()
+    eq("native: " .. i .. " jumps straight to " .. want, name, want:lower())
+    truthy("native: the " .. want .. " panel has lines", api.nvim_buf_line_count(now) >= 1)
+    eq("native: still one panel split", #api.nvim_tabpage_list_wins(0), base + 1)
+    local _ = buf
+  end
+
+  native.toggle_panel()
+  eq("native: <C-p> again closes it", #api.nvim_tabpage_list_wins(0), base)
+  native.toggle_panel()
+  eq("native: and reopens the one you last looked at", (shown()), "usage")
+  native.toggle_panel()
 
   native.close(chat)
   native.reset()
@@ -192,7 +208,7 @@ local function test_uniform()
     hl.setup()
     local chat = new_chat("native-" .. mode)
     native.open(chat)
-    native.cycle_panel()
+    native.toggle_panel()
 
     local base = api.nvim_get_hl(0, { name = "PaseoBase" })
     if mode == "auto" then
@@ -267,8 +283,40 @@ vim.cmd "qa!"
   os.remove(out)
 end
 
+---A tab that is not an agent's -- the read-only subagent view -- gets the
+---rail too. The regression: `tabnew` left you on a bare tab, rail gone.
+local function test_rail_beside()
+  local native = require "paseo.ui.native"
+  local chat_mod = require "paseo.ui.chat"
+  local saved_current = chat_mod.current()
+  local chat = new_chat "native-side-rail"
+  native.open(chat)
+  eq("native: the rail is up on the agent's tab", native.rail_shown(), true)
+
+  vim.cmd "tabnew"
+  local tab = api.nvim_get_current_tabpage()
+  local viewer = api.nvim_get_current_win()
+  native.rail_beside()
+  local rails = 0
+  for _, win in ipairs(api.nvim_tabpage_list_wins(tab)) do
+    if vim.bo[api.nvim_win_get_buf(win)].filetype == "paseo-rail" then
+      rails = rails + 1
+    end
+  end
+  eq("native: a non-agent tab gets the rail beside it", rails, 1)
+  eq("native: and the cursor stays where it was", api.nvim_get_current_win(), viewer)
+  native.rail_beside()
+  eq("native: asking twice does not add a second", #api.nvim_tabpage_list_wins(tab), 2)
+  vim.cmd "tabclose"
+
+  native.close(chat)
+  native.reset()
+  chat_mod.set_current(saved_current)
+end
+
 return {
   { "ui.native.layout", test_layout },
+  { "ui.native.rail_beside", test_rail_beside },
   { "ui.native.markdown", test_markdown },
   { "ui.native.panels", test_panels },
   { "ui.native.uniform", test_uniform },
