@@ -513,7 +513,9 @@ end
 
 ---Open the rail down the left of the Paseo tab.
 ---@param s paseo.NativeSurface
-local function open_rail(s)
+---@param s paseo.NativeSurface
+---@param painting? boolean  The caller draws and seats next: do not do it twice.
+local function open_rail(s, painting)
   if valid_win(s.rail) then
     return
   end
@@ -524,7 +526,7 @@ local function open_rail(s)
   s.rail = api.nvim_get_current_win()
   api.nvim_win_set_buf(s.rail, rail.buf(rail_keys()))
   vim.wo[s.rail].winfixwidth = true
-  rail.adopt(s.rail)
+  rail.adopt(s.rail, { draw = not painting })
   rail.load()
   if valid_win(from) then
     api.nvim_set_current_win(from)
@@ -553,7 +555,8 @@ function M.focus_rail()
     s.rail_from = from
     pcall(vim.cmd.stopinsert)
   end
-  open_rail(s)
+  -- ONE PAINT: opened without its own draw, then revealed and drawn here.
+  open_rail(s, true)
   if valid_win(s.rail) then
     local rail = require "paseo.ui.rail"
     rail.reveal()

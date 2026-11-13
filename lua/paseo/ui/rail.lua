@@ -75,8 +75,12 @@ local session_line
 local expanded = {}
 
 ---The last fetch. `root` is the project it was scoped to, so a fetch that
----lands after you have moved project is not drawn as this one's.
-local cache = { root = nil, list = nil, err = nil, loading = false }
+---lands after you have moved project is not drawn as this one's; `at` is
+---when it landed (see `M.load`).
+local cache = { root = nil, list = nil, err = nil, loading = false, at = nil }
+
+---How long a fetched list is shown without asking again; see `M.load`.
+M.FRESH = 30000
 
 ---Called when the list changes size. The old float set it to have its
 ---spinner clock re-checked; nothing sets it now.
@@ -288,6 +292,12 @@ function M.follow()
   require("paseo.bridge").on("workspaces_changed", function(message)
     vim.schedule(function()
       if not M.win() then
+        -- Hidden, the list is still kept current: a row is patched in place,
+        -- and anything that moves rows makes it stale, so the next show asks
+        -- (`M.load`'s freshness) rather than drawing a list that is wrong.
+        if not (message and message.kind == "upsert" and M.patch(message.workspace, message.hostId)) then
+          cache.at = nil
+        end
         return
       end
       if message and message.kind == "upsert" and M.patch(message.workspace, message.hostId) then
@@ -301,7 +311,7 @@ function M.follow()
         pending = false
         if M.win() then
           cache.loading = false
-          M.load()
+          M.load(nil, { force = true })
         end
       end, 250)
     end)
@@ -314,8 +324,15 @@ end
 ---the sidecar says a workspace changed (`M.follow`) -- the daemon streams that,
 ---but only the FACT is forwarded; the list is refetched here. What the agents
 ---are doing comes from |paseo.agents| and needs no fetch.
+---
+---A list fetched in the last `FRESH` ms is NOT fetched again on a plain show:
+---the daemon pushes every workspace change while the rail follows it
+---(`M.follow`), and what cannot be patched in place already forces a
+---refetch. `<C-b>` used to cost a round trip and a second paint every time.
+---`opts.force` (the `r` key, a change that moved rows) always asks.
 ---@param done? fun()
-function M.load(done)
+---@param opts? { force?: boolean }
+function M.load(done, opts)
   M.follow()
   -- NEVER THE ONE TO START THE BRIDGE. A rail is only ever open beside a
   -- chat that has already asked for it, so a bridge that is not up yet is one
@@ -327,6 +344,18 @@ function M.load(done)
   end
   local root = project_root()
   if cache.loading and cache.root == root then
+    return
+  end
+  if
+    not (opts and opts.force)
+    and cache.list
+    and cache.root == root
+    and cache.at
+    and vim.uv.now() - cache.at < M.FRESH
+  then
+    if done then
+      done()
+    end
     return
   end
   if cache.root ~= root then
@@ -347,6 +376,7 @@ function M.load(done)
       cache.err = err
       if list then
         cache.list = M.arrange(ws.scope(list, root))
+        cache.at = vim.uv.now()
       end
       M.draw()
       if done then
@@ -395,7 +425,7 @@ function M.toggle_pin()
           return vim.notify("paseo: could not pin — " .. tostring(err), vim.log.levels.ERROR)
         end
         cache.loading = false
-        M.load()
+        M.load(nil, { force = true })
       end)
     end,
     ws.hostId
@@ -1522,7 +1552,7 @@ local function keymap(keys)
     {
       "r",
       function()
-        M.load()
+        M.load(nil, { force = true })
       end,
       "refetch the workspaces",
     },
@@ -1727,7 +1757,8 @@ end
 ---did not open and must not move. The Paseo tab has one; it is adopted again
 ---whenever that tab is entered or the rail is shown.
 ---@param w integer
-function M.adopt(w)
+---@param opts? { draw?: boolean }  `draw = false` when the caller paints next.
+function M.adopt(w, opts)
   win, adopted = w, true
   M.style(w)
   -- `minimal` is a float style; a split has to be told.
@@ -1744,8 +1775,10 @@ function M.adopt(w)
       vim.wo[w][option] = value
     end)
   end
-  M.draw()
-  M.seat()
+  if not (opts and opts.draw == false) then
+    M.draw()
+    M.seat()
+  end
 end
 
 function M.hide()
