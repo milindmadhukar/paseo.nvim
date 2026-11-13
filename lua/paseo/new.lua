@@ -1,5 +1,14 @@
---- Starting something: an agent here, an agent in a worktree of its own, or a
---- terminal -- the one way in, whichever key or command it came from.
+--- Starting something: a new SESSION (a workspace, Local or in a worktree of
+--- its own), or a new AGENT in a session that already exists -- and a
+--- terminal in either.
+---
+--- TWO VERBS, AS THE APP HAS THEM. Its sidebar `+` makes a session in a
+--- project; the `+` on a session's row of tabs adds an agent to that one
+--- session. They used to be one verb here, whose "Local" meant "the workspace
+--- you happen to be in" -- so starting something new from the rail put a tab
+--- in whatever session was on screen. Now neither guesses: `M.session` always
+--- makes a workspace, and `M.agent` only ever goes into the session it was
+--- pointed at (`ctx.workspace_id`), never one found by directory.
 ---
 --- THIS IS THE MODEL, NOT THE SCREEN. |paseo.ui.newtask| draws the choices
 --- and the box you type the first prompt in; this module remembers what you
@@ -158,12 +167,100 @@ local function new_worktree(ctx, choice, first, callback)
   end)
 end
 
----A terminal, here or in a new worktree, on screen once it runs.
+---Where a LOCAL session lives: the project's own directory, as the daemon
+---sees it -- what the app's sidebar `+` means by Local.
+---
+---Not the directory of the session you are looking at: from a worktree Paseo
+---cut, Local is the checkout it was cut from, and from inside an assembled
+---multi-repo workspace it is the project that holds them (|paseo.workspaces|
+---.here, which the rail groups by too). A plain directory is its own project.
+---On a remote host the daemon's own `projectRoot` answers, when the session
+---came with one.
+---@param ctx paseo.StartContext
+---@return string
+function M.project_root(ctx)
+  local hosts = require "paseo.hosts"
+  local host = hosts.get(ctx.host_id)
+  local remote = host and not host.local_host
+  if remote and ctx.project_root then
+    return ctx.project_root
+  end
+  local local_dir = ctx.local_root or (not remote and ctx.root) or nil
+  if local_dir then
+    local ok, project = pcall(function()
+      return require("paseo.workspaces").here(local_dir)
+    end)
+    if ok and project then
+      if not remote then
+        return project
+      end
+      local mapped = hosts.to_remote(host.id, project)
+      if mapped then
+        return mapped
+      end
+    end
+  end
+  return ctx.project_root or ctx.root
+end
+
+---A new LOCAL session: a workspace of its own on the project's directory,
+---beside the sessions already there -- and, with `first`, its first agent in
+---the same request, so the daemon names the session from the prompt.
+---
+---Through `workspace.create` with `project`: a `directory` source WITH the
+---project's id, which is what the app sends. Never `workspace.open`, which
+---hands back the session already on that directory.
+---@param ctx paseo.StartContext
+---@param first paseo.FirstAgent|nil
+---@param callback fun(workspace: table|nil, err: string|nil)
+local function new_local(ctx, first, callback)
+  local root = M.project_root(ctx)
+  local args = { cwd = root, project = root }
+  if first and first.prompt and first.prompt ~= "" then
+    args.prompt = first.prompt
+    args.provider = first.provider
+    args.modeId = first.modeId
+    args.thinkingOptionId = first.thinkingOptionId
+    args.featureValues = first.featureValues
+    args.images = first.images
+  end
+  require("paseo.bridge").request("workspace.create", args, function(err, result)
+    vim.schedule(function()
+      if err or not (result and result.id) then
+        return callback(nil, err or "the daemon made no session")
+      end
+      callback({
+        id = result.id,
+        name = result.name,
+        agent_id = result.agentId,
+        directory = result.directory or root,
+        hostId = ctx.host_id,
+      }, nil)
+    end)
+  end, ctx.host_id)
+end
+
+---A new session of either kind, as `choice.where` says.
+---@param ctx paseo.StartContext
+---@param choice paseo.NewChoice
+---@param first paseo.FirstAgent|nil
+---@param callback fun(workspace: table|nil, err: string|nil)
+local function new_session(ctx, choice, first, callback)
+  if choice.where == "worktree" then
+    return new_worktree(ctx, choice, first, callback)
+  end
+  new_local(ctx, first, callback)
+end
+
+---A terminal: in the session `ctx` points at (`scope = "agent"`, the tab
+---row's `+`), or in a new session of its own (`scope = "session"`), on screen
+---once it runs.
 ---@param ctx paseo.StartContext
 ---@param choice paseo.NewChoice
 ---@param preset table  `{ command?, args?, label? }`
 ---@param callback fun(id: string|nil, err: string|nil)
-function M.terminal(ctx, choice, preset, callback)
+---@param scope? "session"|"agent"  Default "agent", as it always was.
+function M.terminal(ctx, choice, preset, callback, scope)
   local function run(cwd, workspace_id)
     require("paseo.terminals").create(cwd, preset, nil, function(id, err)
       if err or not id then
@@ -174,10 +271,10 @@ function M.terminal(ctx, choice, preset, callback)
       callback(id, nil)
     end, ctx.host_id, workspace_id)
   end
-  if choice.where ~= "worktree" then
+  if scope ~= "session" then
     return run(ctx.root, ctx.workspace_id)
   end
-  new_worktree(ctx, choice, nil, function(workspace, err)
+  new_session(ctx, choice, nil, function(workspace, err)
     if not workspace then
       return callback(nil, err)
     end
@@ -185,25 +282,12 @@ function M.terminal(ctx, choice, preset, callback)
   end)
 end
 
----A chat's first message: the agent, and (for a worktree) the workspace it
----works in, in one request -- the only request the daemon names a workspace
----from.
----
----`done(err)` on failure, so the draft can hand the words back.
----`done(nil, agent_id)` when the agent is HERE and the draft becomes it.
----`done(nil, nil)` when the editor has moved to a new worktree's chat.
----@param ctx paseo.StartContext
 ---@param choice paseo.NewChoice
 ---@param prompt string
 ---@param images table[]
----@param done fun(err: string|nil, agent_id: string|nil)
----@param opts? { switch?: boolean }  `switch`: point this Neovim at the new
----       worktree too (|paseo.workspaces|.open). Off on the full-screen
----       surface, where the Paseo tab is `tcd`'d into it when its row switches
----       to that workspace, and moving the tab you came from as well would
----       move your code.
-function M.chat(ctx, choice, prompt, images, done, opts)
-  local first = {
+---@return paseo.FirstAgent
+local function first_agent(choice, prompt, images)
+  return {
     prompt = prompt,
     images = #images > 0 and images or nil,
     provider = choice.provider,
@@ -211,53 +295,71 @@ function M.chat(ctx, choice, prompt, images, done, opts)
     thinkingOptionId = choice.thinkingOptionId,
     featureValues = choice.featureValues,
   }
+end
 
-  if choice.where == "worktree" then
-    return new_worktree(ctx, choice, first, function(workspace, err)
-      if not workspace then
-        return done(err)
-      end
-      if not workspace.agent_id then
-        -- The workspace is real and on disk. Saying so is the difference
-        -- between "try again" and "go and find out what that directory is".
-        return done(("the workspace %q was created, but no agent started in it"):format(workspace.name or "?"))
-      end
-      config.get().paseo.provider = choice.provider
-      if opts and opts.switch then
-        require("paseo.workspaces").open(workspace)
-      end
-      -- `working`: its first turn is already under way -- the prompt rode the
-      -- request that made it.
-      require("paseo.ui.chat").open { root = workspace.directory, agent_id = workspace.agent_id, working = true }
-      done(nil, nil)
-    end)
-  end
+---A new SESSION, with its first agent and that agent's first message: Local
+---(the project's own directory) or a new worktree, as `choice.where` says.
+---The editor moves to its chat; the draft has nothing left to become.
+---
+---`done(err)` on failure, so the draft can hand the words back, and
+---`done(nil, nil)` once the new session's chat is open.
+---@param ctx paseo.StartContext
+---@param choice paseo.NewChoice
+---@param prompt string
+---@param images table[]
+---@param done fun(err: string|nil, agent_id: string|nil)
+---@param opts? { switch?: boolean }  `switch`: point this Neovim at the new
+---       session's directory too (|paseo.workspaces|.open), when it is not
+---       the one it is already in. Off on the full-screen surface, where the
+---       Paseo tab is `tcd`'d into it when its row switches to that workspace,
+---       and moving the tab you came from as well would move your code.
+function M.session(ctx, choice, prompt, images, done, opts)
+  local first = first_agent(choice, prompt, images)
+  new_session(ctx, choice, first, function(workspace, err)
+    if not workspace then
+      return done(err)
+    end
+    if not workspace.agent_id then
+      -- The workspace is real and on disk. Saying so is the difference
+      -- between "try again" and "go and find out what that directory is".
+      return done(("the session %q was created, but no agent started in it"):format(workspace.name or "?"))
+    end
+    config.get().paseo.provider = choice.provider
+    local moved = workspace.directory ~= (ctx.local_root or ctx.root) and workspace.directory ~= ctx.root
+    if opts and opts.switch and moved then
+      require("paseo.workspaces").open(workspace)
+    end
+    local host = require("paseo.hosts").get(ctx.host_id)
+    -- `working`: its first turn is already under way -- the prompt rode the
+    -- request that made it.
+    require("paseo.ui.chat").open {
+      root = workspace.directory,
+      host_id = ctx.host_id,
+      remote = host ~= nil and not host.local_host or nil,
+      agent_id = workspace.agent_id,
+      working = true,
+    }
+    done(nil, nil)
+  end)
+end
 
-  -- HERE: into the workspace on screen by id when it is known, so a second
-  -- agent beside the first lands beside it. Without one, `agent.start` joins
-  -- a named workspace or makes one named from the prompt.
-  local bridge = require "paseo.bridge"
-  if ctx.workspace_id then
-    return bridge.request("agent.create", {
-      workspaceId = ctx.workspace_id,
-      provider = first.provider,
-      modeId = first.modeId,
-      thinkingOptionId = first.thinkingOptionId,
-      featureValues = first.featureValues,
-      prompt = prompt,
-      images = first.images,
-    }, function(err, result)
-      vim.schedule(function()
-        if err or not (result and result.id) then
-          return done(err or "no agent was created")
-        end
-        done(nil, result.id)
-      end)
-    end, ctx.host_id)
+---A new AGENT in the session `ctx.workspace_id` names -- the tab row's `+`.
+---It never makes a workspace, and never looks one up by directory: with no
+---session to go into it says so, and the caller offers a new session instead.
+---
+---`done(nil, agent_id)`: the draft becomes the agent, in place.
+---@param ctx paseo.StartContext
+---@param choice paseo.NewChoice
+---@param prompt string
+---@param images table[]
+---@param done fun(err: string|nil, agent_id: string|nil)
+function M.agent(ctx, choice, prompt, images, done)
+  if not ctx.workspace_id then
+    return done "no session to add an agent to -- start a new session instead"
   end
-  bridge.request("agent.start", {
-    cwd = ctx.root,
-    project = ctx.project,
+  local first = first_agent(choice, prompt, images)
+  require("paseo.bridge").request("agent.create", {
+    workspaceId = ctx.workspace_id,
     provider = first.provider,
     modeId = first.modeId,
     thinkingOptionId = first.thinkingOptionId,
@@ -266,10 +368,10 @@ function M.chat(ctx, choice, prompt, images, done, opts)
     images = first.images,
   }, function(err, result)
     vim.schedule(function()
-      if err or not (result and result.agentId) then
-        return done(err or "no agent")
+      if err or not (result and result.id) then
+        return done(err or "no agent was created")
       end
-      done(nil, result.agentId)
+      done(nil, result.id)
     end)
   end, ctx.host_id)
 end
@@ -295,10 +397,16 @@ function M.isolation(ctx)
   return nil
 end
 
----Start something, from wherever you are. The screen, with `opts` choosing
----what it opens on (the rail's `w` opens on a worktree, `t` on a terminal).
+---Start something, from wherever you are: the screen, opened on `opts`.
+---
+---`scope` is the verb, and the key that got here decides it -- it is not
+---remembered. "session" (the default: the rail's `a` `w`, `<C-n>`) makes a
+---new workspace; "agent" (the rail's `A` `t`, the new-agent key) adds to the
+---session `ctx.workspace_id` names. An agent asked for with no session to
+---put it in -- the rail's project line, a buffer of code -- gets the new
+---session screen, and a word saying why.
 ---@param ctx paseo.StartContext|nil  nil: from the current directory.
----@param opts? { kind?: "chat"|"terminal", where?: "here"|"worktree", surface?: "sidebar"|"native" }
+---@param opts? { scope?: "session"|"agent", kind?: "chat"|"terminal", where?: "here"|"worktree", surface?: "sidebar"|"native" }
 ---@return table|nil chat  The draft chat the screen is on.
 function M.open(ctx, opts)
   ctx = ctx or M.context()
@@ -306,7 +414,13 @@ function M.open(ctx, opts)
     notify "nowhere to start anything"
     return nil
   end
-  return require("paseo.ui.newtask").open(ctx, opts or {})
+  opts = vim.tbl_extend("force", {}, opts or {})
+  if opts.scope == "agent" and not ctx.workspace_id then
+    vim.notify("paseo: no session here to add an agent to -- a new session, then", vim.log.levels.INFO)
+    opts.scope = "session"
+  end
+  opts.scope = opts.scope or "session"
+  return require("paseo.ui.newtask").open(ctx, opts)
 end
 
 ---The context, from the chat on screen if there is one, else from where this

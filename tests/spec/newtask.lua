@@ -149,28 +149,71 @@ local function test_newtask()
     native.close(chat2)
     chats.discard(chat2)
 
-    -- A chat HERE becomes the agent in place, and the conversation is back.
-    local chat3 = newtask.open(ctx, { kind = "chat", where = "here" })
+    -- LOCAL IS A NEW SESSION: a workspace of its own on the project's
+    -- directory, never an agent in whichever one is on screen -- even when
+    -- the context knows one.
+    local real = vim.uv.fs_realpath
+    local chat3 = newtask.open(vim.tbl_extend("force", ctx, { workspace_id = "wks_on_screen" }), { kind = "chat", where = "here" })
     local task3 = newtask.task(chat3)
+    eq("newtask: `a` is a new session", task3.scope, "session")
     vim.wait(500, function()
       return task3.draft ~= nil and not task3.draft.loading
     end)
-    answer = nil
+    truthy("newtask: the footer says it is a new session", text(api.nvim_win_get_buf(chat3.win_conversation)):find("a new session in", 1, true) ~= nil)
+    answer, opened = nil, nil
     chat3.draft.start("hello", {}, function(err, agent_id)
       answer = { err = err, agent_id = agent_id }
     end)
     vim.wait(500, function()
       return answer ~= nil
     end)
-    eq("newtask: here, the agent is this chat", answer and answer.agent_id, "agent-new")
-    eq("newtask: through agent.start", requested and requested.op, "agent.start")
+    eq("newtask: Local made a session, no error", answer and answer.err, nil)
+    eq("newtask: through workspace.create", requested and requested.op, "workspace.create")
+    eq("newtask: not in the session on screen", requested and requested.args.workspaceId, nil)
+    eq("newtask: on the project's directory", real(requested.args.cwd), real(dir))
+    eq("newtask: inside that project", real(requested.args.project), real(dir))
+    eq("newtask: with the first message", requested.args.prompt, "hello")
+    eq("newtask: and the model chosen", requested.args.provider, "test/big")
+    eq("newtask: the new session's agent opened", opened and opened.agent_id, "agent-new")
+    eq("newtask: the draft did not become it", answer and answer.agent_id, nil)
+    truthy("newtask: and the draft went away", not native.has(chat3))
+    chats.discard(chat3)
+
+    -- AN AGENT IN A SESSION: into the one it was opened on, by id. No Where.
+    local in_session = vim.tbl_extend("force", ctx, { workspace_id = "wks_9", title = "invoice fix" })
+    local chat4 = new.open(in_session, { scope = "agent", kind = "chat" })
+    local task4 = newtask.task(chat4)
+    eq("newtask: `A` is an agent in the session", task4.scope, "agent")
+    vim.wait(500, function()
+      return task4.draft ~= nil and not task4.draft.loading
+    end)
+    local shown4 = text(api.nvim_win_get_buf(chat4.win_conversation))
+    truthy("newtask: no Local for an agent", not shown4:find("Local", 1, true), shown4)
+    truthy("newtask: no New worktree for an agent", not shown4:find("New worktree", 1, true), shown4)
+    truthy("newtask: it names the session", shown4:find("a new agent in invoice fix", 1, true) ~= nil, shown4)
+    answer = nil
+    chat4.draft.start("and the tests", {}, function(err, agent_id)
+      answer = { err = err, agent_id = agent_id }
+    end)
+    vim.wait(500, function()
+      return answer ~= nil
+    end)
+    eq("newtask: the agent is this chat", answer and answer.agent_id, "agent-new")
+    eq("newtask: through agent.create", requested and requested.op, "agent.create")
+    eq("newtask: into that session", requested and requested.args.workspaceId, "wks_9")
     eq(
       "newtask: and the conversation is back in its window",
-      api.nvim_win_get_buf(chat3.win_conversation),
-      chat3.conversation
+      api.nvim_win_get_buf(chat4.win_conversation),
+      chat4.conversation
     )
-    native.close(chat3)
-    chats.discard(chat3)
+    native.close(chat4)
+    chats.discard(chat4)
+
+    -- An agent with NO session to go into is a new session, not a guess.
+    local chat5 = new.open(ctx, { scope = "agent", kind = "chat" })
+    eq("newtask: no session, so a new one", newtask.task(chat5).scope, "session")
+    native.close(chat5)
+    chats.discard(chat5)
   end)
 
   create.catalogue, terminals.presets = old.catalogue, old.presets
@@ -197,7 +240,30 @@ local function test_isolation()
   vim.fn.delete(plain, "rf")
 end
 
+---LOCAL means the project's own directory, as the app's sidebar `+` does:
+---from a worktree it is the checkout the worktree was cut from.
+local function test_project_root()
+  local new = require "paseo.new"
+  local real = vim.uv.fs_realpath
+  local dir = repo()
+  local wt = dir .. "-wt"
+  vim.system({ "git", "-C", dir, "worktree", "add", "-q", "-b", "side", wt }):wait()
+  eq("project_root: a checkout is its own", real(new.project_root { root = dir, local_root = dir, host_id = "local" }), real(dir))
+  eq(
+    "project_root: a worktree's is the checkout it was cut from",
+    real(new.project_root { root = wt, local_root = wt, host_id = "local" }),
+    real(dir)
+  )
+  local plain = vim.fn.tempname()
+  vim.fn.mkdir(plain, "p")
+  eq("project_root: a plain directory is its own", real(new.project_root { root = plain, local_root = plain, host_id = "local" }), real(plain))
+  vim.fn.delete(wt, "rf")
+  vim.fn.delete(dir, "rf")
+  vim.fn.delete(plain, "rf")
+end
+
 return {
   { "newtask.screen", test_newtask },
   { "newtask.isolation", test_isolation },
+  { "newtask.project_root", test_project_root },
 }

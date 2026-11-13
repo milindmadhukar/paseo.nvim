@@ -14,7 +14,13 @@
 --- message turns the draft into a real agent. Then the conversation comes
 --- back and nothing else moves.
 ---
----   ┌ Chat | Terminal ────── Local | New worktree ┐
+--- TWO VERBS, ONE SCREEN. A new SESSION (`scope = "session"`: the rail's
+--- `a`, `<C-n>`) asks Where -- Local, the project's own directory, or a new
+--- worktree -- and always makes a workspace. A new AGENT IN A SESSION
+--- (`scope = "agent"`: the rail's `A`, the new-agent key) has no Where at
+--- all: it goes into the session it was opened on. |paseo.new| says why.
+---
+---   ┌ Chat | Terminal ────── Local | New worktree ┐   (a session only)
 ---   │ Base branch  main  dev  feat/x  …            │
 ---   │ Provider · Model · Mode · Thinking · Features│   (a chat)
 ---   │ Preset  Shell  claude  codex  pi  Command…   │   (a terminal)
@@ -57,6 +63,7 @@ local RECENT = 4
 ---The task being set up, per draft chat.
 ---@class paseo.NewTask
 ---@field ctx paseo.StartContext
+---@field scope "session"|"agent"  A new workspace, or one more agent in `ctx.workspace_id`.
 ---@field chat table           The draft chat.
 ---@field kind "chat"|"terminal"
 ---@field where "here"|"worktree"
@@ -146,7 +153,7 @@ local function groups(task)
     },
   }
 
-  if task.iso then
+  if task.scope == "session" and task.iso then
     out[#out + 1] = {
       id = "where",
       key = M.KEYS.where,
@@ -154,12 +161,14 @@ local function groups(task)
       label = "Where",
       kind = "chips",
       entries = {
-        -- "Local", as the app says it. The id stays `here`: it is what
-        -- `new.json` remembers, and what the rest of the code means by it.
+        -- "Local", as the app says it: a new session on the project's own
+        -- directory. The id stays `here`: it is what `new.json` remembers.
         {
           id = "here",
           label = "Local",
-          description = "a new agent in this workspace, sharing its files with the agents already in it",
+          description = ("a new session in %s itself, beside the sessions already there"):format(
+            vim.fn.fnamemodify(task.root or "?", ":~")
+          ),
         },
         {
           id = "worktree",
@@ -173,7 +182,7 @@ local function groups(task)
     }
   end
 
-  if task.where == "worktree" and task.iso and task.iso.kind == "worktree" then
+  if task.scope == "session" and task.where == "worktree" and task.iso and task.iso.kind == "worktree" then
     local current = base_of(task)
     local entries, seen = {}, {}
     local function add(name, note)
@@ -283,9 +292,15 @@ local function footer(task)
       line = { widgets.keycap "<CR>", { "  on one of them starts it", "PaseoDim" } }
     else
       local send = keys.label("composer", "<CR>") or "<M-CR>"
-      local where = task.where == "worktree"
-          and (task.iso and task.iso.kind == "worktree" and ("a worktree off " .. (base_of(task) or "?")) or "a new workspace")
-        or "a new agent in this workspace"
+      local where
+      if task.scope == "agent" then
+        where = "a new agent in " .. (task.ctx.title or "this session")
+      elseif task.where == "worktree" then
+        where = task.iso and task.iso.kind == "worktree" and ("a new session in a worktree off " .. (base_of(task) or "?"))
+          or "a new session in a new workspace"
+      else
+        where = "a new session in " .. vim.fn.fnamemodify(task.root or "?", ":~")
+      end
       line = {
         { "  Type below; ", "PaseoDim" },
         widgets.keycap(send),
@@ -370,7 +385,7 @@ local function start_terminal(task, preset)
       vim.schedule(function()
         abandon(task)
       end)
-    end)
+    end, task.scope)
   end
   if preset.prompt then
     return vim.ui.input({ prompt = "Command: " }, function(command)
@@ -445,7 +460,8 @@ local function start_chat(task, prompt, images, done)
   task.busy = true
   draw(task)
   local switch = not require("paseo.ui.native").has(task.chat)
-  new.chat(task.ctx, choice(task), prompt, images, function(err, agent_id)
+  local verb = task.scope == "agent" and new.agent or new.session
+  verb(task.ctx, choice(task), prompt, images, function(err, agent_id)
     task.busy = false
     if err then
       draw(task)
@@ -453,11 +469,12 @@ local function start_chat(task, prompt, images, done)
     end
     remember(task)
     if agent_id then
-      -- HERE: this chat becomes the agent. The conversation comes back.
+      -- AN AGENT IN THIS SESSION: this chat becomes it. The conversation
+      -- comes back.
       unmount(task)
       return done(nil, agent_id)
     end
-    -- A new worktree: the row has switched to it, and its chat is open.
+    -- A NEW SESSION: its chat is open, and the draft goes.
     abandon(task)
     done(nil, nil)
   end, { switch = switch })
@@ -660,7 +677,7 @@ end
 ---own, the sidebar its window. The composer is focused, in insert mode, so
 ---the first thing you do is type.
 ---@param ctx paseo.StartContext
----@param opts { kind?: "chat"|"terminal", where?: "here"|"worktree", surface?: "sidebar"|"native" }
+---@param opts { scope?: "session"|"agent", kind?: "chat"|"terminal", where?: "here"|"worktree", surface?: "sidebar"|"native" }
 ---@return table chat  The draft chat.
 function M.open(ctx, opts)
   if api.nvim_get_mode().mode == "t" then
@@ -668,8 +685,11 @@ function M.open(ctx, opts)
   end
   local remembered = new.remembered(ctx)
   local iso = new.isolation(ctx)
+  local scope = (opts.scope == "agent" and ctx.workspace_id) and "agent" or "session"
   local task = {
     ctx = ctx,
+    scope = scope,
+    root = scope == "session" and new.project_root(ctx) or ctx.root,
     remembered = remembered,
     iso = iso,
     kind = opts.kind or remembered.kind or "chat",
@@ -678,7 +698,7 @@ function M.open(ctx, opts)
     preset = remembered.preset,
     busy = false,
   }
-  if not iso then
+  if not iso or scope == "agent" then
     task.where = "here"
   end
   if ctx.project == nil then
@@ -694,8 +714,9 @@ function M.open(ctx, opts)
     host_id = ctx.host_id,
     project = ctx.project,
     settings = {},
-    banner = "new task",
     surface = opts.surface,
+    banner = scope == "agent" and ("new agent · " .. (ctx.title or "this session"))
+      or ("new session · " .. vim.fs.basename(task.root or ctx.root)),
     start = function(prompt, images, done)
       start_chat(task, prompt, images, done)
     end,
