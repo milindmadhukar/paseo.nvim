@@ -71,11 +71,13 @@ local function test_chat_follow()
     eq("surface: and opens it exactly once", opens, 1)
     native.open = opened
 
-    -- AND IT IS A TOGGLE: the key that opened it is the way back.
+    -- AND IT IS A TOGGLE, IN AND OUT: the key that opened it is the way
+    -- back to the code, and the agent's tab is kept for the next press.
     chat.surface("buffer", { toggle = true })
-    truthy("surface: pressing it again closes the surface", not native.has(chat.current()))
+    truthy("surface: pressing it again leaves the agent's tab", not native.is_open(chat.current()))
+    truthy("surface: without closing it", native.has(chat.current()))
     chat.surface("buffer", { toggle = true })
-    truthy("surface: and a third press brings it back", native.has(chat.current()))
+    truthy("surface: and a third press goes back to it", native.is_open(chat.current()))
     chat.close()
     chat.forget()
 

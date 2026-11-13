@@ -399,9 +399,11 @@ is noticed straight away. `ui.pr.enabled = false` turns the whole thing off.
 
 ### The chat, full screen
 
-The default surface. `:Paseo chat` opens it and closes it again; `:Paseo
-buf`, `:Paseo dash` and `:Paseo native` all open it too, so keys bound to
-the old names keep working. Every pane is a **real split**, and **each agent
+The default surface. `:Paseo chat` and `:Paseo native` toggle you **in and
+out** of it: from your code to the agent's tab, and from there back to the tab
+you came from, with the agent's tab kept so the next press lands right back on
+it (`q` is what closes it). `:Paseo buf` and `:Paseo dash` open it too, so keys
+bound to the old names keep working. Every pane is a **real split**, and **each agent
 gets a tab page of its own**, so two agents in one workspace are two tabs and
 `gt`/`gT` move between them. `<C-f>` goes here from the sidebar; `<C-c>` stops
 the turn, from the composer or the conversation, normal mode or insert.

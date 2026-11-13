@@ -341,8 +341,35 @@ local function test_rail_beside()
   chat_mod.set_current(saved_current)
 end
 
+local function test_toggle()
+  local native = require "paseo.ui.native"
+  local chat_mod = require "paseo.ui.chat"
+  local saved_current = chat_mod.current()
+
+  local home = api.nvim_get_current_tabpage()
+  local a = new_chat "native-toggle"
+  native.open(a)
+  settle()
+  local agent_tab = a.native_tab
+  truthy("toggle: the agent is on a tab of its own", agent_tab ~= home)
+
+  -- `:Paseo native` ON the agent's tab goes back where you came from...
+  chat_mod.surface("native", { toggle = true })
+  eq("toggle: out lands on the tab you came from", api.nvim_get_current_tabpage(), home)
+  truthy("toggle: and the agent's tab is still there", api.nvim_tabpage_is_valid(agent_tab))
+
+  -- ...and again from there lands straight back on it.
+  chat_mod.surface("native", { toggle = true })
+  eq("toggle: in lands on the same agent tab", api.nvim_get_current_tabpage(), agent_tab)
+
+  native.close(a)
+  native.reset()
+  chat_mod.set_current(saved_current)
+end
+
 return {
   { "ui.native.layout", test_layout },
+  { "ui.native.toggle", test_toggle },
   { "ui.native.rail_beside", test_rail_beside },
   { "ui.native.markdown", test_markdown },
   { "ui.native.panels", test_panels },

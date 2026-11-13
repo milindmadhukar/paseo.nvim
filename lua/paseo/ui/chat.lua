@@ -1659,6 +1659,10 @@ end
 
 function M.toggle()
   local chat = current
+  -- Full screen, it is a toggle IN AND OUT: see `surface`.
+  if chat and require("paseo.ui.native").is_open(chat) then
+    return require("paseo.ui.native").leave()
+  end
   if chat and visible(chat) then
     return M.close()
   end
@@ -1812,8 +1816,11 @@ function M.surface(name, opts)
 
   local native = require "paseo.ui.native"
   if name == "native" then
+    -- A TOGGLE IN AND OUT, not a close: back to the tab you came from, the
+    -- agent's tab left as it was so the next one lands straight on it. `q`
+    -- is what closes it.
     if opts and opts.toggle and native.is_open(chat) then
-      return M.close()
+      return native.leave()
     end
     if not native.has(chat) then
       sidebar.close(chat)

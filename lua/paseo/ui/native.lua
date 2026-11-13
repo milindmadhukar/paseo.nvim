@@ -43,6 +43,9 @@ local ns = api.nvim_create_namespace "paseo.native"
 ---@type table<integer, paseo.NativeTab>
 local tabs = {}
 
+---See `M.leave`.
+local origin
+
 ---The panels, in the order of their number keys (`1` `2` `3` in the panel),
 ---and the module that draws each one.
 M.PANELS = { "Settings", "Changes", "Usage" }
@@ -151,6 +154,25 @@ local function set_options(win, options)
       vim.wo[win][option] = value
     end)
   end
+end
+
+---The last tab that was NOT an agent's that you left: where `:Paseo native`
+---goes back to from an agent's tab.
+---Out of the agent's tab, back to the code: the tab you came from if it is
+---still there, else any tab that is not an agent's, else a fresh one. The
+---agent's tab stays, so `:Paseo native` again lands straight back on it.
+function M.leave()
+  if origin and api.nvim_tabpage_is_valid(origin) and not entry(origin) then
+    api.nvim_set_current_tabpage(origin)
+    return
+  end
+  for _, tab in ipairs(api.nvim_list_tabpages()) do
+    if not entry(tab) then
+      api.nvim_set_current_tabpage(tab)
+      return
+    end
+  end
+  vim.cmd "tabnew"
 end
 
 ---Focus the box you type in, on this tab.
@@ -749,6 +771,17 @@ watch = function()
       adopt_rail(t)
       require("paseo.ui.rail").draw()
       M.refresh(t.chat)
+    end,
+  })
+
+  api.nvim_create_autocmd("TabLeave", {
+    group = augroup,
+    desc = "paseo: remember the editor tab you left for an agent's",
+    callback = function()
+      local tab = api.nvim_get_current_tabpage()
+      if not entry(tab) then
+        origin = tab
+      end
     end,
   })
 

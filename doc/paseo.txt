@@ -738,6 +738,13 @@ skills.method                                       `"link"`|`"copy"`, default `
     Toggle the chat FULL SCREEN: one tab page per agent, every pane a real
     split. See |paseo-native|.
 
+    A toggle IN AND OUT, not open-and-close. From your code it goes to the
+    agent's tab (the one you were last on); from the agent's tab it goes
+    back to the tab you came from, and leaves the agent's tab as it was, so
+    the next press lands straight back on it. `q` in the chat is what closes
+    the tab. Map it to one key in normal and terminal mode: >lua
+        vim.keymap.set({ "n", "t" }, [[<C-\>]], "<cmd>Paseo native<cr>")
+<
     `buf` and `tab` are the old volt dashboard's names, kept so keys bound to
     them keep working. That dashboard is gone, and the full-screen surface is
     what they meant.
@@ -1598,8 +1605,9 @@ twitch rather than a warning. |paseo-chat-usage| is where a context window in
 trouble is worth looking at.
 
                                                   *paseo-native* *paseo-full*
-THE CHAT, FULL SCREEN -- the default surface. `:Paseo chat` opens it and
-closes it again; |:Paseo-native| toggles it, `:Paseo buf` and `:Paseo tab` are
+THE CHAT, FULL SCREEN -- the default surface. `:Paseo chat` and
+|:Paseo-native| toggle you in and out of it (back to the tab you came from,
+the agent's tab kept; `q` closes it), `:Paseo buf` and `:Paseo tab` are
 the same command, and |:Paseo-dash| opens it, so keys bound to the old names
 keep working. `<C-f>` goes here from the sidebar.
 
