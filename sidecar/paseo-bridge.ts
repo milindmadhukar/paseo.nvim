@@ -55,19 +55,39 @@ const ops: Ops = {
 };
 setShutdown(() => ops.close({ op: "close" }));
 
-async function dispatch(req: Request): Promise<void> {
+/**
+ * How long a request waited for its turn and how long it then ran, for a
+ * caller that asked (`perf: true`, from |paseo.perf|). The difference is the
+ * question a slow reply raises: was the daemon slow, or was this stuck behind
+ * something that was?
+ */
+function timing(req: Request, arrived: number, started: number) {
+  if (!req.perf) return undefined;
+  const now = performance.now();
+  return { queuedMs: started - arrived, runMs: now - started };
+}
+
+async function dispatch(req: Request, arrived: number): Promise<void> {
+  const started = performance.now();
   const op = ops[req.op];
   if (!op) {
     write({ id: req.id, ok: false, error: `unknown op: ${req.op}` });
     return;
   }
   try {
-    write({ id: req.id, ok: true, result: await op(req) });
+    const result = await op(req);
+    write({
+      id: req.id,
+      ok: true,
+      result,
+      timing: timing(req, arrived, started),
+    });
   } catch (error) {
     write({
       id: req.id,
       ok: false,
       error: error instanceof Error ? error.message : String(error),
+      timing: timing(req, arrived, started),
     });
   }
 }
@@ -104,13 +124,14 @@ function handle(line: string): void {
     return;
   }
 
+  const arrived = performance.now();
   queue = queue
     .then(async () => {
       if (CONCURRENT.has(req.op)) {
-        void dispatch(req);
+        void dispatch(req, arrived);
         return;
       }
-      await dispatch(req);
+      await dispatch(req, arrived);
     })
     // A REJECTED QUEUE IS A DEAF SIDECAR. `queue` is the chain every later
     // request is appended to, and once it rejects every `.then` after it is

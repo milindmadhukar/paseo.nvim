@@ -268,6 +268,27 @@ commands.wcreate = {
   end,
 }
 
+-- Where the time went: see |paseo.perf|. `:Paseo perf` turns recording on
+-- (if it was not already), `:Paseo perf reset` starts the count again.
+commands.perf = {
+  desc = "Timings: what the plugin spent its time on since recording began",
+  run = function(args)
+    local perf = require "paseo.perf"
+    if args[1] == "reset" then
+      perf.reset()
+      return vim.notify("paseo: perf counters reset", vim.log.levels.INFO)
+    end
+    if not perf.enabled then
+      perf.enable()
+      return vim.notify(
+        "paseo: perf recording is on now; do the slow thing, then :Paseo perf again",
+        vim.log.levels.INFO
+      )
+    end
+    vim.notify(table.concat(perf.lines(), "\n"), vim.log.levels.INFO, { title = "paseo: perf" })
+  end,
+}
+
 commands.agents = {
   desc = "Agent sessions in the workspace containing this directory",
   run = function()
@@ -596,6 +617,11 @@ function M.setup(opts)
 
   -- Streaming events have to be wired before anything can arrive on them.
   require("paseo.ui.chat").attach_events()
+
+  -- After everything it wraps is loaded, so the wrapping takes.
+  if require("paseo.perf").enabled then
+    require("paseo.perf").enable()
+  end
 
   -- Guard the standard interactive routes. Existing command-line
   -- abbreviations and mappings are preserved; configs with a central quit

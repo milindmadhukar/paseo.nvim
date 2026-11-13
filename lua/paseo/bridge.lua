@@ -7,6 +7,7 @@
 local config = require "paseo.config"
 local daemon = require "paseo.daemon"
 local hosts = require "paseo.hosts"
+local perf = require "paseo.perf"
 
 local M = {}
 
@@ -117,6 +118,19 @@ local function on_line(state, line)
     return
   end
   state.pending[message.id] = nil
+
+  if perf.enabled and state.sent then
+    local sent = state.sent[message.id]
+    state.sent[message.id] = nil
+    if sent then
+      perf.add("rpc." .. sent.op, perf.now() - sent.at)
+      local timing = message.timing
+      if type(timing) == "table" then
+        perf.add("rpc." .. sent.op .. ".queued", timing.queuedMs or 0)
+        perf.add("rpc." .. sent.op .. ".run", timing.runMs or 0)
+      end
+    end
+  end
 
   -- NOT `message.ok and nil or message.error`. `nil` can never be the true
   -- branch of `a and b or c` in Lua -- `true and nil` is nil, which then falls
@@ -404,6 +418,13 @@ function M.request(op, args, callback, host_id)
   -- `id` and `op` are set LAST and therefore win. Nothing in `args` may use
   -- those names; an agent is passed as `agentId` for exactly this reason.
   local payload = vim.tbl_extend("force", args or {}, { id = id, op = op })
+  if perf.enabled then
+    -- Asks the sidecar to say how long this sat in its queue and how long it
+    -- ran; see |paseo.perf|.
+    payload.perf = true
+    state.sent = state.sent or {}
+    state.sent[id] = { op = op, at = perf.now() }
+  end
   local ok, err = pcall(function()
     state.handle:write(vim.json.encode(payload) .. "\n")
   end)

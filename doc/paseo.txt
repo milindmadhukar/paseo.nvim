@@ -1052,6 +1052,18 @@ got.
 
     Shorthand for `:checkhealth paseo`.
 
+:Paseo perf [reset]                                            *:Paseo-perf*
+
+    Where the time went. Off by default; the first `:Paseo perf` turns
+    recording on (as does `PASEO_PERF=1` in the environment, or
+    `vim.g.paseo_perf = true` before setup), and every later one prints what
+    was recorded since: the wall time of the functions on the path from a key
+    to a painted window, each bridge request from write to reply -- split
+    into the time it sat QUEUED in the sidecar and the time it RAN against the
+    daemon -- and `loop.stall`, how late a 10 ms timer fired, which is how
+    long a key went unanswered. `reset` starts the count again.
+    The benchmarks that use the same counters are in `tests/bench/`.
+
 ==============================================================================
 6. LUA API                                                         *paseo-api*
 

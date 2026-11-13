@@ -266,6 +266,7 @@ screen.
 | `:Paseo agent [stop]` | Sidecar and agent status |
 | `:Paseo repos` | The repos in the current unit of work |
 | `:Paseo health` | `:checkhealth paseo` |
+| `:Paseo perf [reset]` | Where the time went: per-function and per-request timings since recording began (the first call turns recording on) |
 
 Default keys, all under `<leader>a`. `aa` chat · `ae` explain · `ak` ask · `af`
 ask about the file · `aQ` ask about the whole quickfix list — `ae` and `ak`
@@ -1935,6 +1936,32 @@ tests/e2e/daemon.sh stop      # take the throwaway daemon down
 It needs `tmux`, `python3`, `node` and a Chromium-family browser for the
 PNGs. It is opt-in and not part of CI: it runs the daemon you have
 installed, which is the point.
+
+### Benchmarks
+
+Numbers rather than pass/fail, so they are not part of `run.sh`:
+
+```sh
+tests/bench/run.sh micro [out.json]   # main-loop work, stubbed daemon, headless
+tests/e2e/bench.sh [label]            # real windows against a throwaway daemon
+python3 -I tests/bench/compare.py before.json after.json
+```
+
+- **Micro** times what a key press waits on at the sizes a real day reaches
+  — fifty workspaces, a hundred and fifty agents, a long reply — with every
+  daemon reply canned: building and painting the rail, a spinner tick, one
+  agent event fanning out to every listener, a reply streaming in, a
+  conversation loading, and the new-task screen working out where it is.
+- **UI** seeds its own daemon (port 6798, `$TMPDIR/paseo-bench-e2e`) with
+  twenty worktree workspaces of two agents each, then times each flow from
+  the function a key calls to **paint** (the window is up and the loop has
+  gone idle) and **ready** (the real content is in it): opening a chat cold,
+  the rail, the Settings panel, the new-task screen, switching chats. Then a
+  load test: four agents streaming with the rail open, and how much of each
+  second the main loop spent drawing.
+- **In your own editor**, `PASEO_PERF=1 nvim` (or `:Paseo perf` once) records
+  the same spans — and, for every request, how long it waited in the sidecar's
+  queue against how long the daemon took — and `:Paseo perf` prints them.
 
 [![tests](https://github.com/milindmadhukar/paseo.nvim/actions/workflows/tests.yml/badge.svg)](https://github.com/milindmadhukar/paseo.nvim/actions/workflows/tests.yml)
 
