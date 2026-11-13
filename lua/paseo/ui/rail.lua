@@ -764,9 +764,15 @@ function M.build(width)
     }
     return b
   end
+  local native_drafts = vim.tbl_filter(function(c)
+    return c.draft ~= nil and not c.agent_id
+  end, require("paseo.ui.native").listed())
   if #cache.list == 0 then
     b.lines[2] = { { PAD .. "no workspaces", "PaseoTreeMeta" } }
-    return b
+    -- A draft of the first session here still has a row: under nothing.
+    if #native_drafts == 0 then
+      return b
+    end
   end
 
   local chat = M.host_chat()
@@ -847,18 +853,47 @@ function M.build(width)
   -- EVERY DRAFT on the row, under the workspace it was opened on -- not only
   -- the one in the middle: you can have several on the go, and each is a row
   -- to go back to.
-  local drafts_at = {}
-  for _, c in ipairs(require("paseo.ui.native").listed()) do
-    if c.draft and not c.agent_id then
-      local at = M.index_of(cache.list, { id = c.workspace_id, dir = c.local_root or c.root })
-      if not at and c == chat then
-        at = current
-      end
-      if at then
-        drafts_at[at] = drafts_at[at] or {}
-        table.insert(drafts_at[at], c)
-      end
+  local drafts_at, loose = {}, {}
+  for _, c in ipairs(native_drafts) do
+    local at = M.index_of(cache.list, { id = c.workspace_id, dir = c.local_root or c.root })
+    if not at and c == chat then
+      at = current
     end
+    if at then
+      drafts_at[at] = drafts_at[at] or {}
+      table.insert(drafts_at[at], c)
+    else
+      -- On no workspace there is: the first session in a project.
+      loose[#loose + 1] = c
+    end
+  end
+
+  ---One draft's row: `•`, and the first line written in it.
+  local function draft_row(draft, ws, depth, parent, key, last)
+    local dkey = (key and (key .. "/") or "") .. "draft/" .. tostring(draft.draft_id or draft.conversation)
+    local mine = draft == chat
+    local line = emit(
+      {
+        kind = "draft",
+        ws = ws,
+        chat = draft,
+        depth = depth,
+        parent = parent,
+        key = dkey,
+        path = key and { key, dkey } or { dkey },
+      },
+      last,
+      {
+        mark = "•",
+        mark_hl = "PaseoTreeIdle",
+        name = M.draft_title(draft),
+        name_hl = mine and "PaseoTreeOpened" or "PaseoTreeSession",
+      }
+    )
+    if mine and not b.session then
+      b.session = line
+    end
+    return line
   end
   for i, ws in ipairs(cache.list) do
     local here = i == current
@@ -954,22 +989,7 @@ function M.build(width)
       -- there is one.
       for _, draft in ipairs(drafts) do
         index = index + 1
-        local dkey = key .. "/draft/" .. tostring(draft.draft_id or draft.conversation)
-        local mine = draft == chat
-        local line = emit(
-          { kind = "draft", ws = ws, chat = draft, depth = 1, parent = ws_line, key = dkey, path = { key, dkey } },
-          { index == count },
-          {
-            mark = "•",
-            mark_hl = "PaseoTreeIdle",
-            name = M.draft_title(draft),
-            name_hl = mine and "PaseoTreeOpened" or "PaseoTreeSession",
-          }
-        )
-        group_last = line
-        if mine and not b.session then
-          b.session = line
-        end
+        group_last = draft_row(draft, ws, 1, ws_line, key, { index == count })
       end
       if count == 0 then
         below(ws_line, { { "no sessions yet", "PaseoTreeMeta" } })
@@ -981,6 +1001,9 @@ function M.build(width)
         table.insert(b.below[group_last], { { "" } })
       end
     end
+  end
+  for k, draft in ipairs(loose) do
+    draft_row(draft, nil, 0, nil, nil, { k == #loose })
   end
 
   -- THE KEYS, where you are looking when you want them -- virtual, so no row

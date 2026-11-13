@@ -143,6 +143,57 @@ local function sync(task)
   end)
 end
 
+-- -------------------------------------------------------------- keeping it
+
+---What a draft context is kept as: its plain fields, nothing a function.
+local CTX_FIELDS = { "root", "local_root", "host_id", "workspace_id", "title", "project", "preferred", "project_root" }
+
+---Keep the draft (|paseo.drafts|) -- once there is something in it worth
+---keeping: words in the box, or a choice you made. One opened and left
+---untouched is not a draft you would miss.
+---@param task paseo.NewTask
+local function keep(task)
+  local chat = task.chat
+  if not (chat and tasks[chat]) then
+    return
+  end
+  local drafts = require "paseo.drafts"
+  local lines = {}
+  if chat.composer and api.nvim_buf_is_valid(chat.composer) then
+    lines = api.nvim_buf_get_lines(chat.composer, 0, -1, false)
+  end
+  local typed = vim.trim(table.concat(lines, "\n")) ~= ""
+  if not (typed or task.touched) then
+    return drafts.remove(task.id)
+  end
+  local ctx = {}
+  for _, field in ipairs(CTX_FIELDS) do
+    local v = task.ctx[field]
+    if type(v) == "string" or type(v) == "number" or type(v) == "boolean" then
+      ctx[field] = v
+    end
+  end
+  -- Before the daemon has answered there is no draft model: what it opened
+  -- with is still what it will open with.
+  local c = choice(task)
+  for _, field in ipairs { "provider", "modeId", "thinkingOptionId", "featureValues" } do
+    if c[field] == nil then
+      c[field] = task.remembered[field]
+    end
+  end
+  drafts.save {
+    id = task.id,
+    scope = task.scope,
+    kind = task.kind,
+    where = task.where,
+    base = task.base,
+    preset = task.preset,
+    ctx = ctx,
+    choice = c,
+    prompt = lines,
+  }
+end
+
 -- ------------------------------------------------------------------ groups
 
 ---@param task paseo.NewTask
@@ -329,6 +380,8 @@ end
 local function unmount(task)
   local chat = task.chat
   tasks[chat] = nil
+  -- Sent, or thrown away: either way not a draft to bring back.
+  require("paseo.drafts").remove(task.id)
   if task.view and task.buf and api.nvim_buf_is_valid(task.buf) then
     task.view:unbind(task.buf)
   end
@@ -346,6 +399,8 @@ local function unmount(task)
     end
   end
   if task.buf and api.nvim_buf_is_valid(task.buf) then
+    -- The conversation back on the row: the draft that became an agent.
+    require("paseo.ui.native").relist(task.buf, chat.conversation)
     pcall(api.nvim_buf_delete, task.buf, { force = true })
   end
   task.buf = nil
@@ -412,7 +467,7 @@ end
 ---@param group table
 ---@param entry table
 ---@param done fun()
-local function apply(task, group, entry, done)
+local function apply_choice(task, group, entry, done)
   if group.id == "kind" then
     task.kind = entry.id
     return done()
@@ -450,6 +505,19 @@ local function apply(task, group, entry, done)
     end)
   end
   done()
+end
+
+---Apply one chip, as you chose it: the draft is worth keeping now.
+---@param task paseo.NewTask
+---@param group table
+---@param entry table
+---@param done fun()
+local function apply(task, group, entry, done)
+  apply_choice(task, group, entry, function()
+    task.touched = true
+    keep(task)
+    done()
+  end)
 end
 
 ---The first message, from the composer: |paseo.ui.chat|'s draft calls this.
@@ -600,6 +668,7 @@ local function watch_composer(task)
       if not tasks[task.chat] then
         return true
       end
+      keep(task)
       if pending then
         return
       end
@@ -639,7 +708,15 @@ local function build(task)
   vim.bo[buf].bufhidden = "hide"
   vim.bo[buf].filetype = M.FILETYPE
   vim.bo[buf].modifiable = false
-  pcall(api.nvim_buf_set_name, buf, ("paseo://new/%d"):format(buf))
+  -- Named for what it makes: the bufferline shows it in the row.
+  local base = "paseo://new/" .. (task.scope == "agent" and "new agent" or "new session")
+  for n = 1, 99 do
+    if pcall(api.nvim_buf_set_name, buf, n == 1 and base or ("%s (%d)"):format(base, n)) then
+      break
+    end
+  end
+  -- On the row in place of the empty conversation under it.
+  require("paseo.ui.native").relist(chat.conversation, buf)
 
   local keys = require "paseo.ui.keys"
   local view = require("paseo.ui.panels.settings").new({
@@ -757,7 +834,17 @@ function M.open(ctx, opts)
   if api.nvim_get_mode().mode == "t" then
     pcall(vim.cmd.stopinsert)
   end
+  local saved = opts.restore
   local remembered = new.remembered(ctx)
+  if saved then
+    -- What it was kept with, over what this project last made.
+    remembered = vim.tbl_extend("force", remembered, saved.choice or {}, {
+      kind = saved.kind,
+      where = saved.where,
+      base = saved.base,
+      preset = saved.preset,
+    })
+  end
   local iso = new.isolation(ctx)
   local scope = (opts.scope == "agent" and ctx.workspace_id) and "agent" or "session"
   local task = {
@@ -796,9 +883,13 @@ function M.open(ctx, opts)
     end,
   }
   task.chat = chat
-  task.id = opts.id or new_id()
+  task.id = saved and saved.id or new_id()
+  task.touched = saved ~= nil
   chat.draft_id = task.id
   tasks[chat] = task
+  if saved and chat.composer and api.nvim_buf_is_valid(chat.composer) then
+    api.nvim_buf_set_lines(chat.composer, 0, -1, false, saved.prompt or {})
+  end
   watch_composer(task)
   -- Which session the draft is IN, for the rail to draw it under: an agent's
   -- is the one it goes into. Sessions can share a directory, so the
@@ -806,6 +897,10 @@ function M.open(ctx, opts)
   chat.new_scope = scope
   chat.workspace_id = scope == "agent" and ctx.workspace_id or nil
   mount(task)
+  if saved then
+    -- Brought back, not asked for: |M.restore| puts you back where you were.
+    return chat
+  end
   to_composer(task)
   -- Again on the next tick: opened from TERMINAL mode (a key mapped in `t`),
   -- leaving the terminal's window ends terminal mode after this has run and
@@ -817,6 +912,64 @@ function M.open(ctx, opts)
     end
   end)
   return chat
+end
+
+---Bring back the drafts kept from before (|paseo.drafts|), onto the Paseo
+---tab that has just been made: each one a buffer on the row and a row on the
+---rail, the text and the choices as you left them. What was in the middle,
+---and where the cursor was, stay as they were.
+---
+---Again on a later tab: a draft still in memory whose tab was closed goes
+---back on the row; one already there is not opened twice.
+function M.restore()
+  local native = require "paseo.ui.native"
+  if not native.any() then
+    return
+  end
+  local live, on_row = {}, {}
+  for _, task in pairs(tasks) do
+    live[task.id] = task
+  end
+  for _, chat in ipairs(native.listed()) do
+    on_row[chat] = true
+  end
+  local back = native.chat()
+  local win = api.nvim_get_current_win()
+  local insert = api.nvim_get_mode().mode == "i"
+  local moved = false
+  for _, entry in ipairs(require("paseo.drafts").all()) do
+    local task = live[entry.id]
+    if task then
+      if not on_row[task.chat] and task.chat.surface == "native" then
+        moved = true
+        pcall(native.open, task.chat, { focus = false })
+      end
+    elseif require("paseo.hosts").get(entry.ctx.host_id) and entry.ctx.root then
+      moved = true
+      local ok, err = pcall(M.open, entry.ctx, {
+        scope = entry.scope,
+        kind = entry.kind,
+        where = entry.where,
+        surface = "native",
+        restore = entry,
+      })
+      if not ok then
+        vim.notify("paseo: could not bring back a draft — " .. tostring(err), vim.log.levels.WARN)
+      end
+    end
+  end
+  if not moved then
+    return
+  end
+  if back and native.chat() ~= back then
+    native.show(back, { focus = false })
+  end
+  if api.nvim_win_is_valid(win) then
+    api.nvim_set_current_win(win)
+  end
+  if insert and api.nvim_get_mode().mode ~= "i" then
+    vim.cmd.startinsert { bang = true }
+  end
 end
 
 ---The task a draft chat is setting up, if it is one.
@@ -869,6 +1022,17 @@ function M.show(chat)
     return false
   end
   return place(task)
+end
+
+---A draft chat's choices buffer, if it has one: what the row lists it as.
+---@param chat table
+---@return integer|nil
+function M.screen_of(chat)
+  local task = tasks[chat]
+  if task and task.buf and api.nvim_buf_is_valid(task.buf) then
+    return task.buf
+  end
+  return nil
 end
 
 ---The draft chat whose choices `buf` is, if it is one: so `:b`, the

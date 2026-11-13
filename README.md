@@ -111,6 +111,12 @@ session, `A` a new agent in the session under the cursor, `w` a session in a
 new worktree, `t` a terminal, `d` archives, and `.` lists everything you can
 do to the row. `g?` shows them all.
 
+A new session you have not sent yet is a draft: a buffer and a rail row of
+its own, named by its first line. Have several. Switch away and back and the
+text and choices are as you left them, and drafts open when you quit come
+back on the next Paseo tab. Text and choices are kept, images are not; `q`
+on the choices throws a draft away.
+
 These are defaults, and they are bound only in Paseo's own buffers. Every
 built-in key can be moved or unbound with the `keys` option
 (`:help paseo-config.keys`). The full-screen keys are set in `ui.native.keys`,

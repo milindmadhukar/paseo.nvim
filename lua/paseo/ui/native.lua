@@ -229,9 +229,12 @@ end
 ---@return integer[]
 local function buffers(s)
   local out = {}
+  local newtask = require "paseo.ui.newtask"
   for _, chat in ipairs(s.set) do
-    if valid_buf(chat.conversation) then
-      out[#out + 1] = chat.conversation
+    -- A draft is listed as its choices: the conversation under them is empty.
+    local buf = newtask.screen_of(chat) or chat.conversation
+    if valid_buf(buf) then
+      out[#out + 1] = buf
     end
   end
   for _, term in ipairs(s.terms) do
@@ -276,6 +279,39 @@ local function list_one(s, buf)
       vim.bo[buf].buflisted = true
     end)
   end
+end
+
+---One buffer of the row standing in for another, in the same place: a
+---draft's choices for its empty conversation, and back when it becomes an
+---agent. Listed in its stead, and in the bufferline's `t:bufs` where the
+---other was -- so `<S-l>`, a click and `:b` step through the row as it reads.
+---@param old integer|nil
+---@param new integer|nil
+function M.relist(old, new)
+  local s = surface()
+  if not (s and valid_buf(old) and valid_buf(new) and vim.bo[old].buflisted) then
+    -- Off the row, or off the tab (everything is unlisted there): coming
+    -- back lists whichever `buffers` names.
+    return
+  end
+  pcall(function()
+    vim.bo[new].buflisted = true
+  end)
+  pcall(function()
+    vim.bo[old].buflisted = false
+  end)
+  if api.nvim_get_current_tabpage() == s.tab and type(vim.t.bufs) == "table" then
+    local out = {}
+    for _, buf in ipairs(vim.t.bufs) do
+      if buf == old then
+        out[#out + 1] = new
+      elseif buf ~= new then
+        out[#out + 1] = buf
+      end
+    end
+    vim.t.bufs = out
+  end
+  pcall(vim.cmd, "redrawtabline")
 end
 
 ---@param s paseo.NativeSurface
@@ -643,11 +679,6 @@ function M.cycle(delta)
   end
   local at = 1
   local shown = api.nvim_win_get_buf(s.conv)
-  -- A draft's choices are its conversation, for where you are in the row.
-  local draft = require("paseo.ui.newtask").chat_of(shown)
-  if draft and draft.conversation then
-    shown = draft.conversation
-  end
   for i, buf in ipairs(list) do
     if buf == shown then
       at = i
@@ -1217,6 +1248,11 @@ local function entered(buf)
   local chats = require "paseo.ui.chat"
   local chat = chats.by_buffer(buf)
   if chat then
+    if chat == s.chat and buf == chat.conversation and require("paseo.ui.newtask").show(chat) then
+      -- A draft's own (empty) conversation, reached by buffer number from
+      -- its choices: the choices are what it shows.
+      return
+    end
     if chat ~= s.chat or not valid_win(s.comp) then
       if chat.initialised or not chat.agent_id then
         M.open(chat, { focus = false })
@@ -1288,11 +1324,17 @@ local function watch()
       if not s or s.swapping then
         return
       end
+      local newtask = require "paseo.ui.newtask"
       for _, chat in ipairs(s.set) do
-        if chat.conversation == args.buf and vim.bo[args.buf].buflisted then
+        local listed_as = newtask.screen_of(chat) or chat.conversation
+        if listed_as == args.buf and vim.bo[args.buf].buflisted then
           -- After the delete: the buffer is still being taken down here.
           vim.schedule(function()
             M.remove(chat)
+            -- A draft deleted is a draft thrown away.
+            if newtask.task(chat) then
+              return require("paseo.ui.chat").dispose(chat)
+            end
             -- `:bdelete` unloads it, and an unloaded `nofile` buffer has
             -- lost the transcript: the chat goes too, and opening the agent
             -- again builds it afresh.
@@ -1588,6 +1630,11 @@ function M.open(chat, opts)
     -- Windows left over from another surface's layout are not ours to reuse.
     chat.win_conversation, chat.win_composer = nil, nil
     s = create(chat)
+    -- A new Paseo tab: the drafts you had on the go come back onto it,
+    -- after what you opened is up.
+    vim.schedule(function()
+      require("paseo.ui.newtask").restore()
+    end)
   elseif api.nvim_get_current_tabpage() ~= s.tab then
     api.nvim_set_current_tabpage(s.tab)
   end
@@ -1714,10 +1761,12 @@ function M.remove(chat)
   if at then
     table.remove(s.set, at)
   end
-  if valid_buf(chat.conversation) then
-    pcall(function()
-      vim.bo[chat.conversation].buflisted = false
-    end)
+  for _, buf in ipairs { chat.conversation, require("paseo.ui.newtask").screen_of(chat) } do
+    if valid_buf(buf) then
+      pcall(function()
+        vim.bo[buf].buflisted = false
+      end)
+    end
   end
   if s.chat ~= chat then
     return
