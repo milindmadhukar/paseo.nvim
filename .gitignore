@@ -1,5 +1,5 @@
 # the sidecar's dependencies
-sidecar/node_modules/
+sidecar/node_modules
 
 # editor / OS
 *.swp
