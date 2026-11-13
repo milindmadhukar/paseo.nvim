@@ -538,6 +538,10 @@ side: **nothing is opened for you, and nothing is closed for you.**
 - **`:bdelete` on an agent** takes just that one off the row, and the
   neighbour takes the middle; backing out of a new task does the same. The
   agent itself lives on, on the rail.
+- **An archived agent's buffer closes by itself**, the same way — whoever
+  archived it: the rail's `d`, the app, the CLI, another agent, or while
+  Neovim was disconnected (a fresh snapshot without it says so). A message
+  names it; the last one going takes the Paseo tab with it.
 
 A bufferline that keeps a buffer list per tab page — NvChad's tabufline, with
 its `t:bufs` — shows the agents on the Paseo tab and your files on yours with

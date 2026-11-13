@@ -1445,6 +1445,39 @@ function M.all()
   return out
 end
 
+---Agents that left the directory (|paseo.agents|.on_gone): every chat on one
+---goes, as `:bdelete` takes it -- off the row, the neighbour into the middle
+---(the last one taking the Paseo tab with it), its buffers wiped -- and you
+---are told which. A draft has no agent and is never one of them.
+---@param gone table[]  The agents, as they last were.
+---@param host_id? string
+function M.archived(gone, host_id)
+  local by_id = {}
+  for _, agent in ipairs(gone) do
+    if agent.id then
+      by_id[agent.id] = agent
+    end
+  end
+  local names = {}
+  for _, chat in ipairs(M.all()) do
+    local agent = chat.agent_id and by_id[chat.agent_id]
+    local same_host = not (host_id and chat.host_id) or chat.host_id == host_id
+    if agent and same_host and not chat.draft then
+      local title = agent.title or chat.title
+      names[#names + 1] = (title and vim.trim(title) ~= "") and title
+        or ("agent " .. chat.agent_id:sub(1, 8))
+      pcall(require("paseo.ui.native").remove, chat)
+      M.dispose(chat)
+    end
+  end
+  if #names > 0 then
+    vim.notify(
+      ("paseo: archived, so its buffer closed: %s"):format(table.concat(names, ", ")),
+      vim.log.levels.INFO
+    )
+  end
+end
+
 ---Forget a chat AND wipe its buffers -- the native surface leaving a
 ---workspace. The agent is untouched: opening it again builds a fresh chat and
 ---fetches its history.
@@ -2093,6 +2126,15 @@ function M.attach_events()
   M.relay_permissions = function(chat)
     require("paseo.ui.permission").relay(chat, has_own_chat)
   end
+  -- ARCHIVED, from anywhere -- the rail, the app, the CLI, another agent:
+  -- its buffer leaves the row rather than sitting there on a session that
+  -- is gone.
+  require("paseo.agents").on_gone(function(gone, host_id)
+    vim.schedule(function()
+      M.archived(gone, host_id)
+    end)
+  end)
+
   require("paseo.agents").on_change(function()
     vim.schedule(function()
       local agents = require "paseo.agents"

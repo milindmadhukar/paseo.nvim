@@ -62,6 +62,7 @@ local files = {
   "subagents",
   "chat",
   "perf",
+  "archive",
 }
 
 ---Every `.lua` under `tests/spec/`, as module suffixes -- so a new file that

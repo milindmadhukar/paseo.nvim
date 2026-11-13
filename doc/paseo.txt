@@ -1898,6 +1898,11 @@ one has its composer, so you can talk to it. `q` goes back to the parent.
 takes the middle; backing out of a new task does the same. The agent itself
 lives on, on the rail.
 
+AN ARCHIVED AGENT'S BUFFER CLOSES BY ITSELF, the same way -- whoever archived
+it: the rail, the Paseo app, the CLI, another agent, or archived while Neovim
+was disconnected (the snapshot after the reconnect no longer has it). A
+message names it; the last one going takes the Paseo tab with it.
+
 A bufferline that keeps a buffer list per tab page -- NvChad's tabufline,
 with its `t:bufs` -- shows the agents on the Paseo tab and your files on
 yours with nothing to configure. Map next/previous buffer to the

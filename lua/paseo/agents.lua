@@ -16,6 +16,8 @@ local agents = {}
 local subscribed = {}
 local listening = false
 local listeners = {}
+---Called with the agents that LEFT the directory; see `M.on_gone`.
+local gone_listeners = {}
 
 ---Bumped on every change to the directory. Everything derived from it --
 ---the sorted list, the agents under a root, a workspace's agents -- is kept
@@ -55,17 +57,31 @@ local function apply(payload)
   local host_id = payload.hostId or hosts.selected()
   agents[host_id] = agents[host_id] or {}
   local directory = agents[host_id]
+  local gone = {}
   if payload.kind == "snapshot" then
+    local before = directory
     directory = {}
     agents[host_id] = directory
     for _, agent in ipairs(payload.entries or {}) do
       agent.hostId = host_id
       directory[agent.id] = agent
     end
+    -- Missing from a fresh snapshot is gone too: archived while the
+    -- connection was down (a laptop asleep, a daemon restarted).
+    for id in pairs(before) do
+      if not directory[id] then
+        gone[#gone + 1] = before[id]
+      end
+    end
   elseif payload.kind == "upsert" and payload.agent then
     payload.agent.hostId = host_id
     directory[payload.agent.id] = payload.agent
   elseif payload.kind == "remove" and payload.id then
+    -- The directory is the daemon's NON-archived agents, so leaving it means
+    -- archived (or deleted). The daemon says so more than once; once is news.
+    if directory[payload.id] then
+      gone[#gone + 1] = directory[payload.id]
+    end
     directory[payload.id] = nil
   elseif payload.kind == "error" then
     local host = hosts.get(host_id)
@@ -80,6 +96,11 @@ local function apply(payload)
   bump()
   for _, fn in ipairs(listeners) do
     pcall(fn, directory, host_id)
+  end
+  if #gone > 0 then
+    for _, fn in ipairs(gone_listeners) do
+      pcall(fn, gone, host_id)
+    end
   end
 end
 
@@ -130,6 +151,15 @@ function M.watch_all(callback)
       end
     end, host.id)
   end
+end
+
+---Call `fn(agents, host_id)` when agents LEAVE the directory: archived or
+---deleted, whether by you, the app, the CLI, or another agent -- and seen as
+---a removal, or as missing from a fresh snapshot after a reconnect. Handed
+---the agents as they last were, so a caller can still say which one went.
+---@param fn fun(agents: table[], host_id: string)
+function M.on_gone(fn)
+  gone_listeners[#gone_listeners + 1] = fn
 end
 
 ---Call `fn` whenever the directory changes.
