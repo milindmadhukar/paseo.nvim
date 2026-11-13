@@ -30,16 +30,10 @@ local function test_answer()
     return { root = root, agent_id = "a1", conversation = buf, win_conversation = win }
   end
 
-  ---Everything volt actually drew, as one string.
+  ---Everything drawn on the card, as one string: real buffer text.
   ---@param buf integer
   local function drawn(buf)
-    local parts = {}
-    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, -1, 0, -1, { details = true })) do
-      for _, cell in ipairs(mark[4].virt_text or {}) do
-        parts[#parts + 1] = cell[1]
-      end
-    end
-    return table.concat(parts, " ")
+    return table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), " ")
   end
 
   local function press(key)
@@ -93,10 +87,10 @@ local function test_answer()
   local card = vim.api.nvim_get_current_buf()
   local card_win = vim.api.nvim_get_current_win()
 
-  -- The overlay is volt's, and it is over the CHAT window rather than centred on
-  -- the editor. Anchoring is what makes "takes over the chat window" true on
-  -- both surfaces without a branch per surface.
-  truthy("ask: the card is a volt buffer", require("volt.state")[card] ~= nil)
+  -- The overlay is over the CHAT window rather than centred on the editor.
+  -- Anchoring is what makes "takes over the chat window" true on every
+  -- surface without a branch per surface.
+  eq("ask: the card has its filetype", vim.bo[card].filetype, "paseo-answer")
 
   -- A description says what an option MEANS, and the half of it that used to
   -- fall off the end of its single row was the half that told it apart from
@@ -119,12 +113,6 @@ local function test_answer()
         <= vim.api.nvim_win_get_height(chat.win_conversation)
   )
 
-  -- Clickable, which is the half `volt.events.add` alone does not give you.
-  local targets = 0
-  for _, row in pairs(require("volt.state")[card].clickables) do
-    targets = targets + #row
-  end
-  truthy("ask: the options carry click targets", targets > 0, targets)
 
   -- ONE question at a time, and the counter is what says so. Both halves matter:
   -- the second question being absent is the feature, and `2 of 3` is what stops
@@ -135,16 +123,14 @@ local function test_answer()
   truthy("ask: the counter says how many there are", shown:find("1 of 3", 1, true) ~= nil, shown)
   truthy("ask: and the hint does not offer to send yet", shown:find "answer this one" ~= nil, shown)
 
-  -- Volt lays a section out by row and never clears, so the window and the
-  -- buffer have to agree after a step that changed the line count.
+  -- The window and the buffer have to agree after a step that changed the
+  -- line count, or rows are drawn off the end -- or hidden.
   local function consistent(label)
-    local state = require("volt.state")[card]
     eq(
-      "ask: " .. label .. " -- volt's height is the buffer's",
-      state.h,
+      "ask: " .. label .. " -- the window is the buffer's height",
+      vim.api.nvim_win_get_height(card_win),
       vim.api.nvim_buf_line_count(card)
     )
-    eq("ask: " .. label .. " -- and the window's", state.h, vim.api.nvim_win_get_height(card_win))
     local overflow = 0
     for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(card, -1, 0, -1, {})) do
       if mark[2] >= vim.api.nvim_buf_line_count(card) then
@@ -201,7 +187,6 @@ local function test_answer()
   press "i"
   local box = vim.api.nvim_get_current_buf()
   truthy("ask: the answer box is a real, typeable buffer", vim.bo[box].modifiable and box ~= card)
-  eq("ask: and is never handed to volt", require("volt.state")[box], nil)
 
   vim.api.nvim_buf_set_lines(box, 0, -1, false, { "looks", "right" })
   press "<CR>"
@@ -417,7 +402,6 @@ local function test_answer()
   -- it replaces did. You cannot approve what you were not shown.
   truthy("ask: a plan gets a real-text body", body ~= nil)
   eq("ask: carrying the plan in full", body and vim.api.nvim_buf_line_count(body), 120)
-  eq("ask: which is not volt's either", body and require("volt.state")[body], nil)
   eq("ask: and nothing is elided", drawn(card):find "more lines", nil)
   truthy(
     "ask: one Implement per mode it could land in",
@@ -468,14 +452,7 @@ local function test_answer()
 
   ask.close()
 
-  -- Volt keys its state by buffer and keeps the buffer on its key handler; both
-  -- halves are ours to undo, for every window the overlay opened.
-  eq("ask: closing clears the card's volt state", require("volt.state")[card], nil)
-  local listed = false
-  for _, buf in ipairs(require("volt.events").bufs) do
-    listed = listed or buf == card
-  end
-  eq("ask: and takes it off volt's key handler", listed, false)
+  eq("ask: closing deletes the card's buffer", vim.api.nvim_buf_is_valid(card), false)
   -- The augroup is deleted outright, and `nvim_get_autocmds` raises on a group
   -- that does not exist -- so "it threw" IS the pass here.
   local kept = pcall(vim.api.nvim_get_autocmds, { group = "paseo.answer" })

@@ -85,7 +85,7 @@ repo_with_agent() {
 # long that takes is the provider's business, not something to sleep for.
 #   create_from_review '<lua expr true once created>'
 create_from_review() {
-  # The review itself, not just "a float": the dashboard is floats too, and a
+  # The review itself, not just "a float": the chat has floats too, and a
   # `c` that lands in the composer is the change operator.
   "$E" wait 'vim.bo.filetype == "paseo-create"' 20 || fail "the new-agent screen never opened"
   for _ in $(seq 1 15); do

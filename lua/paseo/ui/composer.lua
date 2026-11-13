@@ -4,7 +4,7 @@
 --- its mode, its thinking level, how much context is left and which directory
 --- it is working in -- used to live at the very top of whichever surface was
 --- open: a winbar over the transcript in the sidebar, the first row of the
---- chrome on the dashboard. Both are as far from the cursor as it is possible
+--- old dashboard. Both are as far from the cursor as it is possible
 --- to get on that screen. You decide what to type with those five facts, and
 --- you decide it while looking at the box; so they belong against the box,
 --- which is where they are now.
@@ -15,10 +15,11 @@
 --- it IS a card, and the drawn box it used to have (in every style, including
 --- the ones where nothing else has an edge) can go.
 ---
---- ONE BUILDER, TWO SURFACES. The bar is a `winbar` on the composer window in
---- both, rather than volt on the dashboard and a winbar in the sidebar: a
---- winbar repaints without going through volt's layout, which matters at
---- twenty frames a second when the microphone is open.
+--- ONE BUILDER, TWO SURFACES. The bar is a `winbar` on the composer window on
+--- the native surface and in the sidebar alike. A winbar repaints on its own,
+--- with no layout pass behind it, which matters at twenty frames a second when
+--- the microphone is open -- and is why it stopped being a volt row back when
+--- there was a dashboard.
 
 local icons = require "paseo.ui.icons"
 local render = require "paseo.ui.render"
@@ -621,8 +622,8 @@ end
 ---Paint the composer window itself: its background, and its bar.
 ---
 ---Called once when the window opens. The bar is a winbar, so it costs one row
----of the window's height -- which both surfaces account for, the dashboard in
----|paseo.ui.layout| and the sidebar in `fit_composer`.
+---of the window's height -- which |paseo.ui.sidebar|'s `fit_composer`
+---accounts for, on both surfaces.
 ---@param chat table
 ---@param opts? { border?: string }  Group for a drawn edge, where the style
 ---                has one. Absent means the box has no frame, which is what
@@ -804,8 +805,8 @@ function M.dictating(chat, state)
   end
 
   M.refresh(chat)
-  -- Away from the Chat tab there is no box to draw a meter over: the
-  -- dashboard's footer says "listening" instead, so it gets the news too.
+  -- And the rest of the surface's header, on whichever surface the chat is
+  -- on.
   require("paseo.ui.sidebar").refresh(chat)
 end
 

@@ -259,36 +259,35 @@ commands.sessions = commands.agents
 commands.term = {
   desc = "The terminals in this workspace, on the Sessions tab",
   run = function()
-    -- A terminal is a SESSION, so there is nowhere else to go: the dashboard's
-    -- Sessions tab lists the agents and the PTYs together, and opening either
-    -- shows it on the Chat tab. This used to open a rail-and-pane window of
-    -- its own, over the top of whatever you were looking at.
+    -- A terminal is a SESSION, so there is nowhere else to go: the rail lists
+    -- the agents and the PTYs together, and picking either gives it a native
+    -- tab. This used to open a rail-and-pane window of its own, over the top
+    -- of whatever you were looking at.
     --
-    -- Through `open` with a callback rather than `surface` then `select`.
-    -- With no chat yet, `surface` defers to an `open` of its own and reaches
-    -- the dashboard only once the daemon has answered -- so a `select` written
-    -- after it races that answer and, against a real daemon rather than a
-    -- synchronous stub, asks for a tab on a surface that is not up yet.
-    -- `select` is a no-op then, and you arrive at Chat.
+    -- Through `open` with a callback rather than `surface` and then a call
+    -- after it. With no chat yet, `surface` defers to an `open` of its own and
+    -- the surface is up only once the daemon has answered -- so a call written
+    -- after it races that answer, against a real daemon rather than a
+    -- synchronous stub, and acts on a surface that is not up yet.
     --
     -- NO `surface` here. It used to say `"float"`, which `open` then wrote
-    -- onto `chat.surface` -- so asking for the terminals from the buffer
+    -- onto `chat.surface` -- so asking for the terminals from the old buffer
     -- dashboard moved you to a float and kept you there.
     require("paseo.ui.chat").open({}, function(chat)
       if chat then
-        -- Through `sessions` rather than a `select` of its own, because
+        -- Through `sessions` rather than a focus of its own, because
         -- "get me to that list from wherever I am" is exactly what `<C-s>`
         -- means and the answer should not differ by which one you pressed.
-        -- It keeps the mount you are on, and knows that the sidebar's answer
-        -- is the dashboard -- the list exists nowhere else.
+        -- From the sidebar that is the native surface's rail -- the list
+        -- exists nowhere else.
         require("paseo.ui.chat").sessions(chat)
       end
     end)
   end,
 }
 
--- The old name. It used to mean "the tab listing them"; the list is on the
--- Sessions tab and this lands there too. Kept because the help tag is
+-- The old name. It used to mean "the tab listing them"; the list is the
+-- rail now and this lands there too. Kept because the help tag is
 -- published.
 commands.terminals = commands.term
 
@@ -299,38 +298,25 @@ commands.chat = {
   end,
 }
 
-commands.dash = {
-  desc = "Open the chat full screen, with the agent panels",
-  run = function()
-    -- Not `fullscreen()`, which is the `<C-f>` TOGGLE: `:Paseo dash` asked for
-    -- the dashboard, and with the dashboard already the default surface a
-    -- toggle would have answered by closing it.
-    require("paseo.ui.chat").surface "float"
-  end,
-}
-
-commands.buf = {
-  desc = "Toggle the chat full screen, in a window of its own",
-  run = function()
-    -- A TOGGLE, where `:Paseo dash` is not. This surface takes the window you
-    -- are standing in, so the key that opened it is the obvious way back to
-    -- the file it covered -- nvim-tree, oil and nvdash all work that way, and
-    -- the alternative was `q`, which is a different key for the same thought.
-    require("paseo.ui.chat").surface("buffer", { toggle = true })
-  end,
-}
-
--- The other name for the same thing: some people reach for what it IS -- a
--- buffer, with a filetype, in the window layout -- and some for where it goes.
--- Same precedent as `sessions`/`agents` and `ws`/`workspaces`.
-commands.tab = commands.buf
-
 commands.native = {
-  desc = "EXPERIMENTAL: the chat in plain splits, one tab page per agent (no volt)",
+  desc = "Toggle the chat full screen: a tab page per agent, every pane a split",
   run = function()
     require("paseo.ui.chat").surface("native", { toggle = true })
   end,
 }
+
+-- `dash`, `buf` and `tab` opened the old volt dashboard's two mounts. That
+-- dashboard is gone and the native surface is what they meant -- the chat,
+-- full screen -- so they open it, and the keys bound to them keep working.
+-- `dash` is not a toggle, as it was not: it asks for the surface.
+commands.dash = {
+  desc = "Open the chat full screen (the native surface)",
+  run = function()
+    require("paseo.ui.chat").surface "native"
+  end,
+}
+commands.buf = commands.native
+commands.tab = commands.native
 
 commands.stop = {
   desc = "Interrupt the turn the current chat's agent is running",

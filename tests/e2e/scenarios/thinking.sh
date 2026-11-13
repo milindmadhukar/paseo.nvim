@@ -19,7 +19,7 @@ kinds="$(q "$turn")"
 
 # Reopened, the same turn renders the same shape (history is projected).
 "$E" keys q
-"$E" wait 'not require("paseo.ui.float").chat()' 10 || fail "chat did not close"
+"$E" wait 'not require("paseo.ui.native").chat()' 10 || fail "chat did not close"
 open_chat
 "$E" wait '#(require("paseo.ui.chat").current().order or {}) > 0' 20 || fail "history did not load"
 [ "$(q "$turn")" = "$kinds" ] || fail "history $(q "$turn") != live $kinds"

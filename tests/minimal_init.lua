@@ -23,8 +23,9 @@ package.path = ("%s/?.lua;%s"):format(root, package.path)
 
 local deps = assert(vim.env.PASEO_TEST_DEPS, "PASEO_TEST_DEPS is not set; run tests/run.sh")
 for name, kind in vim.fs.dir(deps) do
-  -- PASEO_TEST_NOVOLT=1 leaves volt OFF the runtimepath, to prove what runs without it.
-  if kind == "directory" and not (name == "volt" and vim.env.PASEO_TEST_NOVOLT == "1") then
+  -- Never volt, even when an old cache still has it: nothing needs it, and a
+  -- suite that passed only because it was there would prove nothing.
+  if kind == "directory" and name ~= "volt" then
     vim.opt.runtimepath:append(vim.fs.joinpath(deps, name))
   end
 end

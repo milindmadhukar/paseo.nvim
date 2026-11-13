@@ -139,9 +139,9 @@ function M.review(opts, callback)
   local done = false
 
   ---Exactly once, whatever got us here: `q`, `<Esc>`, `c`, a `WinClosed`, or
-  ---a failure before there was ever a window. volt's own `q` routes through
-  ---`after_close`, which is `handle.close`, which is `on_close`, which is
-  ---this -- so the cancel path and the create path meet in one place.
+  ---a failure before there was ever a window. The popup's `q` and `<Esc>` are
+  ---`handle.close`, which calls `on_close`, which is this -- so the cancel
+  ---path and the create path meet in one place.
   local function finish(result, err)
     if done then
       return
@@ -232,7 +232,7 @@ function M.review(opts, callback)
         keys = {
           { "c", create, "paseo: create this agent session" },
         },
-        -- volt owns `q` and `<Esc>`; both land here.
+        -- The popup binds `q` and `<Esc>`; both land here.
         on_close = function()
           finish(nil, nil)
         end,

@@ -133,8 +133,8 @@ function M.open(opts, callback)
   state = popup.open {
     view = view,
     width = width,
-    -- Above the dashboard's 30, which is the whole reason the dashboard sits
-    -- below the z-index a float gets by default.
+    -- With the other popups: above the 50 a float gets by default, below the
+    -- permission dialog.
     zindex = 60,
     title = function(handle)
       local inner = handle.w - (2 * XPAD)

@@ -8,14 +8,12 @@ local go_home = t.go_home
 
 --- The chat window follows a workspace switch.
 ---
---- The bug: with the dashboard up full screen, `<CR>` in the workspace picker
---- moved the editor and left the chat describing the workspace you had just
---- left -- and because a float belongs to the tab page it was opened on, the
---- default `"tab"` switch did not even leave it on screen.
+--- The bug: with the chat up full screen, `<CR>` in the workspace picker moved
+--- the editor and left the chat describing the workspace you had just left.
 local function test_chat_follow()
   local bridge = require "paseo.bridge"
   local chat = require "paseo.ui.chat"
-  local float = require "paseo.ui.float"
+  local native = require "paseo.ui.native"
   local config = require "paseo.config"
   local workspaces = require "paseo.workspaces"
 
@@ -53,42 +51,31 @@ local function test_chat_follow()
     -- Nothing open: changing directory is not a request for a chat.
     eq("follow: no chat open, nothing happens", chat.follow(there), false)
 
-    -- `:Paseo buf` FROM A COLD START LANDS ON ONE SURFACE, not two. With no
-    -- chat yet it opened one on `ui.surface` -- the float -- and then tore it
-    -- down and rebuilt the real surface over the top: one flash of the wrong
-    -- thing per session, and a provider picker opened against a window that
-    -- was about to close.
-    --
-    -- Counted rather than merely checked at the end, because "it is on the
-    -- right surface now" is exactly what the two-step version also answered.
-    local mounts = {}
-    local opened = float.open
-    float.open = function(this, opts)
-      mounts[#mounts + 1] = (opts and opts.mount) or "float"
-      return opened(this, opts)
+    -- `:Paseo buf` FROM A COLD START LANDS ON ONE SURFACE, not two -- and
+    -- `buf` means the native surface now, the old dashboard being gone.
+    -- Counted, because "it is on the right surface now" is exactly what a
+    -- two-step open (default surface first, then the real one) also answered.
+    local opens = 0
+    local opened = native.open
+    native.open = function(...)
+      opens = opens + 1
+      return opened(...)
     end
     chat.surface "buffer"
     truthy(
-      "surface: :Paseo buf with no chat opens one",
+      "surface: :Paseo buf with no chat opens one, on the native surface",
       vim.wait(1000, function()
-        return chat.current() ~= nil and float.mount() == "buffer"
+        return chat.current() ~= nil and native.has(chat.current())
       end)
     )
-    eq("surface: and mounts the surface exactly once", #mounts, 1)
-    eq("surface: on the one that was asked for", mounts[1], "buffer")
-    float.open = opened
+    eq("surface: and opens it exactly once", opens, 1)
+    native.open = opened
 
-    -- AND IT IS A TOGGLE. This surface takes the window you are standing in,
-    -- so the key that opened it is the way back to the file it covered.
+    -- AND IT IS A TOGGLE: the key that opened it is the way back.
     chat.surface("buffer", { toggle = true })
-    truthy("surface: pressing it again closes the surface", not float.is_open(chat.current()))
+    truthy("surface: pressing it again closes the surface", not native.has(chat.current()))
     chat.surface("buffer", { toggle = true })
-    truthy("surface: and a third press brings it back", float.is_open(chat.current()))
-    -- A toggle only ever answers the surface it names: the float is a
-    -- different one, and asking for it while the buffer surface is up is a
-    -- swap, never a close.
-    chat.surface("float", { toggle = true })
-    eq("surface: asking for the OTHER surface swaps rather than closes", float.mount(), "float")
+    truthy("surface: and a third press brings it back", native.has(chat.current()))
     chat.close()
     chat.forget()
 
@@ -100,7 +87,7 @@ local function test_chat_follow()
           and chat.current().agent_id == "agent-" .. vim.fs.basename(here)
       end)
     )
-    truthy("follow: on the full-screen surface", float.is_open(chat.current()))
+    truthy("follow: on the full-screen surface", native.has(chat.current()))
 
     -- The bug, directly: the open window must end up on the new workspace.
     truthy("follow: an open chat follows the switch", chat.follow(there))
@@ -111,35 +98,16 @@ local function test_chat_follow()
       end)
     )
     eq("follow: and its root came with it", chat.current().root, there)
-    truthy("follow: still on the full-screen surface", float.is_open(chat.current()))
-
-    -- A float belongs to the tab page it was opened on, so the surface has to
-    -- be rebuilt on the tab you are now standing on -- not merely refocused.
-    local tabs = #vim.api.nvim_list_tabpages()
-    local came_from = vim.api.nvim_get_current_tabpage()
-    vim.cmd.tabnew()
-    local landed_on = vim.api.nvim_get_current_tabpage()
-    chat.follow(here)
-    eq(
-      "follow: the surface is rebuilt on the tab you are on now",
-      vim.api.nvim_win_get_tabpage(chat.current().win_conversation),
-      landed_on
-    )
-    truthy("follow: which is not the one it was opened on", landed_on ~= came_from)
-    truthy("follow: and it is genuinely open there", float.is_open(chat.current()))
+    truthy("follow: still on the full-screen surface", native.has(chat.current()))
     chat.close()
-    if vim.api.nvim_tabpage_is_valid(landed_on) then
-      vim.api.nvim_set_current_tabpage(landed_on)
-      vim.cmd.tabclose()
-    end
-    eq("follow: without leaking the tab", #vim.api.nvim_list_tabpages(), tabs)
+    native.reset()
 
     -- THE CRASH. Closing the surface from a tab page other than its own left
     -- the tab it was on pointing at a window that no longer existed; the next
     -- `:tabclose` died with `E315: ml_get: Invalid lnum`, or took the process
     -- down outright. It predates the follow -- open the chat, `gt`, close it --
     -- but the `"tab"` switch does exactly that shape of thing every time.
-    tabs = #vim.api.nvim_list_tabpages()
+    local tabs = #vim.api.nvim_list_tabpages()
     chat.open { root = here }
     vim.wait(200)
     vim.cmd.tabnew()
@@ -426,14 +394,14 @@ end
 
 --- The surface is yours, not the conversation's.
 ---
---- The bug: from the buffer dashboard, switching to a workspace whose chat had
---- been open before landed you on a float. `float.close` clears
---- `chat.surface`, and the chat `agent.find` handed back -- one this session
---- already knew -- was laid out with nothing to go on but `ui.surface`.
+--- The bug: switching to a workspace whose chat had been open before landed
+--- you on the default surface, whatever you had been on -- the chat
+--- `agent.find` handed back was laid out with nothing to go on but
+--- `ui.surface`.
 local function test_surface_memory()
   local bridge = require "paseo.bridge"
   local chat = require "paseo.ui.chat"
-  local float = require "paseo.ui.float"
+  local native = require "paseo.ui.native"
   local sidebar = require "paseo.ui.sidebar"
   local surface = require "paseo.ui.surface"
   local config = require "paseo.config"
@@ -467,32 +435,31 @@ local function test_surface_memory()
       end)
     end
 
-    chat.open { root = here, surface = "buffer" }
-    truthy("surface memory: opened on the buffer dashboard", on(here) and float.mount() == "buffer")
+    -- The sidebar first, because the native surface is the default and a
+    -- memory that only ever answers the default proves nothing.
+    chat.open { root = here, surface = "sidebar" }
+    truthy("surface memory: opened on the sidebar", on(here) and sidebar.is_open(chat.current()))
     chat.follow(there)
-    truthy("surface memory: a new workspace keeps the buffer dashboard", on(there) and float.mount() == "buffer")
+    truthy("surface memory: a new workspace keeps the sidebar", on(there) and sidebar.is_open(chat.current()))
     -- The reported one: back to a chat this session has already seen.
     chat.follow(here)
     truthy("surface memory: so does one you have been to before", on(here))
-    eq("surface memory: and it is still the buffer dashboard", float.mount(), "buffer")
+    truthy("surface memory: and it is still the sidebar", sidebar.is_open(chat.current()))
+    eq("surface memory: not the native surface", native.has(chat.current()), false)
 
     -- Closed and reopened: the surface you left on, not the default.
     chat.close()
     chat.forget()
     chat.open { root = there }
-    truthy("surface memory: reopening comes back on the buffer dashboard", on(there) and float.mount() == "buffer")
+    truthy("surface memory: reopening comes back on the sidebar", on(there) and sidebar.is_open(chat.current()))
 
-    -- The sidebar is remembered the same way, through a follow to a known chat.
-    chat.surface "sidebar"
-    truthy("surface memory: onto the sidebar", sidebar.is_open(chat.current()) and float.mount() == nil)
-    chat.follow(here)
-    truthy("surface memory: a workspace switch keeps the sidebar", on(here))
-    eq("surface memory: and is not a dashboard", float.mount(), nil)
-    truthy("surface memory: but the sidebar", sidebar.is_open(chat.current()))
-
-    -- `<C-f>` from the sidebar goes back to the dashboard you came from.
+    -- `<C-f>` from the sidebar goes full screen: the native surface.
     chat.fullscreen()
-    eq("surface memory: <C-f> from the sidebar returns to the buffer dashboard", float.mount(), "buffer")
+    truthy("surface memory: <C-f> from the sidebar goes full screen", native.has(chat.current()))
+    chat.surface "sidebar"
+    truthy("surface memory: and back onto the sidebar", sidebar.is_open(chat.current()))
+    chat.follow(here)
+    truthy("surface memory: then home", on(here))
 
     -- COMING BACK TO A WORKSPACE: the draft you left in its composer is still
     -- there, and the conversation is at its END, not wherever you had last

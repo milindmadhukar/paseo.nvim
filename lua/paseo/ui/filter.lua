@@ -12,12 +12,10 @@
 --- filter off, and under a custom `vim.ui.input` (dressing, noice, snacks) it
 --- is somebody else's window entirely, opened wherever they put it.
 ---
---- The window is ONE ROW and never grows. The panel underneath is drawn by
---- volt, which records each section's start row when the layout is measured
---- and writes extmarks at those rows without clearing anything -- but this is
---- a window of our own floated over it, so it cannot disturb that. What it
---- must not do is take the panel's keys: `<Esc>` and `<CR>` end it, and
---- everything else is text.
+--- The window is ONE ROW and never grows. It is a window of our own floated
+--- over the panel, so the panel redrawing underneath at every keystroke cannot
+--- disturb it. What it must not do is take the panel's keys: `<Esc>` and
+--- `<CR>` end it, and everything else is text.
 
 local api = vim.api
 
@@ -38,7 +36,7 @@ local function finish(text)
 
   -- Out of insert BEFORE the window goes. A window closed from insert mode
   -- leaves the editor in insert in whatever window it lands on next, which
-  -- here is the chrome -- a buffer that is not modifiable, so the next
+  -- here is the panel -- a buffer that is not modifiable, so the next
   -- keystroke answers with `E21`.
   if api.nvim_get_mode().mode ~= "n" then
     pcall(vim.cmd.stopinsert)
@@ -113,7 +111,7 @@ function M.open(opts, handlers)
     height = 1,
     style = "minimal",
     border = "rounded",
-    -- Above the dashboard's panes -- it is floated over the list it filters --
+    -- Above the surface's windows -- it is floated over the list it filters --
     -- and below the permission dialog, which must never end up behind a box
     -- somebody is typing in.
     zindex = 60,

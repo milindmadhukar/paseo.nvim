@@ -305,7 +305,8 @@ function M.open(parent)
     height = 3,
     style = "minimal",
     border = edge,
-    -- Over the dashboard, which sits at `ui.float.zindex` and its panes above.
+    -- `ui.float.zindex` plus the room the old dashboard's panes took above it:
+    -- over an ordinary float, under the permission dialog.
     zindex = (require("paseo.config").get().ui.float.zindex or 40) + 20,
   })
   for option, value in pairs {

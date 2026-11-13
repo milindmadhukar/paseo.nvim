@@ -76,7 +76,7 @@ local function test_layout()
 end
 
 local function test_toggle()
-  local float = require "paseo.ui.float"
+  local native = require "paseo.ui.native"
   local rail = require "paseo.ui.rail"
   local bridge = require "paseo.bridge"
   local agents = require "paseo.agents"
@@ -91,6 +91,7 @@ local function test_toggle()
     list = workspaces.list,
     here = workspaces.here,
     open = workspaces.open,
+    open_workspace = native.open_workspace,
     state = vim.env.XDG_STATE_HOME,
   }
   vim.env.XDG_STATE_HOME = vim.fn.tempname()
@@ -117,6 +118,10 @@ local function test_toggle()
     workspaces.open = function(ws)
       opened = ws
     end
+    -- On a native tab a workspace opens its agent in a tab of its own.
+    native.open_workspace = function(ws)
+      opened = ws
+    end
 
     local chat = {
       root = vim.uv.cwd(),
@@ -130,7 +135,7 @@ local function test_toggle()
     transcript.reset(chat)
 
     truthy("rail: shown by default", rail.visible())
-    float.open(chat)
+    native.open(chat)
     -- The list lands on the next tick.
     vim.wait(200, function()
       return rail.current() ~= nil or (rail.win() and api.nvim_buf_line_count(api.nvim_win_get_buf(rail.win())) > 3)
@@ -139,14 +144,15 @@ local function test_toggle()
     truthy("rail: the window is up", win ~= nil)
     eq("rail: and the cursor stayed in the composer", api.nvim_get_current_buf(), chat.composer)
 
-    local config = api.nvim_win_get_config(win)
-    local composer = api.nvim_win_get_config(chat.win_composer)
-    truthy("rail: left of the conversation", config.col + config.width < composer.col)
+    local rail_col = api.nvim_win_get_position(win)[2]
+    local composer_col = api.nvim_win_get_position(chat.win_composer)[2]
+    local composer_width = api.nvim_win_get_width(chat.win_composer)
+    truthy("rail: left of the conversation", rail_col + api.nvim_win_get_width(win) < composer_col)
     local text = table.concat(api.nvim_buf_get_lines(api.nvim_win_get_buf(win), 0, -1, false), "\n")
     truthy("rail: lists the project's workspaces", text:find("alpha", 1, true) and text:find("beta", 1, true), text)
 
     -- Into it, down a row, and open.
-    float.focus_rail()
+    native.focus_rail()
     eq("rail: the focus key lands in it", api.nvim_get_current_win(), win)
     local first = rail.current()
     truthy("rail: on a workspace, not the heading", first ~= nil)
@@ -154,35 +160,37 @@ local function test_toggle()
     truthy("rail: j moves to the next workspace", rail.current() and rail.current() ~= first)
     rail.open_current()
     eq("rail: <CR> opens the one under the cursor", opened and opened.name, rail.current().name)
+    api.nvim_set_current_win(chat.win_composer)
 
     -- Toggle off: the window goes, the panes take the room back, and the
     -- choice is remembered for the next session.
-    float.toggle_rail()
-    eq("rail: toggled off, the window is gone", rail.win(), nil)
+    native.toggle_rail()
+    truthy("rail: toggled off, the window is gone", not (win and api.nvim_win_is_valid(win)))
     truthy("rail: and focus went back to the composer", api.nvim_get_current_buf() == chat.composer)
-    local wide = api.nvim_win_get_config(chat.win_composer)
-    truthy("rail: the composer moved left into the room", wide.col < composer.col and wide.width > composer.width)
+    truthy(
+      "rail: the composer moved left into the room",
+      api.nvim_win_get_position(chat.win_composer)[2] < composer_col
+        and api.nvim_win_get_width(chat.win_composer) > composer_width
+    )
     rail.reset()
     eq("rail: the toggle is remembered across restarts", rail.visible(), false)
 
-    float.toggle_rail()
-    truthy("rail: and back on", rail.win() ~= nil)
-    float.close()
-    eq("rail: closing the dashboard takes the rail with it", rail.win(), nil)
-
-    -- Too narrow: no rail at all, and the panes keep their old geometry.
-    vim.o.columns = 80
-    float.open(chat)
-    eq("rail: none on a narrow surface", rail.win(), nil)
-    float.close()
+    native.toggle_rail()
+    truthy("rail: and back on", rail.win() ~= nil and api.nvim_win_is_valid(rail.win()))
+    eq("rail: and remembered as on", (function()
+      rail.reset()
+      return rail.visible()
+    end)(), true)
+    native.close(chat)
   end)
 
   vim.o.columns, vim.o.lines = saved.columns, saved.lines
   bridge.running, agents.watch = saved.running, saved.watch
   workspaces.list, workspaces.here, workspaces.open = saved.list, saved.here, saved.open
+  native.open_workspace = saved.open_workspace
   vim.env.XDG_STATE_HOME = saved.state
   rail.reset()
-  pcall(float.close)
+  pcall(native.reset)
   if not ok then
     error(failure, 0)
   end
@@ -190,9 +198,9 @@ end
 
 local function test_current()
   local rail = require "paseo.ui.rail"
-  local float = require "paseo.ui.float"
+  local native = require "paseo.ui.native"
   local agents = require "paseo.agents"
-  local saved = { chat = float.chat, get = agents.get }
+  local saved = { chat = native.chat, get = agents.get }
   local dir = vim.fn.tempname()
   vim.fn.mkdir(dir, "p")
   local list = {
@@ -201,7 +209,7 @@ local function test_current()
     { id = "ws-3", name = "other", directory = dir .. "-other" },
   }
   local ok, failure = pcall(function()
-    float.chat = function()
+    native.chat = function()
       return { agent_id = "a", host_id = "local", root = dir }
     end
     agents.get = function()
@@ -212,19 +220,19 @@ local function test_current()
       return { id = "a", cwd = dir }
     end
     eq("rail: without an id, the first on the directory -- and only it", rail.current_index(list), 1)
-    float.chat = function()
+    native.chat = function()
       return { host_id = "local", root = dir .. "-other" }
     end
     eq("rail: a draft is on the directory it was opened in", rail.current_index(list), 3)
   end)
-  float.chat, agents.get = saved.chat, saved.get
+  native.chat, agents.get = saved.chat, saved.get
   if not ok then
     error(failure, 0)
   end
 end
 
 local function test_sessions()
-  local float = require "paseo.ui.float"
+  local native = require "paseo.ui.native"
   local rail = require "paseo.ui.rail"
   local bridge = require "paseo.bridge"
   local agents = require "paseo.agents"
@@ -308,7 +316,7 @@ local function test_sessions()
       composer = api.nvim_create_buf(false, true),
     }
     transcript.reset(chat)
-    float.open(chat)
+    native.open(chat)
     local function text()
       return rail.win() and table.concat(api.nvim_buf_get_lines(api.nvim_win_get_buf(rail.win()), 0, -1, false), "\n") or ""
     end
@@ -324,7 +332,7 @@ local function test_sessions()
 
 
     -- <C-s>: into the rail, on the session on screen.
-    float.focus_sessions()
+    native.focus_rail()
     eq("rail: the sessions key lands in the rail", api.nvim_get_current_win(), rail.win())
     eq("rail: on the agent on screen", rail.current_session() and rail.current_session().item.id, "s-1")
     vim.api.nvim_feedkeys("j", "x", false)
@@ -342,7 +350,7 @@ local function test_sessions()
     truthy("rail: l opens another workspace's sessions", text():find("other agent", 1, true), text())
     rail.expand(false)
     truthy("rail: and h closes them", not text():find("other agent", 1, true), text())
-    float.close()
+    native.close(chat)
   end)
 
   vim.o.columns, vim.o.lines = saved.columns, saved.lines
@@ -352,7 +360,7 @@ local function test_sessions()
   workspaces.list, workspaces.here = saved.list, saved.here
   vim.env.XDG_STATE_HOME = saved.state
   rail.reset()
-  pcall(float.close)
+  pcall(native.reset)
   if not ok then
     error(failure, 0)
   end

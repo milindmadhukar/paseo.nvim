@@ -12,10 +12,9 @@
 --- as a correctly rendered screen, with colour, cursor and reflow, for free.
 --- Keystrokes come back through the channel's `on_input` and go to the daemon.
 ---
---- This is the one surface in the plugin that is neither volt nor
---- |paseo.ui.render|. Both of those draw cells into lines; a terminal draws
---- itself, and the right amount of code between the daemon and the screen is
---- none.
+--- This is the one surface in the plugin that is not |paseo.ui.render|. That
+--- draws cells into lines; a terminal draws itself, and the right amount of
+--- code between the daemon and the screen is none.
 ---
 --- A REGISTRY, NOT A VIEW. This used to hold one terminal at a time in a
 --- module-local, and `open` closed whatever was there first -- so two Paseo
@@ -23,7 +22,7 @@
 --- the old Terminals tab feel like a demo. What is per TERMINAL (a buffer, a
 --- libvterm channel, a subscription on the daemon) lives here, keyed by id.
 --- What is per WINDOW belongs to whatever is showing it -- see
---- |paseo.ui.float|, which floats it over the Chat tab.
+--- |paseo.ui.native|, which gives it a tab page of its own.
 
 local bridge = require "paseo.bridge"
 local hosts = require "paseo.hosts"

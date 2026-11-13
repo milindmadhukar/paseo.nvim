@@ -1,18 +1,13 @@
 --- One line vocabulary, two sinks.
 ---
---- A CELL is `{ text, highlight }` and a LINE is a list of cells -- exactly the
---- shape volt's `draw` consumes, so the same builder feeds both surfaces:
+--- A CELL is `{ text, highlight }` and a LINE is a list of cells, so the same
+--- builder feeds every surface:
 ---
----   * `to_volt`   -- hand the lines to volt, which draws them as `virt_text`
----                    extmarks. Used for the header, the panels and the
----                    permission dialog: fixed-size chrome.
 ---   * `to_buffer` -- write the lines as REAL buffer text and colour them with
----                    one extmark per cell. Used for the transcript.
----
---- Why the transcript is not volt: volt renders virtual text, and virtual text
---- cannot be yanked, searched with `/`, or soft-wrapped. For a header that is
---- irrelevant; for an agent's reply with a code block in it, it is the
---- difference between a UI and a picture of one.
+---                    one extmark per cell. Everything: the transcript, the
+---                    panels, the rail, popups and dialogs. Real text can be
+---                    yanked, searched with `/` and soft-wrapped.
+---   * `to_winbar` -- one line as a 'winbar'/'statusline' string.
 
 local M = {}
 
@@ -279,7 +274,7 @@ end
 ---shows you the same card you would have seen it run as.
 ---
 ---Honours `ui.style` like every other card, so the transcript and the
----dashboard cannot drift apart again. The two framed styles put the header IN
+---panels cannot drift apart again. The two framed styles put the header IN
 ---the top border; the two unframed ones replace the frame with a one-column
 ---accent bar down the left edge, carrying the same colour the border would
 ---have -- which is how a failed card still reads as failed without a box
@@ -370,29 +365,9 @@ end
 
 -- ------------------------------------------------------------------- the sinks
 
----Hand lines to volt.
----
----This DEEP COPIES, and that is not defensive style -- it is required.
----`volt/draw.lua:42` runs `table.remove(marks, 3)` over the lines it is given,
----permanently stripping the third element from every cell. Hand volt a table
----you intend to reuse and the actions vanish from it after the first draw, so
----the second redraw of a panel silently loses every click target.
----@param lines table[][]
----@return table[][]
-function M.to_volt(lines)
-  local out = {}
-  for i, line in ipairs(lines) do
-    -- flatten() already builds new cell tables, so this is the deep copy too.
-    out[i] = M.flatten(line)
-  end
-  return out
-end
-
 ---Render one line into a `winbar`/`statusline` string.
 ---
----The third sink, and the cheapest: the sidebar's header needs no window and no
----buffer of its own, which also means it cannot collide with volt's
----`modifiable = false`.
+---The cheapest sink: the header needs no window and no buffer of its own.
 ---@param line table[]
 ---@return string
 function M.to_winbar(line)
@@ -433,6 +408,13 @@ function M.to_buffer(buf, ns, first, last, lines)
 
   local modifiable = vim.bo[buf].modifiable
   vim.bo[buf].modifiable = true
+  -- A redraw TO THE END replaces everything from `first` on, and its old
+  -- highlights must go with it: `nvim_buf_set_lines` does not delete
+  -- extmarks, it collapses them onto the rows that remain -- so a layout that
+  -- shrank kept every highlight of the rows it lost, stacked at its end.
+  if last == -1 then
+    api.nvim_buf_clear_namespace(buf, ns, first, -1)
+  end
   api.nvim_buf_set_lines(buf, first, last, false, text)
 
   for i, line in ipairs(lines) do

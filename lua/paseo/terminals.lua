@@ -32,7 +32,7 @@ local terminals = {}
 local roots = {}
 ---Roots already subscribed. Per root rather than a single flag: the daemon
 ---reports terminals per DIRECTORY, so watching one workspace tells you nothing
----about another, and a plain boolean would make the second dashboard you open
+---about another, and a plain boolean would make the second workspace you open
 ---look empty.
 ---@type table<string, boolean>
 local watched = {}
@@ -116,7 +116,7 @@ function M.watch(root, callback, host_id)
     return callback(nil)
   end
   -- Marked before the round trip, not after. `M.lines` calls this on every
-  -- redraw, and a dashboard repaints many times before the first response
+  -- redraw, and a surface repaints many times before the first response
   -- lands -- so waiting for the answer would queue a subscription per frame.
   watched[watch_key] = true
 
@@ -341,12 +341,12 @@ end
 
 ---A redraw of whatever surface is showing terminals, if any.
 ---
----The directory has no idea what is drawing it, and should not: `float` is the
----only surface left that does, and it answers a no-op when it is shut.
+---The directory has no idea what is drawing it, and should not: the native
+---surface's panels are what does, and they answer a no-op when none is up.
 local function repaint()
   vim.schedule(function()
     pcall(function()
-      require("paseo.ui.float").rebuild()
+      require("paseo.ui.native").redraw_panels()
     end)
   end)
 end

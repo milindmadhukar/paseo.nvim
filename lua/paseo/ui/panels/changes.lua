@@ -56,12 +56,10 @@ local function sections(chat)
             { repos.relative(repo, change.path) or change.path, "PaseoPath" },
           },
           activate = function()
-            -- The dashboard closes on the way. A file opened underneath a
-            -- full-screen float is a file you cannot see, and this panel
-            -- exists to answer "what did it just edit" -- an answer you then
-            -- want to READ.
-            require("paseo.ui.float").close()
-            vim.cmd.edit(vim.fn.fnameescape(file))
+            -- In a tab of its own: the panel is a split on the agent's tab,
+            -- and editing over it would take the panel's window. The agent's
+            -- tab stays where it was, a `gT` away.
+            vim.cmd.tabedit(vim.fn.fnameescape(file))
           end,
         }
       end
@@ -110,7 +108,7 @@ local function view_for(chat)
   if not view or view.source.chat ~= chat then
     view = list.new(source(chat), {
       redraw = function()
-        require("paseo.ui.float").rebuild()
+        require("paseo.ui.native").redraw_panels()
       end,
     })
   end

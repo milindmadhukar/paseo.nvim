@@ -12,37 +12,45 @@
 ---
 --- So there is one answer, held here, and it is asked in one order:
 ---
----   1. what the caller asked for -- `:Paseo buf`, `:Paseo sidebar`, `<C-f>`;
----   2. what is ON SCREEN right now -- a session picked from the dashboard
----      stays on the dashboard you picked it from;
+---   1. what the caller asked for -- `:Paseo native`, `:Paseo sidebar`,
+---      `<C-f>`;
+---   2. what is ON SCREEN right now -- a session picked from the rail stays
+---      on the native surface you picked it from;
 ---   3. what you last put a chat on -- across a close, a tab switch, a
 ---      workspace switch;
 ---   4. `ui.surface`, when nothing has been on screen yet this session.
 ---
---- Writes come from the surfaces themselves (|paseo.ui.float|.open and
+--- There are two surfaces: the native one (a tab page per agent) and the
+--- sidebar. `"float"` and `"buffer"` named the old volt dashboard's two mounts;
+--- both resolve to the native surface now.
+---
+--- Writes come from the surfaces themselves (|paseo.ui.native|.open and
 --- |paseo.ui.sidebar|.open), so whatever put a chat on screen -- a command, a
 --- key, a test -- is recorded the same way, and nothing has to remember to.
 
 local M = {}
 
----@alias paseo.SurfaceName "float"|"sidebar"|"buffer"
+---@alias paseo.SurfaceName "native"|"sidebar"
 
 ---@type paseo.SurfaceName|nil
 local last
 
----The last DASHBOARD mount, kept apart from `last`: from the sidebar, `<C-f>`
----goes back to the dashboard you came from, and `last` says "sidebar" there.
----@type "float"|"buffer"|nil
-local last_dashboard
+---What a name means now: the old dashboard's two mounts are the native surface.
+---@param name string|nil
+---@return paseo.SurfaceName|nil
+local function normalise(name)
+  if name == "float" or name == "buffer" then
+    return "native"
+  end
+  return name
+end
 
 ---Record that a chat was just put on `name`.
 ---@param name paseo.SurfaceName
 function M.remember(name)
-  if name == "float" or name == "sidebar" or name == "buffer" or name == "native" then
+  name = normalise(name)
+  if name == "sidebar" or name == "native" then
     last = name
-  end
-  if name == "float" or name == "buffer" then
-    last_dashboard = name
   end
 end
 
@@ -52,20 +60,15 @@ function M.last()
   return last
 end
 
----The surface showing a chat right now, on any tab page.
+---The surface showing a chat right now, on the tab page you are on.
 ---@return paseo.SurfaceName|nil
 function M.on_screen()
-  local mount = require("paseo.ui.float").mount()
-  if mount then
-    return mount
-  end
   -- A native tab is on screen when it is the tab you are on.
   local native = package.loaded["paseo.ui.native"]
   if native and native.chat() then
     return "native"
   end
-  -- No dashboard is up, so a live conversation window is the sidebar's: the
-  -- dashboard's panes use the same field and are gone with it. Only the
+  -- A live conversation window off a native tab is the sidebar's. Only the
   -- current chat can hold one -- every open goes through `current`.
   local chat = require("paseo.ui.chat").current()
   if chat and require("paseo.ui.sidebar").is_open(chat) then
@@ -75,31 +78,15 @@ function M.on_screen()
 end
 
 ---Where a chat goes. See the header for the order.
----@param explicit? paseo.SurfaceName
+---@param explicit? string
 ---@return paseo.SurfaceName
 function M.resolve(explicit)
-  return explicit or M.on_screen() or last or require("paseo.config").get().ui.surface
-end
-
----The DASHBOARD you would get, for the callers that need the dashboard in
----particular -- the Sessions list exists nowhere else, and `<C-f>` from the
----sidebar goes to one. The mount on screen, else the last one you used, else
----the configured one if it is a dashboard, else the float.
----@return "float"|"buffer"
-function M.dashboard()
-  local mount = require("paseo.ui.float").mount()
-  if mount then
-    return mount
-  end
-  if last_dashboard then
-    return last_dashboard
-  end
-  return require("paseo.config").get().ui.surface == "buffer" and "buffer" or "float"
+  return normalise(explicit) or M.on_screen() or last or normalise(require("paseo.config").get().ui.surface)
 end
 
 ---For the tests.
 function M.reset()
-  last, last_dashboard = nil, nil
+  last = nil
 end
 
 return M

@@ -9,11 +9,10 @@ set -euo pipefail
 dir="${1:?usage: deps.sh <dir>}"
 mkdir -p "$dir"
 
-# Floating on the default branch on purpose: volt is a hard dependency that
-# moves, and a pinned SHA would turn "upstream broke us" into a surprise at
-# release time instead of a red run.
+# Floating on the default branch on purpose: a pinned SHA would turn
+# "upstream broke us" into a surprise at release time instead of a red run.
+# (No UI library: every surface is plain buffers.)
 repos=(
-  nvzone/volt                     # the chat UI; not optional
   lewis6991/gitsigns.nvim         # the hunk under the cursor
   nvim-telescope/telescope.nvim   # the pickers
   nvim-lua/plenary.nvim           # telescope's own dependency

@@ -66,9 +66,9 @@ local initialise
 
 ---Repaint the header.
 ---
----The header itself lives in `ui/sidebar.lua`, and the float draws the same
----cells, so the two surfaces cannot drift into disagreeing about which mode the
----agent session is in.
+---The header itself lives in `ui/sidebar.lua`, and the native surface draws
+---from the same builders, so the two surfaces cannot drift into disagreeing
+---about which mode the agent session is in.
 ---@param chat paseo.Chat
 local function set_winbar(chat)
   sidebar.refresh(chat)
@@ -97,7 +97,7 @@ end
 
 ---Fold a settings payload into a chat, and repaint.
 ---
----Also patches `config_snapshot`, which the Agent panel draws its `●` from.
+---Also patches `config_snapshot`, which the Settings panel draws its `●` from.
 ---Leaving that stale meant the header could report a mode the panel below it
 ---still marked as something else.
 ---
@@ -109,8 +109,8 @@ end
 ---@param payload table
 function M.apply_settings(chat, payload)
   local snapshot = chat.config_snapshot
-  -- The Agent panel draws modes, thinking levels, models and features, and
-  -- redrawing it is a full volt regeneration. It is gated on a real CHANGE
+  -- The Settings panel draws modes, thinking levels, models and features, and
+  -- redrawing it rebuilds the whole panel. It is gated on a real CHANGE
   -- rather than on a field being present, because this payload arrives on
   -- every usage tick -- seven times in one short turn, measured -- and the
   -- mode is in all of them.
@@ -190,11 +190,11 @@ function M.apply_settings(chat, payload)
   end
 
   set_winbar(chat)
-  -- The dashboard draws the Agent panel from the snapshot above, and nothing
-  -- else asks it to redraw. Cheap when it is closed: `rebuild` returns early.
+  -- The panels draw from the snapshot above, and nothing else asks them to
+  -- redraw. Cheap when none is up.
   if panel then
     pcall(function()
-      require("paseo.ui.float").rebuild()
+      require("paseo.ui.native").redraw_panels()
     end)
   end
 end
@@ -582,37 +582,17 @@ end
 
 ---The session list, from wherever you are.
 ---
----`<C-s>`'s one meaning. On the dashboard that is a tab; from the sidebar it
----is the dashboard, opened on that tab -- which is the same answer, because
----the list only exists there.
----
----`mount()` rather than `is_open`, which is TAB-AWARE: with
----`ui.buffer.open = "tab"`, or simply from another tab page, `is_open` said no
----about a dashboard that was up, and this then hardcoded a float AND wrote
----`"float"` onto `chat.surface` -- so the one key that gets you to this list
----was also the key that moved you off the buffer mount for good.
+---`<C-s>`'s one meaning: the sessions, which are the rail. On a native tab
+---that is the rail beside you; from the sidebar it is the native surface,
+---opened for this chat, with the cursor in its rail.
 ---@param chat paseo.Chat
 function M.sessions(chat)
   local native = require "paseo.ui.native"
-  if native.is_open(chat) then
-    -- The rail IS the session list here.
-    return native.focus_rail()
-  end
-  local float = require "paseo.ui.float"
-  local mount = float.mount()
-  if not mount then
-    -- Nothing up at all, so there is no mount to inherit and one has to be
-    -- named: the dashboard you last used, not a literal `"float"` -- and the
-    -- sidebar's answer is still the dashboard, because that is the only place
-    -- this list exists.
-    mount = require("paseo.ui.surface").dashboard()
+  if not native.is_open(chat) then
     sidebar.close(chat)
-    float.open(chat, { mount = mount })
-  elseif not float.is_open(chat) then
-    float.open(chat, { mount = mount })
+    native.open(chat)
   end
-  -- The sessions, in the rail: there is no Sessions tab.
-  float.focus_sessions()
+  return native.focus_rail()
 end
 
 -- ------------------------------------------------------------------- images
@@ -685,10 +665,6 @@ end
 ---caller should not have to know which one is up.
 ---@param chat paseo.Chat
 local function fit_composer(chat)
-  local float = require "paseo.ui.float"
-  if float.is_open(chat) then
-    return float.resize_composer(chat)
-  end
   sidebar.fit_composer(chat)
 end
 
@@ -752,9 +728,6 @@ local named = 0
 ---into THAT buffer rather than displacing it -- so the second session's
 ---composer quietly became somebody's source file, with the chat still holding
 ---its id and still writing your draft into it.
----
----The same counter `ui/float.lua` gives the chrome buffer, for the same
----reason and with the same shape.
 ---@param buf integer
 ---@param prefix string
 ---@param root string
@@ -848,10 +821,11 @@ local function make_buffers(chat)
 
     -- ALT-ENTER, and not `<C-s>`. `<CR>` from insert mode is a newline, so a
     -- second key is needed for "send it while I am still typing" -- and the
-    -- key that used to be was `<C-s>`, which means THE SESSION LIST on the
-    -- chrome, in every terminal and in the session strip drawn four rows above
-    -- this box. One key with two meanings, one of them advertised on screen
-    -- directly over the other. `<C-CR>` is bound beside it for terminals that
+    -- key that used to be was `<C-s>`, which means THE SESSION LIST
+    -- everywhere else -- in every terminal, on the rail, and (on the old
+    -- dashboard) in the session strip drawn four rows above this box. One key
+    -- with two meanings, one of them advertised on screen directly over the
+    -- other. `<C-CR>` is bound beside it for terminals that
     -- speak the kitty keyboard protocol, where it is the more natural chord;
     -- terminals that do not send it simply never deliver it, and `<M-CR>` is
     -- the one that works everywhere.
@@ -908,8 +882,9 @@ local function make_buffers(chat)
     end, vim.tbl_extend("force", opts, { desc = "paseo: send the other way (queue / now)" }))
 
     -- And `<C-s>` means here what it means everywhere else: the session list.
-    -- From the box that is a surface change, so it opens the dashboard on that
-    -- tab rather than doing nothing when the dashboard is not up.
+    -- From the sidebar's box that is a surface change: it opens the native
+    -- surface with the cursor in its rail, rather than doing nothing when no
+    -- rail is up.
     local sessions_key = config.get().ui.terminal.keys.sessions
     if sessions_key then
       vim.keymap.set({ "n", "i" }, sessions_key, function()
@@ -1027,15 +1002,11 @@ end
 
 ---Is this chat on screen, on any surface?
 ---
----The float/buffer mounts answer through `float.showing`, which also notices a
----chrome window that went away without us. The sidebar has no state object, so
----its answer is the conversation window itself.
+---A native tab answers for itself. The sidebar has no state object, so its
+---answer is the conversation window itself.
 ---@param chat paseo.Chat
 ---@return boolean
 function M.showing(chat)
-  if require("paseo.ui.float").showing(chat) then
-    return true
-  end
   if require("paseo.ui.native").has(chat) then
     return true
   end
@@ -1047,7 +1018,7 @@ end
 ---`ui.surface`.
 ---
 ---It used to read `chat.surface` first and the default last, and `chat.surface`
----is cleared whenever the dashboard closes -- so every path that closes one
+---was cleared whenever the dashboard closed -- so every path that closes one
 ---chat's surface and opens another's (following you to a workspace you had
 ---been to, adopting an agent `agent.find` already knew) fell through to the
 ---default and turned the buffer dashboard or the sidebar into a float.
@@ -1061,22 +1032,13 @@ local function layout(chat, explicit)
     -- `sidebar.close` closes the chat's windows WHEREVER they are, and on a
     -- native tab they are the tab.
     if not native.has(chat) then
-      require("paseo.ui.float").close()
       sidebar.close(chat)
     end
     native.open(chat)
     transcript.to_bottom(chat)
     return
   end
-  -- Two mounts of ONE module. The dashboard is the same surface floating over
-  -- your code or sitting in a window of its own -- same chrome, same tabs,
-  -- same panes -- so the name goes in as the mount rather than picking
-  -- between two implementations of it.
-  if surface == "float" or surface == "buffer" then
-    require("paseo.ui.float").open(chat, { mount = surface })
-  else
-    sidebar.open(chat)
-  end
+  sidebar.open(chat)
   -- AT THE END, NOT WHERE YOU LEFT IT. A window put back on a conversation
   -- buffer gets that buffer's last cursor position, so coming back to a
   -- workspace -- or reopening a chat at all -- showed whatever you had last
@@ -1434,9 +1396,9 @@ function M.open(opts, callback)
     layout(chat, opts.surface)
   end
   if opts.focus ~= false and chat.win_composer and vim.api.nvim_win_is_valid(chat.win_composer) then
-    -- Not unconditional: the dashboard on any tab but Chat has no composer
-    -- window at all, and `nvim_set_current_win(nil)` is an error rather than a
-    -- no-op.
+    -- Not unconditional: the composer window need not be up, and
+    -- `nvim_set_current_win(nil)` is an error rather than a no-op. (On the old
+    -- dashboard it was missing on every tab but Chat.)
     vim.api.nvim_set_current_win(chat.win_composer)
   end
 
@@ -1673,7 +1635,6 @@ function M.close()
   if native.has(chat) then
     return native.close(chat)
   end
-  require("paseo.ui.float").close()
   sidebar.close(chat)
 end
 
@@ -1686,10 +1647,6 @@ end
 ---@param chat table
 ---@return boolean
 local function visible(chat)
-  -- Already tab-aware.
-  if require("paseo.ui.float").is_open(chat) then
-    return true
-  end
   if require("paseo.ui.native").has(chat) then
     return require("paseo.ui.native").is_open(chat)
   end
@@ -1719,26 +1676,26 @@ end
 
 ---Re-point an OPEN chat at another directory.
 ---
----The bug this fixes: with the dashboard up full screen, switching workspace
----left it showing the previous workspace's agent. The window is the one thing
----on screen and it was describing somewhere you are no longer standing -- and
----since a float belongs to the tab page it was opened on, the `"tab"` switch
----did not even leave it visible.
+---The bug this fixed: with the old dashboard up full screen, switching
+---workspace left it showing the previous workspace's agent. The window was
+---the one thing on screen and it was describing somewhere you were no longer
+---standing -- and since a float belongs to the tab page it was opened on, the
+---`"tab"` switch did not even leave it visible.
 ---
 ---Three deliberate choices:
 ---
 ---  * NOTHING OPEN, NOTHING HAPPENS. Changing directory is not a request for a
 ---    chat. This only ever moves a window that is already up.
 ---  * It goes through `close` rather than handing the surface a new chat,
----    because a float opened on the tab you just left is still a VALID window
+---    because a window opened on the tab you just left is still a VALID window
 ---    -- `is_open` says yes, `open` takes its "already up" branch, and you get
 ---    yanked back to the old tab. Closing first is what puts the surface on the
 ---    tab page you are actually on.
 ---  * `create = false`: an automatic re-point must never open a provider
 ---    picker. A workspace with no agent yet says so and waits.
 ---
----Focus follows the surface: the float covers the screen, so you need to be
----able to type into it; the sidebar sits beside code you were editing, so it
+---Focus follows the surface: a native tab is the whole screen, so you need to
+---be able to type into it; the sidebar sits beside code you were editing, so it
 ---must not steal your cursor.
 ---
 ---`offer` is for OPENING A WORKSPACE, which is not merely changing directory:
@@ -1765,7 +1722,6 @@ function M.follow(root, opts)
   -- `showing` rather than `is_open`, which is tab-aware: following is the act
   -- of moving a surface off the tab you just left, so the one moment it
   -- matters is the moment a tab-aware test says "nothing open".
-  local float = require "paseo.ui.float"
   local native = require "paseo.ui.native"
   -- A native tab is the agent's own, not a window onto "wherever you are": a
   -- workspace switch opens that workspace's agent in a tab of ITS own and
@@ -1774,7 +1730,7 @@ function M.follow(root, opts)
     M.open { root = root, surface = "native", focus = opts.focus ~= false, create = opts.offer == true }
     return true
   end
-  if not (float.showing(chat) or sidebar.is_open(chat)) then
+  if not sidebar.is_open(chat) then
     -- Declining to OPEN a window is not the same as keeping a pointer to the
     -- workspace you just left. `current` is what `toggle`, `close` and
     -- `surface` all read, and `open`'s `adopt` will hand back this very chat
@@ -1793,8 +1749,8 @@ function M.follow(root, opts)
   local surface = require("paseo.ui.surface").resolve()
   local focus = opts.focus
   if focus == nil then
-    -- Anything but the sidebar takes the cursor: both dashboard mounts cover
-    -- what you were looking at, so you need to be able to type into them. The
+    -- Anything but the sidebar takes the cursor: anything else covers what
+    -- you were looking at, so you need to be able to type into it. The
     -- sidebar sits BESIDE your code, which is the whole of the difference.
     focus = surface ~= "sidebar"
   end
@@ -1834,23 +1790,15 @@ end
 ---`toggle` makes the surface's own key answer twice: press it where you are
 ---and the surface comes up, press it again and it goes away. It only ever
 ---closes a surface that is BOTH this one and on the tab page you are looking
----at -- `is_open` asks both -- so the key never answers a dashboard you
+---at -- `is_open` asks both -- so the key never answers a surface you
 ---cannot see by hiding it.
 ---@param name "float"|"sidebar"|"buffer"
 ---@param opts? { toggle?: boolean }
 function M.surface(name, opts)
-  local wanted = name
   name = M._drawable(name)
-  if name ~= wanted then
-    vim.notify("paseo: the dashboard needs nvzone/volt; opening the native surface", vim.log.levels.INFO)
-  end
   local chat = current
   if not chat then
-    -- ON THE SURFACE THAT WAS ASKED FOR, not on the default one first. Opening
-    -- with no `surface` uses `ui.surface`, so `:Paseo buf` from a cold start
-    -- put a float on the screen, tore it down and built the real surface over
-    -- the top of it -- one flash of the wrong thing per session, and the
-    -- agent picker opened against a window that was about to close.
+    -- ON THE SURFACE THAT WAS ASKED FOR, not on the default one first.
     return M.open({ surface = name }, function(opened)
       if opened and opened.surface ~= name then
         M.surface(name)
@@ -1858,16 +1806,6 @@ function M.surface(name, opts)
     end)
   end
 
-  local float = require "paseo.ui.float"
-  if
-    opts
-    and opts.toggle
-    and name ~= "sidebar"
-    and float.is_open(chat)
-    and float.mount() == name
-  then
-    return M.close()
-  end
   if opts and opts.toggle and name == "sidebar" and sidebar.is_open(chat) then
     return M.close()
   end
@@ -1878,7 +1816,6 @@ function M.surface(name, opts)
       return M.close()
     end
     if not native.has(chat) then
-      float.close()
       sidebar.close(chat)
     end
     native.open(chat)
@@ -1887,59 +1824,25 @@ function M.surface(name, opts)
   if native.has(chat) then
     native.close(chat)
   end
-
-  if name == "sidebar" then
-    float.close()
-    chat.surface = "sidebar"
-    sidebar.open(chat)
-  else
-    sidebar.close(chat)
-    chat.surface = name
-    float.open(chat, { mount = name })
-  end
+  chat.surface = "sidebar"
+  sidebar.open(chat)
 end
 
----`<C-f>`: swap to the other surface.
+---`<C-f>`: from the sidebar beside your code, to the chat's native tab.
+---
+---Not a key ON the native surface: a tab page is a place of its own, and
+---`q` -- or `gt` -- is how you leave it. Declined silently; a notification
+---for "this key does nothing here" is noise on a key people press by reflex.
 function M.fullscreen()
   local chat = current
-
-  -- NOT A KEY ON THE BUFFER SURFACE. `<C-f>` names one swap -- the sidebar
-  -- beside your code and the float over it -- and the buffer surface is
-  -- neither: it is a place of its own, on a tab page of its own. A key that
-  -- silently moved you between two of three surfaces depending on where you
-  -- were standing would be a key with no meaning.
-  --
-  -- Declined HERE rather than by leaving it unbound, because the conversation
-  -- and composer bind it permanently and they are shared with the sidebar --
-  -- the chrome is the only buffer that can simply not have it.
-  --
-  -- Silently. A notification for "this key does nothing here" is noise on a
-  -- key people press by reflex.
-  local mounted = require("paseo.ui.float").mount()
-  if chat and mounted == "buffer" and require("paseo.ui.float").showing(chat) then
-    return
-  end
-  -- Nor on the native surface, which is a tab page of its own for the same
-  -- reason the buffer mount is.
   if chat and require("paseo.ui.native").has(chat) then
     return
   end
-  -- The answer overlay is anchored to the conversation WINDOW, and the swap closes
-  -- it -- so without this a question you were halfway through disappears on
-  -- `<C-f>`. Reopened rather than migrated: the picks live on the chat, so
-  -- reopening is the cheap half and there is no second window-moving path to get
-  -- wrong.
+  -- The answer overlay is anchored to the conversation WINDOW, and the swap
+  -- closes it -- so without this a question you were halfway through
+  -- disappears on `<C-f>`. Reopened rather than migrated.
   local pending = require("paseo.ui.answer").showing()
-
-  -- From the sidebar, back to the dashboard you came from -- the buffer one
-  -- if that is where you were -- rather than always to the float.
-  local result
-  if chat and require("paseo.ui.float").is_open(chat) then
-    result = M.surface "sidebar"
-  else
-    result = M.surface(require("paseo.ui.surface").dashboard())
-  end
-
+  local result = M.surface "native"
   if chat and pending then
     vim.schedule(function()
       require("paseo.ui.permission").reopen(chat)
@@ -2272,17 +2175,13 @@ function M.set_current(chat)
   current = chat
 end
 
----Is nvzone/volt available? The dashboard cannot be drawn without it.
----@return boolean
-local function has_volt()
-  return require("paseo.ui.widgets").has_volt()
-end
-
----The surface to use instead of a dashboard that cannot be drawn.
+---The surface a name means. `"float"` and `"buffer"` were the dashboard's two
+---mounts; the dashboard is gone, and both mean the native surface now -- so
+---a config, a keymap or a habit that still says them lands somewhere.
 ---@param name string
 ---@return string
 local function drawable(name)
-  if (name == "float" or name == "buffer") and not has_volt() then
+  if name == "float" or name == "buffer" then
     return "native"
   end
   return name

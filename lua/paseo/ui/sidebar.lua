@@ -1,8 +1,8 @@
 --- The sidebar: a pane beside your code, the conversation above its composer.
 ---
 --- One of the plugin's two surfaces. This is the everyday one -- narrow, beside
---- your code, always answerable. The other is `ui/float.lua`, which trades the
---- code view for room to show everything about the agent session at once.
+--- your code, always answerable. The other is |paseo.ui.native|, which trades
+--- the code view for a tab page per agent, with room for the rail and a panel.
 ---
 --- Both are views onto the SAME `paseo.Chat`: the same conversation buffer, the
 --- same composer buffer, the same block table. Switching surface therefore
@@ -90,8 +90,9 @@ end
 
 ---The status line above the conversation, as cells.
 ---
----Exposed because the float draws the same information through volt, and two
----headers that drift apart is how a UI starts lying about which mode it is in.
+---Exposed because the composer's bar and the native surface's winbar draw
+---from it too, and two headers that drift apart is how a UI starts lying about
+---which mode it is in.
 ---@param chat table
 ---@return table[]
 ---Is it working, and for how long -- as cells, or nothing when it is idle.
@@ -109,9 +110,9 @@ end
 ---threshold, which is the twitch that had this at the bottom of the screen in
 ---the first place.
 ---
----The dashboard's footer keeps it for the tabs that have no composer on them.
----A turn runs on while you read the Changes panel, and that is exactly when
----"is it still going" is hard to answer: nothing else on those tabs moves.
+---The native surface's conversation winbar carries it as well, so it is on
+---screen while you read the Changes panel -- which is exactly when "is it
+---still going" is hard to answer: nothing else there moves.
 ---@param chat table
 ---@return table[]
 function M.status(chat)
@@ -230,8 +231,8 @@ local function parts(chat)
   end
 
   -- THE DIRECTORY, not the session's title. Which agent session this is gets
-  -- said twice already -- by the dashboard's session strip and by the
-  -- sidebar's own top bar -- and neither of them says WHERE it is working,
+  -- said already -- by the native surface's winbar and by the sidebar's own
+  -- top bar -- and neither of them says WHERE it is working,
   -- which is the fact you want when you are about to tell it to change
   -- something on disk.
   local path = vim.fn.fnamemodify(chat.root, ":~")
@@ -262,8 +263,9 @@ function M.header(chat, opts)
 
   -- RECORDING FIRST, because while it is true it is the only thing on this row
   -- that is about you rather than about the agent, and it is the state most
-  -- worth being certain of. Drawn here as well as over the box because the
-  -- dashboard puts this row on every tab, and the box is only on one of them.
+  -- worth being certain of. Drawn here as well as over the box for a header
+  -- that is not the bar; the old dashboard put that one on every tab, and the
+  -- box was only on one of them.
   if chat.dictating and not opts.bar then
     lead[#lead + 1] = { icons.ui.mic .. " ", "PaseoToolFail" }
     -- Opening the microphone is a state of its own and is named as one. The
@@ -349,31 +351,14 @@ end
 
 ---Repaint the header of whichever windows this chat currently has.
 ---
----On the full-screen surface the header is the bar over the composer, and the
----chrome around it is volt's. Route to the volt redraw rather than writing a
----winbar nobody would see.
+---On the native surface the conversation's winbar is |paseo.ui.native|'s, so
+---route there rather than drawing the sidebar's.
 ---@param chat table
 function M.refresh(chat)
   -- The bar over the box, on whichever surface owns the composer right now.
   -- First, because it is the row carrying the session's settings on both of
-  -- them and it does not go through volt.
+  -- them.
   require("paseo.ui.composer").refresh(chat)
-
-  local float = require "paseo.ui.float"
-  -- `showing` rather than `is_open`. The question here is "is the dashboard
-  -- drawing this chat", not "can you see it from where you are standing" --
-  -- and `is_open` is tab-aware, so with the dashboard on another tab page it
-  -- answered no and the fallback below wrote a winbar onto the dashboard's
-  -- OWN conversation pane. That pane's winbar is emptied deliberately -- the
-  -- dashboard draws the header on the bar over its composer -- so the result
-  -- was the header drawn twice, one row apart, and a row stolen from the
-  -- conversation, ten times a second for the length of every turn.
-  --
-  -- Latent while the dashboard floated, because living on another tab page
-  -- was the exception. On the buffer mount it is the point.
-  if float.showing(chat) then
-    return float.refresh_live(chat)
-  end
 
   -- The native surface's conversation carries its own winbar.
   local native = package.loaded["paseo.ui.native"]
@@ -385,7 +370,6 @@ function M.refresh(chat)
   -- whether it is working. The settings cluster that used to be here has moved
   -- down to the composer's bar -- see |paseo.ui.composer| -- and the status
   -- stayed, because a spinner belongs beside the thing it is a spinner for.
-  -- The float, which has a footer, draws the status there instead.
   local win = chat.win_conversation
   if not (win and api.nvim_win_is_valid(win)) then
     return
@@ -442,7 +426,7 @@ function M.open(chat)
   local config = require "paseo.config"
   local ui = config.get().ui.sidebar
 
-  -- A percentage of the editor, read exactly as the float's is -- but floored
+  -- A percentage of the editor, read through `config.cells` -- but floored
   -- in CELLS, because 40% of a 100-column terminal is a pane too narrow to
   -- read a tool card in, and a percentage has no way to know that.
   local floor = math.floor(type(ui.min_width) == "number" and ui.min_width or 60)
@@ -466,9 +450,10 @@ function M.open(chat)
   chat.win_composer = api.nvim_get_current_win()
   api.nvim_win_set_buf(chat.win_composer, chat.composer)
   style(chat.win_composer)
-  -- The box is a CARD here too, at the same elevation the dashboard gives it,
-  -- so "where you type" is the same object on both surfaces. Its bar carries
-  -- the session's settings -- and, while you dictate, the microphone meter.
+  -- The box is a CARD here too, at the same elevation it has on the native
+  -- surface, so "where you type" is the same object on both surfaces. Its bar
+  -- carries the session's settings -- and, while you dictate, the microphone
+  -- meter.
   require("paseo.ui.composer").style(chat)
 
   -- An unrelated `:split` -- or a user's `winheight` -- must not reflow the box
@@ -506,15 +491,15 @@ end
 ---Early-returns when the height is already right, like `ui/prompt.lua`'s
 ---`fit`: this runs on every keystroke in insert mode.
 ---
----The dashboard has had this since `float.resize_composer`; the sidebar had
+---The old dashboard had this in `float.resize_composer`; the sidebar had
 ---not, and the sidebar is the surface that sits beside your code all day. A
 ---fixed eight rows there is a third of a narrow pane spent on whitespace for
 ---the whole of a session.
 ---
 ---`nvim_win_get_height` INCLUDES the winbar row -- measured -- and this
 ---composer carries a hint bar, so the bar is added back on top of the rows
----asked for. Without that, `ui.sidebar.composer` would mean one thing here
----and another on the dashboard, whose composer has no winbar.
+---asked for. Without that, `ui.sidebar.composer` would count the bar as one
+---of its rows.
 ---
 ---The `at_bottom`/`to_bottom` pair is not a nicety. Growing the composer takes
 ---its rows from the BOTTOM of the conversation, so without it typing a fourth
@@ -537,7 +522,7 @@ function M.fit_composer(chat)
   local rows = require("paseo.ui.layout").composer_rows {
     buf = chat.composer,
     win = win,
-    -- Three rows over an empty buffer, as the dashboard's does. A one-row box
+    -- Three rows over an empty buffer. A one-row box
     -- is the shape of `:e `, not of the place you write a paragraph -- and it
     -- has to be the second, because it is what every session opens on.
     min = math.min(math.floor(ui.composer_min or 3), max),

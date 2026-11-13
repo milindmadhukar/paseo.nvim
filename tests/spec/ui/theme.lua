@@ -166,7 +166,7 @@ local function test_theme()
       -- `morning` a tool that SUCCEEDED was drawn in magenta -- the colour of
       -- a string literal, which is not a shade of "it worked". `Added` means
       -- what we mean; `String` only happens to.
-      local hue = select(1, require("volt.color").hex2hsl(c.green))
+      local hue = select(1, require("paseo.ui.color").hex2hsl(c.green))
       truthy(
         "ui: the success accent is actually green on " .. scheme,
         hue >= 60 and hue <= 190,

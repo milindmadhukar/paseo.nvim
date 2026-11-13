@@ -56,19 +56,11 @@ local function check_core()
     end
   end
 
-  -- volt is OPTIONAL. It draws the dashboard (`:Paseo dash`/`buf`) -- the
-  -- chrome, its tabs and panels -- and gives popups and dialogs mouse
-  -- support. The sidebar and the native surface (`:Paseo native`) are plain
-  -- buffers, and popups and dialogs fall back to plain lines without it.
-  if not pcall(require, "volt") then
-    warn "nvzone/volt is not installed -- the float/buffer dashboard is unavailable; `:Paseo native` and the sidebar work without it"
-  elseif not pcall(require, "volt.ui") then
-    -- A partial volt install is its own failure mode: `volt` resolves but
-    -- `volt.ui` does not, and every panel comes up empty with no error anyone
-    -- sees. Probe the submodule the panels actually use.
-    err "volt is present but volt.ui is not -- update nvzone/volt; the dashboard panels cannot draw"
-  else
-    ok "volt is available (draws the float/buffer dashboard)"
+  -- No UI library. Every surface -- the native tabs, the sidebar, popups and
+  -- dialogs -- is plain buffers. (nvzone/volt drew an older dashboard; a copy
+  -- still installed is unused and can be removed.)
+  if pcall(require, "volt") then
+    info "nvzone/volt is installed but paseo.nvim no longer uses it -- safe to remove if nothing else needs it"
   end
 
   -- Where the palette comes from, because it changes what everything looks

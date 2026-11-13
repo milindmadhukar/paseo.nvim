@@ -1,10 +1,12 @@
 --- Buffer-local mappings that give back what they displaced.
 ---
---- The dashboard's panels SHARE one chrome buffer, and volt binds `<CR>` on it
---- at open -- that is how every panel's rows are activated from the keyboard.
---- So a panel that binds `<CR>` and then deletes it on the way out takes
---- volt's with it, and `<CR>` is dead on all five of the others for the rest of
---- the session. The panel does not know that; it only knows it bound a key.
+--- A panel's buffer is not the panel's alone: whatever it is shown in binds
+--- keys on it too -- the native surface's `q`, `1` `2` `3`, `<C-p>` and `r`,
+--- the popup's own `q`. So a panel that binds a key and then deletes it on
+--- the way out can take somebody else's with it, and the panel does not know
+--- that; it only knows it bound a key. (The old dashboard's panels shared one
+--- buffer whose `<CR>` volt owned, which is where this bit first: one panel's
+--- release killed `<CR>` on all the others.)
 ---
 --- Hence: save what is displaced, restore it on release. Only a BUFFER-LOCAL
 --- mapping is ours to displace -- a global one is not overwritten, it is
@@ -26,11 +28,11 @@ function M.take(buf, mappings, desc)
 
   local saved = {}
   for _, mapping in ipairs(mappings) do
-    -- `maparg` reads the CURRENT buffer, not `buf`, and at attach time the
-    -- current buffer is usually not the chrome -- `float.select` focuses the
-    -- chrome window only after the panel is attached, so the cursor is still
-    -- in the composer, whose `<CR>` sends the prompt. Looking it up from the
-    -- wrong buffer would restore *send the prompt* onto the chrome buffer.
+    -- `maparg` reads the CURRENT buffer, not `buf`, and nothing promises the
+    -- two are the same at attach time. The old dashboard attached a panel
+    -- while the cursor was still in the composer, whose `<CR>` sends the
+    -- prompt -- and a lookup from there restored *send the prompt* onto the
+    -- panel's buffer.
     local existing
     api.nvim_buf_call(buf, function()
       existing = vim.fn.maparg(mapping[1], "n", false, true)
@@ -60,8 +62,8 @@ function M.release(buf, saved)
     pcall(vim.keymap.del, "n", mapping.lhs, { buffer = buf })
     if mapping.prev then
       -- `mapset` restores a buffer-local mapping to the CURRENT buffer, so it
-      -- has to run with the right one current -- otherwise volt's `<CR>` comes
-      -- back attached to whatever you happened to be looking at.
+      -- has to run with the right one current -- otherwise the displaced key
+      -- comes back attached to whatever you happened to be looking at.
       pcall(api.nvim_buf_call, buf, function()
         vim.fn.mapset("n", false, mapping.prev)
       end)

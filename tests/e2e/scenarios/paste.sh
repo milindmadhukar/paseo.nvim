@@ -1,9 +1,9 @@
 # Attaching an image leaves the surface where it was.
 #
-# The regression: on the buffer mount (`:Paseo buf`), `:Paseo image` looked
-# the chat up by directory, missed it (chats are keyed by agent once one is
-# bound), built a second one, and the round trip that followed landed you in
-# the float.
+# The regression: on the full-screen surface (`:Paseo buf`), `:Paseo image`
+# looked the chat up by directory, missed it (chats are keyed by agent once
+# one is bound), built a second one, and the round trip that followed moved
+# you to another surface.
 source "$(dirname "$0")/../lib.sh"
 
 python3 -I - "$PASEO_E2E_ROOT/pic.png" <<'PY'
@@ -20,13 +20,13 @@ composer='table.concat(vim.api.nvim_buf_get_lines(require("paseo.ui.chat").curre
 repo="$(fresh_repo)"
 "$D" paseo run --provider fake/scripted --cwd "$repo" "echo seed" >/dev/null 2>&1 || fail "no seed agent"
 
-for surface in buffer float; do
+for surface in native sidebar; do
   "$E" stop
   "$E" start "$repo"
-  if [ "$surface" = buffer ]; then
+  if [ "$surface" = native ]; then
     "$E" keys ':Paseo buf' Enter
   else
-    "$E" keys ':Paseo dash' Enter
+    "$E" keys ':Paseo sidebar' Enter
   fi
   "$E" wait 'require("paseo.ui.chat").current() ~= nil' 20 || fail "$surface: no chat"
   settle

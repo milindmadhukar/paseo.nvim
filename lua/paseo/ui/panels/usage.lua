@@ -13,7 +13,8 @@
 --- Drawn as a dashboard rather than as a list of labelled numbers. Tiles across
 --- the top carry the figures, and the breakdown underneath is a real table
 --- rather than `("  %-10s"):format(label)`, which is what column alignment
---- looked like before `volt.ui.table` was reached for.
+--- looked like before a table widget was reached for (volt's first, now
+--- `widgets.table`).
 
 local animate = require "paseo.ui.animate"
 local icons = require "paseo.ui.icons"
@@ -99,7 +100,7 @@ function M.load()
         fetched_at = result and result.fetchedAt or nil,
       }
       vim.schedule(function()
-        require("paseo.ui.float").rebuild()
+        require("paseo.ui.native").redraw_panels()
       end)
     end)
   end)
@@ -145,9 +146,10 @@ end
 ---One provider's plan, as a card.
 ---
 ---DENSE ON PURPOSE: two rows per window, a label line and a bar, with the
----reset time on the label line rather than under it. The body of this panel is
----TRUNCATED, not scrolled (`float.body_lines`), so every row this spends is a
----row the provider below it does not get -- and a `widgets.tile` per window
+---reset time on the label line rather than under it. The panel is drawn to
+---fit its window's height (`M.lines`'s `height`), and a row past that is
+---below the fold, so every row this spends is a row the provider below it
+---does not get on screen -- and a `widgets.tile` per window
 ---costs three, plus a blank, plus a reset row. Four windows of that is the
 ---whole panel.
 ---@param usage table
@@ -309,7 +311,7 @@ function M.lines(chat, width, height)
       -- only one Usage panel is ever on screen.
       val = animate.tween {
         key = "usage.context",
-        buf = require("paseo.ui.float").chrome_buf() or 0,
+        buf = 0,
         section = "body",
         target = pct,
       },
@@ -370,9 +372,9 @@ function M.lines(chat, width, height)
     vim.list_extend(lines, widgets.grid_col(column))
   end
 
-  -- THE BODY IS TRUNCATED, NOT SCROLLED (`float.body_lines`), so the rows this
-  -- section is prepared to give up have to be decided here rather than found
-  -- out by having them silently cut. Both of these say again, at length, what
+  -- THE PANEL IS DRAWN TO ITS WINDOW'S HEIGHT, so the rows this section is
+  -- prepared to give up have to be decided here rather than found out by
+  -- having them land below the fold. Both of these say again, at length, what
   -- a tile above already said in one line -- so they are what goes when the
   -- plan limits need the room, and the limits are the half you cannot read
   -- anywhere else.
@@ -392,7 +394,7 @@ function M.lines(chat, width, height)
           thousands(turn_usage.outputTokens),
         },
         -- `"fit"` rather than a share of the width: three short numbers
-        -- stretched across a wide dashboard read as three unrelated figures.
+        -- stretched across a wide panel read as three unrelated figures.
       },
       "fit",
       {

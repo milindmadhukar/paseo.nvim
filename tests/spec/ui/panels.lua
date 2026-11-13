@@ -5,7 +5,6 @@ local eq, truthy = t.eq, t.truthy
 
 local render = require "paseo.ui.render"
 local config = require "paseo.config"
-local float = require "paseo.ui.float"
 local session = require "paseo.ui.session"
 local session_panel = require "paseo.ui.panels.settings"
 local widgets = require "paseo.ui.widgets"
@@ -115,18 +114,17 @@ local function test_session_source()
   table.sort(blank)
   eq("ui: no glyph in the registry is empty", blank, {})
 
-  -- EVERY TAB HAS AN ICON, and the two lists are keyed by the same string.
-  -- `tab_lines` does `icons.panel[name] or ""`, so a tab the registry does not
-  -- spell identically draws a blank pill and nothing anywhere errors -- which
-  -- is exactly how a rename goes unnoticed until you look at the bar.
+  -- EVERY PANEL HAS AN ICON, keyed by the same string the panel list uses --
+  -- a panel the registry does not spell identically draws a blank and nothing
+  -- anywhere errors, which is exactly how a rename goes unnoticed.
   local missing = {}
-  for _, name in ipairs(require("paseo.ui.float").TABS) do
+  for _, name in ipairs(require("paseo.ui.native").PANELS) do
     if vim.api.nvim_strwidth(registry.panel[name] or "") < 1 then
       missing[#missing + 1] = name
     end
   end
   table.sort(missing)
-  eq("ui: every dashboard tab has an icon under its own name", missing, {})
+  eq("ui: every panel has an icon under its own name", missing, {})
 
   -- The two selection markers additionally have to be exactly ONE cell. They
   -- are drawn in fixed-width rows, and a two-cell marker shifts everything to
@@ -224,28 +222,16 @@ local function test_panels()
 
   local popup_buf = vim.api.nvim_get_current_buf()
   eq("settings: with a filetype of its own", vim.bo[popup_buf].ft, "paseo-settings")
-  -- The height is VOLT'S, read back out of its state after `gen_data`. A
-  -- window sized before the layout is built is sized against a guess, and this
-  -- layout's size depends on how many models the provider has.
-  eq(
-    "settings: sized to the layout volt measured",
-    vim.api.nvim_win_get_height(0),
-    require("volt.state")[popup_buf].h
-  )
-  eq(
-    "settings: and the buffer has exactly that many lines to anchor extmarks to",
-    #vim.api.nvim_buf_get_lines(popup_buf, 0, -1, false),
-    require("volt.state")[popup_buf].h
-  )
+  -- Sized to its layout, which is measured first: this layout's size depends
+  -- on how many models the provider has.
+  local popup_lines = #vim.api.nvim_buf_get_lines(popup_buf, 0, -1, false)
+  eq("settings: sized to the layout it drew", vim.api.nvim_win_get_height(0), math.max(6, popup_lines))
   -- `only` means one group, not a highlighted group in a list of four.
+  local text = table.concat(vim.api.nvim_buf_get_lines(popup_buf, 0, -1, false), "\n")
   local drawn_groups = 0
   for _, name in ipairs { "Permission mode", "Thinking", "Model", "Features" } do
-    for _, line in ipairs(vim.api.nvim_buf_get_extmarks(popup_buf, -1, 0, -1, { details = true })) do
-      for _, cell in ipairs(line[4].virt_text or {}) do
-        if cell[1] == name then
-          drawn_groups = drawn_groups + 1
-        end
-      end
+    if text:find(name, 1, true) then
+      drawn_groups = drawn_groups + 1
     end
   end
   eq("settings: opened on one group, it draws one group", drawn_groups, 1)
@@ -282,13 +268,9 @@ local function test_panels()
   truthy("settings: and closes", not settings.is_open())
   eq("settings: leaving no windows behind", #vim.api.nvim_list_wins(), wins_before)
   eq("settings: nor buffers", #vim.api.nvim_list_bufs(), bufs_before)
-  eq("settings: nor an entry in volt's state", require("volt.state")[popup_buf], nil)
 
-  -- Clamping the WINDOW without clamping the LAYOUT is worse than not
-  -- clamping at all: `nvim_open_win` shrinks quietly, volt goes on drawing at
-  -- the rows it recorded, and the throw lands between opening the window and
-  -- binding `q` -- an empty popup over a full-screen backdrop with no key
-  -- that dismisses either.
+  -- Clamping the WINDOW without clamping the LAYOUT hides the rows that carry
+  -- the keys you need to dismiss it.
   local real_lines = vim.o.lines
   vim.o.lines = 20
   surface_chat.config_snapshot.models = {}
@@ -300,11 +282,7 @@ local function test_panels()
   if opened then
     local squeezed = vim.api.nvim_get_current_buf()
     local drawn = #vim.api.nvim_buf_get_lines(squeezed, 0, -1, false)
-    eq(
-      "settings: the buffer is as long as the layout volt measured",
-      drawn,
-      require("volt.state")[squeezed].h
-    )
+    truthy("settings: the squeezed layout still draws", drawn >= 1)
     truthy("settings: and fits the editor", vim.api.nvim_win_get_height(0) <= vim.o.lines - 4)
     settings.close()
   end
@@ -330,35 +308,29 @@ local function test_panels()
     before .. " -> " .. after
   )
 
-  local per_row = {}
-  for _, mark in
-    ipairs(vim.api.nvim_buf_get_extmarks(shrinking, require("volt.state")[shrinking].ns, 0, -1, {}))
-  do
-    per_row[mark[2]] = (per_row[mark[2]] or 0) + 1
-  end
-  local stacked = nil
-  for row, n in pairs(per_row) do
-    if n > 1 then
-      stacked = ("row %d carries %d"):format(row, n)
-    end
-  end
-  eq("settings: and leaves no extmarks stacked on a row", stacked, nil)
+  -- One highlight extmark per cell, so the test is not "one per row": it is
+  -- that the shrunk popup carries exactly what a FRESH one of the same layout
+  -- does -- nothing left over from the rows it no longer has.
+  local hl_ns = require("paseo.ui.hl").ns
+  local shrunk_marks = #vim.api.nvim_buf_get_extmarks(shrinking, hl_ns, 0, -1, {})
+  settings.close()
+  settings.open(surface_chat, "model")
+  local fresh_marks = #vim.api.nvim_buf_get_extmarks(vim.api.nvim_get_current_buf(), hl_ns, 0, -1, {})
+  eq("settings: and leaves no extmarks behind from the rows it lost", shrunk_marks, fresh_marks)
   settings.close()
 
   vim.o.lines = real_lines
 
-  -- Volt's convention is the cell's THIRD element, and everything between the
-  -- panel and volt must preserve it -- truncate, flatten and to_volt all
-  -- rebuild cell tables.
+  -- A cell's THIRD element is its action, and truncate and flatten both
+  -- rebuild cell tables -- so both must carry it through.
   local action = function() end
-  local through = render.to_volt { render.truncate({ { "x", "PaseoDim", action } }, 40) }
-  eq("ui: click actions survive truncate and to_volt", through[1][1][3], action)
+  local through = render.flatten(render.truncate({ { "x", "PaseoDim", action } }, 40))
+  eq("ui: actions survive truncate and flatten", through[1][3], action)
 
-  -- The dashboard is the DEFAULT surface: it is the one with everything on it,
-  -- and the sidebar is what `<C-f>` switches to.
+  -- The native surface is the DEFAULT: full screen, the one with everything on
+  -- it; the sidebar is the narrower thing beside your code.
   local defaults = config.defaults()
-  eq("ui: the configured default surface is the dashboard", defaults.ui.surface, "float")
-  truthy("ui: whose z-index is below the 50 a float gets by default", defaults.ui.float.zindex < 50)
+  eq("ui: the configured default surface is the native one", defaults.ui.surface, "native")
 
   -- Pasting an image is what `p` does now -- read the clipboard, fall through
   -- to an ordinary paste when it holds no picture -- so the composer no longer
@@ -976,97 +948,10 @@ local function test_usage_panel()
   usage.invalidate()
 end
 
---- Workspaces nest under the project they live in.
----
---- The daemon cannot get this right and it is not its fault: a `ws` workspace
---- is a plain directory, so opening `~/Code/openfin/.workspaces/billing`
---- registers it as a top-level project called `billing`, a SIBLING of
---- `openfin` rather than something inside it. Asserted on the sections the
---- panel hands the list view, because that is where the nesting lives.
-local function test_workspaces_panel()
-  local panel = require "paseo.ui.panels.workspaces"
-  local workspaces = require "paseo.workspaces"
-  local agents = require "paseo.agents"
-
-  local old_list, old_watch, old_summary = workspaces.list, agents.watch, agents.summary
-  agents.watch = function() end
-  agents.summary = function()
-    return "idle"
-  end
-  workspaces.list = function(cb)
-    local known = {
-      {
-        id = "w1",
-        name = "openfin",
-        directory = "/x/Code/openfin",
-        project = "openfin",
-        projectId = "prj_root",
-      },
-      {
-        id = "w2",
-        name = "billing",
-        directory = "/x/Code/openfin/.workspaces/billing",
-        project = "billing",
-        projectId = "prj_billing",
-      },
-      {
-        id = "w3",
-        name = "testing",
-        directory = "/x/Code/paseo.nvim",
-        project = "paseo.nvim",
-        projectId = "prj_nvim",
-      },
-    }
-    for _, ws in ipairs(known) do
-      ws.group = workspaces.group(ws)
-    end
-    cb(known, nil)
-  end
-
-  panel.invalidate()
-  local chat = { root = "/x/Code/openfin" }
-  panel.lines(chat, 100, 40)
-  vim.wait(200)
-  local drawn = {}
-  for _, line in ipairs(panel.lines(chat, 100, 40)) do
-    local cells = {}
-    for _, cell in ipairs(line) do
-      cells[#cells + 1] = cell[1] or ""
-    end
-    drawn[#drawn + 1] = table.concat(cells)
-  end
-  local text = table.concat(drawn, "\n")
-
-  local at_openfin, at_billing, at_nvim
-  for i, line in ipairs(drawn) do
-    at_openfin = at_openfin or (line:find("openfin", 1, true) and i or nil)
-    at_billing = at_billing or (line:find("billing", 1, true) and i or nil)
-    at_nvim = at_nvim or (line:find("paseo.nvim", 1, true) and i or nil)
-  end
-  truthy("ui: the workspaces panel draws a group heading", at_openfin ~= nil, text)
-  truthy(
-    "ui: with the .workspaces child under it rather than beside it",
-    at_billing ~= nil and at_openfin ~= nil and at_billing > at_openfin,
-    text
-  )
-  truthy(
-    "ui: and the next group after both of them",
-    at_nvim ~= nil and at_billing ~= nil and at_nvim > at_billing,
-    text
-  )
-  -- One `billing` line: it used to be both a group and a row under itself.
-  eq("ui: and billing is a workspace, not also a project", select(2, text:gsub("billing", "")), 1)
-  truthy("ui: the panel says how to forget a project", text:find("forget", 1, true) ~= nil, text)
-
-  workspaces.list, agents.watch, agents.summary = old_list, old_watch, old_summary
-  panel.invalidate()
-end
-
 return {
   { "ui.session", test_session_source },
   { "ui.panels", test_panels },
   { "ui.toggles", test_toggle_height },
   { "ui.list", test_list },
   { "ui.usage", test_usage_panel },
-  { "ui.workspaces", test_workspaces_panel },
 }

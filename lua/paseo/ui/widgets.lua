@@ -7,15 +7,10 @@
 --- "    "` in two more, `string.rep("─", width - 2)` in a fourth, and the same
 --- footer hint row copied verbatim into five files.
 ---
---- Where volt already has the component, we USE volt's -- `grid_col` is a real
---- column layout engine, `table` is a real ruled grid, and reimplementing
---- either would be silly. Where volt's does not fit, ours is here and the
---- comment says why.
----
---- THE `"_pad_"` TRAP. volt's `hpad` expands a cell whose text is the literal
---- string `"_pad_"` to fill the remaining width, and `volt.ui.line_w` skips it
---- when measuring. `render.width` does NOT -- to it that cell is five columns
---- of text. So `hpad` must always run BEFORE `render.truncate`, never after.
+--- THE `"_pad_"` TRAP. `hpad` expands a cell whose text is the literal string
+--- `"_pad_"` to fill the remaining width, and `line_w` skips it when
+--- measuring. `render.width` does NOT -- to it that cell is five columns of
+--- text. So `hpad` must always run BEFORE `render.truncate`, never after.
 --- `M.row` is the only thing here that emits `"_pad_"`, and it resolves it
 --- before returning, so nothing downstream ever sees one.
 
@@ -27,34 +22,10 @@ local api_strwidth = vim.api.nvim_strwidth
 
 local M = {}
 
--- VOLT IS OPTIONAL. This module used to `require "volt.ui"` at the top, and
--- since `chat.lua` requires this one, a missing volt meant nothing loaded at
--- all -- not the sidebar, not the native surface, neither of which draws a
--- single volt section. The helpers below are the small part of `volt.ui` the
--- panels lean on, written here so they need nothing; `table` and `chart` still
--- prefer volt's when it is installed, and degrade when it is not.
-
----Is nvzone/volt on the runtimepath? Asked once: it does not appear mid-session.
----@type boolean|nil
-local has_volt
-
----@return boolean
-function M.has_volt()
-  if has_volt == nil then
-    has_volt = pcall(require, "volt")
-  end
-  return has_volt
-end
-
----volt's `ui` module, or nil.
----@return table|nil
-local function voltui()
-  if not M.has_volt() then
-    return nil
-  end
-  local ok, mod = pcall(require, "volt.ui")
-  return ok and mod or nil
-end
+-- The small set of drawing helpers the panels lean on -- padding, widths,
+-- rules, bars, checkboxes, grids, tables and charts -- all drawn as plain
+-- cells for |paseo.ui.render|. (They were nvzone/volt's once; nothing here
+-- needs it.)
 
 ---Display width of a line, NOT counting a `"_pad_"` sentinel cell.
 ---@param line table[]
@@ -207,11 +178,11 @@ M.card_inner = render.card_inner
 ---A card. EVERY row is exactly `w` columns, and there are always exactly
 ---`#opts.lines + 2` of them.
 ---
----That height invariant is load-bearing, not tidiness. volt records each
----section's start row when the layout is MEASURED and never recomputes it on
----redraw, so a card whose height depends on the frame style would move every
----section below it the moment someone changed `ui.style`. Holding all four
----styles to the same height means the preset is purely a repaint: two cards
+---That height invariant is load-bearing, not tidiness. A card whose height
+---depended on the frame style would move every row below it the moment
+---someone changed `ui.style` (under volt, which recorded each section's start
+---row once, it drew them at the wrong rows). Holding all four styles to the
+---same height means the preset is purely a repaint: two cards
 ---paired side by side still square up, `card_to_height` still works, and
 ---nothing downstream has to know which style is live.
 ---
@@ -226,11 +197,11 @@ M.card_inner = render.card_inner
 ---  rounded  the old look: title in the top border, sides, bottom.
 ---  square   the same with square corners.
 ---
----Not `volt.ui.border` for the framed cases either: that one sizes itself to
----its content, mutates the table it is given and returns `nil`, and paints no
----background -- three things that are all wrong for a panel laid out in fixed
----columns, where a card one cell narrower than its neighbour is immediately
----visible.
+---Not built the way `volt.ui.border` was, for the framed cases either: that one
+---sized itself to its content, mutated the table it was given and returned
+---`nil`, and painted no background -- three things that are all wrong for a
+---panel laid out in fixed columns, where a card one cell narrower than its
+---neighbour is immediately visible.
 ---@param opts { title: string|table[], icon?: string, lines: table[][], w: integer, rule?: string, kind?: string }
 ---@return table[][]
 function M.card(opts)
@@ -382,7 +353,7 @@ end
 ---A row of chips, wrapped to `w` columns.
 ---
 ---Returns LINES, not a line: five permission modes do not fit across a narrow
----dashboard, and the alternative to wrapping is truncating away the one you
+---panel, and the alternative to wrapping is truncating away the one you
 ---were looking for.
 ---@param chips table[]  Cells, as returned by `M.chip`.
 ---@param w integer
@@ -458,8 +429,8 @@ end
 ---The hint bar: ` h l ` move  ` ⏎ ` apply …
 ---
 ---One builder, because this row was copy-pasted verbatim into five files and
----they had already drifted -- the float advertised `1-5` while there were six
----tabs.
+---they had already drifted -- the old float advertised `1-5` while there were
+---six tabs.
 ---@param pairs_ table[]  `{ { "h l", "move" }, … }`, and a third element --
 ---                       a function -- makes that hint clickable.
 ---@param hl? string  Background for the gaps, when drawn inside a card.
@@ -625,7 +596,7 @@ function M.tile(opts)
   return lines
 end
 
----A ruled table without volt: same shape as volt's -- a top rule, one row per
+---A ruled table: a top rule, one row per
 ---entry with a rule between, a bottom rule, the title above -- every column
 ---as wide as its widest cell (plus padding), each cell centred.
 ---@param rows table[]
@@ -686,7 +657,7 @@ function M.plain_table(rows, w, header_hl, title)
   return lines
 end
 
----A ruled table. Straight through to volt's, which is a real one.
+---A ruled table.
 ---
 ---`w` may be the string `"fit"`, which shrinks to content -- measure the
 ---result with `M.line_w(result[1])` when the remaining columns have to be
@@ -695,18 +666,15 @@ end
 ---icon or a colour without a second table.
 ---@param rows table[]
 ---@param w integer|string
----`title` is a CELL -- `{ text }` or `{ text, hl }` -- not a line. volt wraps
----it in a line itself, so handing it one produces a line whose first cell is a
----table, and the first thing that concatenates a cell's text throws.
+---`title` is a CELL -- `{ text }` or `{ text, hl }` -- not a line: it is
+---wrapped in one here.
 ---@param opts? { header?: string, title?: table }
 ---@return table[][]
 function M.table(rows, w, opts)
   opts = opts or {}
-  local volt = voltui()
-  local lines = volt and volt.table(rows, w, opts.header or "PaseoCardTitle", opts.title)
-    or M.plain_table(rows, w, opts.header or "PaseoCardTitle", opts.title)
+  local lines = M.plain_table(rows, w, opts.header or "PaseoCardTitle", opts.title)
 
-  -- volt draws its rules in `linenr`, which on most themes is the same weight
+  -- The rules are drawn in `linenr`, which on most themes is the same weight
   -- as the numbers inside the table. Repainted faint, so the grid recedes and
   -- the figures are what you see -- a rule at content weight is the commonest
   -- way a terminal UI ends up looking busy.
@@ -723,7 +691,7 @@ end
 
 ---A bar or dot chart, ten rows tall.
 ---
----Ten rows because that is volt's quantisation: a value is bucketed to a
+---Ten rows: a value is bucketed to a
 ---decile and the height of the column carries the magnitude. Resolution comes
 ---from the ROW, and colour from `format_hl` -- which is why there is no
 ---`▁▂▃▄▅▆▇█` ramp here and does not need to be.
@@ -756,21 +724,54 @@ function M.chart(values, opts)
     baropts.icon = style.BAR.block
   end
 
-  local data =
-    { val = values, baropts = baropts, format_labels = opts.labels, footer_label = opts.footer }
-  local volt = voltui()
-  if not volt then
-    -- No chart without volt: one row of the values as a ramp, which still says
-    -- which way the series went.
-    local ramp = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" }
-    local cells = {}
-    for _, v in ipairs(values) do
-      local i = math.max(1, math.min(8, math.floor((v or 0) / 12.5) + 1))
-      cells[#cells + 1] = { ramp[i], type(opts.hl) == "string" and opts.hl or "PaseoAgent" }
+  -- Ten rows, top to bottom; a column is lit up to its decile. Side labels
+  -- (100 at the top, 0 at the bottom) when asked for; the footer under it.
+  local function hl_of(v)
+    if baropts.format_hl then
+      return baropts.format_hl(v)
     end
-    return { cells }
+    return type(baropts.hl) == "table" and baropts.hl.on or baropts.hl
   end
-  return opts.dot and volt.graphs.dot(data) or volt.graphs.bar(data)
+  local label_w = baropts.sidelabels and 4 or 0
+  local lines = {}
+  for row = 10, 1, -1 do
+    local line = {}
+    if baropts.sidelabels then
+      local label = row == 10 and "100" or row == 5 and " 50" or row == 1 and "  0" or "   "
+      line[#line + 1] = { label .. " ", "PaseoTextFaint" }
+    end
+    for i, v in ipairs(values) do
+      local level = math.max(0, math.min(10, math.ceil((v or 0) / 10)))
+      local on = level >= row
+      local glyph
+      if opts.dot then
+        glyph = on and baropts.icons.on or baropts.icons.off
+      else
+        glyph = on and string.rep(baropts.icon, baropts.w) or string.rep(" ", baropts.w)
+      end
+      line[#line + 1] = { glyph, on and hl_of(v) or "PaseoTextFaint" }
+      if i < #values and baropts.gap > 0 then
+        line[#line + 1] = { string.rep(" ", baropts.gap) }
+      end
+    end
+    lines[#lines + 1] = line
+  end
+  if opts.labels then
+    local line = { { string.rep(" ", label_w) } }
+    for i, v in ipairs(values) do
+      local text = tostring(opts.labels(v) or "")
+      local cell_w = opts.dot and api_strwidth(baropts.icons.on) or baropts.w
+      line[#line + 1] = { text .. string.rep(" ", math.max(0, cell_w - api_strwidth(text))), "PaseoTextFaint" }
+      if i < #values and baropts.gap > 0 then
+        line[#line + 1] = { string.rep(" ", baropts.gap) }
+      end
+    end
+    lines[#lines + 1] = line
+  end
+  for _, footer in ipairs(opts.footer or {}) do
+    lines[#lines + 1] = footer
+  end
+  return lines
 end
 
 -- ---------------------------------------------------------------- accents
@@ -849,11 +850,9 @@ end
 
 ---Actions for something that lights up under the pointer.
 ---
----volt's hover is four lines per widget and nothing in this plugin used it
----except the tab bar -- so every row in Sessions, Changes, Workspaces and
----Terminals was clickable but dead under the mouse, which reads as "not a
----button" right up until you click it and something happens.
----@param id string      Unique; volt stores it in `vim.g.nvmark_hovered`.
+---Kept so the list rows can carry a click action and an id; there is no
+---pointer hover on plain buffers, so `hovered` is always false.
+---@param id string
 ---@param redraw string|string[]  Section(s) to repaint on enter and leave.
 ---@param click? function|string
 ---@return table
@@ -861,11 +860,13 @@ function M.hover(id, redraw, click)
   return { click = click, hover = { id = id, redraw = redraw } }
 end
 
----True while the pointer is over the thing with this id.
+---True while the pointer is over the thing with this id. Plain buffers have
+---no pointer hover, so: never. Kept so row drawing stays one code path.
 ---@param id string
 ---@return boolean
 function M.hovered(id)
-  return vim.g.nvmark_hovered == id
+  local _ = id
+  return false
 end
 
 ---The background a list row should be drawn in.

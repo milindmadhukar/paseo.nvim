@@ -59,16 +59,12 @@ local function test_terminals()
   apply { kind = "snapshot", cwd = root, entries = {} }
   eq("terminals: an empty list empties the root", #terminals.for_root(root), 0)
 
-  -- Terminals are SESSIONS now, listed beside the agents the way Paseo lists
-  -- them, and the surface is `:Paseo term`. A seventh tab holding a list is
-  -- the thing that was replaced, so its absence is the assertion.
-  local float = require "paseo.ui.float"
-  eq("terminals: the dashboard has five tabs", #float.TABS, 5)
-  truthy("terminals: and none of them is the Sessions tab -- the tree is", not vim.tbl_contains(float.TABS, "Sessions"))
-  truthy(
-    "terminals: and none of them is a Terminals tab",
-    not vim.tbl_contains(float.TABS, "Terminals")
-  )
+  -- Terminals are SESSIONS, listed in the rail beside the agents the way
+  -- Paseo lists them. A panel holding a list is the thing that was replaced,
+  -- so its absence is the assertion.
+  local panels = require("paseo.ui.native").PANELS
+  truthy("terminals: no panel is a Sessions list -- the rail is", not vim.tbl_contains(panels, "Sessions"))
+  truthy("terminals: and none is a Terminals list", not vim.tbl_contains(panels, "Terminals"))
 
   -- The registry: several terminals alive at once is the whole point, and one
   -- `terminal_output` listener routing by id is how they are fed.

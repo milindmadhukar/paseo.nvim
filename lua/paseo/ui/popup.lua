@@ -1,20 +1,12 @@
 --- The host every settings popup is opened by.
 ---
---- A volt popup is not "open a window and draw in it". The sequence below is
---- volt's, in volt's order, and the order is not negotiable:
+--- A centred window drawn as real lines (`render.to_buffer`), sized to its
+--- layout: measured first, opened at that height, and re-fitted whenever the
+--- layout grows or shrinks -- switching model replaces the whole thinking list.
 ---
----   `gen_data`, and only THEN read the height back out of `volt.state` -- the
----   layout measures itself, so a window sized before the layout is built is
----   sized against a guess. `volt.run` after the window exists, because it
----   writes the empty lines the extmarks anchor to. `volt.events.add` last,
----   because it is per buffer and a buffer volt has not been told about
----   silently ignores every click.
----
---- That sequence, the clamping either side of it and the teardown after it
---- used to live in `ui/settings.lua` and nowhere else, which is why the screen
---- shown before an agent exists was a plain buffer instead of a second popup:
---- the alternative was copying a hundred and twenty lines of it. This is that
---- hundred and twenty lines, once.
+--- It used to live in `ui/settings.lua` and nowhere else, which is why the
+--- screen shown before an agent exists was a plain buffer instead of a second
+--- popup. This is that code, once.
 ---
 --- STATE LIVES ON THE HANDLE, not in this module. `settings.lua` can afford a
 --- singleton -- there is one settings popup -- but |paseo.ui.create|'s review
@@ -36,13 +28,9 @@ local TITLE_ROWS = 3
 
 ---Rows the body may use.
 ---
----The LAYOUT is clamped, not just the window. Clamping only the window is
----worse than not clamping at all: `nvim_open_win` shrinks quietly, but volt
----goes on emitting extmarks at the rows `gen_data` recorded, and
----`nvim_buf_set_extmark` raises "Invalid 'line': out of range" past the last
----line of the buffer. That throw lands between opening the window and binding
----`q` to close it, which leaves an empty popup over a full-screen backdrop
----with no key that dismisses either.
+---The LAYOUT is clamped, not just the window: a window shrunk quietly by
+---`nvim_open_win` over a buffer drawn for more rows hides the rows that carry
+---the keys you need to dismiss it.
 ---@return integer
 local function body_rows()
   return math.max(3, (vim.o.lines - 4) - TITLE_ROWS)
@@ -62,10 +50,8 @@ end
 ---@param opts { view: paseo.AgentSettingsView, width: fun(): integer, title: fun(handle: paseo.Popup): table[][], filetype?: string, zindex?: integer, keys?: table[], on_close?: fun() }
 ---@return paseo.Popup
 function M.open(opts)
-  -- VOLT IS OPTIONAL. Without it the popup is the same window drawn as real
-  -- lines by `render.to_buffer`; every view's keys are its own (|paseo.ui.keys|)
-  -- so nothing but the mouse is lost.
-  local volt = require("paseo.ui.widgets").has_volt() and require "volt" or nil
+  -- Real lines, drawn by `render.to_buffer`; every view's keys are its own
+  -- (|paseo.ui.keys|).
   local plain_ns = require("paseo.ui.hl").ns
 
   require("paseo.ui.hl").setup()
@@ -110,43 +96,12 @@ function M.open(opts)
     return lines
   end
 
-  ---Measure the layout into volt and report the height it wants.
+  ---The height the layout wants.
   local function measure()
-    if not volt then
-      return math.max(6, #all_lines())
-    end
-    volt.gen_data {
-      {
-        buf = handle.buf,
-        ns = handle.ns,
-        xpad = XPAD,
-        layout = {
-          -- Fresh tables every call: volt's `draw` strips the third element
-          -- from every cell it is handed, so a cached line list loses its
-          -- click targets after the first draw.
-          {
-            name = "title",
-            lines = function()
-              return render.to_volt(title_lines())
-            end,
-          },
-          {
-            name = "session",
-            lines = function()
-              return render.to_volt(body_lines())
-            end,
-          },
-        },
-      },
-    }
-    return math.max(6, require("volt.state")[handle.buf].h)
+    return math.max(6, #all_lines())
   end
 
-  ---Rebuild, resize and repaint. All three, always: volt stores each
-  ---section's starting row when `gen_data` runs and clears nothing on redraw,
-  ---so a layout that grew -- switching model replaces the whole thinking list
-  ----- leaves the previous draw's rows under the new ones unless the window
-  ---and the buffer's empty lines grow with it.
+  ---Rebuild, resize and repaint.
   function handle.rebuild()
     if handle.closed or not api.nvim_buf_is_valid(handle.buf) then
       return
@@ -156,7 +111,7 @@ function M.open(opts)
     -- the last remaining line -- so a layout that shrank leaves every row it
     -- no longer has stacked on the popup's bottom row, overprinting each
     -- other forever.
-    api.nvim_buf_clear_namespace(handle.buf, handle.ns, 0, -1)
+    api.nvim_buf_clear_namespace(handle.buf, plain_ns, 0, -1)
 
     local h = measure()
     if h ~= handle.h then
@@ -172,17 +127,8 @@ function M.open(opts)
       end
     end
 
-    if not volt then
-      render.to_buffer(handle.buf, plain_ns, 0, -1, all_lines())
-      vim.bo[handle.buf].modifiable = false
-      return
-    end
-
-    vim.bo[handle.buf].modifiable = true
-    volt.set_empty_lines(handle.buf, handle.h, handle.w)
+    render.to_buffer(handle.buf, plain_ns, 0, -1, all_lines())
     vim.bo[handle.buf].modifiable = false
-
-    volt.redraw(handle.buf, "all")
   end
 
   function handle.close()
@@ -195,26 +141,15 @@ function M.open(opts)
       handle.view:unbind(handle.buf)
     end)
 
-    -- volt's own teardown: it deletes the buffers, clears `volt.state` and
-    -- takes them off the global key handler's list. Doing that by hand is
-    -- what leaked clickable tables for the session before.
-    pcall(function()
-      if volt then
-        require("volt.utils").close { bufs = { handle.buf, handle.backdrop } }
-      end
-    end)
-
     for _, win in ipairs { handle.win, handle.backdrop_win } do
       if win and api.nvim_win_is_valid(win) then
         pcall(api.nvim_win_close, win, true)
       end
     end
 
-    if not volt then
-      for _, buf in ipairs { handle.buf, handle.backdrop } do
-        if buf and api.nvim_buf_is_valid(buf) then
-          pcall(api.nvim_buf_delete, buf, { force = true })
-        end
+    for _, buf in ipairs { handle.buf, handle.backdrop } do
+      if buf and api.nvim_buf_is_valid(buf) then
+        pcall(api.nvim_buf_delete, buf, { force = true })
       end
     end
 
@@ -239,8 +174,7 @@ function M.open(opts)
   })
   vim.wo[handle.backdrop_win].winblend = 20
 
-  -- Measure first: `gen_data` runs every section's `lines()` and records the
-  -- total, which is the only honest height for a layout whose size depends on
+  -- Measure first: the only honest height for a layout whose size depends on
   -- how many models this provider has.
   handle.h = measure()
 
@@ -263,33 +197,12 @@ function M.open(opts)
   api.nvim_set_hl(handle.ns, "NormalFloat", { link = "PaseoNormal" })
   api.nvim_set_hl(handle.ns, "FloatBorder", { link = "PaseoNormalBorder" })
 
-  if volt then
-    volt.run(handle.buf, { h = handle.h, w = handle.w })
-  else
-    render.to_buffer(handle.buf, plain_ns, 0, -1, all_lines())
-    vim.bo[handle.buf].modifiable = false
-  end
-  -- After `volt.run`, which sets `VoltWindow`.
+  render.to_buffer(handle.buf, plain_ns, 0, -1, all_lines())
+  vim.bo[handle.buf].modifiable = false
   vim.bo[handle.buf].filetype = opts.filetype or "paseo-settings"
 
-  -- volt binds `q` and `<Esc>` itself and routes them through
-  -- `volt.utils.close`, which force-deletes the buffer -- so the close path
-  -- has to hang off `after_close` rather than off our own keymaps, or a `q`
-  -- would take the window away without ever answering the caller.
-  if volt then
-    volt.mappings {
-      bufs = { handle.buf, handle.backdrop },
-      winclosed_event = true,
-      after_close = handle.close,
-    }
-
-    -- The half that makes a cell clickable with a mouse: `events.add` binds
-    -- `<CR>` and `<Tab>`, and `enable` -- which `volt.run` already called -- is
-    -- what routes `LeftMouse` and `MouseMove` here.
-    require("volt.events").add(handle.buf)
-  else
-    -- What `volt.mappings` gave us: `q`/`<Esc>` close, and so does closing
-    -- the window any other way.
+  -- `q`/`<Esc>` close, and so does closing the window any other way.
+  do
     for _, lhs in ipairs { "q", "<Esc>" } do
       vim.keymap.set("n", lhs, handle.close, { buffer = handle.buf, nowait = true, silent = true })
     end

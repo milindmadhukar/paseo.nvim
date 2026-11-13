@@ -13,8 +13,8 @@ package.path = ("%s/?.lua;%s"):format(root, package.path)
 
 local deps = assert(vim.env.PASEO_TEST_DEPS, "PASEO_TEST_DEPS is not set; run tests/e2e/nvim.sh")
 for name, kind in vim.fs.dir(deps) do
-  -- PASEO_E2E_NOVOLT=1 leaves volt OFF the runtimepath, to prove what runs without it.
-  if kind == "directory" and not (name == "volt" and vim.env.PASEO_E2E_NOVOLT == "1") then
+  -- Never volt, even when an old cache still has it: nothing needs it.
+  if kind == "directory" and name ~= "volt" then
     vim.opt.runtimepath:append(vim.fs.joinpath(deps, name))
   end
 end
@@ -35,7 +35,7 @@ require("paseo").setup {
     provider = vim.env.PASEO_E2E_PROVIDER or "fake/scripted",
   },
   ui = {
-    surface = vim.env.PASEO_E2E_SURFACE or "float",
+    surface = vim.env.PASEO_E2E_SURFACE or "native",
     -- PASEO_E2E_UI_COLORS=fixed checks the plugin's own palette.
     colors = vim.env.PASEO_E2E_UI_COLORS or "auto",
   },
@@ -46,8 +46,8 @@ require("paseo").setup {
 _G.paseo_e2e = {}
 
 function _G.paseo_e2e.state()
-  local float = require "paseo.ui.float"
-  local chat = float.chat() or require("paseo.ui.chat").current()
+  local native = require "paseo.ui.native"
+  local chat = native.chat() or require("paseo.ui.chat").current()
   local blocks = {}
   if chat and chat.blocks then
     for _, id in ipairs(chat.order or {}) do
@@ -68,8 +68,10 @@ function _G.paseo_e2e.state()
     }
   end
   return vim.json.encode {
-    mount = float.mount(),
-    tab = float.tab and float.tab() or nil,
+    -- Which surface the chat is on: "native" (its own tab page) or "sidebar".
+    mount = (chat and native.has(chat) and "native")
+      or (chat and require("paseo.ui.sidebar").is_open(chat) and "sidebar")
+      or nil,
     tabpages = #vim.api.nvim_list_tabpages(),
     agent = chat and chat.agent_id or nil,
     streaming = chat and chat.streaming or false,
@@ -79,7 +81,7 @@ function _G.paseo_e2e.state()
 end
 
 local function current()
-  return require("paseo.ui.float").chat() or require("paseo.ui.chat").current()
+  return require("paseo.ui.native").chat() or require("paseo.ui.chat").current()
 end
 
 ---How many user messages the transcript shows.

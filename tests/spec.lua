@@ -37,7 +37,6 @@ local files = {
   "pr",
   "workspace",
   "ui.render",
-  "ui.surfaces",
   "ui.panels",
   "ui.composer",
   "ui.theme",

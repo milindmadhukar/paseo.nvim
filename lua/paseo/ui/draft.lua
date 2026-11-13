@@ -214,8 +214,8 @@ function M.groups(draft)
       entries = toggles,
       -- The card keeps the height it had while the daemon is asked what the
       -- new mode supports. A features card that collapses to one row and
-      -- springs back moves every card below it twice, and volt turns that
-      -- into `Invalid 'line': out of range` on the next mouse move.
+      -- springs back moves every card below it twice. (Under volt that was
+      -- also `Invalid 'line': out of range` on the next mouse move.)
       rows = draft.loading and math.max(1, draft.feature_rows) or nil,
       placeholder = draft.loading and "loading…" or nil,
     },

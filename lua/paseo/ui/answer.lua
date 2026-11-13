@@ -64,8 +64,7 @@ local open_overlay
 ---@field kind "question"|"plan"
 ---@field state paseo.QuestionState|nil
 ---@field focus table<integer, integer>   Option focus, per question. Ours, not
----                                       the cursor's: volt resets the cursor
----                                       to {1,1} after every click.
+---                                       the cursor's.
 ---@field w integer
 ---@field h integer
 ---@field card_buf integer
@@ -81,8 +80,6 @@ local open_overlay
 ---@field body_row integer|nil
 ---@field body_h integer|nil
 ---@field anchor integer|nil      The chat window we are anchored to, if any.
----@field volt boolean            False once volt has failed to draw and the
----                               card is plain text instead.
 ---@field augroup integer
 ---@field busy boolean|nil        Re-entry guard for the resize handlers.
 ---@field resize_pending boolean|nil
@@ -100,8 +97,8 @@ local MIN_W, MIN_H = 48, 14
 ---
 ---`relative = "win"` is the whole trick, and it is the one place in this plugin
 ---that uses it. Neovim repositions a win-relative float against its parent on
----every redraw, so the sidebar's real splits and the dashboard's floated panes
----need no branch and no arithmetic here -- shrink the chat window and the card
+---every redraw, so the sidebar's splits and the native surface's need no
+---branch and no arithmetic here -- shrink the chat window and the card
 ---moves with it.
 ---
 ---Two things it does NOT do, both handled below: it does not close when its
@@ -665,63 +662,16 @@ local function build(o, f)
   return lines
 end
 
--- --------------------------------------------------------------------- volt
+-- -------------------------------------------------------------------- paint
 
 ---@param o paseo.Answer
 ---@param f table
 ---@param lines table[][]
 local function paint(o, f, lines)
   o.h = math.max(4, math.min(#lines, f.avail))
-
-  local ok = o.volt
-    and pcall(function()
-      local volt = require "volt"
-      api.nvim_buf_clear_namespace(o.card_buf, ns, 0, -1)
-      volt.gen_data {
-        {
-          buf = o.card_buf,
-          ns = ns,
-          xpad = 0,
-          layout = {
-            {
-              name = "answer",
-              -- A FRESH table every call: `volt.draw` does
-              -- `table.remove(marks, 3)` on what it is handed, so a cached line
-              -- list loses its click actions after the first draw.
-              lines = function()
-                local built = build(o, frame(o.chat, o.kind))
-                -- Never more rows than the buffer has. volt writes an extmark
-                -- per row at a precomputed line, and a row past the end raises
-                -- `Invalid 'line': out of range` -- from inside `vim.on_key`,
-                -- when it happens on hover.
-                return render.to_volt(vim.list_slice(built, 1, math.min(#built, o.h)))
-              end,
-            },
-          },
-        },
-      }
-      vim.bo[o.card_buf].modifiable = true
-      volt.set_empty_lines(o.card_buf, o.h, f.w)
-      vim.bo[o.card_buf].modifiable = false
-      volt.redraw(o.card_buf, "all")
-    end)
-
-  if not ok then
-    -- Volt is a hard dependency -- `paseo.ui.widgets` requires `volt.ui` at the
-    -- top -- so this is not the "volt is missing" path, which cannot be reached
-    -- from here. It is the "volt threw" path, and being unable to answer at all
-    -- is worse than an unstyled card.
-    o.volt = false
-    vim.bo[o.card_buf].modifiable = true
-    render.to_buffer(
-      o.card_buf,
-      require("paseo.ui.hl").ns,
-      0,
-      -1,
-      vim.list_slice(lines, 1, math.min(#lines, o.h))
-    )
-    vim.bo[o.card_buf].modifiable = false
-  end
+  vim.bo[o.card_buf].modifiable = true
+  render.to_buffer(o.card_buf, require("paseo.ui.hl").ns, 0, -1, vim.list_slice(lines, 1, math.min(#lines, o.h)))
+  vim.bo[o.card_buf].modifiable = false
 end
 
 -- ------------------------------------------------------------- child windows
@@ -880,9 +830,9 @@ end
 
 ---An answer in your own words, typed where you are looking.
 ---
----A REAL buffer, never volt's: insert-mode keymaps, completion, abbreviations
+---A REAL, modifiable buffer: insert-mode keymaps, completion, abbreviations
 ---and undo are the difference between writing an answer and filling in a text
----field, and `volt.run` would set `modifiable = false` on it. It is floated over
+---field. It is floated over
 ---rows the card reserves for it, so there is one frame on screen rather than a
 ---popup over a float over a backdrop -- which is what `vim.ui.input` was.
 ---@param o paseo.Answer
@@ -1156,28 +1106,6 @@ end
 
 -- ------------------------------------------------------------------ opening
 
----Forget volt's per-buffer bookkeeping.
----
----It keys state by buffer and never clears it itself, and a buffer left on its
----key handler goes on being dispatched to for the rest of the session. Both
----halves, which only `paseo.ui.float` was doing.
----@param buf integer|nil
-local function forget(buf)
-  if not buf then
-    return
-  end
-  pcall(function()
-    require("volt.state")[buf] = nil
-    local bufs = require("volt.events").bufs
-    for i, id in ipairs(bufs) do
-      if id == buf then
-        table.remove(bufs, i)
-        break
-      end
-    end
-  end)
-end
-
 function M.close()
   local o = open_overlay
   if not o then
@@ -1200,7 +1128,6 @@ function M.close()
     end
   end
   for _, buf in pairs { o.box_buf, o.body_buf, o.card_buf, o.backdrop_buf } do
-    forget(buf)
     if api.nvim_buf_is_valid(buf) then
       pcall(api.nvim_buf_delete, buf, { force = true })
     end
@@ -1230,9 +1157,6 @@ function M.open(chat, request, view, handlers)
     handlers = handlers,
     kind = view.state and "question" or "plan",
     focus = {},
-    -- Without volt, the `render.to_buffer` fallback in `paint` is the
-    -- renderer from the first frame; the keys below are ours either way.
-    volt = require("paseo.ui.widgets").has_volt(),
     augroup = api.nvim_create_augroup("paseo.answer", { clear = true }),
   }
 
@@ -1315,21 +1239,6 @@ function M.open(chat, request, view, handlers)
   paint(o, f, lines)
   place_children(o)
   vim.bo[o.card_buf].filetype = "paseo-answer"
-
-  -- The mouse half. `events.add` binds `<CR>`/`<Tab>`/`<S-Tab>` on the buffer
-  -- and `enable` is what routes `LeftMouse` to a cell's click action. Our own
-  -- maps go on AFTER, so they win the three keys we care about. `volt.mappings`
-  -- is deliberately NOT called: it binds `q`/`<Esc>` to a teardown that knows
-  -- nothing about our child windows.
-  if o.volt then
-    pcall(function()
-      local events = require "volt.events"
-      events.add(o.card_buf)
-      if not vim.g.extmarks_events then
-        events.enable()
-      end
-    end)
-  end
 
   bind(o, o.card_buf)
   -- The plan's body is focusable so the wheel can reach it, which means you can

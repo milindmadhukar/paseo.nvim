@@ -1,8 +1,7 @@
 --- The conversation buffer: real lines, tracked in blocks.
 ---
---- Real lines rather than volt's virtual text, so `y`, `/`, `gg`, folds and
---- soft-wrap all keep working on an agent's reply. Volt draws the chrome around
---- this; it does not draw this.
+--- Real lines rather than virtual text, so `y`, `/`, `gg`, folds and
+--- soft-wrap all keep working on an agent's reply.
 ---
 --- A BLOCK is one rendered item -- a message, a tool card, a reasoning step.
 --- Blocks are anchored by extmark rather than by line number, because a tool
@@ -86,9 +85,9 @@ end
 
 ---Is the window showing the END of the transcript?
 ---
----By VIEWPORT, not by cursor. This window is never the focused one -- the
----dashboard opens it with `enter = false` and the sidebar hands focus straight
----to the composer -- so its cursor is not where you are looking. It is only
+---By VIEWPORT, not by cursor. This window is usually not the focused one --
+---the native surface and the sidebar both hand focus straight to the
+---composer -- so its cursor is not where you are looking. It is only
 ---ever wherever `to_bottom` last parked it.
 ---
 ---The old test was `cursor >= line_count - 3`, and that is why following
@@ -249,8 +248,9 @@ local function card_for(block, width, markdown)
   })
   local entry = { key = key, lines = card.lines, collapsible = card.collapsible }
   -- Safe to hold on to: `render.to_buffer` flattens its input into fresh
-  -- tables and never writes back into the cells it was handed, unlike volt's
-  -- `draw`, which strips the click handler out of `cell[3]`.
+  -- tables and never writes back into the cells it was handed (volt's `draw`,
+  -- which this used to go through, stripped the click handler out of
+  -- `cell[3]`).
   if #card.lines <= CACHE_MAX_LINES then
     cache = cache or {}
     table.insert(cache, 1, entry)
@@ -618,9 +618,9 @@ end
 ---buffer are a pure function of the width, so when the width is the same the
 ---work is provably redundant.
 ---
----This also covers the surface swap for free: the sidebar pane and the float's
----pane are different widths, so a real swap redraws. If they ever do coincide,
----the bytes would have been identical anyway.
+---This also covers the surface swap for free: the sidebar pane and the native
+---tab's conversation are different widths, so a real swap redraws. If they ever
+---do coincide, the bytes would have been identical anyway.
 ---@param chat table
 ---@param opts? { force?: boolean }  `force` for a change the width cannot see.
 function M.redraw(chat, opts)

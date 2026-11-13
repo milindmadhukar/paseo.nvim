@@ -3,21 +3,11 @@
 local t = require "tests.spec.helpers"
 local eq, truthy = t.eq, t.truthy
 
----Never `nvim_buf_get_lines`: volt draws with extmark virtual text over a
----buffer of blank rows, so the lines are spaces and a check against them
----passes whatever is on screen. Two assertions about the new-session screen
----were vacuous for exactly that reason.
+---What the screen says: its real buffer text.
 ---@param buf integer
 ---@return string
-local function volt_text(buf)
-  local out = {}
-  for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, -1, 0, -1, { details = true })) do
-    for _, cell in ipairs(mark[4] and mark[4].virt_text or {}) do
-      out[#out + 1] = cell[1]
-    end
-    out[#out + 1] = "\n"
-  end
-  return table.concat(out)
+local function drawn_text(buf)
+  return table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
 end
 
 local function test_provider_setup()
@@ -160,11 +150,11 @@ local function test_provider_setup()
     local review_buf = vim.api.nvim_get_current_buf()
     truthy(
       "provider: with a Provider card the Agent tab does not have",
-      volt_text(review_buf):find("Provider", 1, true) ~= nil
+      drawn_text(review_buf):find("Provider", 1, true) ~= nil
     )
     truthy(
       "provider: and its footer survives a short editor",
-      volt_text(review_buf):find("create", 1, true) ~= nil
+      drawn_text(review_buf):find("create", 1, true) ~= nil
     )
 
     -- Changing model refetches that model's features, and the draft is the
@@ -192,7 +182,7 @@ local function test_provider_setup()
     truthy(
       "provider: the features card says so while it waits",
       vim.wait(1000, function()
-        return volt_text(review_buf):find("loading", 1, true) ~= nil
+        return drawn_text(review_buf):find("loading", 1, true) ~= nil
       end)
     )
     held_feature_callback(nil, {
@@ -203,7 +193,7 @@ local function test_provider_setup()
     truthy(
       "provider: model features finish loading",
       vim.wait(1000, function()
-        return volt_text(review_buf):find("loading", 1, true) == nil
+        return drawn_text(review_buf):find("loading", 1, true) == nil
       end)
     )
     vim.api.nvim_feedkeys("c", "x", false)

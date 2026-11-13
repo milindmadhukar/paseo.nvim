@@ -114,9 +114,9 @@ function M.open(opts, callback)
     col = math.max(0, math.floor((vim.o.columns - width) / 2)),
     style = "minimal",
     border = "rounded",
-    -- Above the dashboard's 30, below the settings popup's 60 and well below
-    -- the permission dialog's 200 -- a permission request must never end up
-    -- behind a box you are typing in.
+    -- Below the settings popup's 60 and well below the permission dialog's
+    -- 200 -- a permission request must never end up behind a box you are
+    -- typing in.
     zindex = 40,
     title = { { " ask · " .. ellipsis(width - 12, opts.title or "here") .. " ", "PaseoHeader" } },
     title_pos = "center",
@@ -155,8 +155,8 @@ function M.open(opts, callback)
   -- how you write a second paragraph.
   --
   -- `<C-s>` used to be the second key here and in the composer, and it is the
-  -- session list -- on the chrome, in every terminal, and on the strip over
-  -- the box. One key cannot mean both, and "send" is the one with an
+  -- session list -- in every terminal, on the rail, and in the composer
+  -- itself. One key cannot mean both, and "send" is the one with an
   -- alternative. `<C-CR>` rides along for terminals that speak the kitty
   -- keyboard protocol; the rest never deliver it.
   map("n", "<CR>", accept)

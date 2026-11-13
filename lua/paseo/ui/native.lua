@@ -1,5 +1,5 @@
 --- EXPERIMENTAL. The native surface: the chat out of real splits and nothing
---- else -- no volt, no floats, no chrome.
+--- else -- no floats over your code, no frame drawn around it.
 ---
 --- ONE TAB PAGE PER AGENT. A tab page is Neovim's own answer to "a separate
 --- arrangement of windows", so two agents in one workspace are two tabs and
@@ -10,8 +10,8 @@
 ---
 --- The rail is |paseo.ui.rail|'s buffer -- one buffer, shown in a window on
 --- every native tab. The conversation and composer are the chat's own buffers,
---- exactly as the sidebar shows them. The panel is the dashboard's Settings,
---- Changes or Usage, drawn as real lines by |paseo.ui.render|. `<C-p>` toggles
+--- exactly as the sidebar shows them. The panel is Settings, Changes or Usage
+--- (`ui/panels/`), drawn as real lines by |paseo.ui.render|. `<C-p>` toggles
 --- it; `1` `2` `3` in it pick which.
 ---
 --- WHAT IS CURRENT FOLLOWS THE TAB. `:Paseo mode`, `:Paseo stop` and every
@@ -212,6 +212,51 @@ local watch
 ---@type table<integer, integer>
 local side_rails = {}
 
+---The keys out of a terminal's tab (`ui.terminal.keys`).
+---
+---A terminal takes every key, which is what it is for -- so the few it does
+---not take are your whole way out, bound in TERMINAL mode as well as normal,
+---or each would start with `<C-\><C-n>`. They are Neovim's own moves:
+---`chrome` leaves terminal mode, `terminal` goes back in, `next`/`prev` are
+---the next and previous tab page, `sessions` is the rail. `q` (normal mode
+---only -- in terminal mode it is a letter) closes the tab; the terminal lives
+---on, on the daemon. `false` unbinds any of them.
+---@param buf integer
+function M.bind_terminal(buf)
+  if not (buf and api.nvim_buf_is_valid(buf)) or vim.b[buf].paseo_terminal_keys then
+    return
+  end
+  vim.b[buf].paseo_terminal_keys = true
+  local keys = (require("paseo.config").get().ui.terminal or {}).keys or {}
+  local function map(modes, lhs, fn, desc)
+    if lhs then
+      vim.keymap.set(modes, lhs, fn, { buffer = buf, nowait = true, silent = true, desc = "paseo: " .. desc })
+    end
+  end
+  map({ "n", "t" }, keys.chrome, function()
+    vim.cmd.stopinsert()
+  end, "out of the terminal, into normal mode")
+  map({ "n", "t" }, keys.terminal, function()
+    vim.cmd.startinsert()
+  end, "back into the terminal")
+  map({ "n", "t" }, keys.next, function()
+    vim.cmd.tabnext()
+  end, "the next tab")
+  map({ "n", "t" }, keys.prev, function()
+    vim.cmd.tabprevious()
+  end, "the previous tab")
+  map({ "n", "t" }, keys.sessions, function()
+    local win = side_rails[api.nvim_get_current_tabpage()]
+    if valid_win(win) then
+      vim.cmd.stopinsert()
+      api.nvim_set_current_win(win)
+    end
+  end, "the sessions, in the rail")
+  map("n", "q", function()
+    pcall(vim.cmd.tabclose)
+  end, "close this tab (the terminal lives on)")
+end
+
 ---Is the rail showing on the native tab you are looking at?
 ---@return boolean
 function M.rail_shown()
@@ -270,13 +315,17 @@ function M.toggle_rail()
   if not t then
     return
   end
+  -- REMEMBERED, across tabs and restarts (|paseo.ui.rail|'s state file): a
+  -- rail you hid stays hidden on the next agent's tab and the next session.
   if valid_win(t.rail) then
     local win = t.rail
     t.rail = nil
     pcall(api.nvim_win_close, win, true)
+    require("paseo.ui.rail").set_visible(false)
     M.back()
     return
   end
+  require("paseo.ui.rail").set_visible(true)
   open_rail(t)
 end
 
@@ -302,8 +351,8 @@ local function draw_panel(t)
   pcall(api.nvim_win_set_cursor, t.panel_win, cursor)
 end
 
----Repaint every panel that is up. The panels' own views ask for this through
----|paseo.ui.float|'s `rebuild`, which forwards here.
+---Repaint every panel that is up. The panels' own views ask for this when
+---what they draw changes, and so does every frame of |paseo.ui.animate|.
 function M.redraw_panels()
   for tab in pairs(tabs) do
     local t = entry(tab)
@@ -864,11 +913,19 @@ function M.show_session(session)
     local terminal = require("paseo.terminals").get(session.id, host_id)
       or { id = session.id, hostId = host_id }
     local ui = require "paseo.ui.terminal"
+    local keep_rail = M.rail_shown()
     vim.cmd "tabnew"
     local win = api.nvim_get_current_win()
     local scratch = api.nvim_get_current_buf()
     local view = ui.ensure(terminal, win)
     ui.show(view, win)
+    -- The rail comes too, as it does for a subagent's view: a tab of its own
+    -- is not a reason to lose the way back.
+    if keep_rail then
+      M.rail_beside()
+      api.nvim_set_current_win(win)
+    end
+    M.bind_terminal(view.buf)
     if api.nvim_buf_is_valid(scratch) and #vim.fn.win_findbuf(scratch) == 0 then
       pcall(api.nvim_buf_delete, scratch, {})
     end

@@ -1,6 +1,6 @@
 # The native surface, against a real daemon: a tab per agent, the spinner
 # while a turn runs, markdown prose, the panels, and a second agent in a
-# second tab. Run with PASEO_E2E_NOVOLT=1 to prove it needs no volt.
+# second tab.
 source "$(dirname "$0")/../lib.sh"
 
 repo="$(fresh_repo)"

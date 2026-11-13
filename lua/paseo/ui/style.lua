@@ -1,7 +1,7 @@
---- Frame language: how a card is drawn, and what the outer float's edge is.
+--- Frame language: how a card is drawn, and what a floating window's edge is.
 ---
---- This exists because "borders" turned out to be the whole complaint about
---- how the dashboard looked, and because the right answer is not one style --
+--- This exists because "borders" turned out to be the whole complaint about how
+--- the old dashboard looked, and because the right answer is not one style --
 --- it is a small set of them with a sane default.
 ---
 --- The default is `"plate"`, which draws NO frame at all. A card is a title

@@ -255,13 +255,11 @@ end
 ---@param root string
 ---@param callback fun(result: table|nil, err: string|nil)
 local function into_terminal(root, callback)
-  local float = require "paseo.ui.float"
   require("paseo.ui.newterm").open({
     root = root,
-    -- The PTY is sized to the surface it will be drawn on. Absent on the
-    -- sidebar, where there is no terminal pane to size it to and
-    -- |paseo.terminals| picks a default.
-    size = float.mount() and float.body_size() or nil,
+    -- Unsized: |paseo.terminals| picks a default, and the window the PTY is
+    -- shown in resizes it to itself on attach.
+    size = nil,
   }, function(id, err)
     if err then
       return callback(nil, err)
@@ -269,11 +267,9 @@ local function into_terminal(root, callback)
     if not id then
       return callback(nil, nil)
     end
-    -- ON SCREEN IF THERE IS A SCREEN FOR IT. `show_session` is the dashboard's
-    -- own "point the Chat tab at this"; on the sidebar there is no Chat tab to
-    -- point, and a terminal nobody can see is worse than one you were told
-    -- where to find.
-    float.show_session { kind = "terminal", id = id }
+    -- ON SCREEN: the native surface shows it (a terminal is a session like an
+    -- agent); from the sidebar the Sessions in the rail list it.
+    require("paseo.ui.native").show_session { kind = "terminal", id = id }
     callback({ kind = "terminal", id = id }, nil)
   end)
 end
@@ -319,18 +315,19 @@ function M.open(opts, callback)
   end)
 end
 
----What `<C-n>` offers on the dashboard: everything there is to start, from
----wherever you are on it.
+---What `<C-n>` offers on the native surface: everything there is to start,
+---from wherever you are on it.
 M.NEW = {
   { id = "here", label = "new agent", note = "in this workspace" },
   { id = "workspace", label = "new agent in a new workspace", note = "a directory of its own" },
   { id = "terminal", label = "new terminal", note = "a shell in this workspace" },
 }
 
----Start something from the dashboard -- `kind` says what, or a menu asks.
+---Start something from the native surface -- `kind` says what, or a menu
+---asks.
 ---
----THE ONE WAY IN, whichever key or click it came from: `<C-n>` and the
----footer's `new` ask; the session tree's `a`, `w` and `t` already know.
+---THE ONE WAY IN, whichever key it came from: `<C-n>` asks; the rail's `a`,
+---`w` and `t` already know.
 ---@param ctx paseo.StartContext
 ---@param kind? "here"|"workspace"|"terminal"
 function M.new(ctx, kind)

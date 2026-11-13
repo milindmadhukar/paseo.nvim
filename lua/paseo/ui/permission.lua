@@ -37,8 +37,8 @@ local ns = api.nvim_create_namespace "paseo.permission"
 ---this module, which is the point of it taking callbacks. It is so that a
 ---broken overlay still leaves this file loadable, with the plain allow/deny
 ---float below, rather than failing to load the module that answers permissions
----at all. Volt is optional for both: each paints with `render.to_buffer` when
----volt is not installed.
+---at all. Neither needs anything outside this plugin to draw: both paint
+---with `render.to_buffer`.
 ---@return table|nil
 local function overlay()
   local ok, module = pcall(require, "paseo.ui.answer")
@@ -217,20 +217,6 @@ function M.close()
   end
   for _, buf in ipairs { dialog.buf, dialog.backdrop } do
     if buf and api.nvim_buf_is_valid(buf) then
-      -- Volt keys its state by buffer and never clears it itself, and it also
-      -- keeps the buffer on its global key handler's list -- so BOTH halves,
-      -- or this dialog's clickable tables leak and a dead buffer goes on being
-      -- dispatched to for the rest of the session.
-      pcall(function()
-        require("volt.state")[buf] = nil
-        local bufs = require("volt.events").bufs
-        for i, id in ipairs(bufs) do
-          if id == buf then
-            table.remove(bufs, i)
-            break
-          end
-        end
-      end)
       pcall(api.nvim_buf_delete, buf, { force = true })
     end
   end
@@ -354,8 +340,8 @@ local function open(chat, request)
     -- through to the float below: that answers with a bare allow, which for a
     -- question is the exact bug this whole path exists to avoid. So say so and
     -- leave it pending -- still answerable in the Paseo app, and still in the
-    -- transcript. (Volt is not the reason any more: the overlay paints with
-    -- `render.to_buffer` when volt is absent.)
+    -- transcript. (A missing volt used to be one way to get here; nothing
+    -- here needs volt now.)
     return vim.notify(
       "paseo: the question overlay failed to load; the request is still pending",
       vim.log.levels.ERROR
@@ -369,15 +355,11 @@ local function open(chat, request)
   -- A dimmed backdrop, so the dialog reads as modal. typr does the same for
   -- its stats window.
   --
-  -- NOT OVER THE DASHBOARD. A blended float only shows the base grid through
-  -- it, never other floats -- and every pane of the dashboard is a float. So
-  -- the "dimmed" dashboard was no dashboard at all: the conversation, the
-  -- rail and the card for this very request vanished behind it, and the
-  -- dialog sat over an empty editor, which reads as the dashboard having
-  -- crashed. The dashboard is already the modal context; the dialog over it
-  -- needs no second one.
+  -- Every surface now is real splits, which a blended backdrop dims as it
+  -- should. (Over the old floating dashboard it could not: a blended float
+  -- shows only the base grid through it, so it hid every pane it covered.)
   local backdrop, backdrop_win
-  if not require("paseo.ui.float").mount() then
+  do
     backdrop = api.nvim_create_buf(false, true)
     backdrop_win = api.nvim_open_win(backdrop, false, {
       relative = "editor",
@@ -402,7 +384,7 @@ local function open(chat, request)
     height = h,
     style = "minimal",
     border = "rounded",
-    -- Above the big float, which sits at 100.
+    -- Above its own backdrop, at 190, and every other window here.
     zindex = 200,
   })
 
@@ -415,39 +397,8 @@ local function open(chat, request)
     request = request,
   }
 
-  -- Volt owns this buffer entirely: it is chrome, nothing is typed into it,
-  -- and it is ours to delete. That is exactly the case volt is for -- unlike
-  -- the composer, which must never be handed to it.
-  local ok = pcall(function()
-    local volt = require "volt"
-    volt.gen_data {
-      {
-        buf = buf,
-        ns = ns,
-        xpad = 1,
-        layout = {
-          {
-            name = "permission",
-            -- A FRESH table every call: `volt.draw` does
-            -- `table.remove(marks, 3)` on what it is handed, so a cached line
-            -- list loses its actions after the first draw.
-            lines = function()
-              return render.to_volt(build(request, width, view))
-            end,
-          },
-        },
-      },
-    }
-    volt.run(buf, { h = h, w = w })
-  end)
-
-  if not ok then
-    -- This one CAN run without volt -- it builds with `render` alone -- so
-    -- unlike the overlay, whose `paseo.ui.widgets` requires `volt.ui` outright,
-    -- the fallback here is reachable and worth keeping.
-    render.to_buffer(buf, hl.ns, 0, -1, lines)
-    vim.bo[buf].modifiable = false
-  end
+  render.to_buffer(buf, hl.ns, 0, -1, lines)
+  vim.bo[buf].modifiable = false
 
   local map = function(key, fn)
     vim.keymap.set("n", key, fn, { buffer = buf, nowait = true, silent = true })

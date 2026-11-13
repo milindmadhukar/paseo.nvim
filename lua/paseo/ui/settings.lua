@@ -2,8 +2,8 @@
 ---
 --- `:Paseo mode` used to be a `vim.ui.select` listing five strings with a `●`
 --- glued to the front of one of them. This is the same four settings drawn the
---- same way the dashboard draws them -- because it IS the dashboard's view
---- object, at a different width, with its own window.
+--- same way the native surface's Settings panel draws them -- because it IS
+--- that panel's view object, at a different width, with its own window.
 ---
 --- The window itself is |paseo.ui.popup|'s, which is also what the new-agent
 --- screen opens. Those two used to be a volt popup and a plain buffer, and the

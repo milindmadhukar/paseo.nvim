@@ -15,7 +15,7 @@
 --- Two structures come out of it:
 ---
 ---   * the ELEVATION ladder -- five backgrounds stepped off `Normal`, which is
----     what gives the dashboard depth. Surfaces are separated by elevation and
+---     what gives the surfaces depth. Surfaces are separated by elevation and
 ---     padding rather than by drawn boxes, which is the whole point of the
 ---     redesign: a frame around every card reads as noise, a sheet raised off
 ---     its background reads as design.
@@ -64,7 +64,7 @@ end
 
 ---Blend two colours, or give up gracefully.
 ---
----Wrapped because `volt.color` is only present when volt is, and because `mix`
+---Wrapped because `mix`
 ---returns its first argument unchanged when either input will not parse as hex
 ----- which is what a `nil` background looks like.
 ---@param accent string|nil
@@ -75,11 +75,7 @@ function M.blend(accent, onto, strength)
   if not (accent and onto) then
     return nil
   end
-  local ok, color = pcall(require, "volt.color")
-  if not ok then
-    return nil
-  end
-  return color.mix(accent, onto, strength)
+  return require("paseo.ui.color").mix(accent, onto, strength)
 end
 
 ---Move a colour towards white (positive) or black (negative).
@@ -90,11 +86,7 @@ function M.shift(base, amount)
   if not base then
     return nil
   end
-  local ok, color = pcall(require, "volt.color")
-  if not ok then
-    return nil
-  end
-  return color.change_hex_lightness(base, amount)
+  return require("paseo.ui.color").change_hex_lightness(base, amount)
 end
 
 ---The contrast ratio an accent must clear against the surface it is drawn on.
@@ -191,7 +183,7 @@ end
 ---
 ---Deriving from the colourscheme is right by default -- a plugin that ignores
 ---your theme looks pasted in -- but it is a default, not a law. A theme whose
----`Function` colour is a shade the dashboard reads badly in, or one that
+---`Function` colour is a shade the panels read badly in, or one that
 ---simply is not what you want the agent surfaces to look like, has no way out
 ---of derivation except this.
 ---
@@ -228,22 +220,20 @@ M.FIXED = {
 ---colour that silently disables a whole tier.
 M.ROLES = { "red", "green", "blue", "yellow", "grey", "border", "text", "bg" }
 
----Volt's palette, or a usable stand-in.
+---The colourscheme's palette.
 ---
----`require "volt.highlights"` is a SIDE-EFFECTING module: requiring it defines
----the Ex* groups. It is pcall'd so this file still loads in a headless test
----where volt is not on the runtimepath -- the fallbacks below are ordinary
----Neovim groups that always exist.
+---Under base46 (NvChad) the palette someone chose is read straight from its
+---cache; otherwise from the groups every colourscheme has to define anyway.
 ---@return paseo.Theme.Palette
 local function from_colourscheme()
-  pcall(require, "volt.highlights")
 
-  -- `Normal` first, not `NormalFloat`. The dashboard covers most of the screen
-  -- and REPLACES its windows' `Normal` with `PaseoNormal`, so the colour it has
-  -- to be a step away from is the editor's, not the popup background some
-  -- themes make markedly greyer -- `morning` links `NormalFloat` to `Pmenu` at
-  -- #b2b2b2 against a #e4e4e4 editor, and deriving from that put a grey slab
-  -- over a white screen.
+  -- `Normal` first, not `NormalFloat`. The native surface covers the screen,
+  -- and every surface REPLACES its windows' `Normal` with one of ours
+  -- (`PaseoBase`, `PaseoNormal`), so the colour those have to be a step away
+  -- from is the editor's, not the popup background some themes make markedly
+  -- greyer -- `morning` links `NormalFloat` to `Pmenu` at #b2b2b2 against a
+  -- #e4e4e4 editor, and deriving from that put a grey slab over a white
+  -- screen.
   --
   -- A THEME MAY STATE NO BACKGROUND AT ALL. `morning` does: it sets `Normal`'s
   -- foreground and leaves the background to the terminal. Everything derived
@@ -258,27 +248,33 @@ local function from_colourscheme()
     or (vim.o.background == "light" and "#ffffff" or "#000000")
   local text = fg_of "Normal"
 
-  -- volt's `Ex*` groups are only trustworthy when base46 is: its OTHER path
-  -- writes `ExBlue = { fg = get_hl "Function" }`, and `volt.utils.get_hl`
-  -- returns a TABLE -- `{ fg = "#87afaf" }` -- not a colour, so every accent on
-  -- that path resolves to #000000. Black is not obviously wrong on a dark
-  -- theme, which is why it went unnoticed; it is simply invisible.
-  --
-  -- So the fallback is ours rather than volt's, and it reads the same
-  -- SEMANTIC groups volt meant to read. That is the whole difference between
-  -- the two chains: with base46 we take a palette someone chose, and without
-  -- it we take the groups every colourscheme has to define anyway.
-  local themed = vim.g.base46_cache ~= nil
+  -- BASE46 FIRST, when it is there: a palette someone chose, read from its
+  -- own cache -- `red`, `green`, `blue`, `yellow`, and the greys. (These came
+  -- through volt's `Ex*` groups before, which were base46's colours under
+  -- another name.) Without it, the SEMANTIC groups every colourscheme defines.
+  local base46
+  if vim.g.base46_cache then
+    local ok, colors = pcall(dofile, vim.g.base46_cache .. "colors")
+    base46 = ok and type(colors) == "table" and colors or nil
+  end
+  local function from_base46(key)
+    if not base46 then
+      return nil
+    end
+    if key == "border" then
+      return base46.grey and M.shift(base46.grey, vim.o.background == "dark" and 35 or -35) or nil
+    end
+    local value = base46[key]
+    return type(value) == "string" and value or nil
+  end
 
-  local function pick(volt_group, ...)
-    if themed then
-      local found = fg_of(volt_group)
-      if found then
-        return found
-      end
+  local function pick(base46_key, ...)
+    local found = from_base46(base46_key)
+    if found then
+      return found
     end
     for _, fallback in ipairs { ... } do
-      local found = fg_of(fallback)
+      found = fg_of(fallback)
       if found then
         return found
       end
@@ -290,13 +286,13 @@ local function from_colourscheme()
   -- diff groups mean what we mean, and the syntax groups only happen to. On
   -- `morning`, `String` is MAGENTA -- so a tool that succeeded was drawn in the
   -- same colour a string literal is, which is not a shade of "it worked".
-  local grey = pick("CommentFg", "Comment", "NonText")
+  local grey = pick("light_grey", "Comment", "NonText")
 
   return {
-    red = pick("ExRed", "DiagnosticError", "Removed", "diffRemoved", "ErrorMsg"),
-    green = pick("ExGreen", "DiagnosticOk", "Added", "diffAdded", "String"),
-    blue = pick("ExBlue", "Function", "Identifier", "Directory"),
-    yellow = pick("ExYellow", "DiagnosticWarn", "Changed", "diffChanged", "WarningMsg"),
+    red = pick("red", "DiagnosticError", "Removed", "diffRemoved", "ErrorMsg"),
+    green = pick("green", "DiagnosticOk", "Added", "diffAdded", "String"),
+    blue = pick("blue", "Function", "Identifier", "Directory"),
+    yellow = pick("yellow", "DiagnosticWarn", "Changed", "diffChanged", "WarningMsg"),
     -- Dim has to be DIMMER than body text, and on some themes it is not.
     -- Two different ways of being too loud, so two corrections: a saturated
     -- `Comment` is replaced with a neutral derived from the body text, and
@@ -307,7 +303,7 @@ local function from_colourscheme()
       text,
       bg
     ),
-    border = pick("ExLightGrey", "LineNr", "Comment"),
+    border = pick("border", "LineNr", "Comment"),
     text = text,
     bg = bg,
   }
@@ -359,11 +355,7 @@ function M.saturation(hex_colour)
   if not hex_colour then
     return 0
   end
-  local ok, color = pcall(require, "volt.color")
-  if not ok then
-    return 0
-  end
-  local _, saturation = color.hex2hsl(hex_colour)
+  local _, saturation = require("paseo.ui.color").hex2hsl(hex_colour)
   return saturation or 0
 end
 
@@ -472,10 +464,7 @@ function M.hues(seed, count)
   if not seed then
     return out
   end
-  local ok, color = pcall(require, "volt.color")
-  if not ok then
-    return out
-  end
+  local color = require "paseo.ui.color"
   for i = 1, count do
     -- `change_hex_hue` takes a PERCENTAGE of the wheel, not degrees.
     out[i] = color.change_hex_hue(seed, ((i - 1) * M.GOLDEN_ANGLE * 100) % 100)

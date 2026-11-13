@@ -5,17 +5,17 @@
 --- one at a time to find out what is set.
 ---
 --- This file is a VIEW over `ui/session.lua`'s model, and it is deliberately
---- reusable: `M.new` returns a view object that the dashboard panel and the
---- standalone popup both drive. They differ only in how wide they are and what
---- they call to repaint, so sharing the builders is what keeps the two from
---- drifting into different-looking versions of the same four settings.
+--- reusable: `M.new` returns a view object that the native surface's panel and
+--- the standalone popup both drive. They differ only in how wide they are and
+--- what they call to repaint, so sharing the builders is what keeps the two
+--- from drifting into different-looking versions of the same four settings.
 ---
---- WHY A FOCUS MODEL AND NOT THE CURSOR. volt dispatches `<CR>` through a
---- `CursorMoved` autocmd and then resets the cursor to `{1,1}` after every
---- click (`volt/events.lua:44-48`), so a selection that lived on the cursor
---- would be thrown away by the framework on each interaction. Focus is ours,
---- drawn with `PaseoChipFocus`, and hover paints the same group -- so the
---- mouse and the keyboard are visibly the same interaction, not two.
+--- WHY A FOCUS MODEL AND NOT THE CURSOR. Focus is ours, held by id and drawn
+--- with `PaseoChipFocus`, so it survives a redraw that rebuilds every row, and
+--- it picks one chip out of a row of several. It began as a workaround: volt
+--- dispatched `<CR>` through a `CursorMoved` autocmd and reset the cursor to
+--- `{1,1}` after every click, so a selection on the cursor was thrown away on
+--- each interaction.
 
 local render = require "paseo.ui.render"
 local session = require "paseo.ui.session"
@@ -31,7 +31,8 @@ M.title = "Settings"
 ---@class paseo.AgentSettingsView
 ---@field source paseo.SettingsSource
 ---@field only string|nil   Draw just this group.
----@field section string    The volt section a hover repaints.
+---@field section string    Left from volt, which repainted this section on
+---                          hover. Nothing dispatches a hover now.
 ---@field compact boolean   Drop the padding inside every card.
 ---@field hints table[]|nil Extra footer hint pairs.
 ---@field footer nil|fun(width: integer): table[][]  A row under the cards.
@@ -48,15 +49,15 @@ function M.new(source, opts)
   return setmetatable({
     source = source,
     only = opts.only,
-    -- Which volt section a hover has to repaint. The dashboard calls its
-    -- panel area "body"; the popup draws one section of its own.
+    -- Left from volt: the section a hover repainted. Nothing dispatches a
+    -- hover now.
     section = opts.section or "body",
     -- Drop the padding inside every card. Set by whichever surface is drawing
     -- when the rows it has are fewer than the rows the layout wants.
     compact = false,
-    -- Extra hint pairs for the footer. The popup has a `q` the dashboard tab
-    -- does not, and a hint bar that lies about how to get out is worse than
-    -- no hint bar.
+    -- Extra hint pairs for the footer, for keys the surface around the view
+    -- binds itself -- the popup's `q`. A hint bar that lies about how to get
+    -- out is worse than no hint bar.
     hints = opts.hints,
     focus = { group = opts.only, entry = nil },
     redraw = opts.redraw or function() end,
@@ -202,18 +203,19 @@ end
 
 -- ----------------------------------------------------------------- drawing
 
----Hover and focus are the same paint, so the two input devices look like one.
+---Hover and focus are the same paint. Plain buffers have no pointer hover,
+---so this is the keyboard's focus alone; kept as one call site.
 ---@param id string
 ---@return boolean
 local function hovered(id)
-  return vim.g.nvmark_hovered == id
+  return require("paseo.ui.widgets").hovered(id)
 end
 
 ---Is this the focused entry?
 ---
 ---COMPARED BY ID, never by identity. `session.groups` builds fresh tables on
----every call -- it has to, because volt destroys the ones it is handed -- so
----the entry `resolve` picked and the entry `lines` is drawing are two
+---every call (it had to, under volt, which destroyed the ones it was handed),
+---so the entry `resolve` picked and the entry `lines` is drawing are two
 ---different Lua tables describing the same setting. Comparing them with `==`
 ---silently never matched, and the focus ring never appeared.
 ---@param focus table  `{ group = id, entry = id }`
@@ -246,13 +248,10 @@ end
 ---four options is four lines you read once; one line that changes as you
 ---move is one you actually use.
 ---
----ITS HEIGHT IS RESERVED, not computed from the focused entry. Two reasons,
----and the second is a crash. It stops the cards below jumping a row as you
----move along a chip row. And volt records each section's starting row once,
----in `gen_data`, then draws at those offsets without clearing or re-padding
----- so a section that changed height because you MOVED THE MOUSE writes
----extmarks past the end of the buffer, and `handle_hover` raises
----"Invalid 'line': out of range" from inside `vim.on_key`.
+---ITS HEIGHT IS RESERVED, not computed from the focused entry. It stops the
+---cards below jumping a row as you move along a chip row. (Under volt it was
+---also a crash: volt recorded each section's starting row once, so a section
+---that changed height on a hover wrote extmarks past the end of the buffer.)
 ---
 ---`description` only, never `note`. A note is one word -- "default", or a
 ---base branch -- and reserving two rows of a card to say it about one entry
@@ -363,7 +362,7 @@ local function toggles_body(self, group, focus, w)
       focused = entry
     end
     local action = click(self, group, entry)
-    -- volt's own checkbox: one segment, glyph plus label, state in the
+    -- The checkbox volt had: one segment, glyph plus label, state in the
     -- highlight. Ours only supplies the icons and the two colours.
     local cell = widgets.checkbox {
       txt = entry.label,
@@ -414,10 +413,9 @@ local function card(self, group, focus, w)
 
   -- A FLOOR on the body, for a group whose contents come and go. The features
   -- card empties while the daemon is asked what the new mode supports, and a
-  -- card that shrinks and grows again moves every card below it -- which volt
-  -- turns from a flicker into a crash, because `gen_data` recorded the old
-  -- rows and `handle_hover` redraws at them. Holding the height across the
-  -- round trip is what keeps the layout still.
+  -- card that shrinks and grows again moves every card below it, a flicker on
+  -- every round trip. (Under volt it was a crash.) Holding the height across
+  -- the round trip is what keeps the layout still.
   for _ = #body + 1, group.rows or 0 do
     body[#body + 1] = { { "", "PaseoCardText" } }
   end
@@ -472,10 +470,10 @@ function View:draw(width)
   local groups = self:groups()
   if not groups then
     -- Drawing is not a good place to start a round trip, but it is the only
-    -- place that knows there is nothing to draw. Guarded, because volt calls
-    -- `lines()` again on every hover and `View:lines` calls it twice to
-    -- measure -- unguarded, a mouse moved across a panel that had not loaded
-    -- yet fired two `agent.config` requests per mouse-move event.
+    -- place that knows there is nothing to draw. Guarded, because every
+    -- repaint draws and `View:lines` draws twice to measure -- unguarded, a
+    -- panel that had not loaded yet would fire two `agent.config` requests a
+    -- repaint. (Under volt, two per mouse-move event.)
     if not self.loading then
       self.loading = true
       self.source:load(function()
@@ -630,16 +628,16 @@ function View:bind(buf)
   if self.bound then
     self:unbind(buf)
   end
-  -- Through |paseo.ui.keys|, which saves what it displaces -- the panels share
-  -- one chrome buffer and volt owns `<CR>` on it.
+  -- Through |paseo.ui.keys|, which saves what it displaces -- the buffer
+  -- carries keys the surface or popup bound on it too.
   self.bound = require("paseo.ui.keys").take(buf, self:mappings(), "paseo: agent settings")
 end
 
 ---Give the buffer its keys back.
 ---
----Required, not tidiness: the dashboard's chrome buffer is shared by six
----panels, and `<CR>` left bound here would keep trying to apply an agent
----setting from the Changes tab.
+---Required, not tidiness: the buffer carries keys the surface or popup bound
+---on it too, and a plain delete would take any this displaced with it. See
+---|paseo.ui.keys|.
 ---@param buf integer
 function View:unbind(buf)
   local saved = self.bound
@@ -647,9 +645,10 @@ function View:unbind(buf)
   require("paseo.ui.keys").release(buf, saved)
 end
 
--- ------------------------------------------------- the dashboard panel API
+-- ---------------------------------------------------- the native panel API
 
----The dashboard's view. One surface, one view; rebuilt when the chat changes.
+---The native panel's view. One surface, one view; rebuilt when the chat
+---changes.
 ---@type paseo.AgentSettingsView|nil
 local panel_view
 
@@ -659,7 +658,7 @@ local function view_for(chat)
   if not panel_view or panel_view.source.chat ~= chat then
     panel_view = M.new(session.source(chat), {
       redraw = function()
-        require("paseo.ui.float").rebuild()
+        require("paseo.ui.native").redraw_panels()
       end,
     })
   end

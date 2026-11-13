@@ -1,21 +1,23 @@
---- The dashboard's row budget, in one place.
+--- The old dashboard's row budget, in one place -- and the composer's.
 ---
---- The chrome is a fixed stack -- a tab bar, a rule, the body, a footer -- and
---- three separate files were each doing the arithmetic for it
+--- `composer_rows`, at the bottom, is the part a surface still calls:
+--- |paseo.ui.sidebar|'s `fit_composer` sizes the box with it on the sidebar
+--- and the native surface alike. Everything above it is the geometry of the
+--- volt dashboard, which is gone; the tests still exercise it.
+---
+--- That dashboard's chrome was a fixed stack -- a tab bar, a rule, the body, a
+--- footer -- and three separate files were each doing the arithmetic for it
 --- from first principles. `float.body_lines` knew the body was `height - 4`,
 --- `float.panes` knew the first body row was `row + 3` and that the footer
 --- owned the last row, and `panels/terminals.lua` knew both AND carried a bare
 --- `local at = row - 5` to turn a cursor line back into a list index.
 ---
---- Three copies of one number that must agree, none of which mentions the
+--- Three copies of one number that must agree, none of which mentioned the
 --- others. Adding a row to the chrome meant finding all three, and the one
 --- that got missed would not error -- it would simply put the terminal list's
---- click targets one row off, which reads as "clicking does nothing" rather
---- than as a layout bug.
----
---- So: stated once, here, and derived from named parts rather than from
---- literals, so the next row added to the chrome is a change to `CHROME` and
---- nothing else.
+--- click targets one row off, which read as "clicking does nothing" rather
+--- than as a layout bug. So it was stated once, here, derived from named parts
+--- rather than from literals.
 
 local M = {}
 
@@ -116,7 +118,7 @@ function M.rail_width(width, want)
   return math.max(12, math.min(math.floor(want), math.floor(width / 4)))
 end
 
----Screen geometry for the panes floated over the body.
+---Screen geometry for the panes the old float laid over its body.
 ---
 ---`body` is the whole of it, which is what a session with no composer gets --
 ---a terminal fills the panel area outright. It shares `col` and `width` with
@@ -127,7 +129,7 @@ end
 ---                   the configured maximum. The composer grows with what you
 ---                   have typed rather than standing at its full height over
 ---                   an empty buffer, so this is a function of the content and
----                   not of the config alone -- see `float.composer_rows`.
+---                   not of the config alone -- see `composer_rows`.
 ---@param opts? { framed?: boolean }  The composer has a drawn box, which only
 ---                   `ui.style`'s `rounded` and `square` give it. Unframed it
 ---                   still costs one row more than its content: the bar above
@@ -168,10 +170,10 @@ function M.panes(g, composer_h, opts)
       width = rail,
       height = rows.body_height,
       -- The rule between the rail and the panes, in CHROME TEXT columns: the
-      -- cells volt draws from, which start one `xpad` in from the window's
+      -- cells volt drew from, which started one `xpad` in from the window's
       -- content edge -- itself one in from `g.col` when there is a frame. On
       -- screen it is the middle cell of the gap, `g.col + 2 + rail + 1`.
-      -- `body_lines` pads each row out to it.
+      -- The float's `body_lines` padded each row out to it.
       rule = rail + 2 - (g.border and 1 or 0),
     } or nil,
     -- One row of gap between the conversation and the top of the box.
@@ -193,8 +195,8 @@ end
 ---a box you type into blind. `prompt.lua` counts lines because its own box is
 ---78 columns wide and wrapping is the exception there; here it is the rule.
 ---
----Three ways of asking, best first, because the two surfaces ask at different
----moments: the float sizes the pane BEFORE opening it, and the sidebar fits a
+---Three ways of asking, best first, because callers ask at different moments:
+---the old float sized the pane BEFORE opening it, and `fit_composer` fits a
 ---window that already exists.
 ---
 ---`nvim_win_text_height` measures against the window's WIDTH, so changing the

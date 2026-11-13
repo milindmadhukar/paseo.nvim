@@ -15,7 +15,7 @@
 --- their own copy of the apply-and-report logic, drifting against the panel's
 --- copy of the same thing. Now `M.groups` normalises the daemon's four
 --- differently-shaped lists into one shape, `M.apply` is the only place a
---- change is written, and both the dashboard panel and the standalone popup
+--- change is written, and both the Settings panel and the standalone popup
 --- draw from here.
 
 local icons = require "paseo.ui.icons"

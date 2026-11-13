@@ -1,27 +1,23 @@
 --- Motion, under `ui.animate`.
 ---
---- THE CONSTRAINT, first, because it shapes everything here: volt records each
---- section's start row once, when the layout is measured in `gen_data`, and
---- never recomputes it on redraw. A section that grows or shrinks mid-flight
---- therefore draws every section BELOW it at the wrong row, and the failure
---- mode is an `Invalid 'line': out of range` thrown from inside `vim.on_key`.
---- `panels/settings.lua` already reserves a description row for exactly this
---- reason.
----
---- So nothing in this file changes a height. A tween moves a number inside a
---- bar of fixed width and a flash swaps a highlight; both are a repaint of one
---- named section, which is what makes them cheap -- volt's extmarks are keyed
---- `id = row`, so redrawing a section overwrites its own rows in place with no
---- clear and no flicker.
+--- THE CONSTRAINT, first, because it shapes everything here: nothing in this
+--- file changes a height. A tween moves a number inside a bar of fixed width
+--- and a flash swaps a highlight, so a frame rewrites rows in place and
+--- nothing below them moves -- a block that grew or shrank mid-flight would
+--- shift every row under it, every frame. A frame repaints the panels
+--- (|paseo.ui.native|.redraw_panels), or calls the caller's `on_frame` -- the
+--- transcript redraws one block by id. (Under volt this was a hard rule: it
+--- recorded each section's start row once, so a section that changed height
+--- drew every section below it at the wrong row.)
 ---
 --- There WAS a third effect, staggering a panel's rows in on a tab switch, and
 --- it is gone for a reason worth recording. It drew fewer rows into a block
 --- padded to its final height, which respects the constraint above -- but the
---- Sessions maps cursor rows to entities, and that map still named every
---- row while only some were painted. For the length of the reveal the screen
---- disagreed with what a keypress would do. A decorative effect is not worth a
---- window in which the surface lies about itself, least of all in a plugin
---- whose point is that you never leave the keyboard.
+--- old Sessions tab mapped cursor rows to entities, and that map still named
+--- every row while only some were painted. For the length of the reveal the
+--- screen disagreed with what a keypress would do. A decorative effect is not
+--- worth a window in which the surface lies about itself, least of all in a
+--- plugin whose point is that you never leave the keyboard.
 ---
 --- All of it is off when `ui.animate = false`, which normalises to every
 --- effect false in `config.setup`. The spinner is NOT here and is never
@@ -147,10 +143,10 @@ function M.tween(o)
         end
       end
 
-      -- A tween on a plain buffer has no section to repaint: the caller's
-      -- next draw picks the value up. Only volt's sections redraw here.
+      -- A tween has no window of its own: the panels that draw from it are
+      -- repainted, and pick the new value up.
       pcall(function()
-        require("volt").redraw(o.buf, o.section)
+        require("paseo.ui.native").redraw_panels()
       end)
     end)
   )
@@ -168,10 +164,9 @@ M.FLASH_MS = 420
 ---which is a blink rather than a settle.
 ---Start a repaint clock for `key`, running for `FLASH_MS`.
 ---
----`on_frame` is how this works on a REAL buffer as well as a volt one. The
----transcript is ordinary buffer lines with extmarks over them, so there is no
----named section to repaint -- it redraws one block by id instead, and says so
----at the call site rather than having this file know about either.
+---`on_frame` is how a caller repaints exactly what it drew. The transcript is
+---ordinary buffer lines with extmarks over them -- it redraws one block by id,
+---and says so at the call site. Without it, the panels are repainted.
 ---@param o { key: string, buf: integer, section?: string|string[], on_frame?: fun() }
 ---@return table
 local function clock(o)
@@ -185,7 +180,7 @@ local function clock(o)
       return o.on_frame()
     end
     pcall(function()
-      require("volt").redraw(o.buf, o.section)
+      require("paseo.ui.native").redraw_panels()
     end)
   end
 

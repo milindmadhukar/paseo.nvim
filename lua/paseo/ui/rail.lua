@@ -1,22 +1,21 @@
---- The workspace rail: the project's workspaces, down the left of the
---- dashboard, each with what its agents are doing.
+--- The workspace rail: the project's workspaces, down the left of every
+--- native tab, each with what its agents are doing.
 ---
---- The desktop app's sidebar, and for the same reason it has one. The
---- Workspaces tab answers "what is there" at length; this answers "which of
---- them wants me" without leaving the conversation you are in -- a spinner
---- where an agent is working, a yellow `!` where one is waiting on you, red
---- where a turn failed, green where it finished.
+--- The desktop app's sidebar, and for the same reason it has one: it answers
+--- "which of them wants me" without leaving the conversation you are in -- a
+--- spinner where an agent is working, a yellow `!` where one is waiting on you,
+--- red where a turn failed, green where it finished.
 ---
---- A REAL BUFFER IN A WINDOW OF ITS OWN, not rows spliced into the chrome.
---- The chrome is volt's, and volt resets the cursor after every click and
---- owns `<CR>` -- see |paseo.ui.list|'s header for what that cost the list
---- tabs. Here the cursor IS the selection: `j`/`k` move it, 'cursorline'
---- paints it, `<CR>` opens what it is on, and none of that needs a focus
---- model on top.
+--- A REAL BUFFER IN A WINDOW OF ITS OWN. The cursor IS the selection: `j`/`k`
+--- move it, 'cursorline' paints it, `<CR>` opens what it is on, and none of
+--- that needs a focus model on top. (It was made a buffer of its own beside
+--- volt's chrome, which reset the cursor after every click and owned `<CR>` --
+--- see |paseo.ui.list|'s header for what that cost the list tabs.)
 ---
---- The window belongs to |paseo.ui.float|, which knows where the body is.
---- This module owns the buffer, the data and the drawing, and outlives any one
---- dashboard so the list is not refetched on every open.
+--- The window belongs to |paseo.ui.native|, which splits one on every tab and
+--- hands it over with `M.adopt`. This module owns the buffer, the data and the
+--- drawing, and outlives any one tab so the list is not refetched on every
+--- open.
 
 local icons = require "paseo.ui.icons"
 local render = require "paseo.ui.render"
@@ -60,8 +59,8 @@ local expanded = {}
 ---lands after you have moved project is not drawn as this one's.
 local cache = { root = nil, list = nil, err = nil, loading = false }
 
----Something wants to know when the list changes size -- the float, which
----redraws nothing for it but does want the spinner clock re-checked.
+---Called when the list changes size. The old float set it to have its
+---spinner clock re-checked; nothing sets it now.
 ---@type fun()|nil
 M.on_change = nil
 
@@ -96,9 +95,9 @@ local function write_state(state)
   fd:close()
 end
 
----The rail's options: `ui.buffer.rail` on that mount if it says anything,
----`ui.float.rail` otherwise -- the same inheritance every other dashboard
----option has.
+---The rail's options: `ui.float.rail`, with `ui.buffer.rail` over it when
+---asked for the old buffer mount -- the inheritance every dashboard option
+---had. The native surface asks with no mount.
 ---@param mount? "float"|"buffer"
 ---@return { enabled: boolean, width: integer, keys: table<string, string|false> }
 function M.options(mount)
@@ -183,14 +182,14 @@ end
 
 ---Fetch the project's workspaces, and draw them when they land.
 ---
----Asked when the rail is shown, again every so often while the float stays
----up, and whenever the sidecar says a workspace changed (`M.follow`) -- the
----daemon streams that, but only the FACT is forwarded; the list is refetched
----here. What the agents are doing comes from |paseo.agents| and needs no fetch.
+---Asked when the rail is shown, again when you press `r` in it, and whenever
+---the sidecar says a workspace changed (`M.follow`) -- the daemon streams that,
+---but only the FACT is forwarded; the list is refetched here. What the agents
+---are doing comes from |paseo.agents| and needs no fetch.
 ---@param done? fun()
 function M.load(done)
   M.follow()
-  -- NEVER THE ONE TO START THE BRIDGE. A dashboard is only ever open over a
+  -- NEVER THE ONE TO START THE BRIDGE. A rail is only ever open beside a
   -- chat that has already asked for it, so a bridge that is not up yet is one
   -- that is on its way -- and the first agent snapshot it delivers asks again
   -- (`M.directory_changed`). Starting it from here would mean a list in a
@@ -207,9 +206,9 @@ function M.load(done)
   end
   cache.root, cache.loading = root, true
   local ws = require "paseo.workspaces"
-  -- And the agents, which the rail draws from as much as from the list. The
-  -- float's own panels ask for this when they draw; a dashboard that never
-  -- left the Chat tab would otherwise have no statuses to show.
+  -- And the agents, which the rail draws from as much as from the list.
+  -- Nothing else on a native tab is sure to have asked, and without it the
+  -- rail would have no statuses to show.
   pcall(require("paseo.agents").watch)
   ws.list(function(list, err)
     vim.schedule(function()
@@ -350,20 +349,15 @@ local function contains(ws, path)
   return path == dir or vim.startswith(path, dir .. "/")
 end
 
----The chat whose surface the rail is drawn beside: the dashboard's, else the
----native tab's (|paseo.ui.native|).
+---The chat whose surface the rail is drawn beside: the native tab's
+---(|paseo.ui.native|).
 ---@return table|nil
 function M.host_chat()
-  local float = package.loaded["paseo.ui.float"]
-  local chat = float and float.chat()
-  if chat then
-    return chat
-  end
   local native = package.loaded["paseo.ui.native"]
   return native and native.chat() or nil
 end
 
----The workspace the dashboard is showing, as a key into the list.
+---The workspace the native tab is showing, as a key into the list.
 ---
 ---BY WORKSPACE ID when the agent on screen has one, and only then by
 ---directory. The directory alone cannot say which: every `paseo run` in a
@@ -448,8 +442,7 @@ function M.lines(width)
     return out, rows, sessions
   end
 
-  local float = package.loaded["paseo.ui.float"]
-  local chat = float and float.chat() or nil
+  local chat = M.host_chat()
   local tree = require "paseo.ui.tree"
 
   local current = M.current_index(cache.list)
@@ -533,7 +526,7 @@ function M.directory_changed()
   M.draw()
 end
 
----Does anything on the rail turn? The float's spinner clock asks.
+---Does anything on the rail turn? The native surface's spinner clock asks.
 ---@return boolean
 function M.spinning()
   if not (M.win() and cache.list) then
@@ -550,8 +543,8 @@ end
 ---@type integer|nil
 local win
 
----`win` is a native tab's split (see `M.adopt`), not a float of ours: the
----dashboard must neither move it nor close it.
+---`win` is a native tab's split (see `M.adopt`), not a float of ours: this
+---module must neither move it nor close it.
 local adopted = false
 
 ---The rail's window, if it is up.
@@ -716,9 +709,9 @@ local function move(step)
   end
 end
 
----Open what is under the cursor. A session opens on the dashboard; a
----workspace gets the full switch, tab and `tcd` and all, exactly as the
----picker does it, and the chat follows you there by itself.
+---Open what is under the cursor. A session opens on a native tab of its own;
+---a workspace opens an agent on one, from a native tab, and otherwise gets the
+---full switch, tab and `tcd` and all, exactly as the picker does it.
 function M.open_current()
   local node = M.current_session()
   if node then
@@ -771,7 +764,7 @@ end
 
 -- ----------------------------------------------------------------- buffer
 
----The rail's buffer, made once and kept: it outlives the dashboard so the
+---The rail's buffer, made once and kept: it outlives any one tab so the
 ---list is there the moment the next one opens.
 ---@param keys { back: fun(), toggle?: string|false, focus?: string|false, sessions?: string|false, on_toggle: fun() }
 ---@return integer
@@ -859,8 +852,7 @@ function M.buf(keys)
   end, "refetch the workspaces")
   map("P", M.toggle_pin, "pin or unpin this workspace")
   -- Back to where you were typing. `<Esc>` too: in a list, it is "I am done
-  -- here", and the dashboard's own `<Esc>` -- close everything -- would be a
-  -- large answer to a small question.
+  -- here".
   map("<Esc>", keys.back, "back to the conversation")
   map("q", keys.back, "back to the conversation")
   map(keys.focus, keys.back, "back to the conversation")
@@ -882,7 +874,8 @@ end
 
 ---Open the window over `rect`, or move the one that is up.
 ---@param config table  A window config: `relative`, `row`, `col`, `width`,
----                     `height`, `zindex` -- |paseo.ui.float| builds it.
+---                     `height`, `zindex`. The old float built it; the native
+---                     surface adopts a split instead (`M.adopt`).
 ---@param keys table  See `M.buf`.
 function M.show(config, keys)
   local b = M.buf(keys)
@@ -936,7 +929,7 @@ function M.adopt(w)
   win, adopted = w, true
   M.style(w)
   -- On the native surface's base tier, like every other pane there, rather
-  -- than the dashboard's raised sheet.
+  -- than the `PaseoNormal` sheet `M.style` paints a float with.
   local native = package.loaded["paseo.ui.native"]
   if native and native.WINHL then
     pcall(function()

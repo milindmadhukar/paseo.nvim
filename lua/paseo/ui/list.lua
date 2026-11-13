@@ -1,4 +1,4 @@
---- A list you drive from the keyboard, for the dashboard's list tabs.
+--- A list you drive from the keyboard, for the panels that are lists.
 ---
 --- The sibling of |paseo.ui.panels.settings|. That file is a view over a grid
 --- of CONTROLS; this one is a view over SECTIONS OF ROWS. They share a shape
@@ -6,20 +6,22 @@
 --- and share almost no drawing, which is why they are two files and not one
 --- base class with two subclasses to save thirty lines.
 ---
---- WHY A FOCUS MODEL AND NOT THE CURSOR. The same reason the settings view has
---- one, and it bit harder here. volt dispatches `<CR>` through a `CursorMoved`
---- autocmd and then resets the cursor to `{1,1}` after every click, so a
---- selection that lived on the cursor is thrown away by the framework on each
---- interaction. The panels this replaces kept a `buffer line -> item` map and
+--- WHY A FOCUS MODEL AND NOT THE CURSOR. It started as volt's doing, as it did
+--- for the settings view, and bit harder here. volt dispatched `<CR>` through a
+--- `CursorMoved` autocmd and then reset the cursor to `{1,1}` after every
+--- click, so a selection that lived on the cursor was thrown away on each
+--- interaction. The panels this replaced kept a `buffer line -> item` map and
 --- read `nvim_win_get_cursor`, which meant three things at once:
 ---
----   * nothing on screen said which row you were on, because the cursor is a
+---   * nothing on screen said which row you were on, because the cursor was a
 ---     terminal cursor sitting in a volt-drawn line;
 ---   * the cursor was never PUT on a row when you arrived at the tab, so the
 ---     first `<CR>` you pressed did nothing;
 ---   * and one click sent it back to line 1 regardless.
 ---
---- Which is why the Sessions tab had working keymaps and read as broken.
+--- Which is why the old Sessions tab had working keymaps and read as broken.
+--- It stays because a cursor names a LINE, and these lines move under you --
+--- the list is push-fed and redrawn whole -- where focus names the thing.
 ---
 --- Focus is ours, held as `{ section = id, row = id }`, resolved against the
 --- current data on every draw, and painted with the same highlight as hover --
@@ -84,12 +86,13 @@ local RELOAD = "r"
 ---@field anchor fun(): { row: integer, col: integer, width: integer, height: integer }|nil
 ---                              The AREA the search box floats over -- it sits
 ---                              at the bottom of it. Absent centres the box,
----                              which is right for a list that is not on the
----                              dashboard and wrong for one that is.
+---                              which is right for a list that is not in a
+---                              panel and wrong for one that is.
 
 ---@class paseo.ListView
 ---@field source paseo.ListSource
----@field section string         The volt section a hover repaints.
+---@field section string         Left from volt, which repainted this section
+---                              on hover. Nothing dispatches a hover now.
 ---@field focus { section: string|nil, row: string|nil }
 ---@field at { si: integer, ri: integer }  Where focus last RESOLVED to.
 ---@field offset integer         First visible row, for lists taller than the body.
@@ -246,9 +249,9 @@ function View:resolve()
   end
 
   -- 1 and 2. Compared BY ID, never by table identity: `sections()` builds
-  -- fresh tables on every call -- it has to, because volt strips the third
-  -- element out of every cell it is handed -- so `==` would silently never
-  -- match and the focus ring would never appear.
+  -- fresh tables on every call -- so `==` would silently never match and
+  -- the focus ring would never appear. (They had to be fresh under volt,
+  -- which stripped the third element out of every cell it was handed.)
   if self.focus.row then
     local elsewhere
     for _, item in ipairs(flat) do
@@ -405,9 +408,9 @@ end
 ---Narrow the list. `""` widens it again.
 ---
 ---REBINDS when the search goes from off to on or back, because `<Esc>` is only
----ours while there is something to clear. On the float mount `<Esc>` closes the
----dashboard, and a panel that held on to it would turn the surface's dismiss
----key into a no-op for as long as you were on this tab.
+---ours while there is something to clear; the rest of the time it is left to
+---whatever else has it. (On the old float mount `<Esc>` closed the dashboard,
+---and a panel that held on to it made the dismiss key a no-op.)
 ---@param query string
 function View:set_query(query)
   query = query or ""
@@ -567,9 +570,10 @@ function View:lines(width, height)
   local sections = self:sections()
   if not sections then
     -- Drawing is not a good place to start a round trip, but it is the only
-    -- place that knows there is nothing to draw. Guarded, because volt calls
-    -- `lines()` again on every hover -- unguarded, a mouse moved across a
-    -- panel that had not loaded yet fires one request per mouse-move event.
+    -- place that knows there is nothing to draw. Guarded, because `lines()`
+    -- runs on every repaint -- unguarded, every redraw of a panel that had not
+    -- loaded yet would fire a request of its own. (Under volt that was every
+    -- mouse-move event.)
     if not self.loading then
       self.loading = true
       self.source:load(function()
@@ -668,7 +672,7 @@ function View:lines(width, height)
 
   -- MINIMAL SCROLL: move only when focus has left the window, so the list does
   -- not lurch under a `j` that did not need it. The offset lives on the view
-  -- and is clamped every draw -- it is never the cursor's, which volt resets.
+  -- and is clamped every draw -- it is never the cursor's.
   local top = self.offset
   if focus_line > 0 then
     if focus_line <= top then
@@ -778,8 +782,8 @@ function View:mappings()
       self:search()
     end, "paseo: search this list")
     -- Taken ONLY while a search is in force. `View:set_query` rebinds on the
-    -- transition, so the chrome's own `<Esc>` -- which dismisses the dashboard
-    -- -- is displaced for exactly as long as there is a filter to drop.
+    -- transition, so whatever else has `<Esc>` is displaced for exactly as
+    -- long as there is a filter to drop.
     if self.query ~= "" then
       bind("<Esc>", function()
         self:set_query ""
@@ -822,9 +826,9 @@ end
 
 ---Give the buffer its keys back.
 ---
----Required, not tidiness: the dashboard's panels share one chrome buffer and
----volt owns `<CR>` on it, so a panel that merely deleted its own `<CR>` would
----leave the key dead on every other one for the rest of the session.
+---Required, not tidiness: the panel's buffer carries keys the surface bound
+---as well, so a panel that merely deleted its own would delete one it had
+---displaced with them. See |paseo.ui.keys|.
 ---@param buf integer
 function View:unbind(buf)
   local saved = self.bound

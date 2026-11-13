@@ -454,9 +454,9 @@ function M.review(opts, callback)
   local done = false
 
   ---Exactly once, whatever got us here: `q`, `<Esc>`, `c`, `t`, a `WinClosed`,
-  ---or a failure before there was ever a window. volt's own `q` routes through
-  ---`after_close`, which is `handle.close`, which is `on_close`, which is this
-  ----- so the cancel path and the confirm path meet in one place.
+  ---or a failure before there was ever a window. The popup's `q` and `<Esc>`
+  ---are `handle.close`, which calls `on_close`, which is this -- so the cancel
+  ---path and the confirm path meet in one place.
   local function finish(m, notes)
     if done then
       return
@@ -557,7 +557,7 @@ function M.review(opts, callback)
       { "b", base, "paseo: set this repo's base branch" },
       { "t", as_toml, "paseo: edit the manifest as TOML" },
     },
-    -- volt owns `q` and `<Esc>`; both land here.
+    -- The popup binds `q` and `<Esc>`; both land here.
     on_close = function()
       finish(nil, nil)
     end,

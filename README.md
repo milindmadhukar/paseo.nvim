@@ -28,7 +28,6 @@ abstracts Claude / Codex / OpenCode and owns agent sessions, status, and termina
 {
   "milindmadhukar/paseo.nvim",
   dependencies = {
-    "nvzone/volt",
     "nvim-telescope/telescope.nvim",
     "lewis6991/gitsigns.nvim",
   },
@@ -37,7 +36,8 @@ abstracts Claude / Codex / OpenCode and owns agent sessions, status, and termina
 }
 ```
 
-**No build step and no binary.** Everything is Lua, except the modular TypeScript
+**No build step, no binary, no UI library.** Every surface is plain Neovim
+buffers and splits. Everything is Lua, except the modular TypeScript
 sidecar run by `bun` (or node ≥ 22) — no bundling, no
 compilation, nothing to fetch from a releases page.
 
@@ -49,7 +49,6 @@ which reads like a broken install.
 | Needed for | |
 |---|---|
 | Everything | Neovim 0.11+, `git`, a Nerd Font |
-| The dashboard (`:Paseo dash`/`buf`) | nvzone/volt — optional: the sidebar and the experimental [native surface](#the-native-surface-experimental) need nothing |
 | The workspace and agent-session pickers | telescope.nvim |
 | The hunk under the cursor | gitsigns.nvim |
 | Agents | the Paseo daemon running, and `bun` or node ≥ 22 |
@@ -83,8 +82,8 @@ require("paseo").setup {
   },
 
   ui = {
-    surface = "float",            -- where `:Paseo chat` opens.
-                                  -- Or "sidebar", or "buffer".
+    surface = "native",           -- where `:Paseo chat` opens: full screen,
+                                  -- a tab page per agent. Or "sidebar".
     send_behavior = "steer",      -- sending mid-turn: "steer", "interrupt"
                                   -- or "queue". `g<CR>` does the other.
 
@@ -99,30 +98,21 @@ require("paseo").setup {
       fps = 30,
     },
 
-    float = {
-      width = 94,                 -- percent of the editor, 1-100
-      height = 86,
-      -- row and col are absent: absent means centred
-      composer = 7,               -- rows the composer may grow TO
+    native = {                    -- the full-screen surface; see below
+      markdown = true,            -- the agent's prose as raw markdown
+      rail = 32,                  -- rail width in cells; 0 starts it hidden
+      panel = 56,                 -- the Settings/Changes/Usage split
+      composer = 10,              -- rows the box may grow TO
       composer_min = 3,           -- ...and the fewest it rests at
-      zindex = 30,                -- BELOW the 50 a float gets by default
-      backdrop = true,
-      tab_keys = true,            -- bare 1-5 switch tabs; see below
+    },
+
+    float = {                     -- (the name is historical) the rail's keys
       rail = {                    -- the workspaces down the left; see below
         enabled = true,           -- where it starts — the toggle is remembered
-        width = 32,               -- cells, at most a quarter of the surface
+        show_background = false,  -- background workspaces, as the app hides them
         keys = { toggle = "<C-b>", focus = "<C-h>", sessions = "<C-s>" },
       },
       keys = { new = "<C-n>" },   -- start an agent or a terminal, from anywhere
-    },
-
-    buffer = {                    -- the same dashboard, in a window of its own
-      open = "here",              -- the window you are in; "tab" for its own
-      chrome = false,             -- hide the tabline and statusline while up
-      composer = function(lines)  -- a SHARE of the surface, not a flat 7
-        return math.max(7, math.floor(lines / 3))
-      end,
-      -- composer_min, zindex and tab_keys are inherited from `float`
     },
 
     sidebar = {
@@ -135,7 +125,7 @@ require("paseo").setup {
 
     terminal = {                  -- terminals are sessions; see below
       keys = { next = "<C-j>", prev = "<C-k>",
-               chrome = "<C-g>",  -- out of the PTY, onto the tab bar
+               chrome = "<C-g>",  -- out of terminal mode
                sessions = "<C-s>", terminal = "<C-l>" },
       presets = {},               -- extra entries for `c`
     },
@@ -181,23 +171,22 @@ require("paseo").setup {
 
 ## Commands
 
-Three surfaces, and `ui.surface` names which one `:Paseo chat` opens. Two of
-them — `float` and `buffer` — are the same thing, the **dashboard**, on
-different **mounts**: `:Paseo dash` puts it over your code, `:Paseo buf` puts
-it in the window you are standing in, and everything on it is identical either
-way. The third is the **sidebar**, which is a different surface. The rest of
-this document uses those four words and no others for it.
+Two surfaces, and `ui.surface` names which one `:Paseo chat` opens: the
+**full-screen** one (`"native"`, the default: a tab page per agent) and the
+**sidebar**, beside your code. `"float"` and `"buffer"` named the old volt
+dashboard's two mounts and now mean the full-screen surface, so a config that
+still says them keeps working.
 
 `ui.surface` only decides where the first chat of a session opens. After that
 the surface is yours, not the conversation's: switching workspace, picking a
 session, `<C-s>` and reopening after a close all land on the surface that is on
-screen, or else the one you last used. From the sidebar, `<C-f>` goes back to
-whichever dashboard you came from.
+screen, or else the one you last used. From the sidebar, `<C-f>` goes full
+screen.
 
 | | |
 |---|---|
 | `:Paseo chat` | Open/close the chat, on whichever surface `ui.surface` names |
-| `:Paseo native` | **Experimental.** Toggle the chat as plain splits, one tab page per agent — see [below](#the-native-surface-experimental) |
+| `:Paseo native` | Toggle the chat full screen: a tab page per agent — see [below](#the-chat-full-screen) |
 | `:Paseo explain [kind]` | Explain the hunk/selection/file, using the rubric |
 | `:Paseo ask [kind]` | Ask about the hunk/selection/file — a box takes the question |
 | `:Paseo qfask` | Ask about every entry in the quickfix list — whoever built it |
@@ -209,8 +198,8 @@ whichever dashboard you came from.
 | `:Paseo switchmodel` | Change the running agent session's model, or fork it |
 | `:Paseo agent-settings` | What this agent session is set to |
 | `:Paseo session` | Compatibility alias for `agent-settings` |
-| `:Paseo dash` | The dashboard on its **float mount**, over your code |
-| `:Paseo buf` | Toggle the dashboard on its **buffer mount**, in a window of its own (`:Paseo tab`) |
+| `:Paseo dash` | Open the chat full screen (not a toggle) |
+| `:Paseo buf` | Same as `:Paseo native` (`:Paseo tab` too): the old dashboard's names, kept |
 | `:Paseo sidebar` | The chat in the pane beside your code |
 | `:Paseo model [provider/model]` | Set the preference for new agents; no agent is created |
 | `:Paseo workspaces [all]` | Workspace picker for this project (`<C-a>` or `all`: every project's) — open, inspect agent sessions, create, archive |
@@ -316,9 +305,7 @@ It sits in a **fixed-width slot**, which is the answer to the reason it used to
 live at the bottom of the screen: it is the one field on the row that changes
 ten times a second, and among static ones it pushed everything beside it
 sideways every time the count gained a digit. Given ten columns whether it
-needs them or not, it cannot. The dashboard's footer keeps a copy for the tabs
-that have **no** composer on them — a turn runs on while you read the Changes
-panel, and that is exactly when nothing else on screen is moving.
+needs them or not, it cannot.
 
 A pending permission shouts from the header itself — ` needs you` — because
 then the agent is not working, it is waiting for you.
@@ -330,19 +317,15 @@ nobody has open, so its requests are relayed into the parent's chat, marked
 
 **It is drawn against the box you type in**, one row above it, on both
 surfaces. That is a move: it used to live at the far top of the screen — a
-winbar over the transcript in the sidebar, the first row of the chrome on the
-dashboard — which is as far from the cursor as that screen goes. You decide
+winbar over the transcript — which is as far from the cursor as that screen
+goes. You decide
 what to type with those five facts and you decide it while looking at the
 composer, so they belong there. It doubles as the composer's title row, which
 is what lets the box drop its drawn border and be a plate like everything else
 ([below](#the-composer)).
 
-**It is only ever this row.** The dashboard used to repeat it in the chrome
-above the tab bar on every tab but `Chat` — saying what the bar over the box
-already says, and costing those five tabs a row: the tab bar and the whole
-panel under it sat one row lower than on `Chat`, so changing tab shifted the
-layout under you. The panel that can change any of these facts is
-[Settings](#the-settings-tab), which is tab `3`.
+**It is only ever this row.** The panel that can change any of these facts is
+[Settings](#the-settings-panel), `<C-p>` then `1`.
 
 **The row is also the box's top edge.** Without a frame the composer was a slab
 of card colour with a row of text on it, and on a theme whose elevation tiers
@@ -380,10 +363,8 @@ It comes from `gh pr view`, which already knows which pull request belongs to
 the branch you are on, which remote is GitHub, and how you are authenticated.
 Nothing here owns a token.
 
-It shows up in two places: on the composer's bar, beside the model and the
-working directory, so it is on screen the whole time you are working; and as a
-right-hand column on the `Workspaces` tab, so you can scan eleven units of work
-for the one with a red check in it without opening any of them.
+It shows up on the composer's bar, beside the model and the working directory,
+so it is on screen the whole time you are working.
 
 **One word for N repos.** A unit of work spanning six repos has six pull
 requests and the question is still singular — *is this landable* — so the worst
@@ -416,97 +397,70 @@ millisecond. This is a subprocess and a round trip, so it is cached per repo
 underneath it is re-read every two seconds, which is local, so switching branch
 is noticed straight away. `ui.pr.enabled = false` turns the whole thing off.
 
-### The dashboard, on its float mount
+### The chat, full screen
 
-The default. `:Paseo chat` opens it, `:Paseo chat` again closes it, `<C-f>`
-swaps to the sidebar and back. `<C-c>` stops the turn — from the composer or
-the conversation, normal mode or insert.
+The default surface. `:Paseo chat` opens it and closes it again; `:Paseo
+buf`, `:Paseo dash` and `:Paseo native` all open it too, so keys bound to
+the old names keep working. Every pane is a **real split**, and **each agent
+gets a tab page of its own**, so two agents in one workspace are two tabs and
+`gt`/`gT` move between them. `<C-f>` goes here from the sidebar; `<C-c>` stops
+the turn, from the composer or the conversation, normal mode or insert.
 
 ```
-   1 󰀄 Chat   2 󱕂 Settings   3 󰘬 Changes   4 󰄨 Usage   5 󰙅 Workspaces      󰆍 lazygit
+┌ rail ┬ conversation  (winbar: agent · ⠹ 14s · keys) ┬ panel ┐
+│      ├ composer      (its bar: model, mode, spinner)  │       │
 ```
 
-**One navigation bar.** There used to be two: the tabs, and a strip of session
-chips on the row directly under them — two rows of things to click, stacked,
-disagreeing about which of them you navigate with, and the lower one could hold
-about four names before it started dropping them for a `+3`. Moving between
-sessions happens on [the rail](#the-workspace-rail), where each workspace opens
-into its agents and terminals, and it is on every tab, so there is no `Sessions` tab to leave the conversation for.
-What the strip alone could say — **which** session the
-`Chat` tab is showing, which for a terminal nothing else says — is the label at
-the right-hand end of the tab bar. It takes whatever the pills leave and is cut
-to fit, because the pills are the navigation and it is a readout.
+- **The conversation is markdown.** With `ui.native.markdown` (the default)
+  the agent's prose is written as raw markdown and soft-wrapped, so
+  treesitter, and render-markdown.nvim if you have it, draw headings, code
+  fences, lists and tables. Tool cards, thinking and permissions keep their
+  usual look. Code keeps its indentation.
+- **[The rail](#the-workspace-rail)** is down the left: the project's
+  workspaces, each opening into its agents, subagents and terminals.
+- **`<C-p>`** opens a split on the right and puts you in it, on the panel you
+  last looked at. **`1` `2` `3`** in it jump straight to Settings, Changes or
+  Usage, and its bar shows which is which. `<C-p>` again closes it.
+- **`<C-n>`** starts something, from any of these buffers in normal mode:
+  *new agent* (in this workspace), *new agent in a new workspace*, or *new
+  terminal*. Both agent choices go through the settings screen and then open
+  **the ordinary conversation view, empty**: nothing is created until you send
+  the first message, which creates the agent (and, for a new workspace, the
+  workspace with it) with your message as its first prompt, so the daemon
+  names the workspace from it. A new agent opens in a tab of its own.
+- **A terminal or a provider subagent** opens in a tab of its own, **with the
+  rail** if the rail was up where you opened it.
+- **What is current follows the tab.** Entering a tab makes its agent the one
+  `:Paseo mode`, `:Paseo stop` and the rest act on.
+- `q`, or `:q` in the conversation or the box, closes the tab. The agent and
+  your draft live on.
+- **One background for every pane.** It is your editor's own with
+  `ui.colors = "auto"` and the plugin's with `"fixed"`, the same across the
+  tab either way. Only the box you type in is a step raised.
 
-The tab bar **degrades rather than truncates**, because the tab that would
-fall off the end is always the last one — which is the one you had not
-discovered yet. The hint bars do the same: a winbar wider than its window is
-cut from the *left*, so a narrow sidebar was eating `send` — the first thing
-you need — to keep `close`. Four levels, widest that fits:
+The panels:
 
 | | |
 |---|---|
-| `1 󰀄 Chat` | number, icon and name |
-| `1 Chat` | the icon goes first: the name is what you read, the icon is what you recognise |
-| `1 󰀄` | five of these fit in 30 columns |
-| `1` | and at the last level the active tab alone keeps its name |
+| `Settings` | mode, thinking level, model, feature toggles |
+| `Changes` | what is changed on disk, per repo; `<CR>` opens one in a tab of its own |
+| `Usage` | context window, tokens, cost, and this provider's 5-hour and weekly limits |
 
-The row count never changes at any level, because the body height and the
-composer geometry are both measured against it.
+`Changes` takes the list keys: `j`/`k` to move, `h`/`l` by section, `g`/`G`
+to the ends, `<CR>` to open, `r` to re-fetch. **The focused row is painted**,
+and focus is held by **id**, so a list that moves under you (these are
+push-fed) does not take it with it. Every workspace Paseo knows is
+`:Paseo workspaces`, a picker.
 
-| | |
-|---|---|
-| `Chat` | the conversation and the composer, real buffers floated on top |
-| `Settings` | mode, thinking level, model, feature toggles — keyboard or click |
-| `Changes` | what is changed on disk, per repo; open one |
-| `Usage` | context window, tokens, cost — and this provider's 5-hour and weekly limits |
-| `Workspaces` | every workspace Paseo knows, grouped by project with a rule between groups; each row says what it is doing — `⠙` working, `󰀦` needs you, `󰗠` opened and idle, `󰄰` never opened. Archive one, or forget a project |
-
-`Workspaces` and `Changes` are one kind of screen and take one set of keys —
-`j`/`k` to move, `h`/`l` by section, `g`/`G` to the ends, `<CR>` to open, `r`
-to re-fetch — plus their own verbs: `n`/`o`/`d` on Workspaces. **The focused
-row is painted**, in the colour hover uses, and arriving at a tab puts focus on
-a row so the first `<CR>` does something.
-
-**Where the cursor is and which one is open are two different marks.** The
-focus band is one flat sweep across the row, so "this is the one you are in"
-said nothing the moment you pointed at the row if it was drawn inside that
-sweep. Both marks live in a two-column gutter the band never paints over: a
-caret for the keyboard, a bar for the live one.
-
-**A push repaints the surface.** Both directories are fed by the daemon rather
-than polled, and nothing used to ask the screen to draw them again — so
-archiving a session left its row up until the next `j`, and an agent that
-started working did not change colour until you moved. One archive produces
-three `remove` events from a live daemon, so the repaint is coalesced, and it
-redraws the tab bar — whose right-hand end names the session — plus the list
-itself and nothing else: the Changes panel shells out to `git status` per repo,
-and it is not what changed.
-
-None of that was true before. Selection lived on the **cursor**, which volt
-resets to line 1 after every click, nothing was drawn to say where it was, and
-the cursor was never put on a row — so the list tabs read as tabs you could
-only click, and Workspaces had no keymaps at all. Focus is held
-by **id** now, so a list that moves under you — and these are push-fed, so they
-do — does not take it with it.
-
-`1`–`5` jump, `<M-1>`–`<M-5>` and `<Tab>`/`<S-Tab>` do the same, and
-everything that does something responds to a click as well.
-
-**`<C-n>` starts something**, from any buffer of the dashboard in normal mode
-— the composer, the conversation, the rail, the tree, a terminal's normal mode
-— and it is the first hint on the footer, where a click does the same: *new
-agent* (in this workspace), *new agent in a new workspace*, or *new terminal*.
-Both agent choices go through the settings screen and then open **the
-ordinary conversation view, empty**: nothing is created until you send the
-first message, which creates the agent — and, for a new workspace, the
-workspace with it — with your message as its first prompt, so the daemon names
-the workspace from it. The first message is written in the real composer, so
-it can be dictated (`<C-t>`), carry pasted images, or be recalled.
+**No UI library.** This replaced a dashboard drawn by nvzone/volt: a float
+(or a borrowed window) of tabs over floated panes. Everything it showed is
+here as splits, popups and dialogs are plain windows, and the plugin needs
+nothing to draw any of it.
 
 #### The workspace rail
 
-Down the left of the body, on every tab: each workspace in the project you
-are standing in, and what its agents are doing. It is the desktop app's
+Down the left of every agent's tab: each workspace in the project you are
+standing in, and what its agents are doing. It is the desktop app's
 sidebar, and it uses the same rule to decide the state:
 
 | | |
@@ -562,20 +516,19 @@ mix them.
 `<C-h>` moves into it, showing it first if it was hidden; **`<C-s>`** moves
 into it **on the session on screen**, opening its workspace if you had closed
 it — from the composer in either mode, from a terminal, and from every other
-buffer of the dashboard. Inside it:
+buffer of the surface. Inside it:
 
 | | |
 |---|---|
 | `j` / `k` | move, over workspaces and sessions alike |
-| `<CR>` | on a workspace, open it the way the picker does; on a session, show it on the dashboard (a double click too) |
+| `<CR>` | on a workspace, open its agent in a tab of its own; on a session, show it |
 | `<Tab>` / `za` | open or close the workspace's sessions; `l` opens, `h` closes |
 | `a` / `w` / `t` | start an agent in the workspace under the cursor, an agent in a new workspace, a terminal (`c` too) |
 | `y` / `R` / `d` | copy an agent's ID, rename a terminal, archive an agent or kill a terminal (asked first) |
 | `P` / `r` | pin a workspace, refetch the list |
 | `q` / `<Esc>` / `<C-h>` / `<C-s>` | back to where you were typing |
 
-It is 32 cells wide by default, never more than a quarter of the dashboard,
-and left out entirely below 90 columns.
+It is 32 cells wide by default (`ui.native.rail`; `0` starts it hidden).
 
 **Pinned workspaces lead it**, with a pin. `P` pins or unpins the one under the
 cursor. The pin is the daemon's, so it is the same pin the app's sidebar
@@ -585,105 +538,6 @@ plugins make for themselves, are hidden the way the app hides them unless
 The list refetches the moment the daemon says a workspace changed (created,
 archived, pinned, or **titled**), so a generated title appears when it is
 written rather than on the next poll.
-
-### The native surface (experimental)
-
-`:Paseo native` — or `ui.surface = "native"` — is the chat with **no volt
-and no floats**: every pane is a real split, and **each agent gets a tab page
-of its own**, so two agents in one workspace are two tabs and `gt`/`gT` move
-between them.
-
-```
-┌ rail ┬ conversation  (winbar: agent · ⠹ 14s · keys) ┬ panel ┐
-│      ├ composer      (its bar: model, mode, spinner)  │       │
-```
-
-- **The conversation is markdown.** With `ui.native.markdown` (the default)
-  the agent's prose is written as raw markdown and soft-wrapped, so
-  treesitter, and render-markdown.nvim if you have it, draw headings, code
-  fences, lists and tables. Tool cards, thinking and permissions keep their
-  usual look. Code keeps its indentation, which the hard-wrapping surfaces
-  lose.
-- **The rail** is the dashboard's workspace rail in a split on the left.
-  `<CR>` on an agent opens it in its own tab, and `<CR>` on a workspace opens
-  that workspace's agent. `<C-b>` toggles the rail, `<C-h>`/`<C-s>` go into it.
-- **`<C-p>`** opens a split on the right and puts you in it, on the panel you
-  last looked at. **`1` `2` `3`** in it jump straight to Settings, Changes or
-  Usage, and its bar shows which is which. `<C-p>` again closes it. They are
-  the dashboard's panels drawn as real lines, with the same keys. (It used to
-  step Settings → Changes → Usage → closed, so Usage was three presses away.)
-- **A provider subagent** (`gs`, then `<CR>`) opens read-only in a tab of its
-  own, **with the rail** if the rail was up on the tab you opened it from.
-- **`<C-n>`** starts an agent or a terminal. A new agent's draft opens in a new
-  tab.
-- **What is current follows the tab.** Entering a tab makes its agent the
-  one `:Paseo mode`, `:Paseo stop` and the rest act on.
-- `q`, or `:q` in the conversation or the box, closes the tab. The agent and
-  your draft live on.
-- **One background for every pane.** It is your editor's own with
-  `ui.colors = "auto"` and the plugin's with `"fixed"`, but the same
-  across the tab either way. Only the box you type in is a step raised.
-
-Without volt, `:Paseo dash` and `:Paseo buf` open this instead. Popups,
-questions and the permission dialog are drawn as plain lines, with the same
-keys and no mouse.
-
-```lua
-ui = {
-  native = {
-    markdown = true,   -- prose as raw markdown
-    rail = 32,         -- rail width; 0 starts hidden
-    panel = 56,        -- the Settings/Changes/Usage split
-    composer = 10,     -- the box's ceiling …
-    composer_min = 3,  -- … and floor
-  },
-}
-```
-
-### The dashboard, on its buffer mount
-
-`:Paseo buf` — or `ui.surface = "buffer"` — puts everything above in a **real
-window** instead of a float: same chrome, same five tabs, same panes, same
-keys. It takes over the window you were standing in, hides the editor's
-tabline and statusline, and fills what is left, so it gets the whole screen
-rather than the 94% a centred float leaves itself. This is nvdash's
-arrangement, and `:Paseo buf` is a **toggle**: press it again and your file
-comes back, on the line you left it on, with that window's own `number`,
-`wrap` and highlights.
-
-It is a toggle because this surface is one window, and the key that took the
-window is the obvious way to give it back — `q` still works, but it is a
-second key for the same thought. The tab page it used to open on bought
-nothing: a tab is an arrangement of *windows*, and this is one of them. It put
-a tabline up over a surface that draws a header of its own, and it made "back
-to my code" a `gt` rather than the key that opened it. `ui.buffer.open =
-"tab"` is still there for the old behaviour, and `ui.buffer.chrome = true`
-keeps your tabline and statusline up.
-
-**Opening a file takes it down.** That is half of what the surface is, and it
-does not happen by itself: the cursor here is in the composer, which is a
-float, and a picker that opens a file in "the window you came from" would put
-somebody's source in a three-row box over a dashboard that is still up. So a
-real file landing in either pane is taken as *leave* and is reseated in the
-window the surface borrowed — which is where it was always going.
-
-The chrome is an ordinary buffer with a filetype of its own, `paseo-dash`, so
-`ftplugin/paseo-dash.lua` works on it the way it would for a file tree. The
-conversation and composer stay floats — they have to, they are real buffers
-and virtual text cannot be yanked — but they are anchored to the host window
-rather than to the editor. That is not an implementation detail you can
-ignore: it is what makes them follow the window when a split moves it, what
-puts them on its tab page rather than on whichever tab you were standing on,
-and what lets `ui/layout.lua`'s row arithmetic serve both mounts without a
-single branch in it.
-
-Two keys differ, both deliberately. `q` closes it and hands the window back;
-`<Esc>` does **not**, because a float is a thing in front of you and this is a
-place you are standing — one stray `<Esc>` after a mistyped `i` should not
-destroy the surface. And `<C-f>` is not bound at all: that key names one swap,
-between the sidebar beside your code and the float over it, and this is
-neither of those. The sidebar is with your code, the float is floating, this
-is separate.
 
 #### The composer
 
@@ -702,12 +556,8 @@ round — that is the shape of `:e `, not of the place you write a paragraph,
 and it is where every session starts. So the floor is **three**
 (`composer_min`, 1 for the old behaviour).
 
-The ceiling is `composer`, and on the buffer surface it is **a share of the
-screen rather than a flat seven**: that surface is the whole window, a
-fifty-row terminal has forty rows of transcript on it and most of them are
-blank, and the box was still the seven rows it gets in a float over your code.
-`ui.float.composer` and `ui.buffer.composer` both take a function of the
-surface's rows returning cells, which is what the default is.
+The ceiling is `composer`: `ui.native.composer` on the full-screen surface,
+`ui.sidebar.composer` beside your code.
 
 Wrapped lines count towards the height — `wrap` is on, so a 300-column
 paragraph is four rows on screen, and asking the buffer for its line count
@@ -727,7 +577,7 @@ itself and Neovim's own behaviour is the right one.
 **No box drawn around it, under `plate`** — which is the default, and where
 nothing else on the surface has an edge either. A hard rounded rule around the
 composer, inside a window whose own edge is invisible, above cards with no
-frames, was the one thing on the dashboard that ignored `ui.style`. What
+frames, was the one thing on the surface that ignored `ui.style`. What
 separates the box from the transcript now is what separates every other card
 from it: one tier of elevation, and a title row. Under `rounded` and `square` it
 keeps a real frame, because that is what those styles are for.
@@ -737,8 +587,8 @@ Both keys, because they are not interchangeable: `<CR>` sends from normal mode
 and opens a line from insert mode, so the one that works while you are still
 typing is `<M-CR>` — Alt and Enter. (`<C-CR>` is bound beside it for terminals
 that speak the kitty keyboard protocol; the ones that do not simply never send
-it.) **`<C-s>` is not either of them.** It means *the session list* on the
-chrome and in every terminal — so a composer that quietly sent on it was one
+it.) **`<C-s>` is not either of them.** It means *the session list* in the
+rail and in every terminal — so a composer that quietly sent on it was one
 key with two meanings, both advertised on screen at once. From the composer it now does what it does
 everywhere else: takes you to the session on screen, in [the rail](#the-workspace-rail).
 
@@ -761,49 +611,8 @@ Prompts sent from the Paseo app are recalled too, because the list is read
 from the transcript. In a box where you are writing, they are just the arrow
 keys.
 
-A bare digit is also a **count**, and the two panes these are bound on are
-ordinary buffers — so while the dashboard is open, `3p` and `5j` in the
-conversation and the composer go to the tab bar. That is the right default for
-a seven-line prompt box, but it is a trade: `tab_keys = false` buys the counts
-back and leaves the `<M-…>` forms and `<Tab>`, which collide with nothing.
-
-Two things had to be true for that, and neither was. The number keys were
-bound on the **chrome** buffer, and the Chat tab puts your cursor in the
-composer — so the footer advertised keys that went to a buffer with no such
-mapping. And the click targets were all there, on the cell's third element the
-way volt wants them, but `volt.events.enable()` — which routes `LeftMouse` to
-them, and which `volt.run` calls — was never reached, because this surface
-drives `gen_data`/`redraw` itself to keep the conversation buffer out of
-volt's hands.
-
-**The box is yours**, under `ui.float`. `width` and `height` are **percentages
-of the editor, 1–100** — the same unit
-[floaterm](https://github.com/nvzone/floaterm)'s `size` takes, computed with
-the same arithmetic in the same order, so a number means the same thing in
-either config and the two agree to the cell rather than to within a rounding
-error. `row` and `col` are absolute cells, because they are window coordinates
-rather than sizes; absent means centred, with the same `(total - size) / 2`
-floaterm centres with. So floaterm's `size = { h = 90, w = 92 }` is:
-
-```lua
-ui = { float = { width = 92, height = 90 } }
-```
-
-and the two windows land in the same place — switching between them does not
-move the frame under you.
-
-Percentages rather than a margin in cells because a margin that looks right on
-a 200-column monitor is most of a laptop screen; and 1–100 rather than
-fractions because `0.92` and `92` are each obvious once you know which
-convention you are in, and nothing on the page tells you which. A function is
-the escape hatch for a size no percentage can express, and returns cells.
-
-Whatever you ask for is clamped to 60×20 — below that the tab bar and the
-composer stop fitting — and to the editor, so no setting can put the border
-off screen.
-
 **The composer is the size of what is in it**, on the sidebar as well as the
-dashboard. `composer_min` rows over an empty buffer, growing as you type up to
+full-screen surface. `composer_min` rows over an empty buffer, growing as you type up to
 `composer`, shrinking back when you send — measured in *screen* rows rather
 than buffer lines, because it soft-wraps and one pasted sentence is three rows
 in a narrow pane. A fixed eight rows in the sidebar was a third of that pane
@@ -819,19 +628,7 @@ from — Neovim claws the difference back the instant focus returns there, so a
 bigger number is not a wider sidebar, it is a number that quietly does not
 happen.
 
-**Z-index is 30, not 100.** The default for a floating window is 50, and
-plenary's popup — so every telescope picker — takes it. A dashboard above that
-number renders every telescope picker, its previewer and every `vim.ui.select`
-*underneath itself*, which looks exactly like the command doing nothing. The
-permission dialog is the one exception and sits above everything, because it
-is the one window that must not be covered.
-
-The chrome is four volt sections rather than one, which is not tidiness: the
-footer repaints ten times a second while a turn runs, and a
-single section would drag the `Changes` panel — one `git status` per repo —
-through every frame.
-
-### The Settings tab
+### The Settings panel
 
 Everything this agent session is set to, at once, with the current value **filled in**
 rather than marked with a dot:
@@ -867,16 +664,8 @@ one agent to contact another, copy the receiving agent's ID, paste it into the
 sending agent's chat, and ask it to use Paseo's
 [cross-agent prompt tool](https://paseo.sh/docs/orchestration-workflows#send-a-prompt-to-another-agent).
 
-This panel previously had **no key bindings at all**: interaction was 100%
-volt click dispatch, so the only way to change a setting was to reach for the
-mouse or land the cursor on exactly the right row. The mouse still works, and
-pointing at a setting lights it exactly as moving to it does — hover and focus
-are the same paint, because they are the same state.
-
-Focus is *ours*, not the cursor's. Volt dispatches `<CR>` through a
-`CursorMoved` autocmd and resets the cursor to `{1,1}` after every click, so a
-selection living on the cursor is thrown away by the framework on each
-interaction.
+Focus is *ours*, held on the entry rather than the cursor, so redrawing the
+panel never moves it.
 
 `bypassPermissions` is red and `acceptEdits` amber. Until now every mode was
 the same colour, so *"nothing asks, everything runs"* looked identical to
@@ -940,11 +729,11 @@ local/worktree/assembled workspace, **with the agent and that message in the
 same request**, and moves the editor there. The name picks the directory and
 the branch; the title comes from the message, the same way as above. Forking
 into a new workspace (`f`) sends its prompt with the workspace too. **new
-terminal** opens the [terminal picker](#terminals) and points the Chat tab at
-the PTY.
+terminal** opens the [terminal picker](#terminals) and the PTY in a tab of
+its own.
 
-The same three are on the dashboard at any time: `<C-n>` (or the footer's
-first hint) asks which, and the rail's `a`, `w` and `t` go straight to one,
+The same three are a key away at any time: `<C-n>` asks which, and the rail's
+`a`, `w` and `t` go straight to one,
 in the workspace under the cursor. An agent started *here* joins that
 workspace — by its id — and, like every other start, is a draft until its
 first message.
@@ -1000,67 +789,35 @@ applied, which is what two quick mode changes used to produce.
 
 Paseo runs terminals as well as agents — the `claude` and `codex` sessions you
 started in the app are PTYs on the daemon — and **a terminal is a session.** It
-lists on [the rail](#the-workspace-rail), under its workspace, and opening
-one shows it **on the Chat tab**, where the conversation would be:
-
-```
- ╭──────────────────────────────────────────────────────────────────────╮
- │  1 󰀄 Chat   2 󱕂   3 󰘬   4 󰄨   5 󰙅                     󰆍 lazygit    │
- │                                                                      │
- │  ▐▛███▜▌ Claude Code v2.1.263                                        │
- │  ▝▜█████▛▘ Opus 5 (1M context)                                       │
- │                                                                      │
- │  > _                                                                 │
- │                                                                      │
- │  Ctrl + g  tab bar   Ctrl + s  sessions   Ctrl + l  terminal   1-5 … │
- ╰──────────────────────────────────────────────────────────────────────╯
-```
+lists on [the rail](#the-workspace-rail), under its workspace, and opening one
+gives it **a tab page of its own**, the way an agent gets one, with the rail
+down its left if the rail was up where you opened it.
 
 It used to be a surface of its own — a rail of names, a title bar, the terminal
-and a backdrop, four windows over the top of whatever you were looking at, with
-its own geometry, its own z-index and its own keymaps. That shape was
+and a backdrop, floated over whatever you were looking at, with its own
+geometry and keymaps. That shape was
 [floaterm](https://github.com/nvzone/floaterm)'s, and it was the wrong one to
-borrow: a terminal you open a second application to reach is not a session,
-it is a place you get stuck, and the way back out was `q`.
-
-Now there is **one surface**, and what changes is what fills the panel area — a
-conversation and its composer for an agent, the PTY outright for a terminal.
-
-**Which session that is** is the label at the right-hand end of the tab bar,
-on **every** tab — because "which session am I in" does not stop being worth
-answering when you look at Usage, and a terminal has no transcript and no
-composer, so without it the dashboard could be showing a PTY with nothing on
-screen naming it. Moving *between* sessions is the rail's job.
+borrow: a terminal you open a second application to reach is not a session, it
+is a place you get stuck.
 
 **A terminal takes every key, and that is what it is for** — so the handful it
-does not take are your whole way out, and they have to be enough to reach the
-tab bar:
+does not take are your whole way out. They are bound in **terminal mode as
+well as normal**, or each would start with `<C-\><C-n>`, and they are
+Neovim's own moves:
 
 | | |
 |---|---|
-| `<C-g>` | out of the PTY and **onto the tab bar**, without leaving the Chat tab or closing anything: the terminal stays on screen, the keystrokes stop going to it, and `1`–`5`, `<Tab>` and `q` work |
-| `<C-l>` | from the chrome back **into** the PTY — the other direction |
-| `<C-s>` | into the rail, on this terminal's row: everything running here |
-| `<C-j>` / `<C-k>` | the next and previous session in this workspace |
-| `<M-1>`–`<M-5>` | the tabs, for the terminals that deliver an Alt chord |
+| `<C-g>` | out of terminal mode, into normal mode, without closing anything |
+| `<C-l>` | back into the terminal |
+| `<C-j>` / `<C-k>` | the next and previous tab page: the next agent or terminal |
+| `<C-s>` | into the rail, when it is up beside the terminal |
+| `q` | (normal mode) close the tab; the terminal lives on, on the daemon |
 
-`<C-g>` is the answer to *"I can only switch tabs with the mouse"*. `<M-3>` is
-one key, and a great many terminal emulators, multiplexers and ssh sessions
-never deliver an Alt chord at all — and when that is true of yours, those five
-bindings are not a way out, they are five keys that do nothing.
-**Everything but the digits is bound in terminal mode too**, which is the only
-way any of it is worth having — otherwise each starts with `<C-\><C-n>`. That
-does take them from whatever is running inside, which is right for `claude` and
-wrong for `tmux`, so `ui.terminal.keys` renames or disables any of them.
-
-**And an agent picked out of the rail opens the agent** — even this
-chat's own while a terminal is up, which is the way back to the conversation.
-
-The **digits are bound in the PTY's normal mode** — after `<C-\><C-n>`, where
-they cost a count and the surface behaving differently in one buffer is worse
-— and **not in terminal mode**, where a bare `5` is a `5` the program wanted.
-`<C-c>` is not bound either: it is SIGINT and belongs to the program. `<Esc>`
-is never bound at all, so vim running inside one can still leave insert mode.
+Binding them in terminal mode takes them from whatever is running inside,
+which is right for `claude` and wrong for `tmux`, so `ui.terminal.keys` renames
+or disables any of them. `<C-c>` is not bound: it is SIGINT and belongs to the
+program. `<Esc>` is never bound at all, so vim running inside one can still
+leave insert mode.
 
 On the rail, `t` (or `c`) starts a terminal, `R` renames one and `d` kills it
 (asked first — something is usually running in there). `c` opens a **screen, not
@@ -1085,13 +842,12 @@ A terminal is a **real** terminal — `nvim_open_term`, the same libvterm behind
 itself all work. One `terminal_output` listener routes to a registry keyed by
 id, which is the whole of how several are fed at once; `bridge.on` has no
 `off`, so a listener per attach would stack up one dead closure per terminal
-you opened. That registry owns no window, which is why deleting the surface
-above it was a deletion and not a rewrite.
+you opened. That registry owns no window, which is why the surfaces above it
+could be deleted and replaced without touching it.
 
 A terminal **dying** is a directory update that no longer lists it, never a
 process exiting under us — Paseo owns the process, not Neovim, so none of
-floaterm's reaping machinery applies. The Chat tab falls back to the agent and
-the dashboard stays open.
+floaterm's reaping machinery applies.
 
 ### Style
 
@@ -1128,21 +884,12 @@ rendered on the *editor's* background and the framed styles lost the one cell
 of padding the unframed ones get, which is what made the frame read as a
 hairline pasted onto the editor rather than as the edge of a raised sheet.
 
-Every style produces the **same number of rows** for the same content, which is
-not tidiness: volt records a section's start row when the layout is measured
-and never recomputes it, so a card whose height depended on the frame would
-move every section below it the moment you changed this.
+Every style produces the **same number of rows** for the same content, so
+changing it never moves a panel's rows under the cursor.
 
 The default is `plate` because the old look was three frame weights competing
-inside one window — a box around every card, inside the float's own border,
-with a rule under the tab bar as well.
-
-**That rule under the tab bar is gone in every style.** It survived for the
-framed ones, where it was the same complaint in miniature: the float's own
-edge, a full-bleed rule directly under the pills, and a box around every card
-below it. The pills are a row of filled shapes and delimit the bar by
-themselves. The *row* stays — dropping it would shift every section below, and
-volt does not recompute those.
+inside one window — a box around every card, inside a window border, with a
+rule under it as well.
 
 ### Colour
 
@@ -1159,7 +906,7 @@ ui = {
 
 | | |
 |---|---|
-| `ui.colors` | `"auto"` derives the base colours from the colourscheme — what makes the dashboard look like it belongs to whatever you have loaded. `"fixed"` uses the plugin's own instead, and then a `:colorscheme` does not move them. |
+| `ui.colors` | `"auto"` derives the base colours from the colourscheme — what makes the chat look like it belongs to whatever you have loaded. `"fixed"` uses the plugin's own instead, and then a `:colorscheme` does not move them. |
 | `ui.palette` | the eight base colours by name — `red` `green` `blue` `yellow` `grey` `border` `text` `bg` — laid over **whichever** source. So it is a correction to a theme that got one colour wrong as readily as it is a whole palette on top of `"fixed"`. |
 | `ui.theme` | the last word: finished groups, laid over the derived table. |
 
@@ -1174,7 +921,7 @@ set in `theme` is the one group you named.
 ui = { colors = "fixed" }
 
 -- Keep deriving, but this theme's Function colour is not what I want
--- the dashboard's blue to be.
+-- the chat's blue to be.
 ui = { palette = { blue = "#7aa2f7" } }
 
 -- My own palette, derived into a full set.
@@ -1198,17 +945,12 @@ shade a heat scale with, and draw a divider in that is not content weight.
 
 Where the accents come from is a chain, and the order is load-bearing:
 
-- **With NvChad**, volt's `Ex*` groups, which are base46's palette.
+- **With NvChad**, base46's palette, read from its own cache.
 - **Without it**, `DiagnosticError`/`Removed`, `DiagnosticOk`/`Added`,
   `Function`, `DiagnosticWarn`/`Changed` — the groups that *mean* what we mean.
   `Added` before `String`, because on `morning` `String` is **magenta**, so a
   tool that succeeded was drawn the colour of a string literal.
 
-We do not read volt's `Ex*` groups on the non-base46 path, and that is
-deliberate: volt's own fallback writes `ExBlue = { fg = get_hl "Function" }`,
-and `volt.utils.get_hl` returns a **table**, not a colour — so on every setup
-without NvChad each accent resolves to `#000000`. Black is not obviously wrong
-on a dark theme, which is why it went unnoticed. It is simply invisible.
 
 Three corrections are then applied, each of which a real colourscheme forced:
 
@@ -1275,10 +1017,8 @@ ramp. The spinner is not one of them and is never disabled — a turn that is
 running has to look different from a turn that is wedged, and that is
 information rather than decoration.
 
-Neither changes a section's **height**, and that is a hard constraint rather
-than a choice: volt records each section's start row when the layout is
-measured, so a section that grows mid-flight draws every section below it at the
-wrong row — as `Invalid 'line': out of range`, thrown from inside `vim.on_key`.
+Neither changes a panel's **height**: a panel whose rows moved mid-flight
+would move them under the cursor.
 
 There was a **third** effect, staggering a panel's rows in on a tab switch, and
 it is gone for a reason worth recording. It respected that constraint — it drew
@@ -1750,10 +1490,9 @@ is not a Paseo tab, and a terminal is not an agent session.
 | **Workspace** | One unit of work inside a project, with its own working directory. It contains agent sessions and terminals. |
 | **Agent** | The AI worker identified by an agent ID. In UI text, its ongoing conversation is an **agent session**. |
 | **Agent session** | One agent's state and timeline inside a workspace. Several can share the same workspace and files. Bare “session” is retained only in compatibility command aliases and stable internal module/protocol names. |
-| **Tab** | A Paseo application surface that presents an agent session. It is distinct from a Neovim **tab page**. paseo.nvim's dashboard sections are also UI tabs, not isolation boundaries. |
+| **Tab** | A Paseo application surface that presents an agent session. paseo.nvim's full-screen surface gives each agent a Neovim **tab page**; neither is an isolation boundary. |
 | **Dashboard** | paseo.nvim's full-screen surface: the five tabs, the panels, the panes, and the workspace rail with each workspace's sessions. One thing, on one of two **mounts**. |
-| **Mount** | Where the dashboard is drawn — `float`, over your code, or `buffer`, in a real window of its own. Same chrome, same tabs, same keys; only the window differs. |
-| **Sidebar** | The narrow surface beside your code. A different surface from the dashboard, not a third mount of it. |
+| **Sidebar** | The narrow surface beside your code, the other to the full-screen one. |
 | **Terminal** | A daemon-owned PTY inside a workspace. It appears beside agent sessions but is not an agent. |
 | **Worktree** | A Git checkout used to isolate a workspace. It is an implementation mechanism, not a synonym for workspace. |
 | **Daemon** | The background Paseo process that owns projects, workspaces, agent sessions, timelines, and terminals. |
@@ -1904,7 +1643,7 @@ is rebuilt on the tab you are standing on, pointed at that workspace's agent.
 
 It re-points an open chat and nothing more: with no chat up, switching
 directory opens nothing, and a workspace you have not started an agent in yet
-says so rather than opening a provider picker at you. The dashboard
+says so rather than opening a provider picker at you. The full-screen surface
 takes focus — it covers the screen, so you need to be able to type into it —
 and the sidebar does not, because your cursor is in your code. `<C-r>` follows
 too but never takes focus; that belongs to whatever your review autocmd opens.
@@ -1951,7 +1690,7 @@ the sidecar dependencies first with `bun install` or `npm install`; the test
 harness uses Bun when present and Node plus the local TypeScript otherwise.
 
 Neovim is started with `-u tests/minimal_init.lua` and nothing else, so none of
-your own configuration is loaded: volt, gitsigns and telescope are cloned into
+your own configuration is loaded: gitsigns and telescope are cloned into
 `~/.cache/paseo-nvim/test-deps` by `tests/deps.sh` and the suite runs against
 those. A green run means the plugin works, not that one laptop is set up right
 — which is also what makes it runnable on a machine with no configuration at
@@ -2058,20 +1797,19 @@ lua/paseo/          the plugin
     hl.lua          applies them, plus the user's `ui.theme` overrides
     style.lua       frame presets, and the box characters nothing else names
     icons.lua       every glyph, by codepoint
-    layout.lua      the chrome's row budget, stated once -- and mount-agnostic,
-                    which is what lets the dashboard be a float or a window
-    float.lua       the dashboard, on either mount: floating over your code,
-                    or a real buffer taking over the window you are in
-    rail.lua        the workspace rail down the dashboard's left
+    layout.lua      the sidebar's row budget, stated once
+    native.lua      the full-screen surface: a tab page per agent, all splits
+    color.lua       colour arithmetic: mix, lighten, hue, HSL
+    rail.lua        the workspace rail down each agent tab's left
     subagents.lua   the live subagent list `gs` opens
     surface.lua     which surface a chat goes on when nobody named one
     tree.lua        a workspace's sessions as the rail nests them: agents, subagents, terminals
     sidebar.lua     the narrow pane beside your code, in two real splits
     animate.lua     motion, none of which may change a height
-    render.lua      the cell/line alphabet and the three sinks
+    render.lua      the cell/line alphabet and its sinks
     widgets.lua     the vocabulary: cards, chips, keycaps, tiles, bars, tables
     manifest.lua    the workspace manifest, as a screen you answer
-    panels/         one per dashboard tab
+    panels/         Settings, Changes, Usage -- the native panel split
   workspace/        assembling N worktrees into one unit of work
   pickers/          workspaces, sessions
   fork.lua          a second agent that starts where this one has got to

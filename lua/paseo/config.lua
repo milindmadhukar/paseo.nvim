@@ -58,14 +58,12 @@ local M = {}
 ---@field remote_root string
 
 ---@class paseo.Config.UI
----@field surface "float"|"sidebar"|"buffer"  Which surface `:Paseo chat` opens
----                       on. "float" is the default: the full-screen dashboard
----                       is the one with everything on it, and the sidebar is
----                       the narrower thing you switch TO with <C-f>.
----                       "buffer" is the same dashboard as "float" -- same
----                       chrome, same six tabs -- in a real window with a
----                       buffer of its own, on a tab page of its own, using the
----                       whole screen rather than 94% of it.
+---@field surface "native"|"sidebar"  Which surface `:Paseo chat` opens on.
+---                       "native" is the default: full screen, a tab page per
+---                       agent, every pane a real split. The sidebar is the
+---                       narrower thing beside your code; <C-f> goes from it to
+---                       native. "float" and "buffer" -- the old volt
+---                       dashboard's mounts -- are accepted and mean "native".
 ---@field send_behavior "steer"|"interrupt"|"queue"  What sending does while
 ---                       the agent is mid-turn. "steer" (the default, as in the
 ---                       Paseo app) folds the message into the running turn;
@@ -84,7 +82,7 @@ local M = {}
 ---                       elevation and padding instead. See `paseo.ui.style`.
 ---@field colors "auto"|"fixed"  Where the eight base colours come from.
 ---                       "auto" derives them from the colourscheme, which is
----                       what makes the dashboard look like it belongs to
+---                       what makes the surfaces look like they belong to
 ---                       whatever you have loaded. "fixed" uses the plugin's
 ---                       own instead -- for a theme whose colours the agent
 ---                       surfaces read badly in, or which simply is not what
@@ -133,12 +131,18 @@ local M = {}
 ---                       benefits: a jump from 40% to 70% reads as a glitch.
 ---@field flash boolean   Briefly tint a tool card as it settles to ok or
 ---                       failed, then fade out through the accent ramp.
----@field fps integer     Frames a second for all of the above. Every frame is
----                       one `volt.redraw` of one named section, which is an
----                       in-place extmark overwrite -- cheap, but not free on
----                       a slow link.
+---@field fps integer     Frames a second for all of the above. Every frame
+---                       repaints the panels, or the one transcript block that
+---                       is flashing, in place -- cheap, but not free on a
+---                       slow link.
 
 ---@class paseo.Config.UI.Float
+---
+---The old dashboard's table. What is still read from it is the workspace
+---`rail` and `keys.new`, which the native surface binds, and `zindex`, which
+---the subagent picker stacks itself over. The size, composer, `backdrop` and
+---`tab_keys` fields described that float; they are still validated, so an old
+---config loads, but no surface reads them now.
 ---@field width number|fun(columns: integer): integer   PERCENT of the editor,
 ---@field height number|fun(lines: integer): integer    1-100 -- the same unit
 ---                       floaterm's `size` takes, so a number means the same
@@ -162,25 +166,13 @@ local M = {}
 ---                       a paragraph, and the row you type on is the one row
 ---                       on the surface that is never wasted -- so the floor
 ---                       is three. Set 1 for the old behaviour.
----@field zindex integer  Base z-index of the surface. DELIBERATELY BELOW 50,
----                       which is what floating windows and plenary popups get
----                       by default: a dashboard that outranks them hides the
----                       telescope picker, its previewer and every
----                       `vim.ui.select` opened on top of it. Our own modal --
----                       the permission dialog -- is exempt and stays above
----                       everything, because it is the one window that must not
----                       be covered.
----@field backdrop boolean  Dim the editor behind the surface.
----@field tab_keys boolean  Bind bare `1`-`6` to the tabs in the conversation,
----                       the composer and a terminal's NORMAL mode, as well as
----                       in the chrome. They have to be bound there or they do
----                       nothing: the Chat tab puts your cursor in the
----                       composer, or in the PTY. The cost is that a bare
----                       digit is also a COUNT, so `3p` and `5j` in those
----                       buffers go to the tab bar instead while the dashboard
----                       is open. Set false to keep the counts; `<M-1>`-`<M-6>`
----                       and `<Tab>` still switch tabs. In TERMINAL mode a
----                       digit is never taken: it belongs to what is running.
+---@field zindex integer  Base z-index. It was the dashboard's, kept below the
+---                       50 that floating windows and plenary popups get so a
+---                       telescope picker opened over it stayed visible. The
+---                       subagent picker is all that reads it now, and opens
+---                       20 above it.
+---@field backdrop boolean  Dimmed the editor behind the old float.
+---@field tab_keys boolean  Bound bare `1`-`6` to the old dashboard's tabs.
 ---@field rail paseo.Config.UI.Rail  The workspace rail down the left.
 
 ---@class paseo.Config.UI.Rail
@@ -189,59 +181,33 @@ local M = {}
 ---@field width integer   Cells. Capped at a quarter of the surface, and the
 ---                       rail is left out altogether below 90 columns.
 ---@field keys { toggle: string|false, focus: string|false }  Normal mode, on
----                       every buffer the dashboard owns. `false` unbinds.
+---                       the native surface's conversation, composer and rail.
+---                       `false` unbinds.
 ---@field show_background boolean  Show the workspaces agents and plugins make
 ---                       for themselves, which the app's sidebar hides unless
 ---                       "Show background" is on. Default false.
 
 ---@class paseo.Config.UI.Buffer
 ---
----The dashboard as a WINDOW rather than as a float. Deliberately one key: how
----tall the composer grows (`composer`), how the panes stack (`zindex`) and
----whether a bare digit switches tab (`tab_keys`) describe the DASHBOARD and
----not the mount, so they are read from |paseo-config.ui.float| unless you set
----them here. The size is not a setting at all -- the host window's size IS the
----geometry, which is the whole point of the surface.
----@field open "here"|"tab"  Where it goes.
----
----                       `"here"` -- THE WINDOW YOU ARE STANDING IN, nvdash's
----                       arrangement. The buffer that was there is remembered
----                       along with its view and put back when the dashboard
----                       closes, so the surface is a toggle you can take and
----                       leave without losing your place. Opening a file from
----                       it simply opens the file: the dashboard's buffer is
----                       displaced, notices, and tears itself down.
----
----                       `"tab"` -- a tab page of its own, which costs a tab
----                       and keeps the window layout underneath it intact.
----@field chrome boolean  Whether the EDITOR's own tabline and statusline stay
----                       up around the surface. False -- the default -- hides
----                       both while it is open and puts them back, whatever
----                       they were, when it closes.
----
----                       They are two rows of chrome around a surface that
----                       has a header and a footer of its own, and what they
----                       say -- the file you are not looking at, the line you
----                       are not on -- is about the buffer this one replaced.
----                       Set true to keep them.
----
----                       Only ever touched for `open = "here"`: on a tab page
----                       of its own the tabline is how you get back, and
----                       hiding it strands you.
+---The old dashboard as a WINDOW rather than as a float. That mount is gone and
+---`surface = "buffer"` means the native surface now; the table is still
+---validated, so an old config loads, but no surface reads it.
+---@field open "here"|"tab"  Where it went: `"here"` was the window you were
+---                       standing in, `"tab"` a tab page of its own.
+---@field chrome boolean  Whether the editor's own tabline and statusline
+---                       stayed up around it.
 ---@field composer integer|fun(lines: integer): integer
 ---@field composer_min integer
 
 ---@class paseo.Config.UI.Sidebar
 ---@field width number|fun(columns: integer): integer  PERCENT of the editor's
----                       columns, read the same way as the float's.
+---                       columns. A function returns CELLS.
 ---@field min_width integer  ...but never narrower than this, in CELLS. A
 ---                       percentage of a small terminal is a pane too narrow to
----                       read a tool card in, and unlike the float -- whose
----                       floor is a hard layout requirement -- how narrow is
----                       too narrow here is a matter of taste.
+---                       read a tool card in, and how narrow is too narrow is
+---                       a matter of taste.
 ---@field composer integer  The MOST rows the composer grows to, under the
----                       conversation -- a ceiling, not a size, read the same
----                       way as the float's.
+---                       conversation -- a ceiling, not a size.
 ---@field position "right"|"left"  Which side the pane opens on.
 
 ---@class paseo.Config.Voice
@@ -261,17 +227,16 @@ local M = {}
 ---                       unreadable question is worse than one that is not
 ---                       where you expected it.
 ---@field backdrop boolean  Dim the conversation behind the overlay.
----@field zindex integer  Base z-index. Above the dashboard's panes and above
+---@field zindex integer  Base z-index. Above the surface's windows and above
 ---                       anything opened over them, because a question you
 ---                       cannot see is a turn that never finishes. The card
 ---                       sits 10 above this and its children 15.
 ---@class paseo.Config.UI.Terminal
 ---
----A terminal is a SESSION now, shown on the dashboard's Chat tab, so this no
----longer describes a surface of its own: `width`, `height`, `row`, `col`,
----`list`, `zindex` and `backdrop` all belonged to the rail-and-pane window
----that used to open over the top, and are gone with it. A terminal is the size
----of the dashboard, because it IS the dashboard.
+---A terminal is a SESSION now, opened from the rail on a native tab page of its
+---own, so this no longer describes a surface of its own: `width`, `height`,
+---`row`, `col`, `list`, `zindex` and `backdrop` all belonged to the
+---rail-and-pane window that used to open over the top, and are gone with it.
 ---@field keys paseo.Config.UI.Terminal.Keys
 ---@field presets (string|table)[]  Extra entries for the new-terminal screen,
 ---                      beside a shell and one per provider the daemon has.
@@ -284,22 +249,17 @@ local M = {}
 ---first is a key you do not reach. That does take them from whatever is
 ---running inside -- right for `claude`, wrong for `tmux` -- so any of them can
 ---be `false`.
----@field next string|false   The next session in this workspace, agent or
----@field prev string|false   terminal. Stays on the Chat tab.
----@field sessions string|false  To the Sessions tab -- the list of everything
----                      running here and the search over it. Was `keys.list`,
----                      which meant the rail.
----@field chrome string|false  OUT OF THE PTY AND ONTO THE TAB BAR, without
----                      leaving the Chat tab or closing anything: the terminal
----                      stays on screen and the keystrokes stop going to it,
----                      so `1`-`6` and `<Tab>` reach the tabs. This is the key
----                      to rebind if tab navigation from a terminal is only
----                      working with the mouse -- `<M-1>`-`<M-6>` are bound in
----                      terminal mode too, but plenty of terminal emulators,
----                      multiplexers and ssh sessions never deliver an Alt
----                      chord, and then they are six keys that do nothing.
----@field terminal string|false  From the chrome back into the PTY -- the other
----                      direction, bound on the dashboard's own buffer.
+---@field next string|false   The next tab page, and the previous one -- an
+---@field prev string|false   agent's or another terminal's.
+---@field sessions string|false  Into the rail beside the terminal, and in the
+---                      composer the session list. Was `keys.list`, which
+---                      meant the rail.
+---@field chrome string|false  OUT OF THE PTY, into normal mode, without
+---                      closing anything: the terminal stays on screen and the
+---                      keystrokes stop going to it. The name is from when it
+---                      landed you on the old dashboard's tab bar.
+---@field terminal string|false  From normal mode back into the PTY -- the
+---                      other direction.
 
 ---@class paseo.Config.Workspaces
 ---@field dir string      Directory, relative to a project root, holding the
@@ -380,7 +340,7 @@ local defaults = {
   },
 
   ui = {
-    surface = "float",
+    surface = "native",
     send_behavior = "steer",
 
     -- Derived from the colourscheme. The alternative is a plugin that looks
@@ -389,8 +349,8 @@ local defaults = {
     palette = {},
 
     -- No frame around a card. This is the single biggest visual change and it
-    -- is the default because a box per card, drawn inside the float's own
-    -- border, with a rule under the tab bar as well, was three frame weights
+    -- is the default because a box per card, drawn inside the old float's own
+    -- border, with a rule under its tab bar as well, was three frame weights
     -- competing in one window. Depth comes from the elevation ladder in
     -- `ui/theme.lua` instead. `"rounded"` is the old look, kept and fixed.
     style = "plate",
@@ -400,9 +360,9 @@ local defaults = {
     theme = {},
 
     -- Motion, on by default but cheap: two effects, neither of which changes a
-    -- section's HEIGHT. That constraint is not a style choice -- volt records
-    -- each section's start row when the layout is measured, so a section that
-    -- grows mid-animation draws every section below it at the wrong row.
+    -- block's HEIGHT, so a frame repaints rows in place and nothing below them
+    -- moves. (Under volt that was a hard constraint: it drew every section
+    -- below a grown one at the wrong row.)
     animate = {
       bars = true,
       flash = true,
@@ -419,6 +379,9 @@ local defaults = {
     -- back under you.
     expand = "running",
 
+    -- The old dashboard's table. Only `rail`, `keys` and `zindex` are still
+    -- read; the rest is the float's geometry, kept so an old config that sets
+    -- it still validates.
     float = {
       -- Percentages rather than a margin in cells: a margin that looks right
       -- on a 200-column monitor is most of a laptop screen.
@@ -441,9 +404,8 @@ local defaults = {
       rail = {
         enabled = true,
         show_background = false,
-        -- Cells. Never more than a quarter of the surface, and no rail at
-        -- all on one narrower than 90. Wide enough for a workspace's
-        -- sessions, nested under it.
+        -- Cells, on the old float. The native surface's rail is as wide as
+        -- `native.rail` says.
         width = 32,
         keys = {
           toggle = "<C-b>",
@@ -458,37 +420,25 @@ local defaults = {
       },
       keys = {
         -- An agent here, an agent in a new workspace, or a terminal -- asked.
-        -- On every buffer of the dashboard, in normal mode; the footer's
-        -- first hint is the same thing as a button.
+        -- On the native surface's conversation and composer, in normal mode.
         new = "<C-n>",
       },
     },
 
-    -- The same dashboard, in a window of its own rather than floating over
-    -- your code. `composer`, `zindex` and `tab_keys` are read from `float`
-    -- above unless you set them here: they describe the dashboard, not where
-    -- it is mounted, and two copies of one answer is how the two surfaces
-    -- start disagreeing.
+    -- The old dashboard in a window of its own rather than floating over your
+    -- code. That mount is gone and nothing reads this table; it is kept so a
+    -- config that sets it still validates.
     buffer = {
-      -- The window you are standing in, not a tab page of its own. A tab is
-      -- an arrangement of windows and this surface is one window -- so it
-      -- spent a whole tab to say nothing, put a tabline up on a screen that
-      -- has a header of its own, and made "go back to my code" a `gt` rather
-      -- than the key that opened it.
       open = "here",
       chrome = false,
 
-      -- A SHARE OF THE HOST, where the float takes a flat seven. This surface
-      -- is the whole screen: a fifty-row terminal has forty rows of
-      -- transcript on it and most of them are blank, and the box you type in
-      -- was still the same seven rows it gets in a float over your code. The
-      -- floor keeps it honest on a small terminal, where a third is three.
+      -- A share of the host, where the float took a flat seven.
       composer = function(lines)
         return math.max(7, math.floor(lines / 3))
       end,
     },
 
-    -- EXPERIMENTAL. The volt-free surface (`:Paseo native`): one tab page per
+    -- EXPERIMENTAL. The native surface (`:Paseo native`): one tab page per
     -- agent, every pane a real split -- the workspace rail on the left, the
     -- conversation over the composer, a panel on the right when you ask for
     -- one. See |paseo.ui.native|.
@@ -508,8 +458,8 @@ local defaults = {
     sidebar = {
       width = 40,
       min_width = 60,
-      -- A CEILING, read exactly as the float's is: the box grows with what
-      -- you type and shrinks back between `composer_min` and this.
+      -- A CEILING, not a size: the box grows with what you type and shrinks
+      -- back between `composer_min` and this.
       composer = 8,
       composer_min = 3,
       position = "right",
@@ -652,9 +602,11 @@ function M.setup(opts)
   vim.validate("ui.send_behavior", config.ui.send_behavior, function(v)
     return v == "steer" or v == "interrupt" or v == "queue"
   end, '"steer", "interrupt" or "queue"')
+  -- "float" and "buffer" were the old dashboard's mounts; both mean the
+  -- native surface now, so a config that still says them keeps working.
   vim.validate("ui.surface", config.ui.surface, function(v)
-    return v == "float" or v == "sidebar" or v == "buffer" or v == "native"
-  end, '"float", "sidebar", "buffer" or "native"')
+    return v == "native" or v == "sidebar" or v == "float" or v == "buffer"
+  end, '"native" or "sidebar"')
   vim.validate("ui.native.markdown", config.ui.native.markdown, "boolean")
   vim.validate("ui.native.rail", config.ui.native.rail, "number")
   vim.validate("ui.native.panel", config.ui.native.panel, "number")
@@ -679,7 +631,7 @@ function M.setup(opts)
     return v == "auto" or v == "fixed"
   end, '"auto" or "fixed"')
   -- Checked HERE rather than where it is read, so `#00ff0` is reported against
-  -- the key that holds it. A bad hex reaching `volt.color` comes back as the
+  -- the key that holds it. A bad hex reaching `ui/color.lua` comes back as the
   -- input unchanged, which surfaces as one tier of the elevation ladder
   -- silently collapsing into the one below it -- a bug with no error and no
   -- obvious cause.
@@ -742,7 +694,8 @@ function M.setup(opts)
     config.skills.method = "copy"
   end
   -- Clamped rather than merely validated: `nvim_open_win` rejects anything
-  -- below 1 outright, and the backdrop sits five below this.
+  -- below 1 outright. (The old float's backdrop sat five below this; the
+  -- subagent picker that reads it now opens 20 above.)
   vim.validate("ui.float.zindex", config.ui.float.zindex, "number")
   config.ui.float.zindex = math.max(10, math.floor(config.ui.float.zindex))
   vim.validate("ui.float.rail", config.ui.float.rail, "table")
@@ -772,8 +725,8 @@ function M.setup(opts)
   -- finding the key that caused it.
   for where, keys in pairs {
     float = { "width", "height", "row", "col", "composer" },
-    -- Every one of these may be nil here, which is what lets the buffer mount
-    -- inherit it from `ui.float` rather than restate it.
+    -- Every one of these may be nil here: the old buffer mount inherited them
+    -- from `ui.float` rather than restating them.
     buffer = { "composer", "zindex" },
     sidebar = { "width", "min_width", "composer" },
     terminal = { "width", "height", "row", "col", "list" },
@@ -787,7 +740,7 @@ function M.setup(opts)
 
   -- The overlay's widths are CELLS, not percentages, so they take neither a
   -- function nor a value read through `M.cells`. Clamped for the same reason
-  -- the float's z-index is: `nvim_open_win` rejects a z-index below 1, and the
+  -- `ui.float.zindex` is: `nvim_open_win` rejects a z-index below 1, and the
   -- backdrop sits at this value with the card ten above it.
   vim.validate("ui.answer.backdrop", config.ui.answer.backdrop, "boolean")
   for _, key in ipairs { "width", "min_width", "zindex" } do

@@ -169,12 +169,12 @@ local function subagent_glyph(s)
   return icons.status.idle, "PaseoToolOk"
 end
 
----Which session the dashboard is showing.
+---Which session the native tab is showing.
 ---@param chat? table
 ---@return { kind?: string, id?: string }
 function M.on_screen(chat)
-  local float = package.loaded["paseo.ui.float"]
-  local session = float and float.session and float.session()
+  -- A native tab shows one agent: the chat's own.
+  local session = nil
   -- An agent session with no id is the chat's own -- a draft whose first
   -- message has since made it one.
   if chat and (not session or (session.kind == "agent" and not session.id)) then
@@ -286,17 +286,18 @@ end
 
 -- ----------------------------------------------------------------- actions
 
----Open a session on the dashboard.
+---Open a session on a native tab of its own; a provider subagent in the
+---read-only viewer.
 ---@param node table
 ---@param chat table  The chat on screen.
 function M.open(node, chat)
-  local float = require "paseo.ui.float"
+  local native = require "paseo.ui.native"
   local host_id = node.ws and node.ws.hostId or chat.host_id
   if node.kind == "terminal" then
-    return float.show_session { kind = "terminal", id = node.item.id, hostId = node.item.hostId or host_id }
+    return native.show_session { kind = "terminal", id = node.item.id, hostId = node.item.hostId or host_id }
   end
   if node.kind == "agent" or node.item.kind == "paseo" then
-    return float.show_session { kind = "agent", id = node.item.id, hostId = host_id }
+    return native.show_session { kind = "agent", id = node.item.id, hostId = host_id }
   end
   -- A provider subagent can be watched, not told: the read-only viewer.
   local parent = node.item.parent == chat.agent_id and chat

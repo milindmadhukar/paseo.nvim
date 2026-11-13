@@ -5,7 +5,7 @@ local eq, truthy = t.eq, t.truthy
 
 local function test_settings()
   local chat_mod = require "paseo.ui.chat"
-  local float = require "paseo.ui.float"
+  local native = require "paseo.ui.native"
   local render = require "paseo.ui.render"
   local sidebar = require "paseo.ui.sidebar"
 
@@ -28,10 +28,10 @@ local function test_settings()
     },
   }
 
-  -- Rebuilding the dashboard is a full volt regeneration, so count the calls.
+  -- Redrawing the panels is a full repaint, so count the calls.
   local rebuilds = 0
-  local real_rebuild = float.rebuild
-  float.rebuild = function()
+  local real_rebuild = native.redraw_panels
+  native.redraw_panels = function()
     rebuilds = rebuilds + 1
   end
 
@@ -87,7 +87,7 @@ local function test_settings()
   )
   eq("settings: an unknown id falls back to itself", chat.mode, "invented")
 
-  float.rebuild = real_rebuild
+  native.redraw_panels = real_rebuild
 
   -- Every live-agent model selector comes through `session.apply`. Selecting
   -- the current model is a no-op; an actual change asks whether to branch or

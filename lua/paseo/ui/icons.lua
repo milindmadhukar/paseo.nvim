@@ -108,11 +108,11 @@ M.tool = {
 
 -- -------------------------------------------------------------------- panels
 --
--- The six dashboard tabs, plus the surfaces that open on their own. Keyed by
--- the tab name exactly as `float.M.TABS` spells it, and in that order -- a
--- name here that the tab bar does not spell identically draws a blank icon
--- and nothing errors, so the two lists are checked against each other in
--- `tests/spec/ui/panels.lua`.
+-- The panels, plus the surfaces that open on their own (Chat and Sessions
+-- are the old dashboard's tabs). Keyed by the name exactly as
+-- |paseo.ui.native|'s `PANELS` spells it -- a name here that it does not spell
+-- identically draws a blank icon and nothing errors, so the two lists are
+-- checked against each other in `tests/spec/ui/panels.lua`.
 
 M.panel = {
   Chat = g(0xf0004), -- md-account
