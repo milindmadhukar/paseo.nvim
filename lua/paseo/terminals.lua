@@ -411,6 +411,32 @@ end
 function M.create(cwd, preset, size, callback, host_id, workspace_id)
   preset = preset or {}
   host_id = (hosts.get(host_id) or {}).id
+  -- The daemon REQUIRES the workspace now ("workspaceId is required"), and a
+  -- directory nothing has been started in yet has none: open (find or make)
+  -- the one for `cwd` first, the way an agent's first message does.
+  if not workspace_id then
+    local bridge = require "paseo.bridge"
+    return bridge.ensure(function(ensure_err)
+      if ensure_err then
+        return vim.schedule(function()
+          callback(nil, tostring(ensure_err))
+        end)
+      end
+      local args = { cwd = cwd }
+      local host = hosts.get(host_id)
+      if host and host.local_host then
+        args.project = require("paseo.workspaces").parent_project(cwd)
+      end
+      bridge.request("workspace.open", args, function(err, ws)
+        if err or not (ws and ws.id) then
+          return vim.schedule(function()
+            callback(nil, tostring(err or "no workspace for " .. cwd))
+          end)
+        end
+        M.create(cwd, preset, size, callback, host_id, ws.id)
+      end, host_id)
+    end, host_id)
+  end
   require("paseo.bridge").request("terminals.create", {
     cwd = cwd,
     hostId = host_id,

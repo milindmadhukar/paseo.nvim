@@ -161,7 +161,13 @@ export function terminalOps(ctx: BridgeConnection): Ops {
             : {}),
         },
       );
-      return { terminal: payload?.terminal ?? payload ?? null };
+      // A refusal comes back as a payload with `error`, not as a throw --
+      // and returned as the terminal it read as "started no terminal".
+      const terminal = payload?.terminal ?? payload ?? null;
+      if (terminal && typeof terminal.error === "string" && !terminal.id) {
+        throw new Error(terminal.error);
+      }
+      return { terminal };
     },
 
     async "terminals.rename"(req) {

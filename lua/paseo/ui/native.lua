@@ -901,6 +901,7 @@ watch = function()
           end
         end
         M.redraw_panels()
+        require("paseo.ui.newtask").redraw()
       end)
     end,
   })

@@ -55,6 +55,7 @@ local files = {
   "settings",
   "fork",
   "start",
+  "newtask",
   "quit",
   "workspace_create",
   "skills",

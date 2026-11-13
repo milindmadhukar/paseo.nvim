@@ -1834,15 +1834,47 @@ job (`g?` lists them): >
     q <Esc> <C-h> <C-s>   back to where you were typing
 <
                                                                    *paseo-new*
-STARTING SOMETHING is `<C-n>`, from the conversation or the composer in
-normal mode: new agent (here), new agent in a new workspace, or new terminal.
-Both agent choices go through the settings screen and then open the ORDINARY
-CONVERSATION VIEW, EMPTY -- a draft. Nothing is created until you send the first message, which creates the
-agent (and, for a new workspace, the workspace with it) with that message as
-its first prompt, so the daemon names the workspace from it. The message is
-written in the real composer, so it can be dictated, carry images, or be
-recalled. An agent started HERE joins the workspace on screen, by id, and a
-new agent opens in a tab of its own.
+STARTING SOMETHING is one screen, whichever way you get to it: `<C-n>` on
+the full-screen surface, `a` `w` `t` on the rail, `<Plug>(paseo-new)`
+(|paseo-keys|), |:Paseo-new|, or `:Paseo chat` where nothing is running yet.
+It is a DRAFT CHAT: the
+composer you will keep typing in, focused and in insert mode, with the
+choices drawn where the conversation will be: >
+
+    Start  a          Chat  Terminal        Where  w     Here  New worktree
+    Base   b          main  dev  feat/x  …              (a worktree, in git)
+    Provider p · Model s · Permission mode m · Thinking t · Features f
+    Run    c          Shell  Claude  Codex  Pi  …  Command…   (a terminal)
+    ──────────────────────────────────────────────────────────────────────
+    ▌ your first message
+<
+Type and send (`<M-CR>`, or `<CR>` in normal mode). The first message creates
+the agent -- and, for a new worktree, the worktree with it -- with that
+message as its first prompt. A TERMINAL needs no prompt: `<Tab>` (normal
+mode) or `<C-w>k` up to the choices, then `<CR>` on what to run.
+
+In the choices: `h` `j` `k` `l` move, `<CR>` applies, the letter on a card
+jumps to it, `i` or `<Tab>` goes back to the box, `q` cancels.
+
+WHAT IS NOT ASKED. The PROJECT and the HOST are where you already are: this
+tab's directory (or the agent's on screen) and the host it is on. And a new
+worktree is NOT NAMED: the daemon names it and its branch (`frail-squid`) and
+titles the workspace from your first message, as the app's New workspace
+does. `Where` is offered only where something can be isolated: a git
+checkout (a worktree, cut off `Base`, which defaults to what is checked out)
+or a multi-repo project (|paseo-workspace|, its worktrees assembled; a name
+is made from the prompt). A plain directory has only Here.
+
+EVERYTHING IS REMEMBERED -- chat or terminal, here or a worktree, the base you
+picked, the provider and model, mode, thinking, features, the terminal you
+ran -- per project and host, in `stdpath("state")/paseo/new.json`, and
+prefilled next time: in this project from what you did here, elsewhere from
+what you did last. A remembered model the provider no longer offers falls back
+to its default. Nothing is written until something is created.
+
+`Here` joins the workspace on screen, by id, so a second agent lands beside
+the first; the draft becomes that agent in place. A new worktree's agent
+opens on a tab of its own, and a terminal on one of its own.
 
                                                            *paseo-chat-usage*
 The USAGE panel (`3` in the panel) answers two different questions, from two

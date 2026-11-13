@@ -1324,6 +1324,9 @@ local function here()
   return repos.workspace_root(cwd) or (repo and repo.worktree) or cwd
 end
 
+---Where `:Paseo chat` would open, from this tab: see `here` above.
+M.here = here
+
 ---Open (or focus) a chat.
 ---
 ---`create = false` means "show me the agent in this directory, and say so if
