@@ -387,6 +387,7 @@ local function open(chat, request)
     -- Above its own backdrop, at 190, and every other window here.
     zindex = 200,
   })
+  require("paseo.ui.style").pin(win)
 
   open_dialog = {
     buf = buf,

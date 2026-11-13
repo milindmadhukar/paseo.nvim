@@ -560,6 +560,14 @@ push-fed) does not take it with it. Every workspace Paseo knows is
 here as splits, popups and dialogs are plain windows, and the plugin needs
 nothing to draw any of it.
 
+**A popup keeps its own buffer.** Every Paseo float is opened with
+`'winfixbuf'`, so a buffer command run inside one — `:bnext`, `:b N`, `<C-^>`, a
+tabufline/bufferline key — is refused (`E1513`) instead of loading an agent into
+the popup's window. A permission request that pops up while you are cycling
+buffers takes the cursor, and the next "next buffer" key no longer replaces it.
+To make that key silent rather than an error, have your mapping do nothing
+when `vim.api.nvim_win_get_config(0).relative ~= ""`.
+
 #### The workspace rail
 
 Down the left of the Paseo tab: each workspace in the project you are

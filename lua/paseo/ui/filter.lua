@@ -117,6 +117,7 @@ function M.open(opts, handlers)
     zindex = 60,
     title = { { " " .. icons.ui.search .. " " .. (opts.title or "search") .. " ", "PaseoHeader" } },
   })
+  require("paseo.ui.style").pin(win)
   pcall(function()
     vim.wo[win].winhl = "Normal:PaseoNormal,NormalFloat:PaseoNormal,FloatBorder:PaseoBorder"
   end)

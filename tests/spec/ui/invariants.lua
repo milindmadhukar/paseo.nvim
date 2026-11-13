@@ -147,6 +147,26 @@ local function test_invariants()
     )
   end
 
+  -- EVERY FLOAT THE CURSOR CAN ENTER IS PINNED TO ITS BUFFER. A popup takes the
+  -- cursor whenever the daemon asks, often while you are cycling buffers, and
+  -- the next `:bnext` (or a tabufline/bufferline key) ran inside it: an agent
+  -- loaded INTO the permission dialog's window and the question was gone. Each
+  -- `nvim_open_win` is followed by `style.pin`, or is an unfocusable backdrop.
+  local unpinned = {}
+  for _, path in ipairs(vim.fn.glob(root_dir .. "/lua/**/*.lua", false, true)) do
+    local rel = path:sub(#root_dir + 2)
+    local lines = vim.split(code_of(rel) or "", "\n", { plain = true })
+    for i, line in ipairs(lines) do
+      if line:find("nvim_open_win(", 1, true) then
+        local after = table.concat(lines, "\n", i, math.min(#lines, i + 20))
+        if not (after:find("style\"?%)?%.pin%(") or after:find("focusable = false", 1, true)) then
+          unpinned[#unpinned + 1] = ("%s:%d"):format(rel, i)
+        end
+      end
+    end
+  end
+  eq("ui: every focusable float is pinned to its buffer", unpinned, {})
+
   -- THE DELETED SURFACE STAYS DELETED. `ui/termfloat.lua` was the rail-and-pane
   -- window a terminal used to open in; a terminal is a session on the Chat tab
   -- now, and a `require` of it would fail at the call site rather than here --

@@ -123,6 +123,7 @@ function M.open(opts, callback)
     footer = { { " <CR> send · <Esc> cancel ", "PaseoDim" } },
     footer_pos = "center",
   })
+  require("paseo.ui.style").pin(win)
 
   -- The card look, as everywhere else: the border glyphs are drawn in the
   -- surface's own colour, so the box reads as a padding ring rather than a

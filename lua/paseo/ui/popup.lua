@@ -188,6 +188,7 @@ function M.open(opts)
     border = "rounded",
     zindex = opts.zindex or 60,
   })
+  require("paseo.ui.style").pin(handle.win)
 
   -- The card look: the border glyphs are drawn in the surface's own colour, so
   -- what you see is a padding ring rather than a box. Window-local, so nothing

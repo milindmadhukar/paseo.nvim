@@ -175,6 +175,22 @@ function M.valid(value)
   return true
 end
 
+---Pin a Paseo float to the buffer it was opened on (`'winfixbuf'`).
+---
+---A popup takes the cursor when it opens, and it opens whenever the daemon
+---asks -- often in the middle of cycling buffers. The next "go to the next
+---buffer" key then ran INSIDE the float, and the agent it was meant for landed
+---in the popup's window: the question was gone and a real buffer sat in a
+---floating window. Pinned, every buffer command (`:bnext`, `:b N`, `<C-^>`, a
+---picker, `nvim_win_set_buf`) refuses with E1513 instead, and the popup stays
+---up to be answered.
+---@param win integer
+function M.pin(win)
+  pcall(function()
+    vim.wo[win].winfixbuf = true
+  end)
+end
+
 ---The live style, resolved from config.
 ---@return paseo.Style
 function M.get()

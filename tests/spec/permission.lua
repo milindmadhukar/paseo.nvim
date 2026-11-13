@@ -86,6 +86,18 @@ local function test_permission_held()
     return permission._showing() == "h"
   end))
 
+  -- The dialog takes the cursor, so the next "go to the next buffer" key runs
+  -- in it. That used to load an agent INTO the dialog's floating window.
+  local dialog = vim.api.nvim_get_current_win()
+  local dialog_buf = vim.api.nvim_win_get_buf(dialog)
+  eq("held: the dialog has the cursor", vim.api.nvim_win_get_config(dialog).zindex, 200)
+  truthy("held: the dialog is pinned to its buffer", vim.wo[dialog].winfixbuf)
+  local listed = vim.api.nvim_create_buf(true, false)
+  eq("held: switching buffer inside it is refused", pcall(vim.api.nvim_set_current_buf, listed), false)
+  eq("held: :bnext inside it is refused", pcall(vim.cmd.bnext), false)
+  eq("held: and the dialog still shows the question", vim.api.nvim_win_get_buf(dialog), dialog_buf)
+  vim.api.nvim_buf_delete(listed, { force = true })
+
   permission.close()
   vim.cmd "wincmd p"
   vim.cmd "wincmd p"

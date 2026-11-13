@@ -702,6 +702,7 @@ local function child(o, buf, row, height, win, focusable)
     return win
   end
   win = api.nvim_open_win(buf, false, config)
+  require("paseo.ui.style").pin(win)
   pcall(function()
     vim.wo[win].winhl = "Normal:PaseoCardText,NormalFloat:PaseoCardText"
     vim.wo[win].wrap = true
@@ -1212,6 +1213,7 @@ function M.open(chat, request, view, handlers)
   -- The card holds focus for a question -- the options are drawn in it -- and is
   -- unfocusable chrome for a plan, where the keys are bound on the body.
   o.card_win = api.nvim_open_win(o.card_buf, true, placement(f, #lines))
+  require("paseo.ui.style").pin(o.card_win)
   pcall(function()
     vim.wo[o.card_win].winhl = "Normal:PaseoNormal,NormalFloat:PaseoNormal"
   end)

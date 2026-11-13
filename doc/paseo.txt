@@ -1799,6 +1799,15 @@ borrowed window) of tabs over floated panes. Everything it showed is here as
 splits; popups and dialogs are plain windows drawn as real text and driven
 from the keyboard; and the plugin needs nothing to draw any of it.
 
+                                                          *paseo-winfixbuf*
+A POPUP KEEPS ITS OWN BUFFER. Every Paseo float is opened with 'winfixbuf',
+so a buffer command run inside one -- `:bnext`, `:b N`, CTRL-^, a tabufline
+or bufferline key -- is refused (E1513) instead of loading an agent into the
+popup's window. A popup takes the cursor when it opens, often while you are
+cycling buffers; the next "next buffer" key no longer replaces it. To make
+that key silent rather than an error, have your mapping do nothing when
+`vim.api.nvim_win_get_config(0).relative ~= ""`.
+
                                                                   *paseo-rail*
 THE WORKSPACE RAIL is the split down the left of the Paseo tab: each
 workspace in the project you are standing in, with what its agents are
@@ -2886,6 +2895,9 @@ transcript uses.
 `<Esc>` deliberately does not deny. Silently denying on a stray keypress
 throws away whatever the agent was doing. The request stays pending, the
 header shows `` needs you``, and `gp` in the conversation reopens it.
+
+The dialog takes the cursor, and a buffer-cycling key pressed in it is
+refused rather than loading a buffer over it; see |paseo-winfixbuf|.
 
 A pending request also stops the spinner (see |paseo-chat-header|): the agent
 is not working, it is waiting for YOU, and a spinner there would blame it for

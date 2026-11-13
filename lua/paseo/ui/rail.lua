@@ -1599,6 +1599,7 @@ function M.help()
     border = "rounded",
     title = " paseo rail ",
   })
+  require("paseo.ui.style").pin(float)
   vim.wo[float].winhl = "Normal:PaseoNormal,FloatBorder:PaseoBorder"
   for _, lhs in ipairs { "q", "<Esc>", "g?" } do
     vim.keymap.set("n", lhs, function()
@@ -1690,6 +1691,7 @@ function M.show(config, keys)
       false,
       vim.tbl_extend("force", { style = "minimal", border = "none", focusable = true }, config)
     )
+    require("paseo.ui.style").pin(win)
     M.style(win)
   end
   M.draw()

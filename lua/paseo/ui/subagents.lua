@@ -309,6 +309,7 @@ function M.open(parent)
     -- over an ordinary float, under the permission dialog.
     zindex = (require("paseo.config").get().ui.float.zindex or 40) + 20,
   })
+  require("paseo.ui.style").pin(win)
   for option, value in pairs {
     winhl = ("Normal:PaseoNormal,NormalFloat:PaseoNormal,EndOfBuffer:PaseoNormal,CursorLine:PaseoRowHover,FloatBorder:%s"):format(
       edge_hl
