@@ -245,12 +245,15 @@ commands.agents = {
 }
 
 commands.new = {
-  desc = "Start something: a chat here or in a new worktree, or a terminal",
+  desc = "A new session (Local, or `worktree`), or `agent`: one more in the session on screen",
   run = function(args)
+    if args[1] == "agent" then
+      return require("paseo.native").new_agent()
+    end
     M.new_task(args[1] == "worktree" and { where = "worktree" } or nil)
   end,
   complete = function()
-    return { "worktree" }
+    return { "agent", "worktree" }
   end,
 }
 
@@ -371,11 +374,12 @@ function M.agents()
   require("paseo.pickers.sessions").here()
 end
 
----Start something from wherever you are: an agent here, in a new worktree,
----or a terminal -- see |paseo-new|.
----@param opts? { where?: "here"|"worktree", kind?: "chat"|"terminal" }
+---Start something from wherever you are: a new session, Local or in a new
+---worktree, or (`scope = "agent"`) an agent in the session on screen -- see
+---|paseo-new|.
+---@param opts? { scope?: "session"|"agent", where?: "here"|"worktree", kind?: "chat"|"terminal" }
 function M.new_task(opts)
-  require("paseo.new").open(nil, opts)
+  return require("paseo.new").open(nil, opts)
 end
 
 ---@param opts? table See |paseo-configuration|.

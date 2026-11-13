@@ -93,9 +93,11 @@ readers and the microphone.
                         agent here yet it opens the new-task screen.
 
                                                                 *:Paseo-new*
-:Paseo new [worktree]   Start something: an agent here, an agent in a new
-                        worktree, or a terminal. See |paseo-new|. `worktree`
-                        opens the screen with "New worktree" chosen.
+:Paseo new [worktree|agent]
+                        A new session: Local (the project's own directory)
+                        or in a new worktree. See |paseo-new|. `worktree`
+                        opens the screen with "New worktree" chosen. `agent`
+                        is a new agent in the session on screen instead.
 
                                                                 *:Paseo-ask*
 :Paseo ask [kind]       Ask an agent about code. The code becomes a chip
@@ -209,7 +211,7 @@ On the full screen, from any of its buffers (|paseo-config.ui.native|):
     <C-h>       into the rail and back out
     <C-s>       into the rail, on the agent on screen
     <C-p>       the panel: Settings, Changes, Usage
-    <C-n>       start something (|paseo-new|)
+    <C-n>       a new session (|paseo-new|)
 
 Every one of these can be moved or unbound: |paseo-config.keys|.
 
@@ -318,9 +320,10 @@ The keys follow nvim-tree's (`g?` lists them):
     P           the parent
     < >  K J    previous / next sibling; first / last sibling
     W E         fold / unfold everything
-    a           new agent in this row's workspace
-    w           new agent in a new worktree
-    t c         new terminal
+    a           a new session in this project (Local or a new worktree)
+    A           a new agent in this row's session
+    w           a new session in a new worktree
+    t c         a new terminal in this row's session
     f           fork the agent
     y           copy the agent's ID
     R           rename the terminal
@@ -334,24 +337,49 @@ The keys follow nvim-tree's (`g?` lists them):
 
                                                                    *paseo-new*
 Starting something ~
-`<C-n>`, `a` `w` `t` on the rail, `<Plug>(paseo-new)` and |:Paseo-new| all
-open the same screen: the composer you are about to write in, with the
-choices drawn above it. >
+There are two things to start, as in the app:
+
+    A new SESSION      a workspace of its own: the sidebar's `+`.
+                       `<C-n>`, `a` and `w` on the rail, `<Plug>(paseo-new)`,
+                       |:Paseo-new|.
+    A new AGENT in     one more agent in a session that exists: the `+` on
+    a session          its row of tabs. `A` and `t` on the rail,
+                       `<Plug>(paseo-new-agent)`, `:Paseo new agent`, `n` in
+                       the agent chooser.
+
+A session's Where is "Local" -- the project's own directory, beside the
+sessions already there -- or "New worktree". Local is the PROJECT's
+directory, not the directory of the session you are looking at: from a
+worktree it is the checkout that worktree was cut from, from inside an
+assembled multi-repo workspace it is the project that holds them, and a
+plain directory is its own project.
+
+An agent goes into the session you pointed at, never one found by
+directory: the row under the cursor on the rail, or the agent on screen on
+the Paseo tab. Asked for with no session to go into -- the rail's project
+line, or from your code -- it is a new session instead, and says so.
+
+Both open the same screen: the composer you are about to write in, with the
+choices drawn above it. For a session: >
     Start        a    Chat  Terminal        Where  w    Local  New worktree
     Base branch  b    main  dev  feat/x  …
     Provider p · Model s · Permission mode m · Thinking t · Features f
     ▌ your first message
 <
-Write the first message and send it: that creates the agent (and, for a new
-worktree, the worktree), with that message as its first prompt. A terminal
-needs no message: `<Tab>` up to the choices and `<CR>` on what to run.
+An agent in a session has no Where row; the line under the choices names
+the session it goes into.
+
+Write the first message and send it: that creates the session (or the
+agent), with that message as its first prompt. A terminal needs no message:
+`<Tab>` up to the choices and `<CR>` on what to run.
 
 In the choices: `h` `j` `k` `l` move, `<CR>` applies, a card's letter jumps
 to it, `i` or `<Tab>` goes back to the box, `q` cancels. Provider, Model,
 Permission mode and Thinking are lists, so their letter (`p` `s` `m` `t`)
 opens the list in your picker (|paseo-pick|), and so does the base branch's
 `…`. Start, Where and the features stay chips you press. The daemon names a
-new worktree and its branch, and titles the agent from your message.
+new session (and a worktree's branch), and titles the agent from your
+message.
 Everything you pick is remembered per project and pre-filled next time.
 
                                                              *paseo-terminals*
@@ -469,7 +497,7 @@ project's), with what each one's agents are doing, updated live.
     <CR> l      open it: `tcd` there (|paseo-config.workspaces.open|) and
                 show its chat
     s           its agents (|paseo-agents-keys|)
-    n           a new workspace: the new-task screen, on a new worktree
+    n           a new session: the new-task screen, on a new worktree
     d           archive it (asks first if it has unmerged work)
     a           this project's / every project's
     r           review it: `tcd` there and fire `User PaseoReview`
@@ -481,7 +509,7 @@ The agent chooser ~
 |:Paseo-agents|, or `s` on a workspace:
 
     <CR> l 1-9  open its chat
-    n           a new agent in this workspace
+    n           a new agent in this session
     y           copy its ID
     d           archive it
     q <Esc>     close
@@ -570,7 +598,7 @@ is optional. >lua
           composer = 10,
           composer_min = 3,
           keys = { rail = "<C-b>", focus = "<C-h>", sessions = "<C-s>",
-                   panel = "<C-p>", new = "<C-n>" },
+                   panel = "<C-p>", new = "<C-n>", new_agent = false },
           hints = { winbar = false, rail = false },
         },
         sidebar = { width = 40, min_width = 60, composer = 8,
@@ -668,7 +696,8 @@ ui.native           The full-screen surface:
   composer_min        the fewest
   keys                the surface's keys, on all its buffers: a key, a list
                       of keys, or `false`. `rail`, `focus`, `sessions`,
-                      `panel`, `new`.
+                      `panel`, `new` (a new session), `new_agent` (a new
+                      agent in the session on screen; unbound by default).
   hints               key hints on the winbar and under the rail; `true` or
                       `false` sets both. Off by default.
                                                      *paseo-config.ui.sidebar*
@@ -789,9 +818,12 @@ setup({opts})               See |paseo-configuration|.
                                                               *paseo.toggle()*
 toggle()                    Open or close the chat. The same as |:Paseo|.
                                                             *paseo.new_task()*
-new_task({opts})            The new-task screen. {opts}: `where` (`"here"`
-                            or `"worktree"`), `kind` (`"chat"` or
-                            `"terminal"`). The same as |:Paseo-new|.
+new_task({opts})            The new-task screen. {opts}: `scope`
+                            (`"session"`, the default, or `"agent"`: one
+                            more in the session on screen), `where`
+                            (`"here"`, which is Local, or `"worktree"`),
+                            `kind` (`"chat"` or `"terminal"`). The same as
+                            |:Paseo-new|.
                                                                  *paseo.ask()*
 ask({kind})                 |:Paseo-ask|.
                                                              *paseo.explain()*
@@ -843,9 +875,11 @@ panel({name})       Show a panel: `"settings"`, `"changes"` or `"usage"`
                                                  *paseo.native.toggle_panel()*
 toggle_panel()      The panel on or off.
                                                           *paseo.native.new()*
-new()               The new-task screen, from the agent on screen.
+new()               A new session, from the agent on screen: its project.
+                                                    *paseo.native.new_agent()*
+new_agent()         A new agent in the session on screen.
                                                      *paseo.native.worktree()*
-worktree()          The same, on a new worktree.
+worktree()          A new session, on a new worktree.
                                                          *paseo.native.next()*
 next()  prev()      The next / previous agent or terminal.
                                                          *paseo.native.stop()*
@@ -1029,8 +1063,9 @@ One per |paseo-native-api| action, in normal and terminal mode:
     <Plug>(paseo-focus)             <Plug>(paseo-panel)
     <Plug>(paseo-panel-settings)    <Plug>(paseo-panel-changes)
     <Plug>(paseo-panel-usage)       <Plug>(paseo-new)
-    <Plug>(paseo-worktree)          <Plug>(paseo-next)
-    <Plug>(paseo-prev)              <Plug>(paseo-stop)
+    <Plug>(paseo-new-agent)         <Plug>(paseo-worktree)
+    <Plug>(paseo-next)              <Plug>(paseo-prev)
+    <Plug>(paseo-stop)
 
 On the full screen, the hint for "back to your code" shows the key you mapped
 to `<Plug>(paseo-native)` (or to `<cmd>Paseo<cr>`).

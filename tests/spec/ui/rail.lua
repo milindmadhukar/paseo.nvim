@@ -498,8 +498,10 @@ local function test_sessions()
     local on_agent = table.concat(labels(), ",")
     for _, want in ipairs {
       "Open=<CR>",
-      "New agent in this workspace=a",
-      "New agent in a new worktree=w",
+      "New session in this project=a",
+      "New agent in this session=A",
+      "New session in a new worktree=w",
+      "New terminal in this session=t",
       "Fork this agent=f",
       "Copy the agent ID=y",
       "Archive this agent=d",
@@ -549,8 +551,8 @@ local function test_sessions()
     )
     truthy("actions: or archived", not on_task:find("Archive", 1, true), on_task)
     truthy(
-      "actions: but still starts in its workspace",
-      on_task:find("New agent in this workspace", 1, true),
+      "actions: but still starts an agent in its session",
+      on_task:find("New agent in this session", 1, true),
       on_task
     )
     vim.api.nvim_feedkeys("k", "x", false)

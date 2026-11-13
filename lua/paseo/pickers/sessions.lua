@@ -35,8 +35,8 @@ function M.open(ws)
 
     vim.schedule(function()
       local function start_new()
-        -- The new-task screen, HERE: in this workspace, by id. The daemon
-        -- titles the agent from the prompt.
+        -- A new agent IN this workspace, by id: the tab row's `+`. The
+        -- daemon titles the agent from the prompt.
         local ctx = require("paseo.new").context() or {}
         require("paseo.new").open({
           root = ws.directory,
@@ -44,7 +44,9 @@ function M.open(ws)
           host_id = ws.hostId or ctx.host_id,
           preferred = ctx.preferred,
           workspace_id = ws.id,
-        }, { kind = "chat", where = "here" })
+          title = ws.name,
+          project_root = ws.projectRoot,
+        }, { scope = "agent", kind = "chat" })
       end
 
       if #agent_sessions == 0 then

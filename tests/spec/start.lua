@@ -20,15 +20,24 @@ local function test_start()
   local ok, failure = pcall(function()
     local ctx = { root = "/code/kora", host_id = "local" }
 
-    start.new(ctx, "here")
-    eq("start: the rail's `a` opens on a chat here", seen.opts, { kind = "chat", where = "here" })
+    start.new(ctx, "session")
+    eq("start: the rail's `a` opens on a new Local session", seen.opts, { scope = "session", kind = "chat", where = "here" })
     eq("start: for the context it was given", seen.ctx, ctx)
 
-    start.new(ctx, "workspace")
-    eq("start: `w` opens on a chat in a new worktree", seen.opts, { kind = "chat", where = "worktree" })
+    start.new(ctx, "worktree")
+    eq("start: `w` opens on a new session in a worktree", seen.opts, { scope = "session", kind = "chat", where = "worktree" })
+
+    start.new(ctx, "agent")
+    eq("start: `A` opens on an agent in this session", seen.opts, { scope = "agent", kind = "chat" })
 
     start.new(ctx, "terminal")
-    eq("start: `t` opens on a terminal", seen.opts, { kind = "terminal" })
+    eq("start: `t` opens on a terminal in this session", seen.opts, { scope = "agent", kind = "terminal" })
+
+    -- The names callers used before there were two verbs mean a SESSION.
+    start.new(ctx, "here")
+    eq("start: `here` is a new Local session now", seen.opts.scope, "session")
+    start.new(ctx, "workspace")
+    eq("start: `workspace` is a new worktree session", seen.opts.where, "worktree")
 
     start.new(ctx)
     eq("start: no kind opens on what you chose last", seen.opts, {})
@@ -58,6 +67,10 @@ local function test_commands()
     seen = nil
     vim.cmd "Paseo new worktree"
     eq(":Paseo new worktree opens it on a new worktree, no name asked", seen and seen.opts, { where = "worktree" })
+    seen = nil
+    vim.cmd "Paseo new agent"
+    eq(":Paseo new agent asks for an agent in the session on screen", seen and seen.opts, { scope = "agent" })
+    eq(":Paseo new completes both", vim.fn.getcompletion("Paseo new ", "cmdline"), { "agent", "worktree" })
 
     -- THE WHOLE SET. Anything else is a key in the chat or a Lua function.
     eq(

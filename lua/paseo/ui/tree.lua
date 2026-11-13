@@ -346,6 +346,8 @@ function M.context(ws, chat, showing)
     host_id = ws.hostId or chat.host_id,
     preferred = own.preferred,
     workspace_id = ws.id,
+    title = ws.name,
+    project_root = ws.projectRoot,
   }
 end
 

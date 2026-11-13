@@ -100,12 +100,13 @@ Everything else is a key inside the chat or a Lua function.
 | `gs` | conversation | this agent's subagents |
 | `<C-b>` `<C-h>` | full screen | the rail: show or hide it / go in and out |
 | `<C-p>` | full screen | the Settings / Changes / Usage panel |
-| `<C-n>` | full screen | start something |
+| `<C-n>` | full screen | a new session (Local or a new worktree) |
 | `q` | chat | close it |
 
 The rail uses nvim-tree's keys: `l`/`h` unfold and fold, `a` starts a new
-agent, `w` a new worktree, `t` a terminal, `d` archives, and `.` lists
-everything you can do to the row. `g?` shows them all.
+session, `A` a new agent in the session under the cursor, `w` a session in a
+new worktree, `t` a terminal, `d` archives, and `.` lists everything you can
+do to the row. `g?` shows them all.
 
 These are defaults, and they are bound only in Paseo's own buffers. Every
 built-in key can be moved or unbound with the `keys` option

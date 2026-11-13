@@ -961,7 +961,8 @@ function M.build(width)
     local key = require "paseo.ui.keys"
     local line = {}
     for _, hint in ipairs {
-      { "a", "new" },
+      { "a", "session" },
+      { "A", "agent" },
       { "w", "worktree" },
       { ".", "actions" },
       { "g?", "keys" },
@@ -1388,8 +1389,14 @@ function M.into()
   M.open_current()
 end
 
----Start something in the workspace under the cursor.
----@param kind "here"|"workspace"|"terminal"
+---Start something from the row under the cursor: a new SESSION in its
+---project (`a` `w`), or a new agent or terminal IN the session the row is or
+---is under (`A` `t`).
+---
+---On the project line there is no session under the cursor, so an agent
+---asked for there is a new session instead (|paseo.new|.open says so) -- never
+---a tab in whichever session happens to be on screen.
+---@param kind "session"|"worktree"|"agent"|"terminal"
 function M.start(kind)
   local chat = M.host_chat()
   if not chat then
@@ -1401,7 +1408,12 @@ function M.start(kind)
     local i = M.current_index(cache.list)
     showing = i ~= nil and cache.list[i] == ws
   end
-  require("paseo.start").new(require("paseo.ui.tree").context(ws, chat, showing), kind)
+  local ctx = require("paseo.ui.tree").context(ws, chat, showing)
+  if not ws then
+    ctx = vim.tbl_extend("force", {}, ctx)
+    ctx.workspace_id, ctx.title = nil, nil
+  end
+  require("paseo.start").new(ctx, kind)
 end
 
 ---Is the row an agent of its own (|paseo.ui.tree| `is_agent`)?
@@ -1528,21 +1540,31 @@ local function keymap(keys)
     {
       "a",
       function()
-        M.start "here"
+        M.start "session"
       end,
-      "new agent in this workspace (the new-task screen)",
+      "new session in this project (Local or a new worktree)",
       menu = function()
-        return "New agent in this workspace"
+        return "New session in this project"
+      end,
+    },
+    {
+      "A",
+      function()
+        M.start "agent"
+      end,
+      "new agent in this session",
+      menu = function()
+        return "New agent in this session"
       end,
     },
     {
       "w",
       function()
-        M.start "workspace"
+        M.start "worktree"
       end,
-      "new agent in a new worktree",
+      "new session in a new worktree",
       menu = function()
-        return "New agent in a new worktree"
+        return "New session in a new worktree"
       end,
     },
     {
@@ -1550,9 +1572,9 @@ local function keymap(keys)
       function()
         M.start "terminal"
       end,
-      "new terminal in this workspace",
+      "new terminal in this session",
       menu = function()
-        return "New terminal in this workspace"
+        return "New terminal in this session"
       end,
     },
     {

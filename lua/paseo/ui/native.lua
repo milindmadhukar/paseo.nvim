@@ -77,7 +77,7 @@ M.PANELS = { "Settings", "Changes", "Usage" }
 local last_panel = "Settings"
 
 ---The surface's own keys (`ui.native.keys`): each a key, a list, or false.
----@return { rail: any, focus: any, sessions: any, panel: any, new: any }
+---@return { rail: any, focus: any, sessions: any, panel: any, new: any, new_agent: any }
 local function nkeys()
   return require("paseo.config").get().ui.native.keys or {}
 end
@@ -1075,9 +1075,19 @@ local function bind(chat)
         if api.nvim_get_mode().mode ~= "n" then
           pcall(vim.cmd.stopinsert)
         end
-        require("paseo.new").open(require("paseo.new").context(chat))
+        require("paseo.new").open(require("paseo.new").context(chat), { scope = "session" })
       end,
-      "start an agent or a terminal",
+      "start a new session",
+    },
+    {
+      keys.new_agent,
+      function()
+        if api.nvim_get_mode().mode ~= "n" then
+          pcall(vim.cmd.stopinsert)
+        end
+        require("paseo.new").open(require("paseo.new").context(chat), { scope = "agent" })
+      end,
+      "a new agent in this session",
     },
   }
   chat.native_keys = {}
@@ -1808,6 +1818,22 @@ function M.open_workspace(ws)
   end
   if newest then
     return M.show_session { kind = "agent", id = newest.id, hostId = host_id }
+  end
+  -- NOTHING IN IT YET: its first agent goes into THIS session, by id. Opening
+  -- a chat on its directory would be "start something there", which is a new
+  -- session -- and an empty one you picked is the one you meant.
+  if ws.id then
+    local host = require("paseo.hosts").get(host_id)
+    return require("paseo.new").open({
+      root = ws.directory,
+      local_root = ws.local_directory
+        or (host and (host.local_host and ws.directory or require("paseo.hosts").to_local(host.id, ws.directory))),
+      host_id = host_id,
+      preferred = (host and host.provider) or require("paseo.config").get().paseo.provider,
+      workspace_id = ws.id,
+      title = ws.name,
+      project_root = ws.projectRoot,
+    }, { scope = "agent", kind = "chat", surface = "native" })
   end
   require("paseo.ui.chat").open {
     root = ws.directory,

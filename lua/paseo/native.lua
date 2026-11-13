@@ -162,21 +162,35 @@ end
 
 -- --------------------------------------------------------- the agents
 
----Start something: the new-task screen (`<C-n>`, |paseo-new|). On the Paseo
----tab it starts from the agent on screen -- its workspace, its provider.
+---A new session: the new-task screen (`<C-n>`, |paseo-new|), Local or a new
+---worktree. On the Paseo tab it starts from the agent on screen -- its
+---project, its provider.
 function M.new()
   local new = require "paseo.new"
   local current = chat().current()
   if ui().on_tab() and current then
     pcall(vim.cmd.stopinsert)
-    return new.open(new.context(current))
+    return new.open(new.context(current), { scope = "session" })
   end
-  new.open()
+  new.open(nil, { scope = "session" })
 end
 
----The new-task screen, on a new worktree.
+---A new agent IN the session on screen: the `+` on the app's row of tabs.
+---Only the Paseo tab has a session on screen; anywhere else this is a new
+---session, and says so (|paseo.new|.open).
+function M.new_agent()
+  local new = require "paseo.new"
+  local current = chat().current()
+  pcall(vim.cmd.stopinsert)
+  if ui().on_tab() and current then
+    return new.open(new.context(current), { scope = "agent" })
+  end
+  new.open(nil, { scope = "agent" })
+end
+
+---A new session, in a new worktree.
 function M.worktree()
-  require("paseo.new").open(nil, { where = "worktree" })
+  require("paseo.new").open(nil, { scope = "session", where = "worktree" })
 end
 
 ---The next buffer on the Paseo tab's row of agents and terminals, wrapping.
@@ -220,8 +234,9 @@ M.ACTIONS = {
     desc = "the panel, on or off; or straight to one",
     args = vim.tbl_map(string.lower, M.PANELS),
   },
-  new = { run = M.new, desc = "start something" },
-  worktree = { run = M.worktree, desc = "start something in a new worktree" },
+  new = { run = M.new, desc = "a new session" },
+  ["new-agent"] = { run = M.new_agent, desc = "a new agent in the session on screen" },
+  worktree = { run = M.worktree, desc = "a new session in a new worktree" },
   next = { run = M.next, desc = "the next agent or terminal" },
   prev = { run = M.prev, desc = "the previous agent or terminal" },
   stop = { run = M.stop, desc = "stop the turn" },

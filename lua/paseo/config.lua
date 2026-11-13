@@ -481,12 +481,17 @@ local defaults = {
         sessions = "<C-s>",
         -- The Settings / Changes / Usage panel, on or off.
         panel = "<C-p>",
-        -- Start something: the new-task screen.
+        -- A new SESSION: the new-task screen, Local or a new worktree (the
+        -- app's sidebar `+`).
         new = "<C-n>",
+        -- A new AGENT in the session on screen (the `+` on the app's row of
+        -- tabs). Unbound: the rail's `A` does it, and every Ctrl key here is
+        -- someone's.
+        new_agent = false,
       },
       -- KEY HINTS, off unless you ask: `winbar` is the `code  panel  rail
-      -- close` at the right of the conversation's winbar, `rail` the `a new
-      -- w worktree  g? keys` line under the rail's last row. `true` or `false`
+      -- close` at the right of the conversation's winbar, `rail` the `a session
+      -- A agent  w worktree  g? keys` line under the rail's last row. `true` or `false`
       -- sets both. `g?` in the rail lists its keys either way.
       hints = { winbar = false, rail = false },
     },
