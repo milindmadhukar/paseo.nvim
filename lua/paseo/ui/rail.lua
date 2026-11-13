@@ -1491,6 +1491,12 @@ end
 
 -- ----------------------------------------------------------------- buffer
 
+---The rail's `<C-h>`: `<C-w>h`, as from any window. The rail is the leftmost
+---split, so it goes nowhere -- it does not wrap round to the conversation.
+function M.left()
+  vim.cmd.wincmd "h"
+end
+
 ---The rail's keys: what each one does and what `g?` says about it, in one
 ---table, so the two cannot drift. nvim-tree's where it has one for the job.
 ---@param keys { back: fun(), toggle?: string|false, focus?: string|false, sessions?: string|false, on_toggle: fun() }
@@ -1712,7 +1718,11 @@ local function keymap(keys)
     { "q", keys.back, "back to the conversation" },
     -- The native surface's own keys: already configured, so not remapped
     -- again through `keys.rail`.
-    { keys.focus, keys.back, "back to the conversation", configured = true },
+    -- `<C-h>` IN the rail is what it is in any split: the window to the left.
+    -- The rail is the leftmost, so that is nowhere and the cursor stays. It
+    -- used to go back out, so a second `<C-h>` wrapped you round to the
+    -- conversation on the right. Out is `<C-w>l` (your `<C-l>`), `<Esc>` or `q`.
+    { keys.focus, M.left, "the window to the left (none: the rail is leftmost)", configured = true },
     { keys.sessions, keys.back, "back to the conversation", configured = true },
     { keys.toggle, keys.on_toggle, "hide the workspace rail", configured = true },
     {

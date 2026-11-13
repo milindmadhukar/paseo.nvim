@@ -217,7 +217,7 @@ In the conversation ~
 On the full screen, from any of its buffers (|paseo-config.ui.native|):
 
     <C-b>       show or hide the rail, the cursor with it
-    <C-h>       into the rail and back out
+    <C-h>       into the rail; in it, nowhere (it is the leftmost split)
     <C-s>       into the rail, on the agent on screen
     <C-p>       the panel: Settings, Changes, Usage
     <C-n>       a new session (|paseo-new|)
@@ -343,7 +343,8 @@ The keys follow nvim-tree's (`g?` lists them):
     .           everything you can do to this row, in a chooser (also a
                 right-click)
     g?          these keys
-    q <Esc> <C-h>   back to where you were
+    q <Esc>     back to where you were (`<C-w>l` too: it is a split)
+    <C-h>       nothing: the rail is leftmost, so `<C-w>h` stays put
 
                                                                    *paseo-new*
 Starting something ~
@@ -929,7 +930,8 @@ close()             Take the Paseo tab down; the agents live on.
                                                   *paseo.native.toggle_rail()*
 toggle_rail()       The rail on or off, the cursor with it. Remembered.
                                                    *paseo.native.focus_rail()*
-focus_rail()        Into the rail, on the agent on screen; and back out.
+focus_rail()        Into the rail, on the agent on screen. From the rail,
+                    `<C-w>h`: it is leftmost, so the cursor stays.
                                                         *paseo.native.panel()*
 panel({name})       Show a panel: `"settings"`, `"changes"` or `"usage"`
                     (any case); nil for the last one. `PANELS` lists them.

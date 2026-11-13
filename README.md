@@ -100,7 +100,7 @@ Everything else is a key inside the chat or a Lua function.
 | `<Tab>` | conversation | expand or collapse a tool call |
 | `gp` | conversation | reopen a pending permission |
 | `gs` | conversation | this agent's subagents |
-| `<C-b>` `<C-h>` | full screen | the rail: show or hide it / go in and out |
+| `<C-b>` `<C-h>` | full screen | the rail: show or hide it / go into it (`<C-h>` in it stays: it is leftmost) |
 | `<C-p>` | full screen | the Settings / Changes / Usage panel |
 | `<C-n>` | full screen | a new session (Local or a new worktree) |
 | `<C-k>` | full screen, terminals | search workspaces, agents and chats |

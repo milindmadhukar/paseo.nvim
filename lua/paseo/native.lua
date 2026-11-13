@@ -98,13 +98,15 @@ function M.toggle_rail()
   end)
 end
 
----Into the rail, on the session on screen, showing it first if it is hidden;
----from the rail, back to the window you came from (`<C-h>`, `<C-s>`).
+---Into the rail, on the session on screen, showing it first if it is hidden
+---(`<C-h>`). From the rail it is `<C-w>h`, as from any window: the rail is
+---the leftmost split, so the cursor stays -- it does not wrap round to the
+---conversation. `<C-w>l`, `<Esc>` or `q` go back out.
 function M.focus_rail()
   on_tab(function(was_here)
     local rail = require "paseo.ui.rail"
     if was_here and rail.win() and vim.api.nvim_get_current_win() == rail.win() then
-      ui().from_rail()
+      rail.left()
     else
       ui().focus_rail()
     end
@@ -222,7 +224,7 @@ M.ACTIONS = {
   code = { run = M.code, desc = "back to your code" },
   close = { run = M.close, desc = "take the Paseo tab down" },
   rail = { run = M.toggle_rail, desc = "the workspace rail, on or off" },
-  focus = { run = M.focus_rail, desc = "into the rail and back out" },
+  focus = { run = M.focus_rail, desc = "into the rail" },
   panel = {
     run = function(arg)
       if arg and arg ~= "" then

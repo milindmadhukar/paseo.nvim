@@ -745,8 +745,13 @@ local function test_api()
   eq("api: and shows the rail", native.rail_shown() and true or false, true)
   eq("api: remembered as shown", rail.visible(), true)
   eq("api: with the cursor in it", api.nvim_get_current_win(), rail.win())
+  -- The rail is the LEFTMOST split: <C-h> there is <C-w>h, which goes
+  -- nowhere. It went back out once, so a second <C-h> wrapped you round to
+  -- the conversation on the right.
   api_.focus_rail()
-  truthy("api: focus_rail() from the rail goes back out", api.nvim_get_current_win() ~= rail.win())
+  eq("api: focus_rail() from the rail stays in the rail", api.nvim_get_current_win(), rail.win())
+  vim.api.nvim_feedkeys(vim.keycode "<C-h>", "x", false)
+  eq("api: and so does the rail's own <C-h>", api.nvim_get_current_win(), rail.win())
   api_.code()
   api_.panel "usage"
   eq("api: panel(name) from your code shows it on the tab", panel_shown(), "usage")

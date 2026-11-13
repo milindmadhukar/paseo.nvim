@@ -474,8 +474,9 @@ local defaults = {
       keys = {
         -- The workspace rail, on or off.
         rail = "<C-b>",
-        -- Into the rail and back out. `<C-h>` because the rail is the
-        -- window to the left -- the key a split user already presses.
+        -- Into the rail. `<C-h>` because the rail is the window to the left
+        -- -- the key a split user already presses. In the rail it is `<C-w>h`:
+        -- the rail is leftmost, so it stays put rather than wrapping round.
         focus = "<C-h>",
         -- Into the rail ON THE SESSION ON SCREEN, its workspace opened.
         -- `<C-s>` is "the session list" in the composer and out of a
