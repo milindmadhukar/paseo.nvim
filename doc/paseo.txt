@@ -1658,6 +1658,10 @@ agents in one workspace are two tabs and `gt`/`gT` move between them: >
                        |paseo-rail|.
     <C-p>              a split on the right, on the panel you last looked
                        at, with the cursor in it. `<C-p>` again closes it.
+                       The split is up on the keypress; what is in it is
+                       drawn a tick later, and the Changes panel's `git
+                       status` runs off the main loop, every repo at once,
+                       so nothing waits on git or the daemon to show you it.
     1  2  3            in the panel: straight to Settings, Changes or Usage.
                        Its winbar is a tab strip that says which is which.
     <C-n>              start something -- see |paseo-new|. A new agent opens
@@ -2186,8 +2190,9 @@ again: archiving a session left its row up until the next `j`, and an agent
 that started working did not change colour until you moved. The data was
 right and the picture was a second-hand copy of it. One archive produces three
 `remove` events from a live daemon, so the repaint is coalesced -- and it
-redraws the rail, not the Changes panel, which shells out to `git status` per
-repo and is not what changed.
+redraws the rail, not the Changes panel, whose `git status` per repo is not
+what changed. That one draws from what git said last and asks again -- in the
+background -- once it is more than a second and a half old, or on `r`.
 
 Focus is held BY ID, so a list that moves under you -- and these are push-fed,
 so they do -- does not take it with it. A reorder leaves focus on the same

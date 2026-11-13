@@ -669,7 +669,16 @@ end
 ---@param chat table
 function M.load(chat)
   local view = view_for(chat)
-  view.source:load(view.redraw)
+  -- Marked as out, so the draw that follows this (and sees nothing yet)
+  -- does not send a second `agent.config` of its own.
+  if view.loading then
+    return
+  end
+  view.loading = true
+  view.source:load(function()
+    view.loading = false
+    view.redraw()
+  end)
 end
 
 ---@param chat table

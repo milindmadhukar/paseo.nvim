@@ -50,6 +50,11 @@ local function git(repo, args)
   return res.stdout, nil
 end
 
+local STATUS = { "status", "--porcelain=v2", "-z", "--untracked-files=all" }
+
+---Defined below `M.status`, which it parses for.
+local parse_status
+
 ---Changed files in one repo: staged, unstaged and untracked, in one pass.
 ---
 ---PARSING TRAP: with `-z` the records are NUL-terminated, but a `2 ` (rename or
@@ -59,7 +64,33 @@ end
 ---@param repo paseo.Repo
 ---@return paseo.Change[]
 function M.status(repo)
-  local out = git(repo, { "status", "--porcelain=v2", "-z", "--untracked-files=all" })
+  return parse_status(repo, git(repo, STATUS))
+end
+
+---`M.status`, without blocking: `git status` in a big repo is tens of
+---milliseconds, and a panel that runs it on the main loop does it on every
+---keypress that draws. `callback` runs on the main loop.
+---@param repo paseo.Repo
+---@param callback fun(changes: paseo.Change[])
+function M.status_async(repo, callback)
+  local cmd = { "git", "-C", repo.worktree, "-c", "core.quotePath=false" }
+  vim.list_extend(cmd, STATUS)
+  local ok = pcall(vim.system, cmd, { text = true }, function(res)
+    vim.schedule(function()
+      callback(parse_status(repo, res.code == 0 and res.stdout or nil))
+    end)
+  end)
+  if not ok then
+    vim.schedule(function()
+      callback {}
+    end)
+  end
+end
+
+---@param repo paseo.Repo
+---@param out string|nil  `git status --porcelain=v2 -z` output.
+---@return paseo.Change[]
+parse_status = function(repo, out)
   if not out then
     return {}
   end

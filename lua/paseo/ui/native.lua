@@ -482,15 +482,31 @@ local function show_panel(t, name)
     local here = panel_name == name
     strip[#strip + 1] = { (" %d %s "):format(i, panel_name), here and "PaseoChipFocus" or "PaseoDim" }
   end
-  strip[#strip + 1] = { "   r reload · q close", "PaseoDim" }
+  local key = require "paseo.ui.keys"
+  local reload, close = key.label("panel", "r"), key.label("panel", "q")
+  strip[#strip + 1] = {
+    "  " .. (reload and (" " .. reload .. " reload") or "") .. (reload and close and " ·" or "") .. (close and (" " .. close .. " close") or ""),
+    "PaseoDim",
+  }
   vim.wo[t.panel_win].winbar = render.to_winbar(strip)
   last_panel = name
 
   local panel = require("paseo.ui.panels." .. name:lower())
-  if type(panel.load) == "function" then
-    pcall(panel.load, t.chat)
-  end
-  draw_panel(t)
+  -- UP FIRST, FILLED IN AFTER. The split paints on the keypress that asked
+  -- for it; what goes in it (git, the daemon, a full layout) is drawn on the
+  -- next tick, so `<C-p>` never waits on any of that to show you something.
+  render.to_buffer(t.panel_buf, ns, 0, -1, { { { "  loading…", "PaseoDim" } } })
+  vim.bo[t.panel_buf].modifiable = false
+  local shown = t.panel_buf
+  vim.schedule(function()
+    if t.panel_buf ~= shown or not api.nvim_buf_is_valid(shown) then
+      return
+    end
+    if type(panel.load) == "function" then
+      pcall(panel.load, t.chat)
+    end
+    draw_panel(t)
+  end)
   if type(panel.attach) == "function" then
     pcall(panel.attach, t.chat, t.panel_buf)
   end
@@ -1090,6 +1106,7 @@ end
 ---Forget everything. For the test suite.
 function M.reset()
   tabs = {}
+  last_panel = "Settings"
   if timer then
     timer:stop()
     timer:close()

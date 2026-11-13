@@ -372,6 +372,47 @@ local function test_keys()
   chat_mod.set_current(saved_current)
 end
 
+local function test_changes_async()
+  local native = require "paseo.ui.native"
+  local chat_mod = require "paseo.ui.chat"
+  local saved_current = chat_mod.current()
+
+  local dir = vim.fn.tempname()
+  vim.fn.mkdir(dir, "p")
+  vim.system({ "git", "init", "-q", dir }):wait()
+  local fd = assert(io.open(dir .. "/untracked-here.txt", "w"))
+  fd:write "x\n"
+  fd:close()
+  require("paseo.repos").invalidate()
+
+  local chat = new_chat "native-changes"
+  chat.root = dir
+  native.open(chat)
+  settle()
+  native.panel "Changes"
+  local function panel_text()
+    for _, win in ipairs(api.nvim_tabpage_list_wins(0)) do
+      local buf = api.nvim_win_get_buf(win)
+      if vim.bo[buf].filetype == "paseo-panel" then
+        return table.concat(text(buf), "\n")
+      end
+    end
+    return ""
+  end
+  truthy("changes: the panel is up before git has answered", panel_text():find("loading", 1, true) ~= nil)
+  truthy(
+    "changes: and fills in when it does",
+    vim.wait(3000, function()
+      return panel_text():find("untracked-here.txt", 1, true) ~= nil
+    end)
+  )
+
+  native.close(chat)
+  native.reset()
+  chat_mod.set_current(saved_current)
+  vim.fn.delete(dir, "rf")
+end
+
 local function test_toggle()
   local native = require "paseo.ui.native"
   local chat_mod = require "paseo.ui.chat"
@@ -402,6 +443,7 @@ return {
   { "ui.native.layout", test_layout },
   { "ui.native.toggle", test_toggle },
   { "ui.native.keys", test_keys },
+  { "ui.native.changes_async", test_changes_async },
   { "ui.native.rail_beside", test_rail_beside },
   { "ui.native.markdown", test_markdown },
   { "ui.native.panels", test_panels },

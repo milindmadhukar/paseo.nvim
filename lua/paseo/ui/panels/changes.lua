@@ -32,16 +32,24 @@ local function status_cell(change)
   }
 end
 
----`git status` per repo, as sections.
----
----Read straight rather than cached: this is the panel whose whole job is to be
----current, and it is only consulted while the tab is on screen.
----@param chat table
+---How old the last `git status` may be before a draw asks for a fresh one.
+---The panel's whole job is to be current, but a draw is not the place to
+---wait for git: it runs on every resize and animation frame.
+M.TTL = 1500
+
+---What `git status` said last, per chat root: drawn from, never waited on.
+---@type table<string, { sections: paseo.ListSection[], at: integer }>
+local cache = {}
+---Roots with a `git status` out right now.
+---@type table<string, fun()[]>
+local running = {}
+
+---@param results { repo: paseo.Repo, changes: paseo.Change[] }[]
 ---@return paseo.ListSection[]
-local function sections(chat)
+local function build(results)
   local out = {}
-  for _, repo in ipairs(repos.list { path = chat.root }) do
-    local changes = git.status(repo)
+  for _, result in ipairs(results) do
+    local repo, changes = result.repo, result.changes
     if #changes > 0 then
       local rows = {}
       for _, change in ipairs(changes) do
@@ -78,19 +86,71 @@ local function sections(chat)
   return out
 end
 
+---`git status` in every repo of the unit of work, all at once and off the
+---main loop; `done` when the last answers. Asked twice while out, it runs once.
+---@param root string
+---@param done? fun()
+local function refresh(root, done)
+  if running[root] then
+    if done then
+      table.insert(running[root], done)
+    end
+    return
+  end
+  running[root] = done and { done } or {}
+  local list = repos.list { path = root }
+  local results, pending = {}, #list
+  local function finish()
+    cache[root] = { sections = build(results), at = vim.uv.now() }
+    local waiting = running[root] or {}
+    running[root] = nil
+    for _, fn in ipairs(waiting) do
+      fn()
+    end
+  end
+  if pending == 0 then
+    return finish()
+  end
+  for i, repo in ipairs(list) do
+    git.status_async(repo, function(changes)
+      results[i] = { repo = repo, changes = changes }
+      pending = pending - 1
+      -- `results[i]`: in repo order, not the order git answered in.
+      if pending == 0 then
+        finish()
+      end
+    end)
+  end
+end
+
+---The sections to draw: what git said last (nil before it has said anything,
+---which the list view draws as "loading…"). A stale answer is drawn as it is
+---and a fresh one asked for, which redraws the panel when it lands.
+---@param chat table
+---@param redraw fun()
+---@return paseo.ListSection[]|nil
+local function sections(chat, redraw)
+  local hit = cache[chat.root]
+  if hit and vim.uv.now() - hit.at > M.TTL and not running[chat.root] then
+    refresh(chat.root, redraw)
+  end
+  return hit and hit.sections or nil
+end
+
 ---@param chat table
 ---@return paseo.ListSource
 local function source(chat)
   return {
     chat = chat,
-    -- `git status` is synchronous and there is nothing to fetch, so this never
-    -- answers nil -- the list view's loading branch is for the panels that
-    -- talk to the daemon.
+    -- `git status` runs OFF the main loop (see `refresh`), so the panel is
+    -- up the moment you ask for it and fills in when git answers.
     sections = function()
-      return sections(chat)
+      return sections(chat, function()
+        require("paseo.ui.native").redraw_panels()
+      end)
     end,
     load = function(_, done)
-      done()
+      refresh(chat.root, done)
     end,
     hints = {
       { ":Paseo ask hunk", "ask about a hunk" },
@@ -122,6 +182,9 @@ end
 function M.lines(chat, width, height)
   local v = view_for(chat)
   local drawn = v:sections()
+  if drawn == nil then
+    return v:lines(width, height)
+  end
   if #drawn == 0 then
     return {
       {
@@ -131,6 +194,15 @@ function M.lines(chat, width, height)
     }
   end
   return v:lines(width, height)
+end
+
+---Opening the panel (and `r`): ask git again, drawing what it said last --
+---or "loading…" -- until it answers.
+---@param chat table
+function M.load(chat)
+  refresh(chat.root, function()
+    require("paseo.ui.native").redraw_panels()
+  end)
 end
 
 ---@param chat table
