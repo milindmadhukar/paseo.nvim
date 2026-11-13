@@ -7,6 +7,7 @@
 
 local bridge = require "paseo.bridge"
 local hosts = require "paseo.hosts"
+local paths = require "paseo.paths"
 
 local M = {}
 
@@ -15,6 +16,37 @@ local agents = {}
 local subscribed = {}
 local listening = false
 local listeners = {}
+
+---Bumped on every change to the directory. Everything derived from it --
+---the sorted list, the agents under a root, a workspace's agents -- is kept
+---until the next bump, because the rail asks the same questions of the same
+---directory once per row per frame: fifty workspaces made a frame of 150
+---ms, ten frames a second, out of answers that had not changed.
+local generation = 0
+---@type table<string, table[]>
+local memo = {}
+
+local function bump()
+  generation = generation + 1
+  memo = {}
+end
+
+---Which version of the directory this is. Anything that keeps an answer
+---derived from it compares this to know whether the answer is still good.
+---@return integer
+function M.generation()
+  return generation
+end
+
+---A copy of a kept list. Callers sort what they are handed (the tree sorts a
+---workspace's agents by start time), and the kept one must not move.
+local function copy(list)
+  local out = {}
+  for i = 1, #list do
+    out[i] = list[i]
+  end
+  return out
+end
 
 ---Render from the SNAPSHOT first, then apply updates. The snapshot always
 ---arrives before any update, so starting from an empty table and waiting for
@@ -45,6 +77,7 @@ local function apply(payload)
     return
   end
 
+  bump()
   for _, fn in ipairs(listeners) do
     pcall(fn, directory, host_id)
   end
@@ -114,9 +147,9 @@ function M.get(id, host_id)
   return host_id and agents[host_id] and agents[host_id][id] or nil
 end
 
----Every non-archived agent session in the subscribed directory.
+---@param host_id string|nil  Already resolved, or "*".
 ---@return table[]
-function M.all(host_id)
+local function collect(host_id)
   local source
   if host_id == "*" then
     source = {}
@@ -126,7 +159,6 @@ function M.all(host_id)
       end
     end
   else
-    host_id = (hosts.get(host_id) or {}).id
     source = (host_id and agents[host_id]) or {}
   end
   local out = {}
@@ -137,6 +169,21 @@ function M.all(host_id)
     return (a.title or a.id) < (b.title or b.id)
   end)
   return out
+end
+
+---Every non-archived agent session in the subscribed directory.
+---@return table[]
+function M.all(host_id)
+  if host_id ~= "*" then
+    host_id = (hosts.get(host_id) or {}).id
+  end
+  local k = "all\0" .. tostring(host_id)
+  local kept = memo[k]
+  if not kept then
+    kept = collect(host_id)
+    memo[k] = kept
+  end
+  return copy(kept)
 end
 
 ---@return boolean
@@ -314,23 +361,47 @@ end
 ---@return table[]
 function M.for_root(root, host_id)
   host_id = (hosts.get(host_id) or {}).id
-  local local_host = host_id and hosts.get(host_id).local_host
-  root = local_host and vim.fn.resolve(vim.fn.fnamemodify(root, ":p")):gsub("/+$", "")
-    or root:gsub("/+$", "")
-  local out = {}
-  for _, agent in pairs((host_id and agents[host_id]) or {}) do
-    if agent.cwd then
-      local cwd = local_host and vim.fn.resolve(agent.cwd):gsub("/+$", "")
-        or agent.cwd:gsub("/+$", "")
-      if cwd == root or vim.startswith(cwd, root .. "/") then
-        out[#out + 1] = agent
+  local k = "root\0" .. tostring(host_id) .. "\0" .. root
+  local kept = memo[k]
+  if not kept then
+    local local_host = host_id and hosts.get(host_id).local_host
+    root = local_host and paths.canonical(root) or (root:gsub("/+$", ""))
+    kept = {}
+    for _, agent in pairs((host_id and agents[host_id]) or {}) do
+      if agent.cwd then
+        local cwd = local_host and (paths.resolve(agent.cwd):gsub("/+$", ""))
+          or (agent.cwd:gsub("/+$", ""))
+        if cwd == root or vim.startswith(cwd, root .. "/") then
+          kept[#kept + 1] = agent
+        end
       end
     end
+    table.sort(kept, function(a, b)
+      return (a.title or a.id) < (b.title or b.id)
+    end)
+    memo[k] = kept
   end
-  table.sort(out, function(a, b)
-    return (a.title or a.id) < (b.title or b.id)
-  end)
-  return out
+  return copy(kept)
+end
+
+---Agents by workspace id, in `M.all`'s order: built once per generation, so
+---a workspace's agents are a lookup rather than a pass over everyone.
+---@param host_id string|nil
+---@return table<string, table[]>
+local function by_workspace(host_id)
+  local k = "byws\0" .. tostring(host_id)
+  local kept = memo[k]
+  if not kept then
+    kept = {}
+    for _, agent in ipairs(M.all(host_id)) do
+      if agent.workspaceId then
+        kept[agent.workspaceId] = kept[agent.workspaceId] or {}
+        table.insert(kept[agent.workspaceId], agent)
+      end
+    end
+    memo[k] = kept
+  end
+  return kept
 end
 
 ---The agents of one workspace.
@@ -360,11 +431,10 @@ function M.for_workspace(ws, host_id)
   end
   local out = {}
   local seen = {}
-  for _, agent in ipairs(M.all(host_id)) do
-    if agent.workspaceId == ws.id then
-      out[#out + 1] = agent
-      seen[agent] = true
-    end
+  host_id = (hosts.get(host_id) or {}).id
+  for _, agent in ipairs(by_workspace(host_id)[ws.id] or {}) do
+    out[#out + 1] = agent
+    seen[agent] = true
   end
   for _, agent in ipairs(in_dir) do
     if agent.workspaceId == nil and not seen[agent] then

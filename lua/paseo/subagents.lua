@@ -39,6 +39,8 @@ M.PARENT_LABEL = "paseo.parent-agent-id"
 local provider = {}
 local listeners = {}
 local attached = false
+---Bumped whenever a list may have changed; see `kept` below.
+local gen = 0
 
 ---@param host_id string|nil
 ---@param parent string
@@ -49,6 +51,7 @@ end
 ---@param host_id string|nil
 ---@param parent string|nil  nil when the change could concern any parent.
 local function changed(host_id, parent)
+  gen = gen + 1
   for _, fn in ipairs(listeners) do
     pcall(fn, host_id, parent)
   end
@@ -157,14 +160,37 @@ local function line(text)
   return text ~= "" and text or nil
 end
 
----Every subagent of `parent`, both kinds, oldest first.
----@param parent string|nil
+---What `M.list` answered, until either half of it can have changed: the
+---provider descriptors (`changed` bumps this) or the agent directory (its own
+---generation). The rail asks once per agent per frame.
+---@type { gen: integer, agents: integer, lists: table<string, paseo.Subagent[]>, children: table<string, table<string, table[]>>|nil }
+local kept = { gen = -1, agents = -1, lists = {} }
+
+---Paseo subagents by parent, from one pass over the directory.
+---@param host_id string|nil
+---@return table<string, table[]>
+local function children(host_id)
+  local agents = require "paseo.agents"
+  kept.children = kept.children or {}
+  local k = tostring((hosts.get(host_id) or {}).id or host_id)
+  if not kept.children[k] then
+    local by = {}
+    for _, a in ipairs(agents.all(host_id)) do
+      local parent = a.labels and a.labels[M.PARENT_LABEL]
+      if parent then
+        by[parent] = by[parent] or {}
+        table.insert(by[parent], a)
+      end
+    end
+    kept.children[k] = by
+  end
+  return kept.children[k]
+end
+
+---@param parent string
 ---@param host_id? string
 ---@return paseo.Subagent[]
-function M.list(parent, host_id)
-  if not parent then
-    return {}
-  end
+local function collect(parent, host_id)
   local agents = require "paseo.agents"
   local out = {}
 
@@ -188,24 +214,22 @@ function M.list(parent, host_id)
     }
   end
 
-  for _, a in ipairs(agents.all(host_id)) do
-    if a.labels and a.labels[M.PARENT_LABEL] == parent then
-      out[#out + 1] = {
-        kind = "paseo",
-        id = a.id,
-        parent = parent,
-        title = line(a.title) or "agent",
-        status = a.status or "idle",
-        running = agents.working(a.status),
-        -- Blocked on a permission: answered in the parent's chat, which
-        -- relays it (|paseo.ui.permission|.relay).
-        waiting = (a.pendingPermissionCount or 0) > 0 or nil,
-        provider = a.provider,
-        createdAt = a.createdAt,
-        updatedAt = a.updatedAt,
-        cwd = a.cwd,
-      }
-    end
+  for _, a in ipairs(children(host_id)[parent] or {}) do
+    out[#out + 1] = {
+      kind = "paseo",
+      id = a.id,
+      parent = parent,
+      title = line(a.title) or "agent",
+      status = a.status or "idle",
+      running = agents.working(a.status),
+      -- Blocked on a permission: answered in the parent's chat, which
+      -- relays it (|paseo.ui.permission|.relay).
+      waiting = (a.pendingPermissionCount or 0) > 0 or nil,
+      provider = a.provider,
+      createdAt = a.createdAt,
+      updatedAt = a.updatedAt,
+      cwd = a.cwd,
+    }
   end
 
   table.sort(out, function(a, b)
@@ -216,6 +240,32 @@ function M.list(parent, host_id)
   end)
   return out
 end
+
+---Every subagent of `parent`, both kinds, oldest first.
+---@param parent string|nil
+---@param host_id? string
+---@return paseo.Subagent[]
+function M.list(parent, host_id)
+  if not parent then
+    return {}
+  end
+  local agents = require "paseo.agents"
+  if kept.gen ~= gen or kept.agents ~= agents.generation() then
+    kept = { gen = gen, agents = agents.generation(), lists = {} }
+  end
+  local k = key(host_id, parent)
+  local hit = kept.lists[k]
+  if not hit then
+    hit = collect(parent, host_id)
+    kept.lists[k] = hit
+  end
+  local out = {}
+  for i = 1, #hit do
+    out[i] = hit[i]
+  end
+  return out
+end
+
 
 ---How many are running, and how many there are.
 ---@param parent string|nil
