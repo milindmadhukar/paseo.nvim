@@ -1206,9 +1206,13 @@ local function load_history(chat)
       -- History now carries the SAME item shape as the live subscription --
       -- tool calls, reasoning, todos and all -- so reopening a chat shows the
       -- work the agent did, not just the sentences it ended with.
-      for _, item in ipairs(result.items or {}) do
-        transcript.upsert(chat, item)
-      end
+      -- One burst of writes, not sixty separate ones: see
+      -- |paseo.ui.transcript|.quietly.
+      transcript.quietly(chat, function()
+        for _, item in ipairs(result.items or {}) do
+          transcript.upsert(chat, item)
+        end
+      end)
       -- A chat opened MID-TURN -- which is every chat whose first message
       -- just created its agent -- has history ending part-way through a
       -- thought or an answer, and the rest of it arriving live. Leave that

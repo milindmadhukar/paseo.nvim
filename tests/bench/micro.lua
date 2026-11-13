@@ -313,9 +313,15 @@ end
 -- HISTORY: a conversation loading into a fresh transcript.
 bench(("transcript.history x%d"):format(#HISTORY), function()
   transcript.reset(chat)
-  for _, item in ipairs(HISTORY) do
-    transcript.upsert(chat, vim.deepcopy(item))
+  -- As chat.lua's load_history writes it.
+  local quietly = transcript.quietly or function(_, fn)
+    fn()
   end
+  quietly(chat, function()
+    for _, item in ipairs(HISTORY) do
+      transcript.upsert(chat, vim.deepcopy(item))
+    end
+  end)
 end, 10)
 
 bench("transcript.redraw (resize)", function()

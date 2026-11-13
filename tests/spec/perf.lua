@@ -170,7 +170,33 @@ local function test_stream_coalescing()
   vim.api.nvim_buf_delete(chat.conversation, { force = true })
 end
 
+--- Conceal is off for a burst of writes and back after it, whatever happens.
+local function test_quietly()
+  local transcript = require "paseo.ui.transcript"
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.cmd "split"
+  local win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(win, buf)
+  vim.wo[win].conceallevel = 2
+  local chat = { conversation = buf }
+  local inside
+  transcript.quietly(chat, function()
+    inside = vim.wo[win].conceallevel
+    transcript.quietly(chat, function() end)
+  end)
+  eq("quietly: off while writing", inside, 0)
+  eq("quietly: and back after, nested or not", vim.wo[win].conceallevel, 2)
+  local ok = pcall(transcript.quietly, chat, function()
+    error "boom"
+  end)
+  eq("quietly: a failing write still raises", ok, false)
+  eq("quietly: and still puts conceal back", vim.wo[win].conceallevel, 2)
+  vim.api.nvim_win_close(win, true)
+  vim.api.nvim_buf_delete(buf, { force = true })
+end
+
 return {
+  { "perf: conceal off for a burst of writes, and back", test_quietly },
   { "perf: streamed chunks share a draw", test_stream_coalescing },
   { "perf: the agent directory's kept answers", test_agent_memo },
   { "perf: the subagent lists' kept answers", test_subagent_memo },

@@ -410,9 +410,12 @@ local function draw(chat, block, row, old_height)
   end
 
   -- Clear only THIS block's highlights. The anchor lives in a different
-  -- namespace precisely so this does not delete it.
-  api.nvim_buf_clear_namespace(chat.conversation, hl.ns, row, row + old_height)
-  block.height = render.to_buffer(chat.conversation, hl.ns, row, row + old_height, card.lines)
+  -- namespace precisely so this does not delete it. Quietly: see `M.quietly`
+  -- -- a no-op inside a burst that is already quiet.
+  M.quietly(chat, function()
+    api.nvim_buf_clear_namespace(chat.conversation, hl.ns, row, row + old_height)
+    block.height = render.to_buffer(chat.conversation, hl.ns, row, row + old_height, card.lines)
+  end)
   block.drawn = card.key
 
   local modifiable = vim.bo[chat.conversation].modifiable
@@ -425,6 +428,55 @@ local function draw(chat, block, row, old_height)
   -- The "thinking…" line goes under whatever is last now. Before the caller's
   -- `to_bottom`, which is what scrolls it into view.
   pending.pin(chat)
+end
+
+-- ------------------------------------------------------------ writing
+
+---Run `fn` -- some writes to the conversation -- with its windows' conceal
+---off, and put it back after.
+---
+---WHY: with `conceallevel` 2 and a markdown parser whose queries use
+---`conceal_lines` (Neovim's own do), EVERY `nvim_buf_set_lines` calls the
+---treesitter highlighter's conceal-line hook, which re-parses the buffer and
+---re-runs its injection queries on the spot -- 14 ms a write at a few hundred
+---lines, more as the conversation grows. A history load is sixty writes; a
+---resize rewrites every card. Nothing is drawn in between (this is one
+---synchronous call), so turning conceal off for the duration changes nothing
+---on screen, and the highlighter parses once, at the next redraw, as it would
+---have anyway.
+---
+---`noautocmd`, so an OptionSet listener (render-markdown has one) does not
+---see a flip that never reaches the screen.
+---@param chat table
+---@param fn fun()
+function M.quietly(chat, fn)
+  local buf = chat.conversation
+  if chat.quiet_depth or not (buf and api.nvim_buf_is_valid(buf)) then
+    return fn()
+  end
+  local restore = {}
+  for _, win in ipairs(vim.fn.win_findbuf(buf)) do
+    local level = vim.wo[win].conceallevel
+    if level >= 2 then
+      restore[win] = level
+      api.nvim_win_call(win, function()
+        vim.cmd "noautocmd setlocal conceallevel=0"
+      end)
+    end
+  end
+  chat.quiet_depth = true
+  local ok, err = pcall(fn)
+  chat.quiet_depth = nil
+  for win, level in pairs(restore) do
+    if api.nvim_win_is_valid(win) then
+      api.nvim_win_call(win, function()
+        vim.cmd("noautocmd setlocal conceallevel=" .. level)
+      end)
+    end
+  end
+  if not ok then
+    error(err, 0)
+  end
 end
 
 -- ------------------------------------------------------------- streaming
@@ -459,7 +511,9 @@ function M.flush(chat)
   local block = chat.blocks and chat.blocks[id]
   if block then
     local t0 = vim.uv.hrtime()
-    M.rerender(chat, block)
+    M.quietly(chat, function()
+      M.rerender(chat, block)
+    end)
     chat.stream_cost = (vim.uv.hrtime() - t0) / 1e6
   end
   vim.uv.update_time()
@@ -818,19 +872,21 @@ function M.redraw(chat, opts)
   -- re-rendered somewhere above the fold, so a per-block test would answer
   -- "no" for all of them and a resize would lose your place.
   local stick = at_bottom(chat)
-  for _, id in ipairs(chat.order) do
-    local block = chat.blocks[id]
-    if block then
-      -- `force` has to reach the memo too, or it is not a force: the cache key
-      -- knows about width, expansion and the item, and nothing about
-      -- `ui.style` or `ui.expand` changing under a live session -- which is
-      -- the only reason this flag exists.
-      if opts and opts.force then
-        M.invalidate(block)
+  M.quietly(chat, function()
+    for _, id in ipairs(chat.order) do
+      local block = chat.blocks[id]
+      if block then
+        -- `force` has to reach the memo too, or it is not a force: the cache key
+        -- knows about width, expansion and the item, and nothing about
+        -- `ui.style` or `ui.expand` changing under a live session -- which is
+        -- the only reason this flag exists.
+        if opts and opts.force then
+          M.invalidate(block)
+        end
+        M.rerender(chat, block, nil, { follow = false })
       end
-      M.rerender(chat, block, nil, { follow = false })
     end
-  end
+  end)
   chat.rendered_width = width
   if stick then
     to_bottom(chat)

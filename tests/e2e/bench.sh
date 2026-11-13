@@ -70,6 +70,9 @@ for n in $(seq 1 "$cold"); do
   result="$out_dir/$label.run$n.json"
   rm -f "$result"
   "$E" stop
+  # The rail's shown/hidden and widths are remembered; every run starts from
+  # the defaults, whatever the last one (or a scenario) left behind.
+  rm -f "$PASEO_E2E_ROOT/xdg/state/nvim/paseo/ui.json"
   PASEO_PERF=1 "$E" start "$fixture" || exit 1
   "$E" lua "dofile(\"$here/bench.lua\") and 1" >/dev/null
   "$E" lua "_G.paseo_bench.run(\"$result\") or 1" >/dev/null
@@ -90,6 +93,7 @@ if [ "$load" -gt 0 ]; then
   load_result="$out_dir/$label.load.json"
   rm -f "$load_result"
   "$E" stop
+  rm -f "$PASEO_E2E_ROOT/xdg/state/nvim/paseo/ui.json"
   PASEO_PERF=1 "$E" start "$fixture" || exit 1
   "$E" lua "dofile(\"$here/bench.lua\") and 1" >/dev/null
   "$E" keys ':Paseo chat' Enter
