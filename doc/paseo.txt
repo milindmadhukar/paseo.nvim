@@ -652,9 +652,11 @@ workspaces.dir                              string, default `".workspaces"`
                                        *paseo-config.workspaces.branch_prefix*
 workspaces.branch_prefix                           string, default `"ws/"`
 
-    Prefix for the branch a new workspace works on. A manifest carries its own
-    `branch_prefix` and that wins; this covers the case with no manifest -- a
-    plain git repo, where Paseo cuts the worktree. See |paseo-workspace-kinds|.
+    Prefix for the branch a new workspace works on, when it is given a NAME.
+    A manifest carries its own `branch_prefix` and that wins. A plain git
+    repo's worktree started from |paseo-new| is not named at all -- the
+    daemon names it and its branch -- so this applies only where a name is
+    passed. See |paseo-workspace-kinds|.
 
                                                 *paseo-config.workspaces.open*
 workspaces.open                               string|function, default `"tab"`
@@ -861,10 +863,18 @@ skills.method                                       `"link"`|`"copy"`, default `
     picker that says so: <C-n> creates the first, <C-a> lists every
     project's. See |paseo-workspaces-keys|.
 
+:Paseo new                                                    *:Paseo-new*
+
+    Start something: a chat here or in a new worktree, or a terminal. One
+    screen, every choice prefilled from last time, the box ready to type
+    in. See |paseo-new|.
+
 :Paseo wcreate                                            *:Paseo-wcreate*
 
-    Create a workspace here. THE ONE YOU WANT: it works out for itself what
-    kind of project this is, and you never have to. See |paseo-workspace-kinds|.
+    The same screen, opened on a NEW WORKTREE (or, in a multi-repo project,
+    a new assembled workspace). It works out for itself what kind of project
+    this is, and nothing asks for a name: the daemon names a worktree from
+    the first message. See |paseo-workspace-kinds|.
 
 :Paseo agents                                              *:Paseo-agents*
 :Paseo sessions                                          *:Paseo-sessions*
@@ -951,8 +961,9 @@ the directory rather than asking you:
                 nothing is written until you accept it. Cancelling writes
                 nothing and creates nothing.
 
-    worktree    A git repository. Paseo cuts and owns the worktree itself,
-                on `branch_prefix .. name`, off whatever is CHECKED OUT.
+    worktree    A git repository. Paseo cuts, owns and NAMES the worktree
+                itself (`frail-squid`, on a branch of that name), off
+                whatever is CHECKED OUT unless you pick a Base.
                 Nothing is assembled; there is nothing to assemble.
 
     local       Neither. A workspace on the directory as it stands, shared
@@ -1980,45 +1991,32 @@ ours on any model, anyone's on that model, anyone's -- and within each,
 whichever was touched most recently.
 
                                                               *paseo-start*
-WHAT, THEN WHERE, THEN THE SETTINGS. When the answer really is nothing, the
-first thing you are asked is what to start: >
+ONE SCREEN. When the answer really is nothing, you get the new-task screen
+(|paseo-new|): the composer, focused and in insert mode, with the choices --
+chat or terminal, here or a new worktree, the base, the model and its
+settings -- above it, prefilled from what you chose last. It replaced a chain
+of menus (what, then where, then a name, then the settings) that asked, in
+Paseo's own nouns, which of agent and workspace you meant.
 
-    new agent                       here, in this directory
-    new agent in a new workspace    a directory of its own
-    new terminal                    a shell here, in this directory
-    cancel
-<
-This used to be the model picker outright -- four questions about an agent,
-asked before anything had established that an agent was what you came for,
-and with a terminal reachable only from a tab of a surface you had to create
-an agent in order to see.
+A chat is a DRAFT until your first message, and that message creates the
+agent -- and for a new worktree, the worktree with it -- in one request, so
+the daemon names the workspace from it the way the app's New workspace does:
+the app's sidebar and the rail say `Fix flaky login test on CI`, not `main`.
+The daemon only names a workspace inside the request that creates it, and
+only when the prompt is part of that request, which is why the draft waits.
+Cancelling (`q` in the choices, or closing it) leaves nothing behind.
 
-`new agent` goes on to the settings screen below, and then to the chat --
-as a DRAFT. Nothing exists on the daemon until your first message, and that
-message creates the agent and its workspace in one request, so the daemon
-names the workspace from it the way the app's New workspace does: the app's
-sidebar and the rail say `Fix flaky login test on CI`, not `main`. The daemon
-only names a workspace inside the request that creates it, and only when the
-prompt is part of that request, which is why the draft waits. Closing a draft
-with nothing sent leaves nothing behind.
-
-Where the first message lands depends on what is already there. A Paseo
+Where the first message lands HERE depends on what is already there. A Paseo
 worktree, or a workspace somebody titled, keeps its name and the agent joins
 it. A plain checkout still called by its branch gets a fresh workspace beside
 it, in the same project, named from the prompt; the untitled one is left
-alone. `new agent in a new workspace` asks for a name, then the settings,
-then opens the ordinary conversation view as a DRAFT -- no box asking for the
-first prompt. Your first message creates the appropriate
-assembled/worktree/local workspace (|paseo-workspace-kinds|) WITH the agent
-and that message in the same request, and moves the editor there. The name
-picks the directory and the branch; the title comes from the message. Forking
-into a new workspace sends its prompt with the workspace too. `new terminal` opens the
-terminal picker (|paseo-terminals|) and the PTY in a tab of its own; the
-directory still has no agent, so asking again later asks again.
+alone. A NEW WORKTREE is named by the daemon too -- directory, branch and
+title -- so nothing asks you for a name. A terminal opens in a tab of its
+own.
 
-The same three are a key away at any time -- `<C-n>`, and the rail's `a`, `w`
-and `t`, in the workspace under the cursor: see |paseo-new|. Switching
-between the sessions of a workspace is the rail: |paseo-rail-sessions|.
+The same screen is a key away at any time -- `<C-n>`, and the rail's `a`, `w`
+and `t`, in the workspace under the cursor. Switching between the sessions of
+a workspace is the rail: |paseo-rail-sessions|.
 
 An AUTOMATIC open never reaches any of this. |paseo-chat-follows| passes
 `create = false`, so a workspace with no agent says so rather than putting a

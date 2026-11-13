@@ -80,6 +80,14 @@ repo_with_agent() {
   echo "$repo"
 }
 
+# The new-task screen is up and has heard from the daemon: the models (for a
+# chat) and what can be run (for a terminal). Its composer is in insert mode,
+# so a prompt can be typed straight away.
+new_task_ready() {
+  "$E" wait '(function() local c = require("paseo.ui.chat").current(); local t = c and require("paseo.ui.newtask").task(c); return t ~= nil and t.draft ~= nil and not t.draft.loading and t.presets ~= nil end)()' 30 \
+    || fail "the new-task screen never loaded"
+}
+
 # Press `c` on the new-agent screen until it takes. The screen ignores it
 # while the model's features are still loading (its footer says so), and how
 # long that takes is the provider's business, not something to sleep for.

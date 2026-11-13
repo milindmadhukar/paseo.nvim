@@ -42,6 +42,9 @@ case "${1:-}" in
     [ -d "$deps/gitsigns.nvim" ] || "$repo/tests/deps.sh" "$deps" >/dev/null
     tmux kill-session -t "$session" 2>/dev/null || true
     rm -f "$sock"
+    # What the new-task screen remembers is per scenario: one that started a
+    # worktree must not open the next one's screen on Worktree.
+    rm -f "$PASEO_E2E_ROOT/xdg/state/nvim/paseo/new.json"
     tmux new-session -d -s "$session" -x "$cols" -y "$rows" -c "$cwd" \
       "env PASEO_TEST_DEPS='$deps' PASEO_E2E_URL='$PASEO_E2E_URL' PASEO_E2E_HOME='$PASEO_E2E_HOME' \
        XDG_STATE_HOME='$PASEO_E2E_ROOT/xdg/state' XDG_DATA_HOME='$PASEO_E2E_ROOT/xdg/data' \

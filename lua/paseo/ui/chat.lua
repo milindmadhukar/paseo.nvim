@@ -1487,60 +1487,21 @@ function M.open(opts, callback)
         notice(chat, "no agent in this workspace yet — :Paseo chat starts one")
         return callback(nil, nil)
       end
-      -- WHAT, THEN WHERE, THEN THE SETTINGS -- see |paseo.start|. This used to
-      -- open the model picker outright, which asks four questions about an
-      -- agent before anything has established that an agent is the thing you
-      -- came here for, and left a terminal reachable only from a tab of a
-      -- surface you had to create an agent in order to see.
-      notice(chat, "nothing running here yet…")
-      require("paseo.start").open({
-        root = root,
-        local_root = local_root,
-        host_id = host.id,
-        preferred = preferred,
-      }, function(result, err)
-        if err then
-          notice(chat, err, "error")
-          return callback(nil, err)
-        end
-
-        ---Give this empty chat up. Nothing was ever attached to it.
-        local function stand_down(reason)
-          chats[key] = nil
-          if current == chat then
-            M.close()
-          end
-          return callback(nil, reason)
-        end
-
-        if not result then
-          return stand_down "cancelled"
-        end
-
-        -- A TERMINAL IS A SESSION, not an agent, and this chat never becomes
-        -- one. The surface is already pointed at the PTY -- `start` did that
-        -- -- so the chat stays keyed on the directory, with no agent, and
-        -- says so. Asking again next time is correct: there is still no
-        -- agent here.
-        if result.kind == "terminal" then
-          notice(chat, "a terminal is running here — the rail lists it under its workspace")
-          return callback(nil, nil)
-        end
-
-        -- The agent went somewhere else, and the editor is already looking at
-        -- it. This chat is an empty window onto a directory nobody is working
-        -- in any more.
-        if result.moved then
-          return stand_down(nil)
-        end
-
-        -- A DRAFT, NOT AN AGENT. Nothing is created until the first message:
-        -- the daemon names a workspace from the first prompt, and only when
-        -- the prompt is part of the request that creates it -- so creating the
-        -- agent here, empty, is what left every workspace started from the
-        -- editor called `main`. `send` sees `chat.draft` and starts it.
-        make_draft(chat, key, { settings = result.draft })
-        callback(chat, nil)
+      -- NOTHING HERE YET: the new-task screen (|paseo-new|), which is a
+      -- draft chat of its own. This empty one, keyed on the directory, is
+      -- given up for it -- nothing was ever attached to it.
+      chats[key] = nil
+      if current == chat then
+        M.close()
+      end
+      callback(nil, nil)
+      vim.schedule(function()
+        require("paseo.new").open({
+          root = root,
+          local_root = local_root,
+          host_id = host.id,
+          preferred = preferred,
+        }, {})
       end)
     end, host.id)
   end, host.id)

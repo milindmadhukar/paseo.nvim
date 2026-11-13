@@ -42,7 +42,7 @@ end
 local hinted = false
 
 ---@param plan paseo.Strategy|nil
-local function hint_skills(plan)
+function M.hint_skills(plan)
   if hinted or not plan or (plan.kind ~= "assemble" and plan.kind ~= "discover") then
     return
   end
@@ -67,54 +67,6 @@ local function hint_skills(plan)
       .. "`:Paseo skills install`",
     vim.log.levels.INFO
   )
-end
-
----Create a workspace by name.
----
----"creating", not "assembling": assembly is one of three shapes this may turn
----out to be, and which one is not settled until `workspaces.strategy` has
----looked at the directory. The shape is reported AFTERWARDS, when it is known.
----@param name string
----@param root? string
----@param after? fun()
-function M.named(name, root, after)
-  if name:find "[/\\ ]" then
-    return vim.notify("paseo: names may not contain slashes or spaces", vim.log.levels.ERROR)
-  end
-
-  vim.notify("paseo: creating " .. name .. "…", vim.log.levels.INFO)
-  workspaces.create({ name = name, root = root }, function(_, err, plan)
-    if err then
-      return vim.notify("paseo: " .. err, vim.log.levels.ERROR)
-    end
-    -- No id, no error, no plan: the manifest dialog was dismissed, so nothing
-    -- was written and nothing was created. Said out loud only because the
-    -- "creating…" above it would otherwise be the last word on screen, and a
-    -- message that never completed reads as a hang.
-    if not plan then
-      return vim.notify("paseo: cancelled — nothing was written", vim.log.levels.INFO)
-    end
-    vim.notify(
-      ("paseo: created %s — %s"):format(name, workspaces.describe(plan)),
-      vim.log.levels.INFO
-    )
-    hint_skills(plan)
-    if after then
-      vim.schedule(after)
-    end
-  end)
-end
-
----Prompt for a name, then create.
----@param root? string
----@param after? fun()
-function M.create(root, after)
-  vim.ui.input({ prompt = "New workspace name: " }, function(name)
-    if not name or name == "" then
-      return
-    end
-    M.named(name, root, after)
-  end)
 end
 
 ---@param opts? table  `all = true` lists every project's workspaces.
@@ -221,7 +173,13 @@ function M.open(opts)
             actions.close(bufnr)
             -- Here, unless the row says otherwise: in an empty picker there is
             -- no row, and the project it was opened for is the one meant.
-            M.create(entry and entry.value.projectRoot or (not opts.all and here) or nil, reopen)
+            -- The new-task screen, on a new worktree: no name to type.
+            local root = entry and entry.value.projectRoot or (not opts.all and here) or nil
+            local ctx = require("paseo.new").context()
+            if ctx and root then
+              ctx = { root = root, local_root = root, host_id = ctx.host_id, preferred = ctx.preferred }
+            end
+            require("paseo.new").open(ctx, { where = "worktree" })
           end)
 
           map({ "i", "n" }, "<C-d>", function()

@@ -239,10 +239,19 @@ commands.subagents = {
   end,
 }
 
-commands.wcreate = {
-  desc = "Create a workspace here — assembled, worktree or plain, worked out for you",
+commands.new = {
+  desc = "Start something: a chat here or in a new worktree, or a terminal — one screen",
   run = function()
-    require("paseo.pickers.workspaces").create()
+    require("paseo.new").open()
+  end,
+}
+
+-- The old "new workspace": the same screen, opened on a new worktree. It
+-- used to ask for a name first -- the daemon names it now.
+commands.wcreate = {
+  desc = "Start something in a new worktree (the new-task screen, on Worktree)",
+  run = function()
+    require("paseo.new").open(nil, { where = "worktree" })
   end,
 }
 
@@ -543,11 +552,7 @@ commands.skills = {
 ---Start something from wherever you are: an agent here, in a new worktree,
 ---or a terminal -- see |paseo-new|.
 function M.new_task()
-  if vim.fn.mode() ~= "n" then
-    pcall(vim.cmd.stopinsert)
-  end
-  local start = require "paseo.start"
-  start.new(start.context(require("paseo.ui.chat").current()))
+  require("paseo.new").open()
 end
 
 function M.setup(opts)

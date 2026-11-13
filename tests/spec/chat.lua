@@ -121,59 +121,34 @@ local function test_chat_follow()
     eq("follow: and the tab really closed", #vim.api.nvim_list_tabpages(), tabs)
 
     -- An AUTOMATIC re-point must never interrogate you. A workspace with no
-    -- agent says so; it does not open a picker of any kind.
-    local asked, offered = false, false
-    local create = require "paseo.ui.create"
-    local old_review, old_select = create.review, vim.ui.select
-    create.review = function()
-      asked = true
-    end
-    -- THE MENU COUNTS AS INTERROGATING YOU TOO. |paseo.start| asks what to
-    -- start before it asks how, so a follow that reached it would put a modal
-    -- in front of someone who only changed directory -- and, headless, would
-    -- sit on `inputlist` until the suite timed out.
-    vim.ui.select = function(_, _, done)
+    -- agent says so; it does not open the new-task screen (|paseo-new|) --
+    -- which is a whole draft chat, and would put a screen in front of
+    -- someone who only changed directory.
+    local new = require "paseo.new"
+    local old_new_open = new.open
+    local offered, offered_at = false, nil
+    new.open = function(ctx)
       offered = true
-      done(nil)
+      offered_at = ctx and ctx.root
     end
     chat.follow(empty)
     vim.wait(200)
-    eq("follow: an agentless workspace asks nothing at all", { asked, offered }, { false, false })
+    eq("follow: an agentless workspace asks nothing at all", offered, false)
 
-    -- ...but asking for a chat there yourself still gets you the menu, and
-    -- choosing the agent on it still gets you the settings.
-    local seen = false
-    vim.ui.select = function(items, _, done)
-      offered = true
-      for _, item in ipairs(items) do
-        if item.id == "agent" then
-          return done(item)
-        end
-      end
-      done(nil)
-    end
-    create.review = function()
-      seen = true
-    end
+    -- ...but asking for a chat there yourself gets you the screen, on it.
     chat.open { root = empty }
-    vim.wait(200)
-    eq(
-      "follow: `create` defaults back on for a chat you asked for",
-      { offered, seen },
-      { true, true }
-    )
+    truthy("follow: `create` defaults back on for a chat you asked for", vim.wait(1000, function()
+      return offered
+    end))
+    eq("follow: and the screen is for that directory", offered_at, empty)
 
     -- OPENING A WORKSPACE is not merely changing directory: one with no agent
-    -- yet offers the start menu, whether or not a chat is on screen.
-    vim.ui.select = function(_, _, done)
-      offered = true
-      done(nil)
-    end
+    -- yet offers the screen, whether or not a chat is on screen.
     offered = false
     chat.open { root = here }
     vim.wait(200)
     chat.follow(empty, { offer = true })
-    truthy("follow: opening an agentless workspace offers the menu", vim.wait(1000, function()
+    truthy("follow: opening an agentless workspace offers the screen", vim.wait(1000, function()
       return offered
     end))
     chat.close()
@@ -189,7 +164,7 @@ local function test_chat_follow()
     chat.follow(there, { offer = true })
     vim.wait(200)
     eq("follow: but one with an agent opens nothing unbidden", { offered, chat.current() }, { false, nil })
-    create.review, vim.ui.select = old_review, old_select
+    new.open = old_new_open
 
     -- The switch itself carries the chat: this is the reported bug end to end,
     -- through the function the picker's <CR> actually calls.

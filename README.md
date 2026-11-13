@@ -233,7 +233,8 @@ screen.
 | `:Paseo sidebar` | The chat in the pane beside your code |
 | `:Paseo model [provider/model]` | Set the preference for new agents; no agent is created |
 | `:Paseo workspaces [all]` | Workspace picker for this project (`<C-a>` or `all`: every project's) — open, inspect agent sessions, create, archive |
-| `:Paseo wcreate` | Create a workspace here — the shape is worked out for you |
+| `:Paseo new` | Start something: a chat here or in a new worktree, or a terminal — one screen |
+| `:Paseo wcreate` | The same screen, opened on a new worktree (no name to type) |
 | `:Paseo agents` | Agent sessions in this workspace |
 | `:Paseo subagents` | Subagents of the chat's agent (`gs` in the chat), in a live list: a spinner and a clock on each running one, updated as they start and finish. A Paseo one opens as a chat you can message, a provider one (Claude's Task tool) opens read-only, live |
 | `:Paseo sessions` | Compatibility alias for `agents` |
@@ -454,12 +455,9 @@ the turn, from the composer or the conversation, normal mode or insert.
   last looked at. **`1` `2` `3`** in it jump straight to Settings, Changes or
   Usage, and its bar shows which is which. `<C-p>` again closes it.
 - **`<C-n>`** starts something, from any of these buffers in normal mode:
-  *new agent* (in this workspace), *new agent in a new workspace*, or *new
-  terminal*. Both agent choices go through the settings screen and then open
-  **the ordinary conversation view, empty**: nothing is created until you send
-  the first message, which creates the agent (and, for a new workspace, the
-  workspace with it) with your message as its first prompt, so the daemon
-  names the workspace from it. A new agent opens in a tab of its own.
+  the [new-task screen](#starting-an-agent-session) — a chat here or in a new
+  worktree (named for you), or a terminal — with every choice prefilled from
+  last time and the box ready to type in.
 - **A terminal or a provider subagent** opens in a tab of its own, **with the
   rail** if the rail was up where you opened it.
 - **What is current follows the tab.** Entering a tab makes its agent the one
@@ -759,49 +757,42 @@ the chat in a workspace with two live tabs in it offered to start a third. A
 session of this plugin's own is still preferred over the app's, and the model
 you are set to over one you are not; beyond that, whichever was touched last.
 
-**What, then where, then the settings.** When the answer is genuinely nothing,
-the first thing you are asked is what to start:
+**One screen.** When the answer is genuinely nothing — and whenever you ask
+for something new (`<C-n>`, the rail's `a` `w` `t`, `:Paseo new`,
+`<Plug>(paseo-new)`) — you get the **new-task screen**: the composer you will
+keep typing in, focused and in insert mode, with the choices drawn above it
+where the conversation will be:
 
 ```
-Nothing is running in ~/Code/openfin. Start…
-  new agent                     here, in this directory
-  new agent in a new workspace  a directory of its own
-  new terminal                  a shell here, in this directory
-  cancel
+  Start  a   [Chat]  Terminal              Where  w   [Here]  New worktree
+  Base   b   [main]  dev  feat/login  …                  (a worktree, in git)
+  Provider p · Model s · Permission mode m · Thinking t · Features f
+  ─────────────────────────────────────────────────────────────────────────
+  ▌ Fix the flaky login test on CI
 ```
 
-This used to be the model picker outright — four questions about an agent,
-asked before anything had established that an agent is what you came for, and
-with a terminal reachable only from a tab of a surface you had to create an
-agent in order to see.
+Type and send. The first message creates the agent — and for **New
+worktree**, the worktree with it — with your message as its first prompt.
+**Nothing is asked that Neovim already knows:** the project and host are
+where you are standing, and a new worktree is **not named by you**: the daemon
+names it and its branch (`frail-squid`) and titles the workspace from your
+message, as the app's New workspace does. *Where* only appears where
+something can be isolated (a git checkout, or a [multi-repo
+project](#workspaces)); *Base* defaults to what is checked out. A
+**Terminal** needs no prompt: `<Tab>` up to the choices and `<CR>` on what to
+run — a shell, `claude`, `codex`, `pi`, any provider the daemon has, your
+`ui.terminal.presets`, or a command you type.
 
-**new agent** goes to the settings screen and then to the chat, as a
-**draft**: nothing exists on the daemon until your first message. That message
-creates the agent and its workspace in one request, so the daemon names the
-workspace from it, the way the app's New workspace does. The app's sidebar and
-the rail say `Fix flaky login test on CI`, not `main`. The daemon only names a
-workspace inside the request that creates it, and only when the prompt is part
-of that request, which is why the draft waits. A Paseo worktree, or a
-workspace somebody titled, keeps its name and the agent joins it. A plain
-checkout still called by its branch gets a fresh, named workspace beside it in
-the same project.
+**Everything is remembered** — chat or terminal, here or a worktree, the base,
+the provider and model, mode, thinking, features, the terminal you ran — per
+project and host, and prefilled next time. Nothing is written until something
+is created.
 
-**new agent in a new workspace** asks for a name, then the settings, and then
-opens **the ordinary conversation view as a draft** — no box asking for the
-first prompt, so that prompt can be dictated, carry images, or be anything
-else the composer can do. Your first message creates the appropriate
-local/worktree/assembled workspace, **with the agent and that message in the
-same request**, and moves the editor there. The name picks the directory and
-the branch; the title comes from the message, the same way as above. Forking
-into a new workspace (`f`) sends its prompt with the workspace too. **new
-terminal** opens the [terminal picker](#terminals) and the PTY in a tab of
-its own.
-
-The same three are a key away at any time: `<C-n>` asks which, and the rail's
-`a`, `w` and `t` go straight to one,
-in the workspace under the cursor. An agent started *here* joins that
-workspace — by its id — and, like every other start, is a draft until its
-first message.
+In the choices `h` `j` `k` `l` move, `<CR>` applies, the letter on a card
+jumps to it, `i` or `<Tab>` returns to the box and `q` cancels. *Here* joins
+the workspace on screen by id, so a second agent lands beside the first; the
+draft becomes that agent in place. A new worktree's agent, and a terminal,
+open on tabs of their own.
 
 An *automatic* open never reaches any of this: following a workspace switch
 passes `create = false`, so a workspace with no agent says so rather than
@@ -1616,7 +1607,7 @@ wcreate` answers it:
 | Project | What happens | Picker says |
 |---|---|---|
 | A plain directory holding repos | Its worktrees are **assembled** into one composite directory, handed to Paseo as a local workspace | `N repos` |
-| A git repository | Paseo **cuts the worktree** itself, on `ws/<name>` off whatever is checked out | `worktree` |
+| A git repository | Paseo **cuts the worktree** itself, off whatever is checked out (or the *Base* you pick), and names it | `worktree` |
 | Neither | A plain workspace on the directory as it stands | `local` |
 
 No manifest in the first case? One is discovered and **offered**, on a screen:

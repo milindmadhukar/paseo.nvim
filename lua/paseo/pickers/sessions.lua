@@ -52,33 +52,16 @@ function M.open(ws, opts)
         if bufnr then
           actions.close(bufnr)
         end
-        vim.ui.input(
-          { prompt = "New agent session in " .. (ws.name or "workspace") .. ": " },
-          function(title)
-            if title == nil then
-              return
-            end
-            workspaces.new_agent_session(
-              ws,
-              { title = title ~= "" and title or nil },
-              function(id, create_err)
-                if create_err == "cancelled" then
-                  return
-                end
-                if create_err then
-                  return vim.notify("paseo: " .. create_err, vim.log.levels.ERROR)
-                end
-                vim.schedule(function()
-                  require("paseo.ui.chat").open {
-                    root = ws.directory,
-                    agent_id = id,
-                    title = title ~= "" and title or nil,
-                  }
-                end)
-              end
-            )
-          end
-        )
+        -- The new-task screen, HERE: in this workspace, by id. It used to
+        -- ask for a title first; the daemon titles it from the prompt.
+        local ctx = require("paseo.new").context() or {}
+        require("paseo.new").open({
+          root = ws.directory,
+          local_root = ws.local_directory or ws.directory,
+          host_id = ws.hostId or ctx.host_id,
+          preferred = ctx.preferred,
+          workspace_id = ws.id,
+        }, { kind = "chat", where = "here" })
       end
 
       if #agent_sessions == 0 then

@@ -20,9 +20,8 @@ workspaces_in() {
 "$E" stop
 "$E" start "$repo"
 "$E" keys ':Paseo chat' Enter
-sleep 5 # the start menu is a vim.ui.select prompt, which nothing can wait on
-"$E" keys 1 Enter
-create_from_review 'require("paseo.ui.chat").current() and require("paseo.ui.chat").current().draft ~= nil'
+# Nothing here yet: the new-task screen, on a chat here (nothing remembered).
+new_task_ready
 
 # A draft creates nothing on the daemon.
 [ "$(workspaces_in "$repo")" = "[]" ] || fail "the draft created a workspace: $(workspaces_in "$repo")"

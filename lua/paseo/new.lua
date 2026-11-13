@@ -134,11 +134,16 @@ local function new_worktree(ctx, choice, first, callback)
     new = true,
     base = choice.base,
     first = first,
-  }, function(id, err, _, workspace)
+  }, function(id, err, plan, workspace)
     vim.schedule(function()
       if err then
         return callback(nil, err)
       end
+      -- An assembled workspace: the one moment the bundled skills are worth
+      -- mentioning (once a session).
+      pcall(function()
+        require("paseo.pickers.workspaces").hint_skills(plan)
+      end)
       if not id then
         return callback(nil, "cancelled")
       end

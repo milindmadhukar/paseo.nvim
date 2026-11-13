@@ -18,11 +18,9 @@ sessions="(function() local _, _, s = $rail.lines(32); return vim.tbl_count(s) e
 [ "$("$E" lua 'vim.tbl_contains(require("paseo.ui.native").PANELS, "Sessions") and 1 or 0')" = "0" ] \
   || fail "there is a Sessions panel"
 
-# <C-n> from the composer's normal mode, then "new agent" (here).
+# <C-n> from the composer's normal mode: the new-task screen, on a chat here.
 "$E" keys Escape C-n
-sleep 2 # vim.ui.select, which nothing can wait on
-"$E" keys 1 Enter
-create_from_review 'require("paseo.ui.chat").current() and require("paseo.ui.chat").current().draft ~= nil'
+new_task_ready
 
 users_before=0
 "$E" keys 'echo second agent' Escape Enter

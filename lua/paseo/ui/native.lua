@@ -759,8 +759,7 @@ local function bind(chat)
         if api.nvim_get_mode().mode ~= "n" then
           pcall(vim.cmd.stopinsert)
         end
-        local start = require "paseo.start"
-        start.new(start.context(chat))
+        require("paseo.new").open(require("paseo.new").context(chat))
       end,
       "start an agent or a terminal",
     },

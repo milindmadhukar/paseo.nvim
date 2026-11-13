@@ -901,7 +901,7 @@ function M.build(width)
     -- As BOUND (`keys.rail` remaps), and a key you unbound is not offered.
     local key = require "paseo.ui.keys"
     local line = {}
-    for _, hint in ipairs { { "a", "agent" }, { "w", "workspace" }, { "g?", "keys" } } do
+    for _, hint in ipairs { { "a", "new" }, { "w", "worktree" }, { "g?", "keys" } } do
       local lhs = key.label("rail", hint[1])
       if lhs then
         line[#line + 1] = { (#line == 0 and PAD or "  ") .. lhs, "PaseoKey" }
@@ -1441,14 +1441,14 @@ local function keymap(keys)
       function()
         M.start "here"
       end,
-      "new agent in this workspace",
+      "start something here (the new-task screen)",
     },
     {
       "w",
       function()
         M.start "workspace"
       end,
-      "new agent in a new workspace",
+      "start something in a new worktree",
     },
     {
       "t",
