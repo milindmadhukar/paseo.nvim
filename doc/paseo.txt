@@ -1848,9 +1848,12 @@ is written over its row in place.
 
 `<C-b>` shows and hides it, in one paint -- the conversation is re-laid out
 in the same keypress, not a beat after -- and the choice is remembered across
-restarts: a rail you hid stays hidden next session. `<C-h>` goes into it --
-showing it first if it was hidden -- and `<C-h>`, `q` or `<Esc>` go back to
-where you were typing. It is 32 cells wide by default
+restarts: a rail you hid stays hidden next session. THE CURSOR GOES WITH IT,
+as with nvim-tree: showing the rail puts the cursor in it, on the session in
+the middle, and `<C-b>` there hides it and puts the cursor back in the window
+it came from. Hidden from anywhere else, the cursor stays where it is.
+`<C-h>` goes into it -- showing it first if it was hidden -- and `<C-h>`, `q`
+or `<Esc>` go back to the window you came from. It is 32 cells wide by default
 (|paseo-config.ui.native| `rail`; `0` starts it hidden). See
 |paseo-config.ui.float.rail| for the keys and the look.
 
@@ -2215,7 +2218,8 @@ In the composer ~
     p  P      paste -- an image if the clipboard has one, text otherwise
     <C-f>     (sidebar) go full screen. Not bound on the full-screen surface
     <C-p>     (full screen) the panel: Settings / Changes / Usage
-    <C-b>     (full screen) show or hide the workspace rail. See |paseo-rail|
+    <C-b>     (full screen) show the workspace rail and go to it, or hide it
+              and go back. See |paseo-rail|
     <C-h>     (full screen) into the workspace rail
     <C-n>     (full screen) start an agent or a terminal. See |paseo-new|
     <C-c>     stop the turn -- normal or insert. See |paseo-chat-stop|
@@ -2237,7 +2241,8 @@ In the conversation ~
     f         fork the complete conversation. See |paseo-fork|
     <C-f>     (sidebar) go full screen
     <C-p>     (full screen) the panel
-    <C-b>     (full screen) show or hide the workspace rail
+    <C-b>     (full screen) show the workspace rail and go to it, or hide it
+              and go back
     <C-h>     (full screen) into the workspace rail
     <C-s>     (full screen) the session on screen, in the rail
     <C-n>     (full screen) start an agent or a terminal. See |paseo-new|

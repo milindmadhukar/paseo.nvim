@@ -641,6 +641,9 @@ own and never stop on decoration. The cursor sits on the title, as nvim-tree's
 come and go.
 
 `<C-b>` shows and hides the rail, and the choice is remembered across restarts.
+The cursor goes with it, as with nvim-tree: showing the rail puts the cursor in
+it, on the session in the middle, and `<C-b>` there hides it and returns you to
+the window you came from; hidden from anywhere else, the cursor stays put.
 `<C-h>` moves into it, showing it first if it was hidden; **`<C-s>`** moves
 into it **on the session on screen**, unfolding what it is under — from the
 composer in either mode, from a terminal, and from every other buffer of the

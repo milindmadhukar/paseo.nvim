@@ -68,6 +68,18 @@ settle
   || fail "the conversation is not raw markdown"
 "$E" shot native-buffers >/dev/null
 
+# <C-b> TAKES THE CURSOR to the rail, and <C-b> there brings it back -- real
+# keypresses, from the box you type in.
+"$E" keys Escape
+"$E" lua 'vim.api.nvim_set_current_win(require("paseo.ui.chat").current().win_composer)' >/dev/null
+"$E" keys C-b
+"$E" wait 'vim.bo[vim.api.nvim_get_current_buf()].filetype ~= "paseo-rail"' 5 >/dev/null 2>&1 # rail was up: now hidden
+"$E" keys C-b
+"$E" wait 'vim.bo[vim.api.nvim_get_current_buf()].filetype == "paseo-rail"' 5 || fail "<C-b> did not put the cursor in the rail"
+"$E" keys C-b
+"$E" wait 'vim.api.nvim_get_current_win() == require("paseo.ui.chat").current().win_composer' 5 \
+  || fail "<C-b> in the rail did not go back to the box"
+
 # The panels.
 "$E" keys Escape C-p
 "$E" wait 'vim.iter(vim.api.nvim_tabpage_list_wins(0)):any(function(w) return vim.bo[vim.api.nvim_win_get_buf(w)].filetype == "paseo-panel" end)' 10 \

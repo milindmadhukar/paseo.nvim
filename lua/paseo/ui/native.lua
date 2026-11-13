@@ -61,6 +61,7 @@ local ns = api.nvim_create_namespace "paseo.native"
 ---@field terms table[]         The terminals you opened: `{ id, host_id, title, buf }`.
 ---@field peek { parent: table, buf?: integer }|nil  A subagent in the middle.
 ---@field swapping boolean|nil  Set while this module moves buffers itself.
+---@field rail_from integer|nil The window the cursor left for the rail.
 
 ---@type paseo.NativeSurface|nil
 local S
@@ -456,7 +457,9 @@ end
 local function rail_keys()
   local keys = nkeys()
   return {
-    back = M.back,
+    back = function()
+      M.from_rail()
+    end,
     toggle = keys.rail,
     focus = keys.focus,
     sessions = keys.sessions,
@@ -544,6 +547,12 @@ function M.focus_rail()
   if not s then
     return
   end
+  local from = api.nvim_get_current_win()
+  if from ~= s.rail then
+    -- What `<C-b>` in the rail goes back to.
+    s.rail_from = from
+    pcall(vim.cmd.stopinsert)
+  end
   open_rail(s)
   if valid_win(s.rail) then
     local rail = require "paseo.ui.rail"
@@ -554,7 +563,35 @@ function M.focus_rail()
   end
 end
 
----`<C-b>`: the rail, on or off.
+---Where the cursor goes back to when the rail closes: the window it was in
+---when the rail took it, if that is still a window on the Paseo tab, else
+---the box you type in.
+---@param s paseo.NativeSurface
+local function return_from_rail(s)
+  local back = s.rail_from
+  s.rail_from = nil
+  if valid_win(back) and back ~= s.rail and api.nvim_win_get_tabpage(back) == s.tab then
+    api.nvim_set_current_win(back)
+  else
+    M.back()
+  end
+end
+
+---Out of the rail, the rail left open: back to where the cursor came from.
+function M.from_rail()
+  local s = here()
+  if s then
+    return_from_rail(s)
+  end
+end
+
+---`<C-b>`: the rail, on or off -- and the cursor with it.
+---
+---OPENING IT IS GOING TO IT, as with nvim-tree: the cursor lands in the rail,
+---on the session in the middle. CLOSING IT FROM THE RAIL goes back to the
+---window you were in when it opened. Closed from anywhere else, the cursor
+---stays where it is: you were not in the rail, so there is nothing to
+---return from.
 function M.toggle_rail()
   local s = here()
   if not s then
@@ -564,15 +601,20 @@ function M.toggle_rail()
   -- hid stays hidden next session.
   if valid_win(s.rail) then
     local win = s.rail
+    local was_in = api.nvim_get_current_win() == win
     keep_width("rail", win)
     s.rail = nil
     pcall(api.nvim_win_close, win, true)
     require("paseo.ui.rail").set_visible(false)
     pcall(vim.cmd.redrawtabline)
-    M.back()
+    if was_in or not valid_win(api.nvim_get_current_win()) then
+      return_from_rail(s)
+    else
+      s.rail_from = nil
+    end
   else
     require("paseo.ui.rail").set_visible(true)
-    open_rail(s)
+    M.focus_rail()
   end
   -- ONE PAINT. The conversation just changed width; left to the resize
   -- watcher, its cards re-laid themselves out 50ms after the rail moved, and

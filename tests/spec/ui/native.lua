@@ -148,6 +148,31 @@ local function test_layout()
   native.toggle_rail()
   eq("native: and comes back", #api.nvim_tabpage_list_wins(0), 3)
 
+  -- THE CURSOR GOES WITH IT, as with nvim-tree: opening the rail is going to
+  -- it; closing it from there goes back where you were.
+  local function rail_here()
+    return vim.bo[api.nvim_get_current_buf()].filetype == "paseo-rail"
+  end
+  native.toggle_rail()
+  api.nvim_set_current_win(middle)
+  native.toggle_rail()
+  truthy("focus: opening the rail puts the cursor in it", rail_here())
+  native.toggle_rail()
+  eq("focus: closing it from there goes back to where you were", api.nvim_get_current_win(), middle)
+  api.nvim_set_current_win(box)
+  native.toggle_rail()
+  truthy("focus: from the box too", rail_here())
+  native.toggle_rail()
+  eq("focus: and back to the box", api.nvim_get_current_win(), box)
+  -- Closed from somewhere else, the cursor stays there.
+  native.toggle_rail()
+  api.nvim_set_current_win(middle)
+  native.toggle_rail()
+  eq("focus: closed from elsewhere, the cursor stays put", api.nvim_get_current_win(), middle)
+  native.toggle_rail()
+  native.from_rail()
+  eq("focus: the rail's own way back goes to where you were", api.nvim_get_current_win(), middle)
+
   -- A RAIL YOU WIDENED STAYS WIDE through `<C-b>` off and on.
   local function rail_win()
     for _, win in ipairs(api.nvim_tabpage_list_wins(0)) do
