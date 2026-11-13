@@ -428,9 +428,59 @@ function M.flush_queue(chat)
   deliver(chat, table.concat(prompts, "\n\n"), images)
 end
 
+local PLACEHOLDER = "%[Image #(%d+)%]"
+
+---THE PLACEHOLDER IS THE ATTACHMENT. Drop every image whose `[Image #n]` is
+---no longer in the composer -- deleting the placeholder is how you take an
+---image back out -- and renumber the ones left, so the numbers in the prompt
+---match the order the images are sent in. An image used to ride along
+---whether or not its placeholder had survived, so a paste you thought you had
+---undone still went to the agent.
+---@param chat paseo.Chat
+function M.prune_images(chat)
+  if #chat.images == 0 or not (chat.composer and vim.api.nvim_buf_is_valid(chat.composer)) then
+    return
+  end
+  local lines = vim.api.nvim_buf_get_lines(chat.composer, 0, -1, false)
+  local present = {}
+  for _, line in ipairs(lines) do
+    for n in line:gmatch(PLACEHOLDER) do
+      present[tonumber(n)] = true
+    end
+  end
+  local kept, renumber = {}, {}
+  for i, image in ipairs(chat.images) do
+    if present[i] then
+      kept[#kept + 1] = image
+      renumber[i] = #kept
+    end
+  end
+  chat.images = kept
+
+  local win = chat.win_composer
+  local cursor = win and vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_cursor(win)
+  for i, line in ipairs(lines) do
+    local renamed = line:gsub(PLACEHOLDER, function(n)
+      local to = renumber[tonumber(n)]
+      if to and to ~= tonumber(n) then
+        return ("[Image #%d]"):format(to)
+      end
+    end)
+    if renamed ~= line then
+      vim.api.nvim_buf_set_lines(chat.composer, i - 1, i, false, { renamed })
+    end
+  end
+  if cursor then
+    local row = math.min(cursor[1], vim.api.nvim_buf_line_count(chat.composer))
+    local len = #(vim.api.nvim_buf_get_lines(chat.composer, row - 1, row, false)[1] or "")
+    pcall(vim.api.nvim_win_set_cursor, win, { row, math.min(cursor[2], len) })
+  end
+end
+
 ---@param chat paseo.Chat
 ---@param alternate? boolean  The other send key: see |M.send_behavior|.
 local function send(chat, alternate)
+  M.prune_images(chat)
   local body = vim.api.nvim_buf_get_lines(chat.composer, 0, -1, false)
   local text = vim.trim(table.concat(body, "\n"))
 
@@ -449,9 +499,9 @@ local function send(chat, alternate)
   local prompt = table.concat(parts, "\n\n")
 
   -- Images travel BESIDE the text, never inside it. The prompt keeps the
-  -- `[Image #1]` placeholders -- which you can read, renumber by hand, or
-  -- delete -- and the bytes ride in the request's own field, in the order the
-  -- placeholders count.
+  -- `[Image #1]` placeholders, and the bytes ride in the request's own field
+  -- in the order the placeholders count -- only those whose placeholder is
+  -- still there (`prune_images` above).
   local images = {}
   for _, image in ipairs(chat.images) do
     images[#images + 1] = { data = image.data, mimeType = image.mime }
@@ -634,7 +684,13 @@ composers = setmetatable({}, { __mode = "v" })
 ---"why is the second panel empty" needs the images to be numbered.
 ---@param chat paseo.Chat
 ---@param image paseo.Image
-local function attach_image(chat, image)
+---@param opts? { after?: boolean }  After the character under the cursor, as
+---                                   normal-mode `p` puts text; `P` and
+---                                   insert mode put it AT the cursor.
+local function attach_image(chat, image, opts)
+  -- Placeholders deleted since the last paste take their images with them,
+  -- so this one is numbered after what is actually still there.
+  M.prune_images(chat)
   chat.images[#chat.images + 1] = image
   local placeholder = ("[Image #%d]"):format(#chat.images)
 
@@ -643,8 +699,17 @@ local function attach_image(chat, image)
   local win = chat.win_composer
   if win and vim.api.nvim_win_is_valid(win) and vim.api.nvim_get_current_win() == win then
     local row, col = unpack(vim.api.nvim_win_get_cursor(win))
+    local line = vim.api.nvim_buf_get_lines(chat.composer, row - 1, row, false)[1] or ""
+    if opts and opts.after and col < #line then
+      -- Past the WHOLE character, which may be several bytes. At the cursor
+      -- instead, `p` on the `]` of a placeholder split it in two -- and a
+      -- placeholder that no longer reads `[Image #n]` takes its image with it.
+      col = col + vim.str_utf_end(line, col + 1) + 1
+    end
     vim.api.nvim_buf_set_text(chat.composer, row - 1, col, row - 1, col, { placeholder })
-    pcall(vim.api.nvim_win_set_cursor, win, { row, col + #placeholder })
+    -- Normal mode rests ON the last character, insert mode just after it.
+    local rest = vim.api.nvim_get_mode().mode == "i" and 0 or 1
+    pcall(vim.api.nvim_win_set_cursor, win, { row, col + #placeholder - rest })
   else
     local lines = vim.api.nvim_buf_get_lines(chat.composer, 0, -1, false)
     local tail = lines[#lines] or ""
@@ -1043,7 +1108,7 @@ local function make_buffers(chat)
       return function()
         local image = read_image(nil, true)
         if image then
-          return attach_image(chat, image)
+          return attach_image(chat, image, { after = key == "p" and vim.fn.mode() == "n" })
         end
         local prefix = ""
         if vim.fn.mode() == "n" then

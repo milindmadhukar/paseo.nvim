@@ -91,6 +91,25 @@ local function test_image()
   eq("paste: a path that is not there is text", pasted { dir .. "/gone.png" }, 0)
   eq("paste: ordinary prose is text", pasted { "hello", "world" }, 0)
 
+  -- THE PLACEHOLDER IS THE ATTACHMENT: delete it and the image goes too.
+  local chat_mod = require "paseo.ui.chat"
+  local cbuf = vim.api.nvim_create_buf(false, true)
+  local fake = { composer = cbuf, images = { { id = "a" }, { id = "b" }, { id = "c" } } }
+  vim.api.nvim_buf_set_lines(cbuf, 0, -1, false, { "look at [Image #1]", "and [Image #3] here" })
+  chat_mod.prune_images(fake)
+  eq("prune: a deleted placeholder takes its image with it", vim.tbl_map(function(i)
+    return i.id
+  end, fake.images), { "a", "c" })
+  eq(
+    "prune: and the rest are renumbered to the order they are sent in",
+    vim.api.nvim_buf_get_lines(cbuf, 0, -1, false),
+    { "look at [Image #1]", "and [Image #2] here" }
+  )
+  vim.api.nvim_buf_set_lines(cbuf, 0, -1, false, { "never mind" })
+  chat_mod.prune_images(fake)
+  eq("prune: every placeholder gone, nothing is sent", #fake.images, 0)
+  vim.api.nvim_buf_delete(cbuf, { force = true })
+
   -- Outside a composer, vim.paste is untouched.
   require("paseo.ui.chat").attach_events()
   local buf = vim.api.nvim_create_buf(false, true)

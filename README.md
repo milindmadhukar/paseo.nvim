@@ -111,6 +111,7 @@ Every built-in key can be moved or unbound with the `keys` option
 
 Copy a screenshot and press `p` in the composer, or `<C-v>` in insert mode.
 The image is attached as `[Image #1]`, which you can refer to in the prompt.
+Delete the placeholder and the image goes with it.
 Without an image on the clipboard, `p` pastes text as usual.
 
 Dragging an image file onto the terminal, or pasting one copied in a file

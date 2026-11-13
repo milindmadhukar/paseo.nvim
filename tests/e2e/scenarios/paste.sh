@@ -51,8 +51,16 @@ for surface in native sidebar; do
   "$E" lua '(function() vim.api.nvim_set_current_win(require("paseo.ui.chat").current().win_composer); return 1 end)()' >/dev/null
   "$E" keys A
   "$E" lua "(function() vim.paste({ \"$PASEO_E2E_ROOT/pic.png\" }, -1); return 1 end)()" >/dev/null
-  "$E" wait "($composer):find(\"[Image #3]\", 1, true) ~= nil" 10 || fail "$surface: pasting the path attached nothing"
+  "$E" wait "($composer):find(\"[Image #3]\", 1, true) ~= nil" 10 || fail "$surface: pasting the path attached nothing: $("$E" lua "$composer")"
   "$E" wait "($composer):find(\"pic.png\", 1, true) == nil" 5 || fail "$surface: the path was pasted as text too"
   "$E" keys Escape
+  [ "$("$E" lua "$composer")" = "[Image #1][Image #2][Image #3]" ] \
+    || fail "$surface: the placeholders are not whole: $("$E" lua "$composer")"
+
+  # DELETING A PLACEHOLDER TAKES THE IMAGE BACK OUT. They used to ride along
+  # whether or not their placeholder survived.
+  "$E" lua '(function() local c = require("paseo.ui.chat").current(); vim.api.nvim_buf_set_lines(c.composer, 0, -1, false, { "only [Image #3]" }); require("paseo.ui.chat").prune_images(c); return 1 end)()' >/dev/null
+  "$E" wait '#require("paseo.ui.chat").current().images == 1' 5 || fail "$surface: a deleted placeholder kept its image"
+  [ "$("$E" lua "$composer")" = "only [Image #1]" ] || fail "$surface: not renumbered: $("$E" lua "$composer")"
   "$E" shot "paste-$surface" >/dev/null
 done

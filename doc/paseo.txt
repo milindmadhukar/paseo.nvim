@@ -231,6 +231,8 @@ attached instead of typed. Several at once are fine.
 An attached image shows as a placeholder you can refer to: >
     [Image #1] why is the right-hand panel empty here?
 <
+The placeholder IS the attachment: delete it and the image is not sent. The
+ones left are renumbered to the order they are sent in.
 From a code buffer, `require("paseo").paste_image()` attaches the clipboard's
 image to the chat, and `paste_image("~/shot.png")` a file.
 
