@@ -320,7 +320,9 @@ app's sidebar lays them out. One status character leads each row: >
 A workspace's row ends with its lines changed (`+120 -7`), and one with a pull
 request has a line under it with its checks and review state.
 
-Every real line is a row, so `j` `k`, counts, `gg` `G` and `/` work as usual.
+Every real line under the project's is a row, so `j` `k`, counts, `gg` `G`
+and `/` work as usual. The project's line takes no cursor: `k` on the first
+row does nothing, and nothing wraps round.
 The keys follow nvim-tree's (`g?` lists them):
 
     <CR> o      open the session; on a workspace, fold or unfold it

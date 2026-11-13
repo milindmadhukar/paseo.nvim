@@ -1972,7 +1972,25 @@ function M.buf(keys)
       end
       local cursor = api.nvim_win_get_cursor(0)
       local row = rows[cursor[1]]
-      if row and cursor[2] < row.name_col then
+      if not row then
+        -- ONLY ROWS TAKE THE CURSOR. The project's line heads the list and
+        -- is not one, so `k` (or `gg`, a click) there is the first row
+        -- again: nothing happens. Left there, the next redraw -- ten a
+        -- second while anything spins -- re-seated it on the workspace you
+        -- are in, wherever that was: a jump to the bottom.
+        local count = api.nvim_buf_line_count(0)
+        for _, step in ipairs { 1, -1 } do
+          local line = cursor[1] + step
+          while line >= 1 and line <= count do
+            if rows[line] then
+              return place(line)
+            end
+            line = line + step
+          end
+        end
+        return
+      end
+      if cursor[2] < row.name_col then
         pcall(api.nvim_win_set_cursor, 0, { cursor[1], row.name_col })
       end
     end,

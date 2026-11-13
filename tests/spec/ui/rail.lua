@@ -248,6 +248,23 @@ local function test_toggle()
     eq("rail: and opens nothing", opened, nil)
     rail.open_workspace()
     eq("rail: O opens the one under the cursor", opened and opened.name, rail.current().name)
+
+    -- The project's line is not a row: `gg` lands on the first row, and `k`
+    -- there does nothing -- nor does the next redraw move it, which once
+    -- re-seated the cursor on the workspace you are in, at the bottom.
+    -- (`CursorMoved` by hand: a real Neovim fires it after each key, a
+    -- headless `feedkeys` does not.)
+    local function key(lhs)
+      vim.api.nvim_feedkeys(lhs, "x", false)
+      api.nvim_exec_autocmds("CursorMoved", { buffer = api.nvim_win_get_buf(win) })
+    end
+    key "gg"
+    local top = api.nvim_win_get_cursor(win)[1]
+    truthy("rail: gg is on the first row, not the heading", top > 1 and rail.current() ~= nil, top)
+    key "k"
+    eq("rail: k on the first row stays on it", api.nvim_win_get_cursor(win)[1], top)
+    rail.draw()
+    eq("rail: and a redraw leaves it there", api.nvim_win_get_cursor(win)[1], top)
     api.nvim_set_current_win(chat.win_composer)
 
     -- Toggle off: the window goes, the panes take the room back, and the
