@@ -487,6 +487,74 @@ local function test_sessions()
       rail.current_session() and rail.current_session().item.id,
       "s-1"
     )
+
+    -- `.`: what you can do to the row under the cursor, as a menu -- only
+    -- what that row can do, each with the key that does it without the menu.
+    local function labels()
+      return vim.tbl_map(function(item)
+        return item.label .. "=" .. item.lhs
+      end, rail.actions())
+    end
+    local on_agent = table.concat(labels(), ",")
+    for _, want in ipairs {
+      "Open=<CR>",
+      "New agent in this workspace=a",
+      "New agent in a new worktree=w",
+      "Fork this agent=f",
+      "Copy the agent ID=y",
+      "Archive this agent=d",
+    } do
+      truthy("actions: an agent offers " .. want, on_agent:find(want, 1, true), on_agent)
+    end
+    truthy("actions: but not a terminal's rename", not on_agent:find("Rename", 1, true), on_agent)
+    truthy("actions: nor a workspace's pin", not on_agent:find("Pin", 1, true), on_agent)
+
+    local fork, forked = require "paseo.fork", {}
+    local saved_fork, saved_select = fork.start, vim.ui.select
+    local fork_ok, fork_err = pcall(function()
+      fork.start = function(source)
+        forked[#forked + 1] = source
+      end
+      vim.api.nvim_feedkeys("f", "x", false)
+      eq("fork: f forks the agent under the cursor", forked[1] and forked[1].agent_id, "s-1")
+      eq("fork: from its workspace's directory", forked[1] and forked[1].root, root .. "/a")
+
+      local offered
+      vim.ui.select = function(items, opts, on_choice)
+        offered = opts.prompt
+        for _, item in ipairs(items) do
+          if item.label == "Fork this agent" then
+            return on_choice(item)
+          end
+        end
+        on_choice(nil)
+      end
+      rail.menu()
+      vim.wait(200, function()
+        return #forked == 2
+      end)
+      eq("menu: titled with the row", offered, "first agent")
+      eq("menu: a choice runs on the row it was opened on", forked[2] and forked[2].agent_id, "s-1")
+    end)
+    fork.start, vim.ui.select = saved_fork, saved_select
+    if not fork_ok then
+      error(fork_err, 0)
+    end
+
+    vim.api.nvim_feedkeys("j", "x", false)
+    local on_task = table.concat(labels(), ",")
+    truthy(
+      "actions: a provider subagent cannot be forked",
+      not on_task:find("Fork", 1, true),
+      on_task
+    )
+    truthy("actions: or archived", not on_task:find("Archive", 1, true), on_task)
+    truthy(
+      "actions: but still starts in its workspace",
+      on_task:find("New agent in this workspace", 1, true),
+      on_task
+    )
+    vim.api.nvim_feedkeys("k", "x", false)
     vim.api.nvim_feedkeys("j", "x", false)
     eq(
       "rail: j walks into its subagents",

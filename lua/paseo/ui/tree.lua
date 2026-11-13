@@ -274,6 +274,33 @@ function M.open(node, chat)
   require("paseo.pickers.subagents").open_one(node.item, parent)
 end
 
+---Is `node` an agent of its own: one with a conversation to fork and a
+---session to archive? A terminal is not, and neither is a provider subagent,
+---which is a turn of its parent's.
+---@param node table|nil
+---@return boolean
+function M.is_agent(node)
+  return node ~= nil
+    and (node.kind == "agent" or (node.kind == "subagent" and node.item.kind == "paseo"))
+end
+
+---Fork the agent: |paseo.fork|'s menu, same conversation, here or in a
+---worktree of its own -- exactly what `fork` from its conversation does.
+---@param node table
+---@param chat table  The chat on screen.
+function M.fork(node, chat)
+  if not M.is_agent(node) then
+    local why = node.kind == "terminal" and "a terminal has no conversation to fork"
+      or "a provider subagent is part of its parent's turn; fork the parent"
+    return vim.notify("paseo: " .. why, vim.log.levels.INFO)
+  end
+  require("paseo.fork").start {
+    agent_id = node.item.id,
+    root = node.ws and node.ws.directory or chat.root,
+    host_id = node.ws and node.ws.hostId or chat.host_id,
+  }
+end
+
 ---Archive the agent, or kill the terminal -- asked first.
 ---@param node table
 ---@param chat table

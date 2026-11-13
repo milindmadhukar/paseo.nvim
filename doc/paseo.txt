@@ -390,7 +390,8 @@ ui.native                                                           table
                                                 *paseo-config.ui.native.hints*
     `hints` are the KEY HINTS, OFF unless you ask for them: `winbar` is the
     `code  panel  rail  close` at the right of the conversation's winbar,
-    `rail` the `a new  w worktree  g? keys` line under the rail's last row.
+    `rail` the `a new  w worktree  . actions  g? keys` line under the rail's
+    last row.
     `hints = true` (or `false`) sets both. Either way `g?` in the rail lists
     its keys, and every one of them is also a command and a function
     (|paseo-native-api|). `ui.float.rail.hints` is the old name for `rail`,
@@ -2094,12 +2095,17 @@ job (`g?` lists them): >
     K J       first / last sibling
     W E       fold everything (the cursor stays in its workspace) / unfold
               everything
-    a         new agent in the workspace under the cursor    |paseo-new|
-    w         new agent in a new workspace
+    a         new agent in the workspace under the cursor, from any of
+              its rows                                        |paseo-new|
+    w         new agent in a new worktree
     t  c      new terminal in the workspace under the cursor
+    f         fork the agent: the same conversation, beside it or in a
+              worktree of its own (asks which)               |paseo-fork|
     y         copy the agent's ID
     R         rename the terminal
     d         archive the agent / kill the terminal (asked first)
+    .         what you can do to the row under the cursor, as a menu
+              (|vim.ui.select|), each with its key; right-click too
     m  r      pin the workspace / refetch the list
     g?        these keys
     q <Esc> <C-h> <C-s>   back to where you were typing
@@ -2334,7 +2340,8 @@ Forking an agent session ~
 
 Press `f` in normal mode in either chat buffer. Both chat surfaces advertise
 it on their hint bar; it is not a key you are expected to find by pressing
-letters. The daemon snapshots the COMPLETE conversation available at that
+letters. On the rail, `f` forks the agent under the cursor, whichever one is
+on screen (|paseo-rail|). The daemon snapshots the COMPLETE conversation available at that
 moment; no cursor or message boundary is sent.
 
 WHERE THE FORK GOES is the first question, because it is the only one whose

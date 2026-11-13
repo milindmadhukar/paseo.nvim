@@ -960,7 +960,12 @@ function M.build(width)
     -- As BOUND (`keys.rail` remaps), and a key you unbound is not offered.
     local key = require "paseo.ui.keys"
     local line = {}
-    for _, hint in ipairs { { "a", "new" }, { "w", "worktree" }, { "g?", "keys" } } do
+    for _, hint in ipairs {
+      { "a", "new" },
+      { "w", "worktree" },
+      { ".", "actions" },
+      { "g?", "keys" },
+    } do
       local lhs = key.label("rail", hint[1])
       if lhs then
         line[#line + 1] = { (#line == 0 and PAD or "  ") .. lhs, "PaseoKey" }
@@ -1399,6 +1404,13 @@ function M.start(kind)
   require("paseo.start").new(require("paseo.ui.tree").context(ws, chat, showing), kind)
 end
 
+---Is the row an agent of its own (|paseo.ui.tree| `is_agent`)?
+---@param row table
+---@return boolean
+local function tree_is_agent(row)
+  return require("paseo.ui.tree").is_agent(row.node)
+end
+
 ---Act on the session under the cursor, if there is one.
 ---@param fn fun(node: table, chat: table)
 local function on_session(fn)
@@ -1416,10 +1428,21 @@ end
 ---The rail's keys: what each one does and what `g?` says about it, in one
 ---table, so the two cannot drift. nvim-tree's where it has one for the job.
 ---@param keys { back: fun(), toggle?: string|false, focus?: string|false, sessions?: string|false, on_toggle: fun() }
----@return { [1]: string|false|nil, [2]: fun(), [3]: string }[]
+---
+---`menu`, on the entries `.` offers: the row under the cursor in, the label
+---that row's menu gives the key out -- nil where it does nothing there, so a
+---terminal is never offered a fork.
+---@return { [1]: string|false|nil, [2]: fun(), [3]: string, menu?: fun(row: table): string|nil }[]
 local function keymap(keys)
   return {
-    { "<CR>", M.open_current, "open the session / fold the workspace" },
+    {
+      "<CR>",
+      M.open_current,
+      "open the session / fold the workspace",
+      menu = function(row)
+        return row.node and "Open"
+      end,
+    },
     { "o", M.open_current, "open the session / fold the workspace" },
     { "<2-LeftMouse>", M.open_current, "open the session / fold the workspace" },
     { "l", M.into, "unfold, step in, or open" },
@@ -1451,7 +1474,14 @@ local function keymap(keys)
       end,
       "fold or unfold",
     },
-    { "O", M.open_workspace, "open the workspace as a place" },
+    {
+      "O",
+      M.open_workspace,
+      "open the workspace as a place",
+      menu = function(row)
+        return not row.node and "Open the workspace"
+      end,
+    },
     { "P", M.parent, "up to the parent" },
     {
       ">",
@@ -1500,14 +1530,20 @@ local function keymap(keys)
       function()
         M.start "here"
       end,
-      "start something here (the new-task screen)",
+      "new agent in this workspace (the new-task screen)",
+      menu = function()
+        return "New agent in this workspace"
+      end,
     },
     {
       "w",
       function()
         M.start "workspace"
       end,
-      "start something in a new worktree",
+      "new agent in a new worktree",
+      menu = function()
+        return "New agent in a new worktree"
+      end,
     },
     {
       "t",
@@ -1515,6 +1551,19 @@ local function keymap(keys)
         M.start "terminal"
       end,
       "new terminal in this workspace",
+      menu = function()
+        return "New terminal in this workspace"
+      end,
+    },
+    {
+      "f",
+      on_session(function(node, chat)
+        require("paseo.ui.tree").fork(node, chat)
+      end),
+      "fork this agent (here, or into a new worktree)",
+      menu = function(row)
+        return tree_is_agent(row) and "Fork this agent"
+      end,
     },
     {
       "c",
@@ -1531,6 +1580,9 @@ local function keymap(keys)
         end
       end),
       "copy the agent ID",
+      menu = function(row)
+        return row.node and row.node.kind ~= "terminal" and "Copy the agent ID"
+      end,
     },
     {
       -- `R`, not nvim-tree's `r`: `r` is re-fetch on every panel.
@@ -1541,6 +1593,9 @@ local function keymap(keys)
         end
       end),
       "rename this terminal",
+      menu = function(row)
+        return row.node and row.node.kind == "terminal" and "Rename this terminal"
+      end,
     },
     {
       "d",
@@ -1548,6 +1603,12 @@ local function keymap(keys)
         require("paseo.ui.tree").remove(node, chat)
       end),
       "archive this agent / kill this terminal",
+      menu = function(row)
+        if row.node and row.node.kind == "terminal" then
+          return "Kill this terminal"
+        end
+        return tree_is_agent(row) and "Archive this agent"
+      end,
     },
     {
       "r",
@@ -1556,7 +1617,18 @@ local function keymap(keys)
       end,
       "refetch the workspaces",
     },
-    { "m", M.toggle_pin, "pin or unpin this workspace" },
+    {
+      "m",
+      M.toggle_pin,
+      "pin or unpin this workspace",
+      menu = function(row)
+        if row.kind == "workspace" and row.ws.id then
+          return row.ws.pinned and "Unpin this workspace" or "Pin this workspace"
+        end
+      end,
+    },
+    { ".", M.menu, "what you can do to this row, as a menu" },
+    { "<RightMouse>", M.menu_at_mouse, "what you can do to this row, as a menu" },
     { "g?", M.help, "these keys" },
     -- Back to where you were typing. `<Esc>` too: in a list, it is "I am done
     -- here".
@@ -1572,6 +1644,97 @@ end
 
 ---@type table|nil
 local bound
+
+---What `.` offers on the row under the cursor, in the order of `keymap`: each
+---as the menu says it, with the key that does the same thing without it.
+---As BOUND, so a key you moved shows where it went and one you unbound is not
+---offered.
+---@return { label: string, lhs: string, fn: fun() }[]
+function M.actions()
+  local row = cursor_row()
+  if not (row and bound) then
+    return {}
+  end
+  local out, seen = {}, {}
+  for _, entry in ipairs(bound) do
+    local default = entry.default or entry[1]
+    if entry.menu and not seen[default] then
+      seen[default] = true
+      local label = entry.menu(row)
+      if label then
+        out[#out + 1] = { label = label, lhs = entry[1], fn = entry[2] }
+      end
+    end
+  end
+  return out
+end
+
+---`.`: the row's actions as a menu -- the Paseo app's right-click, through
+---`vim.ui.select`, so it is whatever picker you have. A refetch can redraw the
+---rail while it is open; the action runs on the row you opened it on, found
+---again by key, not on whatever is on that line now.
+function M.menu()
+  local row, line = cursor_row()
+  local items = M.actions()
+  if not row or #items == 0 then
+    return
+  end
+  local key = row.key
+  local title = row.node and (row.node.item.title or row.node.item.name or row.node.item.id)
+    or row.ws.name
+    or vim.fs.basename(row.ws.directory or "")
+  local width = 0
+  for _, item in ipairs(items) do
+    width = math.max(width, vim.fn.strdisplaywidth(item.label))
+  end
+  vim.ui.select(items, {
+    prompt = tostring(title),
+    kind = "paseo.rail",
+    format_item = function(item)
+      local gap = width - vim.fn.strdisplaywidth(item.label) + 2
+      return item.label .. string.rep(" ", gap) .. item.lhs
+    end,
+  }, function(choice)
+    if not choice then
+      return
+    end
+    -- After the picker has closed, so an action that asks (`d`) can open
+    -- one of its own.
+    vim.schedule(function()
+      if not M.win() then
+        return
+      end
+      local at
+      if rows[line] and rows[line].key == key then
+        at = line
+      else
+        for l, r in pairs(rows) do
+          if r.key == key then
+            at = l
+            break
+          end
+        end
+      end
+      if not at then
+        return vim.notify("paseo: that row is gone", vim.log.levels.INFO)
+      end
+      api.nvim_set_current_win(win)
+      place(at)
+      choice.fn()
+    end)
+  end)
+end
+
+---`<RightMouse>`: the menu, on the row you clicked.
+function M.menu_at_mouse()
+  local mouse = vim.fn.getmousepos()
+  if not (M.win() and mouse.winid == win and rows[mouse.line]) then
+    return
+  end
+  api.nvim_set_current_win(win)
+  place(mouse.line)
+  M.menu()
+end
 
 ---`g?`: the keys, in a float over the rail, as nvim-tree's help is.
 function M.help()
@@ -1673,7 +1836,7 @@ function M.buf(keys)
     local lhss = entry.configured and key.list(entry[1]) or key.resolve("rail", entry[1])
     for _, lhs in ipairs(lhss) do
       vim.keymap.set("n", lhs, entry[2], { buffer = buf, nowait = true, silent = true, desc = "paseo: " .. entry[3] })
-      bound[#bound + 1] = { lhs, entry[2], entry[3], default = entry[1] }
+      bound[#bound + 1] = { lhs, entry[2], entry[3], default = entry[1], menu = entry.menu }
     end
   end
 

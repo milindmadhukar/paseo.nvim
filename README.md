@@ -299,6 +299,7 @@ defaults.
 
 In either chat buffer, press `f` in normal mode — both surfaces advertise it on
 their hint bar — to fork the complete conversation available at that moment.
+On the rail, `f` forks the agent under the cursor, whichever one is on screen.
 The first question is where it goes, because it is the only one whose answer
 changes anything on disk:
 
@@ -711,8 +712,10 @@ lists them):
 | `O` | open the workspace as a place: its newest agent, one more buffer on the row |
 | `P` / `<` `>` / `K` `J` | the parent; the previous and next sibling; the first and last |
 | `W` / `E` | fold everything (the cursor stays in its workspace); unfold everything |
-| `a` / `w` / `t` | start an agent in the workspace under the cursor, an agent in a new workspace, a terminal (`c` too) |
+| `a` / `w` / `t` | a new agent in the workspace under the cursor (on any of its rows), an agent in a new worktree, a terminal (`c` too) |
+| `f` | fork the agent under the cursor: same conversation, beside it or in a worktree of its own (asks which) |
 | `y` / `R` / `d` | copy an agent's ID, rename a terminal, archive an agent or kill a terminal (asked first) |
+| `.` / right-click | what you can do to the row under the cursor, as a menu, each with its key |
 | `m` / `r` | pin a workspace, refetch the list |
 | `g?` | the keys |
 | `q` / `<Esc>` / `<C-h>` / `<C-s>` | back to where you were typing |
@@ -723,7 +726,7 @@ of a workspace's sessions.
 
 **Key hints are off by default.** `ui.native.hints = { winbar = true, rail =
 true }` (or just `hints = true`) puts `code  panel  rail  close` on the
-conversation's winbar and `a new  w worktree  g? keys` under the rail. `g?`
+conversation's winbar and `a new  w worktree  . actions  g? keys` under the rail. `g?`
 in the rail lists its keys either way.
 
 **Pinned workspaces lead it**, with a pin. `m` pins or unpins the one under the
@@ -1690,7 +1693,7 @@ is not a Paseo tab, and a terminal is not an agent session.
 | **Provider** | The agent backend, such as Claude, Codex, or OpenCode. |
 | **Model** | A provider-specific model used by an agent. |
 | **Subagent** | An agent created or coordinated by another agent as part of its work. |
-| **Fork** | A new agent session initialized from a source agent's conversation snapshot. paseo.nvim currently places the fork in a new workspace. |
+| **Fork** | A new agent session initialized from a source agent's conversation snapshot. It goes beside the source agent or into a worktree of its own; you are asked which. |
 
 Isolation belongs to the **workspace**, not the agent session. Two agent sessions in one
 workspace edit the same files on purpose — that is what makes "one agent
