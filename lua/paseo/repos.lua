@@ -34,20 +34,6 @@ local M = {}
 ---@type table<string, paseo.Repo|false>
 local cache = {}
 
----@param args string[]
----@param cwd string
----@return string|nil stdout, trimmed; nil on any failure
-local function git(args, cwd)
-  local cmd = vim.list_extend({ "git", "-C", cwd }, args)
-  local ok, res = pcall(function()
-    return vim.system(cmd, { text = true }):wait()
-  end)
-  if not ok or res.code ~= 0 then
-    return nil
-  end
-  return (res.stdout or ""):gsub("%s+$", "")
-end
-
 ---@param path string
 ---@return string absolute, symlink-resolved, no trailing slash
 local function normalise(path)
@@ -77,12 +63,10 @@ function M.resolve(path)
     return hit or nil
   end
 
-  -- One fork for all three. --path-format=absolute is what makes
-  -- --git-common-dir absolute; on its own it can come back relative.
-  local query = { "rev-parse", "--path-format=absolute" }
-  vim.list_extend(query, { "--show-toplevel", "--git-dir", "--git-common-dir" })
-  local out = git(query, dir)
-  local worktree, gitdir, common = unpack(vim.split(out or "", "\n", { trimempty = true }))
+  -- What `git rev-parse --show-toplevel --git-dir --git-common-dir` would
+  -- say, read off the disk: no fork. See |paseo.gitfs|.
+  local found = require("paseo.gitfs").find(dir)
+  local worktree, gitdir, common = found and found.worktree, found and found.gitdir, found and found.common
   if not worktree or not gitdir then
     cache[dir] = false
     return nil

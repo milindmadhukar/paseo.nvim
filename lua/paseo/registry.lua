@@ -178,14 +178,9 @@ end
 ---@param dir string
 ---@return string|nil
 local function main_checkout(dir)
-  local res = vim
-    .system({ "git", "-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir" }, { text = true })
-    :wait()
-  local common = res.code == 0 and vim.trim(res.stdout or "") or ""
-  if vim.fs.basename(common) ~= ".git" then
-    return nil
-  end
-  return (vim.fn.resolve(vim.fs.dirname(common)):gsub("/+$", ""))
+  -- Off the disk, not a `git rev-parse` fork: |paseo.gitfs|.
+  local main = require("paseo.gitfs").main_checkout(dir)
+  return main and (vim.fn.resolve(main):gsub("/+$", "")) or nil
 end
 
 ---The multi-repo project `start` belongs to: the nearest ancestor holding a

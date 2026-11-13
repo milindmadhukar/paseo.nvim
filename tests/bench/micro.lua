@@ -361,6 +361,12 @@ bench("workspaces.strategy (repos dir)", function()
   ws_mod.strategy(repos_dir)
 end, 5, uncached)
 
+-- What the new-task screen asks: is there something to discover? (Creating
+-- still pays for the description above.)
+bench("workspaces.strategy (repos dir, peek)", function()
+  ws_mod.strategy(repos_dir, { peek = true })
+end, 5, uncached)
+
 bench("workspaces.here", function()
   ws_mod.here(project)
 end, 10, uncached)

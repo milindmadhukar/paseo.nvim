@@ -195,7 +195,59 @@ local function test_quietly()
   vim.api.nvim_buf_delete(buf, { force = true })
 end
 
+--- |paseo.gitfs| answers what `git rev-parse` would, for every shape the
+--- plugin meets: a checkout, a subdirectory, a linked worktree, a submodule-
+--- style `.git` file, a detached HEAD, and no repository at all.
+local function test_gitfs()
+  local gitfs = require "paseo.gitfs"
+  local function git(dir, ...)
+    local res = vim.system(vim.list_extend({ "git", "-C", dir }, { ... }), { text = true }):wait()
+    return res.code == 0 and vim.trim(res.stdout) or nil
+  end
+  local function sh(dir, ...)
+    vim.system(vim.list_extend({ "git", "-C", dir }, { ... }), { text = true }):wait()
+  end
+  local root = vim.fn.resolve(vim.fn.tempname())
+  local repo = root .. "/repo"
+  vim.fn.mkdir(repo .. "/sub/deeper", "p")
+  sh(repo, "init", "-q", "-b", "trunk")
+  vim.fn.writefile({ "x" }, repo .. "/f")
+  sh(repo, "add", "f")
+  sh(repo, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-qm", "i")
+  sh(repo, "worktree", "add", "-q", "-b", "feature", root .. "/wt")
+  vim.fn.mkdir(root .. "/plain", "p")
+
+  for _, dir in ipairs { repo, repo .. "/sub/deeper", root .. "/wt" } do
+    local found = gitfs.find(dir)
+    local want = vim.split(
+      git(dir, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir"),
+      "\n"
+    )
+    eq("gitfs: toplevel of " .. vim.fs.basename(dir), found and found.worktree, vim.fn.resolve(want[1]))
+    eq("gitfs: git dir of " .. vim.fs.basename(dir), found and found.gitdir, vim.fn.resolve(want[2]))
+    eq("gitfs: common dir of " .. vim.fs.basename(dir), found and found.common, vim.fn.resolve(want[3]))
+  end
+  eq("gitfs: the checkout's branch", gitfs.branch(gitfs.find(repo).gitdir), "trunk")
+  eq("gitfs: the worktree's own branch", gitfs.branch(gitfs.find(root .. "/wt").gitdir), "feature")
+  eq("gitfs: a worktree's main checkout is the repo", gitfs.main_checkout(root .. "/wt"), repo)
+  truthy("gitfs: the checkout's root is a root", gitfs.is_root(repo))
+  truthy("gitfs: a directory inside it is not", not gitfs.is_root(repo .. "/sub"))
+  truthy("gitfs: a linked worktree is a root", gitfs.is_root(root .. "/wt"))
+  eq("gitfs: no repository, no answer", gitfs.find(root .. "/plain"), nil)
+  sh(repo, "checkout", "-q", "--detach")
+  eq("gitfs: detached is no branch", gitfs.branch(gitfs.find(repo).gitdir), nil)
+
+  -- The new-task screen's peek: repositories below, without describing them.
+  local ws = require "paseo.workspaces"
+  eq("peek: repos below a plain directory is discover", ws.strategy(root, { peek = true }).kind, "discover")
+  eq("peek: and no manifest is built to say so", ws.strategy(root, { peek = true }).manifest, nil)
+  eq("peek: nothing below is local", ws.strategy(root .. "/plain", { peek = true }).kind, "local")
+  eq("peek: a checkout is a worktree, as without it", ws.strategy(repo, { peek = true }).kind, "worktree")
+  vim.fn.delete(root, "rf")
+end
+
 return {
+  { "perf: git locations off the disk", test_gitfs },
   { "perf: conceal off for a burst of writes, and back", test_quietly },
   { "perf: streamed chunks share a draw", test_stream_coalescing },
   { "perf: the agent directory's kept answers", test_agent_memo },

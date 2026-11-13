@@ -33,8 +33,9 @@ end
 ---@param dir string
 ---@return boolean
 local function is_repo(dir)
-  local top = git(dir, { "rev-parse", "--show-toplevel" })
-  return top ~= nil and vim.fn.resolve(top) == vim.fn.resolve(dir)
+  -- A stat or two, not a fork: discovery asks this of every directory three
+  -- levels down. See |paseo.gitfs|.
+  return require("paseo.gitfs").is_root(dir)
 end
 
 -- ---------------------------------------------------------------- discovery
@@ -195,6 +196,44 @@ local function describe(root, name, path)
     table.sort(repo[key])
   end
   return repo, notes
+end
+
+---Are there repositories below `root` to discover? The question the
+---new-task screen asks before it draws, answered without describing them:
+---`discover` forks git several times per repository and measures every
+---ignored directory, which is creation's business, not the screen's.
+---@param root string
+---@return boolean
+function M.has_repos(root)
+  root = vim.fn.fnamemodify(vim.fn.expand(root), ":p"):gsub("/+$", "")
+  local function walk(dir, depth)
+    if depth > MAX_DEPTH then
+      return false
+    end
+    local handle = vim.uv.fs_scandir(dir)
+    if not handle then
+      return false
+    end
+    while true do
+      local name, kind = vim.uv.fs_scandir_next(handle)
+      if not name then
+        return false
+      end
+      local path = vim.fs.joinpath(dir, name)
+      if
+        (kind == "directory" or kind == "link")
+        and name ~= ".git"
+        and name ~= manifest.LEGACY_DIR
+        and name ~= manifest.dir()
+        and name ~= "node_modules"
+      then
+        if is_repo(path) or walk(path, depth + 1) then
+          return true
+        end
+      end
+    end
+  end
+  return walk(root, 1)
 end
 
 ---Generate a manifest by looking at a project on disk.

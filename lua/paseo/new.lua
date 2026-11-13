@@ -280,7 +280,8 @@ end
 ---@param ctx paseo.StartContext
 ---@return { kind: string, label: string, base?: string }|nil
 function M.isolation(ctx)
-  local ok, plan = pcall(require("paseo.workspaces").strategy, ctx.local_root or ctx.root)
+  local ok, plan =
+    pcall(require("paseo.workspaces").strategy, ctx.local_root or ctx.root, { peek = true })
   if not ok or not plan then
     return nil
   end

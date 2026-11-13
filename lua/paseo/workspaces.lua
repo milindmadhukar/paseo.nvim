@@ -130,14 +130,12 @@ function M.here(dir)
   if project then
     return normalise(project)
   end
-  local res = vim
-    .system({ "git", "-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir" }, { text = true })
-    :wait()
-  local common = res.code == 0 and vim.trim(res.stdout or "") or ""
   -- `<repo>/.git` for a checkout and every worktree of it. A bare repository
-  -- has no checkout to name, and counts as no repository.
-  if vim.fs.basename(common) == ".git" then
-    return normalise(vim.fs.dirname(common))
+  -- has no checkout to name, and counts as no repository. Read off the disk
+  -- (|paseo.gitfs|): this runs before the new-task screen can draw.
+  local main = require("paseo.gitfs").main_checkout(dir)
+  if main then
+    return normalise(main)
   end
   return dir
 end
@@ -272,12 +270,25 @@ end
 ---@param repo string
 ---@return string
 local function base_of(repo)
-  local branch = git(repo, { "branch", "--show-current" })
+  -- From the files git keeps them in, not a fork each: see |paseo.gitfs|.
+  local gitfs = require "paseo.gitfs"
+  local found = gitfs.find(repo)
+  local branch = found and gitfs.branch(found.gitdir)
   if branch then
     return branch
   end
-  local head = git(repo, { "symbolic-ref", "--short", "refs/remotes/origin/HEAD" })
-  return head and (head:gsub("^origin/", "")) or "main"
+  local f = found and io.open(found.common .. "/refs/remotes/origin/HEAD", "r")
+  local head = f and f:read "*l"
+  if f then
+    f:close()
+  end
+  head = head and head:match "^ref:%s*refs/remotes/origin/(.+)$"
+  if head then
+    return head
+  end
+  -- Detached, and no origin/HEAD on disk: ask git, which knows the rest.
+  local asked = git(repo, { "symbolic-ref", "--short", "refs/remotes/origin/HEAD" })
+  return asked and (asked:gsub("^origin/", "")) or "main"
 end
 
 ---What creating a workspace in `root` would actually do.
@@ -292,9 +303,14 @@ end
 ---is a property of the DIRECTORY, not a question for the person typing. So it
 ---is answered here, once, instead of by remembering whether this project was
 ---the `ws init` kind.
+---
+---`opts.peek` is for a screen deciding what to OFFER: a directory of
+---repositories answers `discover` without the manifest, which takes git forks
+---and directory sizes per repository to write. Creating asks without it.
 ---@param root string
+---@param opts? { peek?: boolean }
 ---@return paseo.Strategy
-function M.strategy(root)
+function M.strategy(root, opts)
   root = (vim.fn.fnamemodify(vim.fn.expand(root), ":p"):gsub("/+$", ""))
 
   -- A manifest answers at its project directory and inside its assembled
@@ -308,13 +324,20 @@ function M.strategy(root)
   -- A git repository needs nothing assembled. This is the case the plugin used
   -- to have no answer for: it fell through to a plain workspace on the primary
   -- checkout, so two "workspaces" were two names for the same files.
-  local top = git(root, { "rev-parse", "--show-toplevel" })
+  local found = require("paseo.gitfs").find(root)
+  local top = found and found.worktree
   if top then
     return { kind = "worktree", root = root, repo = top, base = base_of(top) }
   end
 
   -- Not a repo, but repos live below: the manifest is MISSING rather than
   -- deliberately absent, so it gets written on the way past.
+  if opts and opts.peek then
+    if require("paseo.workspace").has_repos(root) then
+      return { kind = "discover", root = root, project = root }
+    end
+    return { kind = "local", root = root }
+  end
   local m, notes = require("paseo.workspace").discover(root)
   if m then
     return { kind = "discover", root = root, project = root, manifest = m, notes = notes }
