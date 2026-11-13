@@ -135,7 +135,7 @@ end
 ---on the path from a key to a painted window.
 M.HOT = {
   ["paseo.ui.rail"] = { "build", "draw", "load", "spinning", "directory_changed", "reveal", "seat" },
-  ["paseo.ui.transcript"] = { "stream", "upsert", "redraw", "draw" },
+  ["paseo.ui.transcript"] = { "stream", "flush", "upsert", "redraw", "rerender" },
   ["paseo.ui.sidebar"] = { "header", "refresh", "parts" },
   ["paseo.ui.composer"] = { "refresh" },
   ["paseo.ui.native"] = { "open", "show", "sync", "toggle_rail", "toggle_panel", "redraw_panels", "refresh" },

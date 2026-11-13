@@ -67,12 +67,15 @@ local function test_subagent_memo()
   local agents = require "paseo.agents"
   local subagents = require "paseo.subagents"
   local host = require("paseo.hosts").selected()
+  -- Its own parent id: the subagents suite leaves provider subagents behind
+  -- under the plain names.
+  local parent = "perf-parent-" .. vim.fn.rand()
   agents._apply {
     kind = "snapshot",
     hostId = host,
-    entries = { { id = "parent", title = "p", status = "idle" } },
+    entries = { { id = parent, title = "p", status = "idle" } },
   }
-  eq("memo: no subagents yet", #subagents.list("parent", host), 0)
+  eq("memo: no subagents yet", #subagents.list(parent, host), 0)
   agents._apply {
     kind = "upsert",
     hostId = host,
@@ -80,20 +83,20 @@ local function test_subagent_memo()
       id = "kid",
       title = "k",
       status = "running",
-      labels = { [subagents.PARENT_LABEL] = "parent" },
+      labels = { [subagents.PARENT_LABEL] = parent },
     },
   }
-  local list = subagents.list("parent", host)
+  local list = subagents.list(parent, host)
   eq("memo: a new Paseo subagent is listed", #list, 1)
-  eq("memo: and counted as running", select(1, subagents.counts("parent", host)), 1)
+  eq("memo: and counted as running", select(1, subagents.counts(parent, host)), 1)
   list[1] = nil
-  eq("memo: a caller's edit does not reach the kept list", #subagents.list("parent", host), 1)
+  eq("memo: a caller's edit does not reach the kept list", #subagents.list(parent, host), 1)
   agents._apply {
     kind = "upsert",
     hostId = host,
-    agent = { id = "kid", title = "k", status = "idle", labels = { [subagents.PARENT_LABEL] = "parent" } },
+    agent = { id = "kid", title = "k", status = "idle", labels = { [subagents.PARENT_LABEL] = parent } },
   }
-  eq("memo: and it stops running when it stops", select(1, subagents.counts("parent", host)), 0)
+  eq("memo: and it stops running when it stops", select(1, subagents.counts(parent, host)), 0)
   agents._apply { kind = "snapshot", hostId = host, entries = {} }
 end
 
@@ -119,7 +122,56 @@ local function test_paths()
   vim.fn.delete(b, "rf")
 end
 
+--- Streamed chunks are drawn at most once a frame budget. The text is never
+--- behind, and nothing is drawn out of order.
+local function test_stream_coalescing()
+  local transcript = require "paseo.ui.transcript"
+  local chat = { conversation = vim.api.nvim_create_buf(false, true) }
+  transcript.reset(chat)
+  local function text()
+    return table.concat(vim.api.nvim_buf_get_lines(chat.conversation, 0, -1, false), "\n")
+  end
+  transcript.upsert(chat, { kind = "user", text = "go" })
+  local tick = vim.api.nvim_buf_get_changedtick(chat.conversation)
+  for i = 1, 50 do
+    transcript.stream(chat, "w" .. i .. " ")
+  end
+  local writes = vim.api.nvim_buf_get_changedtick(chat.conversation) - tick
+  truthy(("stream: fifty chunks in one go are not fifty writes (%d)"):format(writes), writes < 10)
+  local block = chat.blocks[chat.order[#chat.order]]
+  truthy("stream: but the block's text has every chunk", block.item.text:find("w50 ", 1, true) ~= nil)
+
+  -- A card after the sentence lands under ALL of it.
+  transcript.upsert(chat, { kind = "notice", text = "after" })
+  truthy("stream: what streamed is drawn before what follows it", text():find("w50", 1, true) ~= nil)
+
+  -- And a pending draw lands on its own, with nothing else to push it.
+  transcript.stream(chat, "late ")
+  transcript.stream(chat, "words")
+  truthy(
+    "stream: the last chunk is drawn without another event",
+    vim.wait(1000, function()
+      return text():find("late words", 1, true) ~= nil
+    end, 5)
+  )
+
+  -- `close` (a turn ending) draws it too, at once.
+  transcript.stream(chat, " more")
+  transcript.stream(chat, " end")
+  transcript.close(chat)
+  truthy("stream: a turn's end draws what was pending", text():find("words more end", 1, true) ~= nil)
+  eq("stream: and leaves nothing scheduled", chat.stream_timer, nil)
+
+  -- A reset drops what was waiting rather than drawing it onto nothing.
+  transcript.stream(chat, "a")
+  transcript.stream(chat, "b")
+  transcript.reset(chat)
+  eq("stream: a reset forgets the pending draw", chat.stream_pending, nil)
+  vim.api.nvim_buf_delete(chat.conversation, { force = true })
+end
+
 return {
+  { "perf: streamed chunks share a draw", test_stream_coalescing },
   { "perf: the agent directory's kept answers", test_agent_memo },
   { "perf: the subagent lists' kept answers", test_subagent_memo },
   { "perf: kept path spellings", test_paths },

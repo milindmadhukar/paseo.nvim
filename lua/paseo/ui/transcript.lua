@@ -48,6 +48,9 @@ end
 ---Reset a chat's block bookkeeping. Called on open and by `replaced`.
 ---@param chat table
 function M.reset(chat)
+  -- What was waiting to be drawn belongs to the blocks about to go.
+  chat.stream_pending = nil
+  M.flush(chat)
   chat.blocks = {}
   chat.order = {}
   chat.by_call = {}
@@ -424,12 +427,61 @@ local function draw(chat, block, row, old_height)
   pending.pin(chat)
 end
 
+-- ------------------------------------------------------------- streaming
+
+---Draw what has streamed into the open block since it was last drawn.
+---
+---Chunks are applied to the block's text the moment they arrive and DRAWN at
+---most once per frame budget (`M.stream`). Every write to the conversation
+---costs a treesitter pass -- markdown's `conceal_lines` query re-parses the
+---buffer and re-runs its injections on each one, 14 ms at a few hundred
+---lines and growing with the conversation -- so drawing every chunk of a
+---two-thousand-chunk reply was twenty seconds of a frozen editor.
+---
+---Anything else that touches the transcript draws the pending text first, so
+---nothing is ever drawn out of order: a card appended after a sentence lands
+---under the WHOLE sentence.
+---@param chat table
+function M.flush(chat)
+  local id = chat.stream_pending
+  if chat.stream_timer then
+    local timer = chat.stream_timer
+    chat.stream_timer = nil
+    pcall(function()
+      timer:stop()
+      timer:close()
+    end)
+  end
+  if not id then
+    return
+  end
+  chat.stream_pending = nil
+  local block = chat.blocks and chat.blocks[id]
+  if block then
+    local t0 = vim.uv.hrtime()
+    M.rerender(chat, block)
+    chat.stream_cost = (vim.uv.hrtime() - t0) / 1e6
+  end
+  vim.uv.update_time()
+  chat.stream_at = vim.uv.now()
+end
+
+---How long to leave between two draws of a streaming block: three times what
+---the last one cost, so a reply never takes more than about a quarter of the
+---editor's time, and never less than a frame or more than a quarter second.
+---@param chat table
+---@return integer ms
+local function budget(chat)
+  return math.floor(math.min(250, math.max(16, (chat.stream_cost or 0) * 3)))
+end
+
 ---Append a new block to the end of the transcript.
 ---@param chat table
 ---@param item table
 ---@return table block
 function M.append(chat, item)
   M.ensure(chat)
+  M.flush(chat)
   local buf = chat.conversation
   if not (buf and api.nvim_buf_is_valid(buf)) then
     return {}
@@ -601,6 +653,7 @@ end
 ---@return table block
 function M.upsert(chat, item)
   M.ensure(chat)
+  M.flush(chat)
   if item.callId and chat.by_call[item.callId] then
     local block = chat.blocks[chat.by_call[item.callId]]
     if block then
@@ -623,6 +676,7 @@ end
 ---Called when a turn ends: the next reply is a new answer, not more of this.
 ---@param chat table
 function M.close(chat)
+  M.flush(chat)
   chat.open = nil
 end
 
@@ -667,13 +721,31 @@ function M.stream(chat, text, kind)
   block.item.text = (block.item.text or "") .. text
   -- IN PLACE, so `rerender` sees the same table it cached against.
   M.invalidate(block)
-  M.rerender(chat, block)
+
+  -- Drawn now if the last draw was long enough ago, else once the budget is
+  -- up -- with everything that arrived in between. See `M.flush`.
+  if chat.stream_pending and chat.stream_pending ~= block.id then
+    M.flush(chat)
+  end
+  chat.stream_pending = block.id
+  if chat.stream_timer then
+    return
+  end
+  local wait = budget(chat) - (vim.uv.now() - (chat.stream_at or 0))
+  if wait <= 0 then
+    return M.flush(chat)
+  end
+  chat.stream_timer = vim.defer_fn(function()
+    chat.stream_timer = nil
+    M.flush(chat)
+  end, wait)
 end
 
 ---Expand or collapse the block under the cursor.
 ---@param chat table
 function M.toggle_at_cursor(chat)
   M.ensure(chat)
+  M.flush(chat)
   local win = chat.win_conversation
   if not (win and api.nvim_win_is_valid(win)) then
     return
@@ -734,6 +806,7 @@ end
 ---@param opts? { force?: boolean }  `force` for a change the width cannot see.
 function M.redraw(chat, opts)
   M.ensure(chat)
+  M.flush(chat)
   if not (chat.conversation and api.nvim_buf_is_valid(chat.conversation)) then
     return
   end

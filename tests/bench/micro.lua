@@ -257,14 +257,58 @@ bench("agents.event_fanout", function()
   end, 1)
 end)
 
--- STREAMING: an answer arriving as 2000 small chunks, one block.
-bench("transcript.stream x2000", function()
-  transcript.upsert(chat, { kind = "user", text = "go" })
-  for i = 1, 2000 do
-    transcript.stream(chat, (i % 40 == 0) and "\n\n" or ("word%d "):format(i))
+-- STREAMING: an answer arriving as 2000 small chunks, one block -- each
+-- chunk on its own turn of the loop, as the bridge delivers them. Measured as
+-- MAIN-LOOP time (inside the stream calls and the draws they cause), which is
+-- what a key pressed meanwhile waits behind; the wall clock also includes
+-- the loop idling between chunks.
+local function feed(n, gap_ms)
+  local busy = 0
+  local transcript_flush = transcript.flush
+  transcript.flush = function(...)
+    local t0 = vim.uv.hrtime()
+    transcript_flush(...)
+    busy = busy + (vim.uv.hrtime() - t0) / 1e6
   end
+  transcript.upsert(chat, { kind = "user", text = "go" })
+  local i, done = 0, false
+  local timer = vim.uv.new_timer()
+  timer:start(0, gap_ms, vim.schedule_wrap(function()
+    for _ = 1, gap_ms == 0 and 1 or 1 do
+      i = i + 1
+      if i > n then
+        if not timer:is_closing() then
+          timer:stop()
+          timer:close()
+        end
+        done = true
+        return
+      end
+      local t0 = vim.uv.hrtime()
+      transcript.stream(chat, (i % 40 == 0) and "\n\n" or ("word%d "):format(i))
+      busy = busy + (vim.uv.hrtime() - t0) / 1e6
+    end
+  end))
+  vim.wait(120000, function()
+    return done
+  end, 1)
   transcript.close(chat)
-end, 5)
+  transcript.flush = transcript_flush
+  return busy
+end
+
+do
+  local samples = {}
+  for _ = 1, 3 do
+    samples[#samples + 1] = feed(2000, 1)
+  end
+  results["transcript.stream x2000 (loop ms)"] = summarise(samples)
+  io.stdout:write(("%-34s p50 %8.2f ms   p90 %8.2f ms\n"):format(
+    "transcript.stream x2000 (loop ms)",
+    results["transcript.stream x2000 (loop ms)"].p50,
+    results["transcript.stream x2000 (loop ms)"].p90
+  ))
+end
 
 -- HISTORY: a conversation loading into a fresh transcript.
 bench(("transcript.history x%d"):format(#HISTORY), function()
