@@ -162,6 +162,10 @@ end
 ---@type table<string, integer>|nil
 local widths
 
+---The project each cwd is in; see `project_root`.
+---@type table<string, string>
+local roots = {}
+
 ---@param name "rail"|"panel"
 ---@return integer|nil
 function M.width(name)
@@ -196,6 +200,7 @@ end
 function M.reset()
   shown = nil
   widths = nil
+  roots = {}
   expanded = {}
   cache = { root = nil, list = nil, err = nil, loading = false }
 end
@@ -205,8 +210,15 @@ end
 ---The project the rail lists: where you are standing, not what the chat is
 ---pointed at -- see |paseo.ui.panels.workspaces| for why those differ.
 ---@return string
+---By cwd: which project a directory is in does not change while you sit in
+---it, and asking costs a blocking `git rev-parse` -- on every `<C-b>` that
+---showed the rail, before it could paint.
 local function project_root()
-  return require("paseo.workspaces").here()
+  local cwd = vim.uv.cwd() or ""
+  if not roots[cwd] then
+    roots[cwd] = require("paseo.workspaces").here()
+  end
+  return roots[cwd]
 end
 
 local following = false

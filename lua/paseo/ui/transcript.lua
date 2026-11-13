@@ -216,8 +216,15 @@ local function card_for(block, width, markdown)
   -- `stacked` is in the key because it changes the card's FIRST LINE -- it is
   -- the leading blank, present or not -- and a key that ignored it would serve
   -- a stale rendering to the one block whose spacing had just been decided.
+  -- RAW MARKDOWN PROSE IS WIDTH-FREE: soft wrap fits it to the window, so the
+  -- same lines serve every width. Keying it on width rebuilt and REWROTE every
+  -- prose block on each resize -- the rail going on or off -- and each write
+  -- sent render-markdown round the whole buffer again. Only the boxed cards
+  -- really change with width.
+  local kind = block.item and block.item.kind
+  local free = markdown and (kind == "text" or kind == "user")
   local key = ("%d|%s|%d|%s|%s|%s"):format(
-    width,
+    free and 0 or width,
     tostring(block.expanded),
     block.rev or 0,
     tostring(flashing),

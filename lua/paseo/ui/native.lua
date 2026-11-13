@@ -391,10 +391,14 @@ function M.toggle_rail()
     pcall(api.nvim_win_close, win, true)
     require("paseo.ui.rail").set_visible(false)
     M.back()
-    return
+  else
+    require("paseo.ui.rail").set_visible(true)
+    open_rail(t)
   end
-  require("paseo.ui.rail").set_visible(true)
-  open_rail(t)
+  -- ONE PAINT. The conversation just changed width; left to the resize
+  -- watcher, its cards re-laid themselves out 50ms after the rail moved, and
+  -- that second beat was the delay you could see.
+  transcript.redraw(t.chat)
 end
 
 -- ------------------------------------------------------------------- panels

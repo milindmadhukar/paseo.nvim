@@ -152,6 +152,17 @@ local function test_markdown()
   truthy("native: code keeps its indentation", has(lines, "    local x = 1"))
   truthy("native: and an unclosed fence is closed on screen", has(lines, "```"))
 
+  -- The rail going on or off changes the conversation's width. Raw markdown
+  -- soft-wraps, so not one line of it is rewritten: a rewrite is what made
+  -- render-markdown redraw the whole buffer a beat after every `<C-b>`.
+  local width = api.nvim_win_get_width(chat.win_conversation)
+  local tick = api.nvim_buf_get_changedtick(chat.conversation)
+  native.toggle_rail()
+  truthy("native: the rail toggle changed the width", api.nvim_win_get_width(chat.win_conversation) ~= width)
+  eq("native: and prose was not rewritten for it", api.nvim_buf_get_changedtick(chat.conversation), tick)
+  eq("native: the transcript is drawn at the new width at once", chat.rendered_width, transcript.width(chat))
+  native.toggle_rail()
+
   -- Off the native surface it is drawn as it always was.
   native.close(chat)
   eq("native: closing turns markdown mode off", chat.markdown, nil)
