@@ -349,19 +349,74 @@ end
 ---@field images? table[]
 ---@field title? string  The AGENT's title. The workspace's comes from the prompt.
 
+---Branches a worktree could be cut from, most recently committed first: the
+---DAEMON's list (it answers for the host's checkout), else this machine's
+---`git for-each-ref` when the daemon cannot answer.
+---@param cwd string  On the host.
+---@param callback fun(branches: string[])
+---@param host_id? string
+---@param local_cwd? string  The same checkout here, for the fallback.
+function M.branches(cwd, callback, host_id, local_cwd)
+  bridge.ensure(function(err)
+    if err then
+      return callback(require("paseo.ui.manifest").refs(local_cwd or cwd))
+    end
+    bridge.request("branches", { cwd = cwd, limit = 100 }, function(req_err, result)
+      local list = result and result.branches
+      if req_err or type(list) ~= "table" or #list == 0 then
+        return callback(require("paseo.ui.manifest").refs(local_cwd or cwd))
+      end
+      callback(list)
+    end, host_id)
+  end, host_id)
+end
+
+---A workspace name from a prompt, for the one shape Paseo cannot name itself
+---(an assembled workspace): its first few words, lowercased and hyphenated,
+---made unique in `project`.
+---@param prompt string
+---@param project? string
+---@return string
+function M.slug(prompt, project)
+  local words = {}
+  for word in prompt:lower():gmatch "[%w]+" do
+    words[#words + 1] = word
+    if #words == 4 then
+      break
+    end
+  end
+  local base = #words > 0 and table.concat(words, "-") or "task"
+  base = base:sub(1, 40):gsub("%-+$", "")
+  local name, n = base, 1
+  while project and registry.find(name, project) do
+    n = n + 1
+    name = ("%s-%d"):format(base, n)
+  end
+  return name
+end
+
 ---Create a workspace, whatever kind of project this is.
 ---
 ---ONE ENTRY POINT. `strategy` decides the shape, not the caller, and all three
 ---paths converge on the same thing: an ordinary Paseo workspace with a
 ---directory. That is the seam -- Paseo never learns whether it is looking at
 ---six assembled worktrees, one it cut itself, or a plain checkout.
----@param opts { name: string, root?: string, new?: boolean, first?: paseo.FirstAgent, configure?: fun(ctx: table, done: fun(m: table|nil, notes: table[]|nil)) }
+---
+---THE NAME IS OPTIONAL WHERE PASEO CAN NAME IT. A git repo's worktree, and a
+---plain directory, are named by the daemon -- worktree, branch and title --
+---exactly as the app's New workspace does: the title from the first prompt
+---when there is one, a generated slug (`frail-squid`) when there is not, as
+---for a worktree opened only for a terminal. Only an ASSEMBLED workspace
+---needs one from us (it is the directory and the branch in every member
+---repo), and without one it gets a slug of the prompt.
+---@param opts { name?: string, root?: string, new?: boolean, base?: string, first?: paseo.FirstAgent, configure?: fun(ctx: table, done: fun(m: table|nil, notes: table[]|nil)) }
 ---@param callback fun(id: string|nil, err: string|nil, plan: paseo.Strategy|nil, workspace: paseo.PaseoWorkspace|nil)
 function M.create(opts, callback)
-  if not opts.name or opts.name == "" then
-    return callback(nil, "a workspace needs a name")
+  if opts.name == "" then
+    opts.name = nil
   end
-  if opts.name:find "[/\\ ]" then
+  local prompt = opts.first and opts.first.prompt or ""
+  if opts.name and opts.name:find "[/\\ ]" then
     return callback(
       nil,
       ("workspace names may not contain slashes or spaces: %q"):format(opts.name)
@@ -376,6 +431,12 @@ function M.create(opts, callback)
   local local_root = opts.local_root or (opts.remote and hosts.to_local(host.id, opts.root))
   local source_root = local_root or opts.root or assert(vim.uv.cwd())
   local plan = M.strategy(source_root)
+  if opts.base and opts.base ~= "" and plan.kind == "worktree" then
+    plan.base = opts.base
+  end
+  if not opts.name and (plan.kind == "assemble" or plan.kind == "discover") then
+    opts.name = M.slug(prompt, plan.project)
+  end
   if not host.local_host then
     if plan.kind == "assemble" or plan.kind == "discover" then
       return callback(
@@ -505,13 +566,14 @@ function M.assemble(plan, opts, callback)
       return bridge.request("workspace.create", with_first {
         cwd = plan.repo,
         worktree = true,
-        branch = prefix .. opts.name,
+        -- Unnamed: the daemon's to name (see `M.create`).
+        branch = opts.name and (prefix .. opts.name) or nil,
         base = plan.base,
         title = opts.name,
       }, function(create_err, result)
         callback(result and result.id, create_err, plan, result and {
           id = result.id,
-          name = opts.name,
+          name = opts.name or result.name,
           agent_id = result.agentId,
           directory = result.directory,
           project = plan.repo,
@@ -536,7 +598,7 @@ function M.assemble(plan, opts, callback)
     bridge.request(op, args, function(open_err, result)
       callback(result and result.id, open_err, plan, result and {
         id = result.id,
-        name = opts.name,
+        name = opts.name or result.name,
         agent_id = result.agentId,
         directory = result.directory or directory,
         project = plan.project or plan.root,

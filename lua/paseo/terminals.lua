@@ -406,12 +406,17 @@ end
 ---@param preset table  `{ command?, args?, label? }`
 ---@param size { rows: integer, cols: integer }
 ---@param callback fun(id: string|nil, err: string|nil)
-function M.create(cwd, preset, size, callback, host_id)
+---@param host_id? string
+---@param workspace_id? string  The workspace it belongs to, when known.
+function M.create(cwd, preset, size, callback, host_id, workspace_id)
   preset = preset or {}
   host_id = (hosts.get(host_id) or {}).id
   require("paseo.bridge").request("terminals.create", {
     cwd = cwd,
     hostId = host_id,
+    -- Into THIS workspace, not whichever the daemon finds for the directory
+    -- -- a fresh worktree's may not be the one it would pick.
+    workspaceId = workspace_id,
     command = preset.command,
     args = preset.args,
     name = preset.label ~= "Shell" and (preset.label or preset.command) or nil,

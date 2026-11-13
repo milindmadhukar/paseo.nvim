@@ -337,6 +337,30 @@ export function workspaceOps(ctx: BridgeConnection): Ops {
     },
 
     /** Pin or unpin: pinned workspaces lead the app's sidebar and the rail. */
+    /**
+     * Branches to cut a worktree from, as the app's base-branch picker lists
+     * them: most recently committed first, local and remote folded together.
+     * From the daemon, so it answers for the HOST's checkout, not ours.
+     */
+    async "branches"(req) {
+      const result: any = await ctx.raw().getBranchSuggestions({
+        cwd: String(need(req.cwd, "cwd")),
+        ...(typeof req.query === "string" && req.query !== ""
+          ? { query: req.query }
+          : {}),
+        limit: Math.max(1, Math.min(200, Number(req.limit ?? 50))),
+      });
+      if (result?.error) {
+        throw new Error(String(result.error));
+      }
+      return {
+        branches: Array.isArray(result?.branches) ? result.branches : [],
+        details: Array.isArray(result?.branchDetails)
+          ? result.branchDetails
+          : [],
+      };
+    },
+
     async "workspace.pin"(req) {
       const result: any = await ctx
         .raw()
@@ -361,7 +385,10 @@ export function workspaceOps(ctx: BridgeConnection): Ops {
                     cwd,
                     action: "branch-off",
                     refName: String(req.base ?? "main"),
-                    branchName: String(need(req.branch, "branch")),
+                    // NO BRANCH means the daemon's: it names the worktree and
+                    // its branch from `firstAgentContext`, as the app's New
+                    // workspace does. Only sent when somebody chose one.
+                    ...(req.branch ? { branchName: String(req.branch) } : {}),
                   }
                 : { kind: "directory", path: cwd },
             );

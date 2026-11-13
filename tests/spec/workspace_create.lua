@@ -360,8 +360,57 @@ local function test_workspace_open()
   vim.fn.delete(dir, "rf")
 end
 
+--- UNNAMED: a git repo's worktree is the daemon's to name from the prompt.
+local function test_unnamed()
+  local workspaces = require "paseo.workspaces"
+  local bridge = require "paseo.bridge"
+  local project = multi_repo { solo = "dev" }
+  local repo = vim.fs.joinpath(project, "solo")
+
+  local sent
+  local request, ensure = bridge.request, bridge.ensure
+  bridge.ensure = function(fn)
+    fn(nil)
+  end
+  bridge.request = function(op, args, cb)
+    sent = { op = op, args = args }
+    cb(nil, { id = "wks_auto", directory = repo .. "-wt", name = "fix-rounding", agentId = "a1" })
+  end
+
+  local got
+  workspaces.create({
+    root = repo,
+    new = true,
+    base = "dev",
+    first = { prompt = "Fix the invoice rounding", provider = "claude/opus" },
+  }, function(id, err, _, ws)
+    got = { id = id, err = err, ws = ws }
+  end)
+  eq("unnamed: no error without a name, given a prompt", got.err, nil)
+  eq("unnamed: it asked for a worktree", sent.args.worktree, true)
+  eq("unnamed: with no branch of ours", sent.args.branch, nil)
+  eq("unnamed: and no title", sent.args.title, nil)
+  eq("unnamed: off the base you picked", sent.args.base, "dev")
+  eq("unnamed: the prompt rides along to name it", sent.args.prompt, "Fix the invoice rounding")
+  eq("unnamed: and the name is the daemon's", got.ws.name, "fix-rounding")
+
+  -- No name AND no prompt (a worktree for a terminal): still the daemon's.
+  workspaces.create({ root = repo, new = true }, function(_, err)
+    got = { err = err }
+  end)
+  eq("unnamed: no prompt either is still fine", got.err, nil)
+  eq("unnamed: and sends no prompt", sent.args.prompt, nil)
+
+  eq("slug: the first words of the prompt", workspaces.slug "Fix the invoice rounding, please", "fix-the-invoice-rounding")
+  eq("slug: nothing usable is still a name", workspaces.slug "!!!", "task")
+
+  bridge.request, bridge.ensure = request, ensure
+  vim.fn.delete(project, "rf")
+end
+
 return {
   { "strategy", test_strategy },
+  { "unnamed worktree", test_unnamed },
   { "manifest", test_manifest },
   { "workspace open", test_workspace_open },
 }

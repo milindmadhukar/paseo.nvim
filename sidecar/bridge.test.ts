@@ -702,6 +702,65 @@ test("an assembled workspace is created inside its project, not as one of its ow
   assert.deepEqual(opened, ["/code/tracker"]);
 });
 
+test("a worktree with no branch is the daemon's to name", async () => {
+  const created: any[] = [];
+  const ctx = new BridgeConnection();
+  ctx.connected = (() => ({
+    workspaces: {
+      ref: (id: string) => ({
+        id,
+        async fetch() {
+          return { id, directory: "/code/kora-wt", projectId: "prj" };
+        },
+      }),
+    },
+  })) as any;
+  ctx.raw = (() => ({
+    async createWorkspace(input: any) {
+      created.push(input);
+      return { workspace: { id: "wks_auto" }, agent: { id: "a1" }, error: null };
+    },
+    async getBranchSuggestions(opts: any) {
+      return {
+        branches: ["main", "dev"],
+        branchDetails: [{ name: "main", committerDate: 2 }],
+        error: null,
+        echoed: opts,
+      };
+    },
+  })) as any;
+  const ops = workspaceOps(ctx);
+
+  await ops["workspace.create"]({
+    op: "workspace.create",
+    cwd: "/code/kora",
+    worktree: true,
+    base: "dev",
+    prompt: "Fix the invoice rounding",
+    provider: "claude/opus",
+  });
+  const source = created[0].source;
+  assert.equal(source.kind, "worktree");
+  assert.equal(source.refName, "dev");
+  assert.equal("branchName" in source, false, "no branch: the daemon names it");
+  assert.deepEqual(created[0].firstAgentContext, { prompt: "Fix the invoice rounding" });
+
+  // A branch somebody chose is still sent.
+  await ops["workspace.create"]({
+    op: "workspace.create",
+    cwd: "/code/kora",
+    worktree: true,
+    branch: "ws/mine",
+    prompt: "x",
+    provider: "claude/opus",
+  });
+  assert.equal(created[1].source.branchName, "ws/mine");
+
+  const branches: any = await ops["branches"]({ op: "branches", cwd: "/code/kora" });
+  assert.deepEqual(branches.branches, ["main", "dev"]);
+  assert.equal(branches.details[0].name, "main");
+});
+
 test("stopping a turn goes through the raw client, which is the only one that has it", async () => {
   // `PaseoAgentHandle` has no cancel in 0.8.0 -- the typed API cannot express
   // this at all -- so the op reaches for `ctx.raw()`. That is not a
