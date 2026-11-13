@@ -11,7 +11,11 @@ import {
 import { providerOps, describeSettings } from "./bridge-providers.ts";
 import { describeItem } from "./bridge-timeline.ts";
 import { terminalOps } from "./bridge-terminals.ts";
-import { workspaceOps } from "./bridge-workspaces.ts";
+import {
+  describePullRequest,
+  describeWorkspace,
+  workspaceOps,
+} from "./bridge-workspaces.ts";
 import { voiceOps } from "./bridge-voice.ts";
 import { emit } from "./bridge-io.ts";
 import { subagentOps } from "./bridge-subagents.ts";
@@ -995,4 +999,63 @@ test("subagent updates reach Lua as the events it listens for, in the chat's ite
   assert.deepEqual(history.items, [{ kind: "text", text: "looking", seq: 1 }]);
   assert.equal(history.seq, 2);
   assert.equal(history.epoch, "e1");
+});
+
+test("a workspace carries what the app's sidebar row shows: lines changed, branch, PR and CI", () => {
+  const ws = describeWorkspace({
+    id: "w1",
+    name: "rail-tree",
+    workspaceDirectory: "/code/paseo.nvim",
+    status: "running",
+    statusEnteredAt: "2026-11-13T06:00:00Z",
+    diffStat: { additions: 120, deletions: 7 },
+    gitRuntime: { currentBranch: "feat/tree", isDirty: true, aheadOfOrigin: 2, behindOfOrigin: 0 },
+    githubRuntime: {
+      pullRequest: {
+        url: "https://github.com/o/r/pull/42",
+        title: "tree",
+        state: "open",
+        isMerged: false,
+        isDraft: false,
+        checks: [
+          { name: "lint", status: "success" },
+          { name: "test", status: "pending" },
+          { name: "build", status: "weird-forge-string" },
+        ],
+        reviewDecision: "approved",
+      },
+    },
+  });
+  assert.deepEqual(ws.diffStat, { additions: 120, deletions: 7 });
+  assert.equal(ws.branch, "feat/tree");
+  assert.equal(ws.dirty, true);
+  assert.equal(ws.ahead, 2);
+  assert.equal(ws.statusEnteredAt, "2026-11-13T06:00:00Z");
+  // The number comes off the URL when the forge did not send one; a check in
+  // a vocabulary nobody knows is still running, as the app reads it.
+  assert.deepEqual(
+    { n: ws.pr.number, s: ws.pr.state, c: ws.pr.checks, d: ws.pr.checksDone, t: ws.pr.checksTotal, r: ws.pr.review },
+    { n: 42, s: "open", c: "running", d: 1, t: 3, r: "approved" },
+  );
+
+  // A detached HEAD is no branch, and no PR and no stat are null, not zero.
+  const bare = describeWorkspace({ id: "w2", gitRuntime: { currentBranch: "HEAD" } });
+  assert.equal(bare.branch, null);
+  assert.equal(bare.pr, null);
+  assert.equal(bare.diffStat, null);
+
+  // One failure fails the lot, however many are still going.
+  const failed = describePullRequest({
+    url: "https://github.com/o/r/pull/7",
+    state: "OPEN",
+    checks: [{ status: "failure" }, { status: "pending" }],
+  });
+  assert.equal(failed.checks, "failed");
+  assert.equal(failed.state, "open");
+  // A summary without the checks themselves still says something.
+  assert.equal(describePullRequest({ url: "https://x/pull/1", state: "open", checksStatus: "success" }).checks, "passed");
+  assert.equal(describePullRequest({ url: "https://x/pull/1", state: "open", checksStatus: "none" }).checks, null);
+  assert.equal(describePullRequest({ url: "https://x/pull/1", state: "closed", isMerged: true }).state, "merged");
+  assert.equal(describePullRequest({ url: "https://gitlab.com/o/r/-/merge_requests/9", state: "closed" }).number, 9);
+  assert.equal(describePullRequest(null), null);
 });

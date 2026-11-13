@@ -172,6 +172,132 @@ export async function workspaceFor(
   return await api.workspaces.open(cwd);
 }
 
+/**
+ * A check's state, in the forge-neutral vocabulary the app maps every CI
+ * string onto: anything it does not know is still running.
+ */
+function checkStatus(status: unknown): string {
+  const s = String(status ?? "");
+  return ["success", "failure", "pending", "skipped", "cancelled"].includes(s)
+    ? s
+    : "pending";
+}
+
+/**
+ * What the workspace's pull request says, or null when it has none: the
+ * app's sidebar `prHint` and check summary, computed the way it computes
+ * them (packages/app/src/git/pr-hint.ts, workspace-meta-row/check-summary.ts).
+ *
+ * `checks` is the richer source and the only one with a fraction; a forge that
+ * sends a summary without the individual checks falls back to `checksStatus`.
+ * One failing check fails the lot, however many are still going.
+ */
+export function describePullRequest(pr: any): any {
+  if (!pr?.url) return null;
+  const number =
+    typeof pr.number === "number"
+      ? pr.number
+      : Number(/\/(\d+)\/?(?:[?#].*)?$/.exec(String(pr.url))?.[1] ?? NaN);
+  if (!Number.isFinite(number)) return null;
+
+  const state =
+    pr.isMerged || pr.state === "merged"
+      ? "merged"
+      : String(pr.state ?? "").toLowerCase() === "open"
+        ? "open"
+        : "closed";
+
+  let checks: string | null = null;
+  let done = 0;
+  let total = 0;
+  const list: any[] = Array.isArray(pr.checks) ? pr.checks : [];
+  if (list.length > 0) {
+    total = list.length;
+    let failed = false;
+    for (const check of list) {
+      const s = checkStatus(check?.status);
+      if (s === "failure") failed = true;
+      if (s !== "pending") done += 1;
+    }
+    checks = failed ? "failed" : done === total ? "passed" : "running";
+    if (failed) done = total;
+  } else {
+    checks =
+      ({ success: "passed", failure: "failed", pending: "running" } as any)[
+        pr.checksStatus
+      ] ?? null;
+  }
+
+  return {
+    number,
+    url: String(pr.url),
+    title: pr.title ?? null,
+    state,
+    draft: pr.isDraft === true,
+    checks,
+    checksDone: done,
+    checksTotal: total,
+    review: pr.reviewDecision ?? null,
+    mergeable: pr.mergeable ?? null,
+  };
+}
+
+/**
+ * One workspace as the Lua side reads it -- the list's rows and the
+ * `workspaces_changed` push alike, so a pushed upsert can replace a listed
+ * row field for field.
+ *
+ * Field names taken from the wire, not guessed: the directory is
+ * `workspaceDirectory`, and `directory` does not exist.
+ */
+export function describeWorkspace(ws: any): any {
+  const git = ws.gitRuntime ?? {};
+  const branch = git.currentBranch ?? ws.project?.checkout?.currentBranch ?? null;
+  return {
+    id: ws.id,
+    name: ws.name ?? ws.title ?? null,
+    directory: ws.workspaceDirectory ?? ws.project?.checkout?.cwd ?? null,
+    project: ws.projectDisplayName ?? ws.projectId ?? null,
+    // The project RECORD, not its display name. Removing a project -- which
+    // the app offers and this dropped one line before it was useful -- is
+    // keyed on this and on nothing else.
+    projectId: ws.projectId ?? null,
+    projectRoot: ws.projectRootPath ?? null,
+    projectKind: ws.projectKind ?? null,
+    kind: ws.workspaceKind ?? null,
+    status: ws.status ?? null,
+    statusEnteredAt: ws.statusEnteredAt ?? null,
+    // A detached HEAD is no branch to show.
+    branch: branch && branch !== "HEAD" ? branch : null,
+    // Lines changed against the base branch, as the app's sidebar draws
+    // `+12 -3`: a `--shortstat` from the merge-base, kept current by the
+    // daemon's file watchers and pushed on every change.
+    diffStat:
+      ws.diffStat && typeof ws.diffStat.additions === "number"
+        ? { additions: ws.diffStat.additions, deletions: ws.diffStat.deletions ?? 0 }
+        : null,
+    dirty: git.isDirty ?? null,
+    ahead: git.aheadOfOrigin ?? git.aheadBehind?.ahead ?? null,
+    behind: git.behindOfOrigin ?? git.aheadBehind?.behind ?? null,
+    // The pull request and its CI, polled from the forge by the DAEMON (every
+    // 20s while a check is pending) and pushed like everything else here.
+    pr: describePullRequest(ws.githubRuntime?.pullRequest),
+    forge: ws.forge ?? null,
+    // Whether PASEO owns the worktree, as opposed to it pointing at a primary
+    // checkout -- the difference between isolated and not.
+    ownedWorktree:
+      git.isPaseoOwnedWorktree ?? ws.project?.checkout?.isPaseoOwnedWorktree ?? false,
+    archivingAt: ws.archivingAt ?? null,
+    // The raw title -- null when the name is derived from the branch, which is
+    // how a list tells "still `main`" from "named".
+    title: ws.title ?? null,
+    // Hidden from the app's sidebar unless "Show background" is on: workspaces
+    // agents and plugins make for themselves.
+    background: ws.background === true,
+    pinned: Boolean(ws.pinnedAt),
+  };
+}
+
 export function workspaceOps(ctx: BridgeConnection): Ops {
   const connected = () => ctx.connected();
 
@@ -207,36 +333,7 @@ export function workspaceOps(ctx: BridgeConnection): Ops {
         ...(req.query ? { filter: { query: String(req.query) } } : {}),
         page: { limit: Number(req.limit ?? 200) },
       });
-      // Field names taken from the wire, not guessed: the directory is
-      // `workspaceDirectory`, and `directory` does not exist.
-      return {
-        entries: (page.entries ?? []).map((ws: any) => ({
-          id: ws.id,
-          name: ws.name ?? ws.title ?? null,
-          directory: ws.workspaceDirectory ?? ws.project?.checkout?.cwd ?? null,
-          project: ws.projectDisplayName ?? ws.projectId ?? null,
-          // The project RECORD, not its display name. Removing a project --
-          // which the app offers and this dropped one line before it was
-          // useful -- is keyed on this and on nothing else.
-          projectId: ws.projectId ?? null,
-          projectRoot: ws.projectRootPath ?? null,
-          projectKind: ws.projectKind ?? null,
-          kind: ws.workspaceKind ?? null,
-          status: ws.status ?? null,
-          branch: ws.project?.checkout?.currentBranch ?? null,
-          // Whether PASEO owns the worktree, as opposed to it pointing at a
-          // primary checkout -- the difference between isolated and not.
-          ownedWorktree: ws.project?.checkout?.isPaseoOwnedWorktree ?? false,
-          archivingAt: ws.archivingAt ?? null,
-          // The raw title -- null when the name is derived from the branch,
-          // which is how a list tells "still `main`" from "named".
-          title: ws.title ?? null,
-          // Hidden from the app's sidebar unless "Show background" is on:
-          // workspaces agents and plugins make for themselves.
-          background: ws.background === true,
-          pinned: Boolean(ws.pinnedAt),
-        })),
-      };
+      return { entries: (page.entries ?? []).map(describeWorkspace) };
     },
 
     /** Pin or unpin: pinned workspaces lead the app's sidebar and the rail. */

@@ -7,7 +7,7 @@ import {
 } from "./bridge-io.ts";
 import { BridgeConnection } from "./bridge-connection.ts";
 import { pictures, withFallbackActions } from "./bridge-normalize.ts";
-import { workspaceFor } from "./bridge-workspaces.ts";
+import { describeWorkspace, workspaceFor } from "./bridge-workspaces.ts";
 import { describeSettings } from "./bridge-providers.ts";
 
 export function matchesReviewAgent(
@@ -159,11 +159,12 @@ export async function followDirectory(ctx: BridgeConnection): Promise<void> {
       emit("agents", { kind: "error", error: String(error) }),
   });
 
-  // WORKSPACES TOO, for one reason above all: a workspace's title is written
-  // AFTER it is created -- the daemon names it from the first prompt in the
-  // background -- so a list fetched at creation still says `main`. The rail
-  // used to find out on its next poll; this says so when it happens. Only the
-  // fact is forwarded: the Lua side refetches, and owns what a list means.
+  // WORKSPACES TOO. A workspace's title is written AFTER it is created -- the
+  // daemon names it from the first prompt in the background -- and its diff
+  // stat, branch, pull request and CI change under it for as long as it lives.
+  // An upsert carries the workspace whole, described as the list describes it,
+  // so the rail patches the one row in place; a removal is only the fact, and
+  // the Lua side refetches, since it owns what a list means.
   let workspaces: any = null;
   try {
     workspaces = await api.workspaces.list({
@@ -172,12 +173,21 @@ export async function followDirectory(ctx: BridgeConnection): Promise<void> {
     });
     workspaces?.subscription?.subscribe({
       snapshot: () => {},
-      update: guarded("workspaces", (update: any) =>
+      // The subscription hands over the MESSAGE, `{ type, payload }`; the
+      // update is its payload. (This read `update.workspace` off the message
+      // for as long as only the fact was forwarded, which hid it.)
+      update: guarded("workspaces", (message: any) => {
+        const update = message?.payload ?? message;
         emit("workspaces_changed", {
+          kind: update?.kind ?? null,
           workspaceId:
             update?.workspace?.id ?? update?.workspaceId ?? update?.id ?? null,
-        }),
-      ),
+          workspace:
+            update?.kind === "upsert" && update?.workspace
+              ? describeWorkspace(update.workspace)
+              : null,
+        });
+      }),
       error: () => {},
     });
   } catch {
