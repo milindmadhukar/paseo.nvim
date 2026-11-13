@@ -452,7 +452,8 @@ local defaults = {
       -- The agent's prose as raw markdown, drawn by treesitter (and
       -- render-markdown.nvim if you have it) rather than hard-wrapped here.
       markdown = true,
-      -- Columns for the workspace rail; 0 starts with it hidden.
+      -- Columns for the workspace rail; 0 starts with it hidden. A width you
+      -- drag it to is remembered over this (and the same for `panel`).
       rail = 32,
       -- Columns for the Settings/Changes/Usage split, when it is up.
       panel = 56,

@@ -156,9 +156,46 @@ function M.set_visible(value)
   pcall(write_state, state)
 end
 
+---Widths you dragged a split to, by name ("rail", "panel"). Same file, same
+---read-once rule as `shown`: a rail you widened stays that wide through
+---`<C-b>` off and on, on the next agent's tab, and after a restart.
+---@type table<string, integer>|nil
+local widths
+
+---@param name "rail"|"panel"
+---@return integer|nil
+function M.width(name)
+  if not widths then
+    widths = {}
+    for key, value in pairs(read_state().widths or {}) do
+      if type(value) == "number" and value >= 1 then
+        widths[key] = math.floor(value)
+      end
+    end
+  end
+  return widths[name]
+end
+
+---@param name "rail"|"panel"
+---@param value integer
+function M.set_width(name, value)
+  if type(value) ~= "number" or value < 1 then
+    return
+  end
+  M.width(name)
+  if widths[name] == value then
+    return
+  end
+  widths[name] = value
+  local state = read_state()
+  state.widths = vim.tbl_extend("force", state.widths or {}, { [name] = value })
+  pcall(write_state, state)
+end
+
 ---For the tests: forget what was read, so the next `visible` reads again.
 function M.reset()
   shown = nil
+  widths = nil
   expanded = {}
   cache = { root = nil, list = nil, err = nil, loading = false }
 end

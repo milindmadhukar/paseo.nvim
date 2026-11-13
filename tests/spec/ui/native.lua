@@ -98,6 +98,24 @@ local function test_layout()
   native.toggle_rail()
   eq("native: and comes back", #api.nvim_tabpage_list_wins(0), 3)
 
+  -- A RAIL YOU WIDENED STAYS WIDE through `<C-b>` off and on.
+  local function rail_win()
+    for _, win in ipairs(api.nvim_tabpage_list_wins(0)) do
+      if vim.bo[api.nvim_win_get_buf(win)].filetype == "paseo-rail" then
+        return win
+      end
+    end
+  end
+  api.nvim_win_set_width(rail_win(), 41)
+  native.toggle_rail()
+  native.toggle_rail()
+  eq("native: the rail comes back at the width you left it", api.nvim_win_get_width(rail_win()), 41)
+  -- And a mouse drag or `<C-w>>` (WinResized, no toggle) is kept too.
+  api.nvim_win_set_width(rail_win(), 37)
+  native._resized { rail_win() }
+  eq("native: a drag is remembered", require("paseo.ui.rail").width "rail", 37)
+  require("paseo.ui.rail").set_width("rail", 32)
+
   -- CLOSING takes the tab and leaves the chat.
   native.close(b)
   eq("native: closing takes its tab", #api.nvim_list_tabpages(), tabs_before + 1)

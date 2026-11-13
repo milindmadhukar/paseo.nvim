@@ -183,6 +183,48 @@ local function adopt_rail(t)
   end
 end
 
+---The rail's columns: the width you last dragged it to, else `native.rail`.
+---@return integer
+local function rail_width()
+  local saved = require("paseo.ui.rail").width "rail"
+  return math.max(16, saved or (config().rail > 0 and config().rail) or 32)
+end
+
+---The panel's columns, the same way: last dragged, else `native.panel`.
+---@return integer
+local function panel_width()
+  return math.max(30, require("paseo.ui.rail").width "panel" or config().panel)
+end
+
+---Set between a VimResized and the next tick; see the resize autocmd.
+local vim_resizing = false
+
+---Remember `win`'s width as `name`'s, if it is still a window.
+---@param name "rail"|"panel"
+---@param win integer|nil
+local function keep_width(name, win)
+  if win and api.nvim_win_is_valid(win) then
+    require("paseo.ui.rail").set_width(name, api.nvim_win_get_width(win))
+  end
+end
+
+---WinResized's windows: any rail or panel among them keeps its new width.
+---(Its own function so the suite, which has no UI and so no WinResized, can
+---call it.)
+---@param windows integer[]
+function M._resized(windows)
+  for _, win in ipairs(windows) do
+    if api.nvim_win_is_valid(win) then
+      local ft = vim.bo[api.nvim_win_get_buf(win)].filetype
+      if ft == "paseo-rail" then
+        keep_width("rail", win)
+      elseif ft == "paseo-panel" then
+        keep_width("panel", win)
+      end
+    end
+  end
+end
+
 ---Open the rail on the tab you are on.
 ---@param t paseo.NativeTab
 local function open_rail(t)
@@ -190,7 +232,7 @@ local function open_rail(t)
     return
   end
   local rail = require "paseo.ui.rail"
-  local width = math.max(16, config().rail > 0 and config().rail or 32)
+  local width = rail_width()
   local from = api.nvim_get_current_win()
   api.nvim_set_current_win(t.chat.win_conversation)
   vim.cmd(("topleft %dvsplit"):format(width))
@@ -277,7 +319,7 @@ function M.rail_beside()
     return side_rails[tab]
   end
   local rail = require "paseo.ui.rail"
-  local width = math.max(16, config().rail > 0 and config().rail or 32)
+  local width = rail_width()
   local from = api.nvim_get_current_win()
   vim.cmd(("topleft %dvsplit"):format(width))
   local win = api.nvim_get_current_win()
@@ -319,6 +361,7 @@ function M.toggle_rail()
   -- rail you hid stays hidden on the next agent's tab and the next session.
   if valid_win(t.rail) then
     local win = t.rail
+    keep_width("rail", win)
     t.rail = nil
     pcall(api.nvim_win_close, win, true)
     require("paseo.ui.rail").set_visible(false)
@@ -372,6 +415,7 @@ local function close_panel(t)
     end
   end
   if valid_win(t.panel_win) then
+    keep_width("panel", t.panel_win)
     pcall(api.nvim_win_close, t.panel_win, true)
   end
   if t.panel_buf and api.nvim_buf_is_valid(t.panel_buf) then
@@ -387,7 +431,7 @@ local function show_panel(t, name)
   close_panel(t)
   local from = api.nvim_get_current_win()
   api.nvim_set_current_win(t.chat.win_conversation)
-  vim.cmd(("botright %dvsplit"):format(math.max(30, config().panel)))
+  vim.cmd(("botright %dvsplit"):format(panel_width()))
   t.panel_win = api.nvim_get_current_win()
   t.panel_buf = api.nvim_create_buf(false, true)
   t.panel = name
@@ -749,7 +793,18 @@ watch = function()
   api.nvim_create_autocmd({ "VimResized", "WinResized" }, {
     group = augroup,
     desc = "paseo: refit native panels",
-    callback = function()
+    callback = function(ev)
+      -- A rail or panel you dragged (`<C-w><`, the mouse) keeps that width.
+      -- Not when the EDITOR changed size: a narrow terminal squeezing the
+      -- rail is not you asking for a narrower one.
+      if ev.event == "VimResized" then
+        vim_resizing = true
+        vim.schedule(function()
+          vim_resizing = false
+        end)
+      elseif not vim_resizing then
+        M._resized((vim.v.event or {}).windows or {})
+      end
       vim.schedule(function()
         for tab in pairs(tabs) do
           local t = entry(tab)

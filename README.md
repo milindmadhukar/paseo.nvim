@@ -100,7 +100,7 @@ require("paseo").setup {
 
     native = {                    -- the full-screen surface; see below
       markdown = true,            -- the agent's prose as raw markdown
-      rail = 32,                  -- rail width in cells; 0 starts it hidden
+      rail = 32,                  -- starting width; a dragged width is remembered
       panel = 56,                 -- the Settings/Changes/Usage split
       composer = 10,              -- rows the box may grow TO
       composer_min = 3,           -- ...and the fewest it rests at

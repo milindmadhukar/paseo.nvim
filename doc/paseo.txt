@@ -372,6 +372,12 @@ ui.native                                                           table
     hidden; `<C-b>` brings it back, and from then on your toggle is what is
     remembered (|paseo-config.ui.float.rail|).
 
+    They are where the two START. Drag either one wider or narrower (the
+    mouse, `<C-w><`, `<C-w>>`, `:vertical resize`) and that width is kept:
+    through `<C-b>` off and on, on the next agent's tab, and after a restart,
+    in the same state file as the rail's toggle. A change in the editor's own
+    size is not remembered, so a narrow terminal never shrinks it for good.
+
                         *paseo-config.ui.native.composer*
                         *paseo-config.ui.native.composer_min*
     `composer` is the MOST rows the box you type in may take. It rests at
