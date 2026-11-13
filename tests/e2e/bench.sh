@@ -95,10 +95,18 @@ if [ "$load" -gt 0 ]; then
   "$E" keys ':Paseo chat' Enter
   "$E" wait 'require("paseo.ui.chat").current() ~= nil and require("paseo.ui.rail").win() ~= nil' 30 || exit 1
   sleep 2
-  for k in 1 2 3 4; do
-    "$D" paseo run --provider fake/scripted --cwd "$fixture" --no-wait --title "load $k" "long slow tool think $k" >/dev/null 2>&1 &
+  # In four of the seeded worktree workspaces, so the rail has rows spinning,
+  # plus one into the chat on screen, so its transcript streams too.
+  wss="$("$D" paseo workspace ls --json 2>/dev/null | python3 -I -c 'import json,sys; print(" ".join(w["workspaceId"] for w in json.load(sys.stdin) if w.get("name","").startswith("bench-")))')"
+  k=0
+  for ws in $wss; do
+    k=$((k + 1))
+    [ "$k" -gt 4 ] && break
+    "$D" paseo run --provider fake/scripted --workspace "$ws" --no-wait --title "load $k" "long think $k" >/dev/null 2>&1 &
   done
   wait
+  here_agent="$("$E" lua 'require("paseo.ui.chat").current().agent_id')"
+  "$D" paseo send "$here_agent" "long think in the chat" --no-wait >/dev/null 2>&1 || true
   sleep 2
   "$E" lua "_G.paseo_bench.load(\"$load_result\", $load) or 1" >/dev/null
   for _ in $(seq 1 $((load * 5 + 100))); do
