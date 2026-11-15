@@ -455,23 +455,10 @@ function M.open(chat)
   -- A draft's choices stand in for its (empty) conversation.
   require("paseo.ui.newtask").show(chat)
 
-  -- The composer sits under the conversation, small: it is where you type one
-  -- question, not where you write a document. It opens at its FLOOR and grows
-  -- with what you type -- see `M.fit_composer`.
-  vim.cmd "belowright 1split"
-  chat.win_composer = api.nvim_get_current_win()
-  api.nvim_win_set_buf(chat.win_composer, chat.composer)
-  style(chat.win_composer)
-  -- The box is a CARD here too, at the same elevation it has on the native
-  -- surface, so "where you type" is the same object on both surfaces. Its bar
-  -- carries the session's settings -- and, while you dictate, the microphone
-  -- meter.
-  require("paseo.ui.composer").style(chat)
-
-  -- An unrelated `:split` -- or a user's `winheight` -- must not reflow the box
-  -- out from under the fit. Explicit `nvim_win_set_height` still works on a
-  -- `winfixheight` window; only automatic equalisation is blocked.
-  vim.wo[chat.win_composer].winfixheight = true
+  -- A new one, whatever the chat had before: a window it had on another
+  -- surface is not this sidebar's.
+  chat.win_composer = nil
+  M.ensure_composer(chat)
 
   chat.surface = "sidebar"
   require("paseo.ui.surface").remember "sidebar"
@@ -498,6 +485,37 @@ function M.refresh_hints(chat)
   require("paseo.ui.composer").refresh(chat)
 end
 
+---The composer's window, under the conversation -- made again when it went
+---while the conversation stayed: `:wq` in the prompt editor (|paseo.ui.editor|)
+---closes the window it was in.
+---@param chat table
+function M.ensure_composer(chat)
+  if chat.win_composer and api.nvim_win_is_valid(chat.win_composer) then
+    return
+  end
+  if not (chat.win_conversation and api.nvim_win_is_valid(chat.win_conversation)) then
+    return
+  end
+  -- The composer sits under the conversation, small: it is where you type one
+  -- question, not where you write a document. It opens at its FLOOR and grows
+  -- with what you type -- see `M.fit_composer`.
+  api.nvim_set_current_win(chat.win_conversation)
+  vim.cmd "belowright 1split"
+  chat.win_composer = api.nvim_get_current_win()
+  api.nvim_win_set_buf(chat.win_composer, chat.composer)
+  style(chat.win_composer)
+  -- The box is a CARD here too, at the same elevation it has on the native
+  -- surface, so "where you type" is the same object on both surfaces. Its bar
+  -- carries the session's settings -- and, while you dictate, the microphone
+  -- meter.
+  require("paseo.ui.composer").style(chat)
+
+  -- An unrelated `:split` -- or a user's `winheight` -- must not reflow the box
+  -- out from under the fit. Explicit `nvim_win_set_height` still works on a
+  -- `winfixheight` window; only automatic equalisation is blocked.
+  vim.wo[chat.win_composer].winfixheight = true
+end
+
 ---Grow the composer to what is in it, and shrink it back.
 ---
 ---Early-returns when the height is already right, like `ui/prompt.lua`'s
@@ -520,6 +538,10 @@ end
 function M.fit_composer(chat)
   local win, conv = chat.win_composer, chat.win_conversation
   if not (win and api.nvim_win_is_valid(win)) then
+    return
+  end
+  -- The prompt editor has the box's window, at the height it chose.
+  if chat.editing then
     return
   end
 

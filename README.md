@@ -93,6 +93,7 @@ Everything else is a key inside the chat or a Lua function.
 | `<CR>` / `<M-CR>` | composer | send (normal / either mode) |
 | `g<CR>` | composer | send the other way mid-turn: queue instead of steer |
 | `<S-CR>` | composer | a new line, never a send (either mode) |
+| `<C-g>` | composer | write the prompt in a markdown buffer; `<C-g>`/`:wq` back, `:q!` drops unsaved |
 | `p` `P` `<C-v>` | composer | paste, **including an image** from the clipboard |
 | `<C-t>` | composer | dictate |
 | `<Up>` | empty composer | your previous prompts |
@@ -110,6 +111,11 @@ The rail uses nvim-tree's keys: `l`/`h` unfold and fold, `a` starts a new
 session, `A` a new agent in the session under the cursor, `w` a session in a
 new worktree, `t` a terminal, `d` archives (an agent, or a whole workspace) or
 throws a draft away, and `.` lists everything you can do to the row. `g?` shows them all.
+
+For a long prompt, `<C-g>` moves the box into a real `.md` buffer in the
+same window, grown to the column's height. `:w` puts it in the box as you go,
+and `<C-g>` or `:wq` takes you back. `:q!` comes back without the unsaved
+edits, and `<M-CR>` sends straight from it (`:help paseo-prompt-editor`).
 
 A new session you have not sent yet is a draft: a buffer and a rail row of
 its own, named by its first line. Have several. Switch away and back and the

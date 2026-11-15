@@ -611,7 +611,10 @@ end
 function M.refresh(chat)
   local win = chat.win_composer
   if win and api.nvim_win_is_valid(win) then
-    local bar = render.to_winbar(M.bar(chat, api.nvim_win_get_width(win)))
+    -- The prompt editor in the box's window wears its own bar.
+    local editing = chat.editing and api.nvim_win_get_buf(win) == chat.editing.buf
+    local width = api.nvim_win_get_width(win)
+    local bar = render.to_winbar(editing and require("paseo.ui.editor").bar(chat, width) or M.bar(chat, width))
     pcall(function()
       vim.wo[win].winbar = bar
     end)

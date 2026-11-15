@@ -1405,7 +1405,10 @@ local function watch()
     callback = function(args)
       local s = surface()
       local closed = tonumber(args.match)
-      if s and not s.swapping and (closed == s.conv or (closed == s.comp and s.chat)) then
+      -- Not the box while the prompt editor has it: `:wq` there closes it,
+      -- and |paseo.ui.editor| puts the box back.
+      local editing = s and closed == s.comp and s.chat and s.chat.editing
+      if s and not s.swapping and not editing and (closed == s.conv or (closed == s.comp and s.chat)) then
         vim.schedule(function()
           M.close_surface()
         end)

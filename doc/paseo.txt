@@ -200,6 +200,8 @@ completion and undo all work, and it grows with what you write.
                 See |paseo-send-behavior|
     <S-CR>      a new line, in either mode -- never a send. In every
                 box you type in: the composer, |paseo-ask-box|, an answer.
+    <C-g>       the prompt in a markdown buffer, the box grown to hold
+                it (|paseo-prompt-editor|)
     <Up>        in an empty box: your previous prompts; <Down> back
     p  P  <C-v> paste -- an image if the clipboard has one (|paseo-images|)
     <C-t>       dictate (|paseo-dictation|)
@@ -235,6 +237,29 @@ the Paseo app. |paseo-config.ui.send_behavior| `"interrupt"` stops the turn
 and starts a new one; `"queue"` holds messages and sends them, as one, when
 the turn ends. `g<CR>` does the opposite of the setting. The bar under the
 conversation says what sending will do, and counts what is queued.
+
+                                                       *paseo-prompt-editor*
+Writing a long prompt ~
+`<C-g>` in the composer, from normal or insert mode, moves everything in the
+box into a real `.md` file and opens it in the box's own window, grown to the
+height of the column. The last few lines of the conversation stay above it.
+The cursor and the mode come with it. Being a file, it gets your markdown
+ftplugin, spell checking and a markdown language server.
+
+The way back is Vim's own:
+
+    :w          put it in the box and keep writing
+    <C-g>       write it and go back to the box
+    :wq :x ZZ   the same
+    :q! ZQ      go back without what was not written; the box keeps
+                what was (`:q` over unsaved edits is the usual E37)
+    <M-CR>      write it, go back and send it (<C-CR> too)
+    <S-CR>      a new line, as everywhere
+
+You land in the box in normal mode, so `<CR>` sends. The file lives under
+`stdpath("cache")/paseo/prompts/` while you edit and is deleted after.
+`<C-g>` can be moved like any composer key: `keys.composer["<C-g>"]`
+(|paseo-config.keys|).
 
                                                                 *paseo-images*
                                                            *paseo-chat-images*

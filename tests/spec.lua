@@ -45,6 +45,7 @@ local files = {
   "ui.rail",
   "ui.native",
   "ui.keys",
+  "ui.editor",
   "provider",
   "questions",
   "plan",

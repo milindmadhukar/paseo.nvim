@@ -719,6 +719,13 @@ local function send(chat, alternate)
   deliver(chat, prompt, images)
 end
 
+---Send what is in the composer, as its `<CR>` does (`alternate`: as `g<CR>`).
+---@param chat table
+---@param alternate? boolean
+function M.send(chat, alternate)
+  return send(chat, alternate)
+end
+
 ---Put text in the composer, at the cursor when that is where you are.
 ---
 ---The same rule the image placeholder follows: at the cursor when the composer
@@ -1160,6 +1167,13 @@ local function make_buffers(chat)
       send(chat, true)
     end, vim.tbl_extend("force", opts, { desc = "paseo: send the other way (queue / now)" }))
     keys.newline("composer", chat.composer)
+
+    -- The prompt in a real `.md` buffer, the box's window grown to hold it:
+    -- Claude Code's Ctrl+G, with this editor as the editor. `<C-g>` again,
+    -- `:wq` or `:q!` comes back. See |paseo.ui.editor|.
+    keys.set("composer", { "n", "i" }, "<C-g>", function()
+      require("paseo.ui.editor").open(chat)
+    end, vim.tbl_extend("force", opts, { desc = "paseo: edit the prompt in a markdown buffer" }))
 
     -- And `<C-s>` means here what it means everywhere else: the session list.
     -- From the sidebar's box that is a surface change: it opens the native
