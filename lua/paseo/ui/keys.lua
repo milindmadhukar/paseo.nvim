@@ -163,4 +163,18 @@ function M.user_key(rhs, mode)
   return nil
 end
 
+---`<S-CR>` is a NEWLINE in every box you type into, in both modes, and never
+---a send. It has to be bound to say so: an unbound `<S-CR>` in normal mode is
+---Vim's cursor-down, and in a terminal that cannot tell it from `<CR>` the
+---box's own `<CR>` (send) is what arrives anyway -- nothing to do about that.
+---Insert mode gets the built-in `<CR>`, unremapped, so autoindent and
+---`formatoptions` apply; normal mode opens a line under the cursor.
+---@param scope string  The `keys.<scope>` table that can remap it.
+---@param buf integer
+function M.newline(scope, buf)
+  local opts = { buffer = buf, nowait = true, desc = "paseo: a new line" }
+  M.set(scope, "i", "<S-CR>", "<CR>", vim.tbl_extend("force", opts, { noremap = true }))
+  M.set(scope, "n", "<S-CR>", "o", vim.tbl_extend("force", opts, { noremap = true }))
+end
+
 return M

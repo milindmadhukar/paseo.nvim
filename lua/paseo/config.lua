@@ -77,7 +77,7 @@ local M = {}
 ---                       it; "queue" holds it here and sends it when the turn
 ---                       ends -- or interrupts, if the agent is waiting on a
 ---                       permission, since a queued message would then never
----                       go. The other key (`g<CR>`, `<S-CR>`) does the
+---                       go. The other key (`g<CR>`) does the
 ---                       opposite: queue when this steers, send now when it
 ---                       queues. Sending to an idle agent is just sending.
 ---@field style string|paseo.Style  Frame language. A preset name --

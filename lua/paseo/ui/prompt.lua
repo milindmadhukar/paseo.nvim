@@ -168,6 +168,7 @@ function M.open(opts, callback)
       accept()
     end)
   end
+  require("paseo.ui.keys").newline("composer", buf)
   map("n", "<Esc>", function()
     finish(nil)
   end)

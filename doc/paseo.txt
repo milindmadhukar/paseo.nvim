@@ -196,8 +196,10 @@ completion and undo all work, and it grows with what you write.
     <M-CR>      send, from normal or insert mode (<C-CR> where the
                 terminal can send it)
     g<CR>       send the other way while a turn runs: queue it when
-                sending steers, send now when it queues (<S-CR> too).
+                sending steers, send now when it queues.
                 See |paseo-send-behavior|
+    <S-CR>      a new line, in either mode -- never a send. In every
+                box you type in: the composer, |paseo-ask-box|, an answer.
     <Up>        in an empty box: your previous prompts; <Down> back
     p  P  <C-v> paste -- an image if the clipboard has one (|paseo-images|)
     <C-t>       dictate (|paseo-dictation|)

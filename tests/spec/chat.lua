@@ -655,6 +655,15 @@ local function test_chips()
     chat.prune_refs(mine)
     eq("chips: so does a half-deleted one", #mine.refs, 0)
 
+    -- <S-CR> is a new line, in either mode, and never a send.
+    vim.api.nvim_buf_set_lines(mine.composer, 0, -1, false, { "" })
+    vim.api.nvim_set_current_win(mine.win_composer)
+    vim.api.nvim_feedkeys(vim.keycode "ione<S-CR>two<Esc>", "x", false)
+    eq("newline: <S-CR> in insert mode breaks the line", composer(), "one\ntwo")
+    vim.api.nvim_feedkeys(vim.keycode "<S-CR>three<Esc>", "x", false)
+    eq("newline: and in normal mode opens one", composer(), "one\ntwo\nthree")
+    eq("newline: nothing was sent", sent, nil)
+
     -- Sent: the context first, then the question with its token.
     vim.api.nvim_buf_set_lines(mine.composer, 0, -1, false, { "" })
     chat.add_ref(item("@a.lua:4", "CONTEXT D"))

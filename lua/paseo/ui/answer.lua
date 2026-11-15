@@ -911,6 +911,7 @@ local function open_box(o, insert, note)
     map("n", key, commit)
   end
   map("n", "<CR>", commit)
+  require("paseo.ui.keys").newline("composer", buf)
   -- `<Esc>` in INSERT mode is left alone -- it leaves insert, the way it does
   -- everywhere. In normal mode it backs out without answering, and because these
   -- are buffer-local it does not fight the card's `<Esc>`, which closes the

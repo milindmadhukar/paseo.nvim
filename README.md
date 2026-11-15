@@ -92,6 +92,7 @@ Everything else is a key inside the chat or a Lua function.
 |---|---|---|
 | `<CR>` / `<M-CR>` | composer | send (normal / either mode) |
 | `g<CR>` | composer | send the other way mid-turn: queue instead of steer |
+| `<S-CR>` | composer | a new line, never a send (either mode) |
 | `p` `P` `<C-v>` | composer | paste, **including an image** from the clipboard |
 | `<C-t>` | composer | dictate |
 | `<Up>` | empty composer | your previous prompts |

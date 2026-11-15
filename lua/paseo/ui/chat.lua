@@ -1153,17 +1153,13 @@ local function make_buffers(chat)
     end
 
     -- THE OTHER SEND, the app's long-press: queue it behind the running turn
-    -- when sending steers, send it now when sending queues. `g<CR>` works in
-    -- every terminal; `<S-CR>` in those that can tell it from `<CR>`.
+    -- when sending steers, send it now when sending queues. `g<CR>` only.
+    -- `<S-CR>` was this once, and shift-enter is what everyone's fingers
+    -- press for a NEW LINE: a half-written prompt went out mid-sentence.
     keys.set("composer", "n", "g<CR>", function()
       send(chat, true)
     end, vim.tbl_extend("force", opts, { desc = "paseo: send the other way (queue / now)" }))
-    keys.set("composer", { "n", "i" }, "<S-CR>", function()
-      if vim.fn.mode() == "i" then
-        vim.cmd.stopinsert()
-      end
-      send(chat, true)
-    end, vim.tbl_extend("force", opts, { desc = "paseo: send the other way (queue / now)" }))
+    keys.newline("composer", chat.composer)
 
     -- And `<C-s>` means here what it means everywhere else: the session list.
     -- From the sidebar's box that is a surface change: it opens the native
