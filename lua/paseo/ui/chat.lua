@@ -659,6 +659,11 @@ local function send(chat, alternate)
       vim.api.nvim_buf_set_lines(chat.composer, 0, -1, false, body)
       chat.images, chat.pending, chat.refs = attached, pending, refs
       M.fit_composer(chat)
+      -- Declined or refused (|paseo.projects|): the words are back, and
+      -- nothing failed.
+      if err == "cancelled" then
+        return notice(chat, "not started", "info")
+      end
       notice(chat, "could not start: " .. tostring(err), "error")
     end
 
@@ -681,23 +686,31 @@ local function send(chat, alternate)
     end
 
     notice(chat, "starting…")
-    return bridge.request("agent.start", {
-      cwd = chat.root,
-      project = draft.project,
-      provider = settings.provider,
-      modeId = settings.modeId,
-      thinkingOptionId = settings.thinkingOptionId,
-      featureValues = settings.featureValues,
-      prompt = prompt,
-      images = #images > 0 and images or nil,
-    }, function(err, result)
-      vim.schedule(function()
-        if err or not (result and result.agentId) then
-          return give_back(err or "no agent")
-        end
-        draft.bind(result.agentId)
-      end)
-    end, chat.host_id)
+    -- By directory, which registers a folder the daemon has never seen:
+    -- asked about first, as a new session is (|paseo.projects|).
+    return require("paseo.projects").ensure(chat, function(ok, gate_err)
+      if not ok then
+        return give_back(gate_err)
+      end
+      bridge.request("agent.start", {
+        cwd = chat.root,
+        project = draft.project,
+        provider = settings.provider,
+        modeId = settings.modeId,
+        thinkingOptionId = settings.thinkingOptionId,
+        featureValues = settings.featureValues,
+        prompt = prompt,
+        images = #images > 0 and images or nil,
+      }, function(err, result)
+        vim.schedule(function()
+          if err or not (result and result.agentId) then
+            return give_back(err or "no agent")
+          end
+          require("paseo.projects").invalidate(chat.host_id)
+          draft.bind(result.agentId)
+        end)
+      end, chat.host_id)
+    end)
   end
 
   -- MID-TURN, the daemon's own default is to INTERRUPT -- so typing a

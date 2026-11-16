@@ -119,6 +119,10 @@ local function test_round_trip()
       if op == "providers.features" then
         return cb(nil, { features = {} })
       end
+      -- A project the daemon has, so sending is not asked about first.
+      if op == "project.list" then
+        return cb(nil, { projects = { { id = "prj", root = dir } } })
+      end
       cb(nil, { id = "agent-new", agentId = "agent-new" })
     end
     chats.open = function() end

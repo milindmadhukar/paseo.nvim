@@ -347,6 +347,9 @@ app's sidebar lays them out. One status character leads each row: >
 A workspace's row ends with its lines changed (`+120 -7`), and one with a pull
 request has a line under it with its checks and review state.
 
+A project the daemon does not have yet reads `new` where the count would be
+(|paseo-new-folder|).
+
 Every real line under the project's is a row, so `j` `k`, counts, `gg` `G`
 and `/` work as usual. The project's line takes no cursor: `k` on the first
 row does nothing, and nothing wraps round.
@@ -395,6 +398,24 @@ directory, not the directory of the session you are looking at: from a
 worktree it is the checkout that worktree was cut from, from inside an
 assembled multi-repo workspace it is the project that holds them, and a
 plain directory is its own project.
+
+                                                            *paseo-new-folder*
+A folder Paseo has never seen ~
+The first session started in a directory makes it a project on the daemon.
+So that this never happens to a folder by accident, starting one checks the
+project first:
+
+    `/`, `~`, or above `~`     refused: nothing starts. `:cd` into a project.
+    a project Paseo has        starts, as always
+    a git repo or worktree     starts, and the repo becomes the project
+    under a workspace.toml     starts (|paseo-workspaces-multi|)
+    any other folder           asks once: "Add x to Paseo as a project?"
+
+Declining starts nothing and leaves the draft as you wrote it. After one
+"Add it" the daemon has the project, so it is not asked again. Remove the
+project and it would be asked again. A folder inside a repo means the repo.
+The rail shows such a folder as `new` on its project line, and "not in Paseo
+yet" where its sessions would be.
 
 An agent goes into the session you pointed at, never one found by
 directory: the row under the cursor on the rail, or the agent on screen on

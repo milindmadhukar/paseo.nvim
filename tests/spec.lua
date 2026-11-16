@@ -57,6 +57,7 @@ local files = {
   "settings",
   "fork",
   "start",
+  "projects",
   "newtask",
   "drafts",
   "quit",

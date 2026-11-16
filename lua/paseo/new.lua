@@ -246,10 +246,23 @@ end
 ---@param first paseo.FirstAgent|nil
 ---@param callback fun(workspace: table|nil, err: string|nil)
 local function new_session(ctx, choice, first, callback)
-  if choice.where == "worktree" then
-    return new_worktree(ctx, choice, first, callback)
-  end
-  new_local(ctx, first, callback)
+  -- A folder Paseo has never seen is asked about first (|paseo.projects|):
+  -- the session about to be made is what would register it.
+  require("paseo.projects").ensure(ctx, function(ok, err)
+    if not ok then
+      return callback(nil, err)
+    end
+    local function done(workspace, create_err)
+      if workspace then
+        require("paseo.projects").invalidate(ctx.host_id)
+      end
+      callback(workspace, create_err)
+    end
+    if choice.where == "worktree" then
+      return new_worktree(ctx, choice, first, done)
+    end
+    new_local(ctx, first, done)
+  end)
 end
 
 ---A terminal: in the session `ctx` points at (`scope = "agent"`, the tab
@@ -272,7 +285,17 @@ function M.terminal(ctx, choice, preset, callback, scope)
     end, ctx.host_id, workspace_id)
   end
   if scope ~= "session" then
-    return run(ctx.root, ctx.workspace_id)
+    if ctx.workspace_id then
+      return run(ctx.root, ctx.workspace_id)
+    end
+    -- No session to go into: the terminal makes the directory's own, which
+    -- registers a folder the daemon has never seen. Asked first, the same.
+    return require("paseo.projects").ensure(ctx, function(ok, err)
+      if not ok then
+        return callback(nil, err)
+      end
+      run(ctx.root, nil)
+    end)
   end
   new_session(ctx, choice, nil, function(workspace, err)
     if not workspace then

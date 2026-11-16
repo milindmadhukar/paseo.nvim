@@ -868,6 +868,8 @@ function M.remove_project(ids, label, after)
         if left > 0 then
           return
         end
+        -- A removed project is a folder Paseo has not seen again.
+        require("paseo.projects").invalidate()
         if failed then
           vim.notify("paseo: " .. failed, vim.log.levels.ERROR)
         else

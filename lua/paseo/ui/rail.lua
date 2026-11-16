@@ -360,6 +360,7 @@ function M.load(done, opts)
   end
   if cache.root ~= root then
     cache.list = nil
+    cache.standing = nil
   end
   cache.root, cache.loading = root, true
   local ws = require "paseo.workspaces"
@@ -377,6 +378,7 @@ function M.load(done, opts)
       if list then
         cache.list = M.arrange(ws.scope(list, root))
         cache.at = vim.uv.now()
+        M.check_project(root)
       end
       M.draw()
       if done then
@@ -386,6 +388,33 @@ function M.load(done, opts)
         M.on_change()
       end
     end)
+  end)
+end
+
+---Is the project on the rail one Paseo has? Only asked of an EMPTY list --
+---one with sessions in it is a project already -- and drawn when it answers:
+---`cache.standing` is "new" (the daemon has no project here yet; the first
+---session adds it), "refuse" (`~` or `/`, which never becomes one), or nil.
+---@param root string
+function M.check_project(root)
+  local projects = require "paseo.projects"
+  if not (cache.list and #cache.list == 0) then
+    cache.standing = nil
+    return
+  end
+  if projects.classify(root) == "refuse" then
+    cache.standing = "refuse"
+    return
+  end
+  projects.known(root, nil, function(known)
+    if cache.root ~= root then
+      return
+    end
+    local standing = known == false and "new" or nil
+    if cache.standing ~= standing then
+      cache.standing = standing
+      M.draw()
+    end
   end)
 end
 
@@ -745,12 +774,15 @@ function M.build(width)
   local name = cache.root and vim.fs.basename(cache.root) or "workspaces"
   local initial = (name:match "[%w]" or "?"):upper()
   local tile = "PaseoTreeTile" .. ((M.swatch(name) - 1) % 8 + 1)
+  -- On the right: how many, or -- for a project the daemon does not have
+  -- yet -- `new`. The name gives way to whichever it is.
+  local right = cache.standing == "new" and "new " or cache.list and (tostring(#cache.list) .. " ") or nil
   b.lines[1] = vim.list_extend(
     { { PAD }, { " " .. initial .. " ", tile }, { "  " } },
-    render.truncate({ { name, "PaseoTreeProject" } }, math.max(1, width - 10))
+    render.truncate({ { name, "PaseoTreeProject" } }, math.max(1, width - 8 - (right and #right or 2)))
   )
-  if cache.list then
-    b.right[1] = { { tostring(#cache.list) .. " ", "PaseoTreeMeta" } }
+  if right then
+    b.right[1] = { { right, "PaseoTreeMeta" } }
   end
   -- Air under the header, as the app leaves it.
   b.below[1] = { { { "" } } }
@@ -768,7 +800,11 @@ function M.build(width)
     return c.draft ~= nil and not c.agent_id
   end, require("paseo.ui.native").listed())
   if #cache.list == 0 then
-    b.lines[2] = { { PAD .. "no workspaces", "PaseoTreeMeta" } }
+    -- Short: the rail is 32 cells. The rule itself is |paseo-new-folder|.
+    local empty = cache.standing == "new" and "not in Paseo yet"
+      or cache.standing == "refuse" and "not a project — :cd in one"
+      or "no workspaces"
+    b.lines[2] = render.truncate({ { PAD .. empty, "PaseoTreeMeta" } }, math.max(1, width - 1))
     -- A draft of the first session here still has a row: under nothing.
     if #native_drafts == 0 then
       return b

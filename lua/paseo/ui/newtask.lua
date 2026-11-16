@@ -442,6 +442,10 @@ local function start_terminal(task, preset)
       task.busy = false
       if err then
         draw(task)
+        -- Declined or refused (|paseo.projects|): already said, nothing failed.
+        if err == "cancelled" then
+          return
+        end
         return vim.notify("paseo: could not start a terminal — " .. tostring(err), vim.log.levels.ERROR)
       end
       remember(task)

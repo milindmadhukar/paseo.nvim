@@ -117,6 +117,10 @@ same window, grown to the column's height. `:w` puts it in the box as you go,
 and `<C-g>` or `:wq` takes you back. `:q!` comes back without the unsaved
 edits, and `<M-CR>` sends straight from it (`:help paseo-prompt-editor`).
 
+In a folder Paseo has never seen, the first session makes it a project. A git
+repo or a `workspace.toml` project does that unasked. Any other folder asks
+first, and `~` and `/` are refused (`:help paseo-new-folder`).
+
 A new session you have not sent yet is a draft: a buffer and a rail row of
 its own, named by its first line. Have several. Switch away and back and the
 text and choices are as you left them, and drafts open when you quit come
