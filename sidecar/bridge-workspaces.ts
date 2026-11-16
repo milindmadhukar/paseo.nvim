@@ -491,6 +491,23 @@ export function workspaceOps(ctx: BridgeConnection): Ops {
       };
     },
 
+    /**
+     * The projects the daemon knows, each by its root -- so the editor can
+     * tell a folder Paseo has never seen (and ask before making it one) from
+     * one it already holds. No `sync` cursor: the whole list, every time.
+     */
+    async "project.list"() {
+      const result: any = await ctx.raw().listProjects();
+      return {
+        projects: (result?.projects ?? []).map((p: any) => ({
+          id: p.projectId,
+          root: p.projectRootPath,
+          kind: p.projectKind,
+          name: p.projectCustomName || p.projectDisplayName,
+        })),
+      };
+    },
+
     async "workspace.archive"(req) {
       const workspace = connected().workspaces.ref(
         String(need(req.workspaceId, "workspaceId")),

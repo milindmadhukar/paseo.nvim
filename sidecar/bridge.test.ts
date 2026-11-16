@@ -579,6 +579,27 @@ test("a workspace carries its project id, and a project can be forgotten", async
       // -- the shape the op wrongly expected, so the test agreed with the bug.
       return { removedWorkspaceIds: ["wks_billing"] };
     },
+    async listProjects() {
+      return {
+        requestId: "r1",
+        projects: [
+          {
+            projectId: "prj_billing",
+            projectDisplayName: "billing",
+            projectCustomName: null,
+            projectRootPath: "/code/billing",
+            projectKind: "git",
+          },
+          {
+            projectId: "prj_notes",
+            projectDisplayName: "notes",
+            projectCustomName: "My notes",
+            projectRootPath: "/home/me/notes",
+            projectKind: "non_git",
+          },
+        ],
+      };
+    },
   })) as any;
 
   const ops = workspaceOps(ctx);
@@ -595,6 +616,14 @@ test("a workspace carries its project id, and a project can be forgotten", async
 
   // A missing id is an error, not a request that removes something else.
   await assert.rejects(() => ops["project.remove"]({ op: "project.remove" }));
+
+  // Every project, by its root; a name you gave it over the derived one.
+  assert.deepEqual(await ops["project.list"]({ op: "project.list" }), {
+    projects: [
+      { id: "prj_billing", root: "/code/billing", kind: "git", name: "billing" },
+      { id: "prj_notes", root: "/home/me/notes", kind: "non_git", name: "My notes" },
+    ],
+  });
 });
 
 test("an assembled workspace is created inside its project, not as one of its own", async () => {
