@@ -543,6 +543,25 @@ local function test_workspaces()
     local view = api.nvim_create_buf(false, true)
     local win = native.peek(view)
     eq("peek: a viewer goes in the middle", api.nvim_win_get_buf(win), view)
+    -- It has the surface's keys, as the agent's buffer does: a rail key set to
+    -- `<leader>e` fell through to the global map (the file explorer) here.
+    local keys = require("paseo.config").get().ui.native.keys
+    for _, name in ipairs { "rail", "focus", "panel", "search" } do
+      for _, lhs in ipairs(require("paseo.ui.keys").list(keys[name])) do
+        local map = api.nvim_buf_call(view, function()
+          return vim.fn.maparg(lhs, "n", false, true)
+        end)
+        eq("peek: the surface's " .. name .. " key is on the viewer", map.buffer, 1)
+      end
+    end
+    local shown = not not native.rail_shown()
+    api.nvim_buf_call(view, function()
+      vim.fn.maparg(require("paseo.ui.keys").list(keys.rail)[1], "n", false, true).callback()
+    end)
+    eq("peek: and the rail key toggles the rail", not not native.rail_shown(), not shown)
+    api.nvim_buf_call(view, function()
+      vim.fn.maparg(require("paseo.ui.keys").list(keys.rail)[1], "n", false, true).callback()
+    end)
     native.unpeek()
     eq("peek: and back", api.nvim_win_get_buf(b1.win_conversation), b1.conversation)
 

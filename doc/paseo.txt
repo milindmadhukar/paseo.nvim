@@ -810,8 +810,9 @@ ui.native           The full-screen surface:
   panel               panel width in cells
   composer            the most rows the composer grows to
   composer_min        the fewest
-  keys                the surface's keys, on all its buffers: a key, a list
-                      of keys, or `false`. `rail`, `focus`, `sessions`,
+  keys                the surface's keys, on all its buffers (a provider
+                      subagent's read-only view too): a key, a list of keys,
+                      or `false`. `rail`, `focus`, `sessions`,
                       `panel`, `new` (a new session), `new_agent` (a new
                       agent in the session on screen; unbound by default),
                       `search` (|paseo-search|).

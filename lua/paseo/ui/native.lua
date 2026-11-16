@@ -1104,9 +1104,15 @@ local function set_markdown(chat, on)
   return true
 end
 
----The surface's keys, on the chat's two buffers, while it is on this surface.
+---The surface's keys on `bufs`, acting for `chat`: the pairs set, to undo.
+---
+---Buffer-local, like every key here, so anything shown in the middle has to
+---be given them -- a buffer that is not would fall through to the global map
+---(`<leader>e` to the file explorer, not the rail).
+---@param bufs (integer|nil)[]
 ---@param chat table
-local function bind(chat)
+---@return table[] pairs  `{ buf, lhs }`
+local function bind_surface(bufs, chat)
   local keys = nkeys()
   local list = {
     { keys.rail, M.toggle_rail, "show or hide the workspace rail" },
@@ -1141,8 +1147,8 @@ local function bind(chat)
       "search workspaces, agents and chats",
     },
   }
-  chat.native_keys = {}
-  for _, buf in ipairs { chat.conversation, chat.composer } do
+  local set = {}
+  for _, buf in ipairs(bufs) do
     for _, item in ipairs(list) do
       for _, lhs in ipairs(require("paseo.ui.keys").list(item[1])) do
         if buf and api.nvim_buf_is_valid(buf) then
@@ -1152,11 +1158,18 @@ local function bind(chat)
             item[2],
             { buffer = buf, nowait = true, silent = true, desc = "paseo: " .. item[3] }
           )
-          chat.native_keys[#chat.native_keys + 1] = { buf, lhs }
+          set[#set + 1] = { buf, lhs }
         end
       end
     end
   end
+  return set
+end
+
+---The surface's keys, on the chat's two buffers, while it is on this surface.
+---@param chat table
+local function bind(chat)
+  chat.native_keys = bind_surface({ chat.conversation, chat.composer }, chat)
 end
 
 ---@param chat table
@@ -1935,6 +1948,12 @@ function M.peek(buf)
     return nil
   end
   s.peek = { parent = s.peek and s.peek.parent or s.chat, buf = buf }
+  -- The surface's keys on the peek too, for the agent it was opened from: it
+  -- is in the middle, where `<C-b>` (or `<leader>e`) is the rail. A wiped
+  -- buffer takes its maps with it, so nothing undoes these.
+  if s.peek.parent then
+    bind_surface({ buf }, s.peek.parent)
+  end
   put(s.conv, buf)
   set_options(s.conv, CONVERSATION)
   api.nvim_set_current_win(s.conv)
