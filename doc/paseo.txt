@@ -332,7 +332,8 @@ the float works there, the thumbnails do not.
 
 Without snacks, or in a terminal without kitty graphics, there are only the
 chips, and the float shows the file's name, size and dimensions; `o` is the
-way to see it.
+way to see it. `:checkhealth paseo` says which of these you have, and
+whether ImageMagick is there for formats other than PNG.
 
 `ui.images` turns each source off, or all of it (|paseo-config.ui.images|).
 

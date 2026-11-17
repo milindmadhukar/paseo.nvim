@@ -214,6 +214,47 @@ local function check_images()
     )
     info(("looked for: %s"):format(table.concat(installed, ", ")))
   end
+
+  -- PICTURES IN THE CONVERSATION (|paseo-images-transcript|). The chips and
+  -- the float work everywhere; drawing the picture is snacks.nvim's, in a
+  -- terminal with kitty graphics. Health may block on the terminal's answer,
+  -- which the transcript never does.
+  local opts = require("paseo.config").get().ui.images or {}
+  if opts.enabled == false then
+    info "pictures in the conversation: off (ui.images.enabled = false)"
+    return
+  end
+  local has_snacks, snacks = pcall(require, "snacks")
+  local image = has_snacks and type(snacks) == "table" and snacks.image
+  if not image then
+    info "pictures in the conversation: chips and a float that describes the file; install snacks.nvim to draw them"
+    return
+  end
+  if image.config and image.config.enabled == false then
+    warn "snacks.nvim's image module is disabled (image.enabled = false), so pictures are not drawn"
+    return
+  end
+  local detected = pcall(image.terminal.detect)
+  local env = detected and image.terminal.env() or {}
+  local name = env.name ~= "" and env.name or "this terminal"
+  if env.supported and env.placeholders then
+    ok(("pictures in the conversation: thumbnails and full size, via snacks.nvim in %s"):format(name))
+  elseif env.supported then
+    warn(("%s has kitty graphics without unicode placeholders: the float draws a picture, the thumbnails do not"):format(name))
+  else
+    warn(("%s does not speak the kitty graphics protocol (kitty, Ghostty, WezTerm do): chips and a described float only"):format(name))
+  end
+  if vim.env.TMUX then
+    local passthrough = vim.fn.system({ "tmux", "show", "-gv", "allow-passthrough" }):gsub("%s+$", "")
+    if passthrough == "off" or passthrough == "" then
+      info "in tmux: snacks turns on allow-passthrough per pane; `set -g allow-passthrough on` makes it stick"
+    end
+  end
+  if vim.fn.executable "magick" == 1 or vim.fn.executable "convert" == 1 then
+    ok "ImageMagick found: every picture format, not only PNG"
+  else
+    warn "ImageMagick (magick) not found: only PNG pictures are drawn"
+  end
 end
 
 ---Whether anything on this machine can hold a microphone open.
