@@ -149,9 +149,10 @@ Neovim nothing at all, so use `p` for those.
 Pictures in the conversation are chips: a `![alt](path)` the agent wrote
 (resolved from the agent's directory) and an image file it read. `<CR>` on
 one opens it full size in a float. With
-[snacks.nvim](https://github.com/folke/snacks.nvim) in a kitty-graphics
-terminal (kitty, Ghostty, WezTerm) the float draws the picture; elsewhere `o`
-in it opens the file outside Neovim. `ui.images` switches each source off
+[snacks.nvim](https://github.com/folke/snacks.nvim) in kitty or Ghostty, each
+one is also drawn as a thumbnail under the line (12 rows at most), and the
+float draws it full size. Without snacks, `o` in the float opens the file
+outside Neovim. `ui.images` switches each source off
 (`:help paseo-images-transcript`).
 
 ### Asking about code

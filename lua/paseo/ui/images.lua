@@ -11,6 +11,17 @@
 --- (or anywhere on an image read's card) opens the picture full size in a
 --- FLOAT -- never a tab -- and `gx` finds the one nearest the cursor.
 ---
+--- THUMBNAILS, with snacks.nvim, in a terminal that speaks the kitty graphics
+--- protocol with unicode placeholders (kitty, Ghostty). Each is a snacks
+--- PLACEMENT that paseo owns: snacks' own markdown pass is kept off the
+--- buffer (`vim.b.snacks_image_attached`), because it resolves paths against
+--- Neovim's cwd and re-scans on every write. A placement hangs its picture
+--- as virtual lines under one row, so no line of the transcript moves; its
+--- row is worked out again from the block's anchor on every update, because
+--- a block's redraw collapses snacks' extmarks onto its first line. Only
+--- pictures near the window are placed -- a long history is not thirty
+--- conversions at once -- and the rest as you scroll to them.
+---
 --- DEBOUNCED, NEVER IN THE WRITE. `transcript.draw` only calls `touch`, which
 --- marks the block. One trailing timer per chat looks at every marked block
 --- at once, so a history load of sixty items is one pass, and the reply still
@@ -46,7 +57,7 @@ end
 ---@param chat table
 ---@return table
 local function state(chat)
-  chat.image_state = chat.image_state or { dirty = {}, chips = {} }
+  chat.image_state = chat.image_state or { dirty = {}, chips = {}, placed = {}, unplaced = {} }
   return chat.image_state
 end
 
@@ -193,6 +204,121 @@ local function paint(chat, block, row, entries)
   end
 end
 
+-- ------------------------------------------------------------- thumbnails
+
+---snacks.nvim's image module, when it is installed.
+---@return table|nil
+local function snacks_image()
+  local ok, snacks = pcall(require, "snacks")
+  return ok and type(snacks) == "table" and snacks.image or nil
+end
+
+---Chats with pictures waiting for `available` to answer.
+local waiting = setmetatable({}, { __mode = "k" })
+
+---Is block's first row within a screen of a window showing the buffer?
+---@param chat table
+---@param row integer
+---@param height integer
+---@return boolean
+local function near_view(chat, row, height)
+  for _, win in ipairs(vim.fn.win_findbuf(chat.conversation)) do
+    local top, bot = vim.fn.line("w0", win) - 1, vim.fn.line("w$", win) - 1
+    local screen = api.nvim_win_get_height(win)
+    if row + height - 1 >= top - screen and row <= bot + screen then
+      return true
+    end
+  end
+  return false
+end
+
+---@param entry paseo.ImageEntry
+---@param seen table<string, integer>
+---@return string
+local function key_of(entry, seen)
+  local base = ("%s@%d:%s"):format(entry.kind, entry.line or entry.row, entry.src)
+  seen[base] = (seen[base] or 0) + 1
+  return base .. "#" .. seen[base]
+end
+
+---Point a placement at the row it belongs under, now.
+---@param chat table
+---@param block table
+---@param rec table
+---@return boolean ok
+local function aim(chat, block, rec)
+  local row = require("paseo.ui.transcript").row_of(chat, block)
+  if not row then
+    return false
+  end
+  local at = row + rec.entry.row
+  local line = api.nvim_buf_get_lines(chat.conversation, at, at + 1, false)[1]
+  if not line then
+    return false
+  end
+  -- The whole row as the range: nothing before it and nothing after, so
+  -- snacks hangs the picture BELOW the row, flush left, rather than shrinking
+  -- it to fit beside the text or indenting it by the text's width.
+  rec.p.opts.pos = { at + 1, 0 }
+  rec.p.opts.range = { at + 1, 0, at + 1, #line }
+  return true
+end
+
+---Make the block's placements match its entries.
+---@param chat table
+---@param block table
+---@param entries paseo.ImageEntry[]
+local function place(chat, block, entries)
+  local st = state(chat)
+  local image = snacks_image()
+  local opts = cfg()
+  local have = st.placed[block.id] or {}
+  local want, seen = {}, {}
+  for _, entry in ipairs(entries) do
+    want[key_of(entry, seen)] = entry
+  end
+
+  for key, rec in pairs(have) do
+    if not want[key] then
+      pcall(rec.p.close, rec.p)
+      have[key] = nil
+    end
+  end
+  for key, entry in pairs(want) do
+    local rec = have[key]
+    if rec then
+      rec.entry = entry
+      if aim(chat, block, rec) then
+        rec.p._state = nil
+        rec.p:update()
+      end
+    elseif image then
+      rec = { entry = entry }
+      local ok, p = pcall(image.placement.new, chat.conversation, entry.src, {
+        inline = true,
+        conceal = false,
+        pos = { 1, 0 },
+        max_height = opts.max_height,
+        max_width = opts.max_width,
+        on_update_pre = function()
+          aim(chat, block, rec)
+        end,
+        on_update = function()
+          if chat.sticky ~= false then
+            require("paseo.ui.pending").reveal(chat)
+          end
+        end,
+      })
+      if ok and p then
+        rec.p = p
+        aim(chat, block, rec)
+        have[key] = rec
+      end
+    end
+  end
+  st.placed[block.id] = next(have) and have or nil
+end
+
 -- ------------------------------------------------------------------- pass
 
 ---The block's rows in the buffer, and where they start.
@@ -243,6 +369,10 @@ local function look(chat, block)
       end
       st.chips[block.id] = nil
     end
+    if st.placed[block.id] then
+      place(chat, block, {})
+    end
+    st.unplaced[block.id] = nil
     return true
   end
   local row, lines = rows_of(chat, block)
@@ -252,6 +382,32 @@ local function look(chat, block)
   local entries = M.entries(chat, block, lines)
   paint(chat, block, row, entries)
   st.chips[block.id] = #entries > 0 or nil
+  st.unplaced[block.id] = nil
+
+  if #entries == 0 and not st.placed[block.id] then
+    return true
+  end
+  if not M._env then
+    -- The terminal has not been asked yet. Ask once, and come back.
+    waiting[chat] = true
+    st.unplaced[block.id] = true
+    M.available(function()
+      for c in pairs(waiting) do
+        waiting[c] = nil
+        M.refresh(c)
+      end
+    end)
+    return true
+  end
+  if not M._env.inline then
+    return true
+  end
+  if #entries > 0 and not near_view(chat, row, block.height) then
+    -- Placed when you scroll to it (`M.scrolled`).
+    st.unplaced[block.id] = true
+    return true
+  end
+  place(chat, block, entries)
   return true
 end
 
@@ -266,14 +422,16 @@ function M.sync(chat)
     st.dirty = {}
     return
   end
-  local keep = {}
-  for id in pairs(st.dirty) do
+  -- A snapshot: a block can be marked again DURING the pass (the terminal
+  -- answering, a refresh), and that mark is for the next one.
+  local dirty = st.dirty
+  st.dirty = {}
+  for id in pairs(dirty) do
     local block = chat.blocks and chat.blocks[id]
     if block and not look(chat, block) then
-      keep[id] = true
+      st.dirty[id] = true
     end
   end
-  st.dirty = keep
   st.passes = (st.passes or 0) + 1
 end
 
@@ -301,6 +459,92 @@ local function arm(chat)
   )
 end
 
+---Blocks whose pictures were left for later go back on the list.
+---@param chat table
+---@return boolean any
+local function requeue(chat)
+  local st = chat.image_state
+  if not st then
+    return false
+  end
+  local any = false
+  for id in pairs(st.unplaced) do
+    st.dirty[id] = true
+    any = true
+  end
+  return any or next(st.dirty) ~= nil
+end
+
+---The window scrolled: place what came into view.
+---@param chat table
+function M.scrolled(chat)
+  if requeue(chat) then
+    arm(chat)
+  end
+end
+
+---Show every placement again, at the window's size now.
+---
+---snacks HIDES a placement when no window in the current tab shows its
+---buffer -- the chat went off screen, or you were on another tab -- and
+---nothing shows it again. So: on the buffer coming back, the tab changing,
+---or a window resizing.
+---@param chat table
+function M.refresh(chat)
+  local st = chat.image_state
+  if not st then
+    return
+  end
+  for id, recs in pairs(st.placed) do
+    local block = chat.blocks and chat.blocks[id]
+    for _, rec in pairs(recs) do
+      local p = rec.p
+      if block and aim(chat, block, rec) then
+        if p.hidden then
+          pcall(p.show, p)
+        else
+          p._state = nil
+          pcall(p.update, p)
+        end
+      end
+    end
+  end
+  if requeue(chat) then
+    arm(chat)
+  end
+end
+
+---Follow the buffer in and out of windows. Once per buffer.
+---@param chat table
+local function attach(chat)
+  local buf = chat.conversation
+  local st = state(chat)
+  if st.attached == buf then
+    return
+  end
+  st.attached = buf
+  local group = api.nvim_create_augroup("paseo.images." .. buf, { clear = true })
+  api.nvim_create_autocmd("BufWinEnter", {
+    group = group,
+    buffer = buf,
+    callback = vim.schedule_wrap(function()
+      M.refresh(chat)
+    end),
+  })
+  api.nvim_create_autocmd({ "TabEnter", "WinResized", "VimResized" }, {
+    group = group,
+    callback = vim.schedule_wrap(function()
+      if not api.nvim_buf_is_valid(buf) then
+        pcall(api.nvim_del_augroup_by_id, group)
+        return
+      end
+      if chat.image_state and next(chat.image_state.placed) and #vim.fn.win_findbuf(buf) > 0 then
+        M.refresh(chat)
+      end
+    end),
+  })
+end
+
 ---A block was just written. Costs a table write and a timer reset.
 ---@param chat table
 ---@param block table
@@ -310,17 +554,8 @@ function M.touch(chat, block)
   end
   local st = state(chat)
   st.dirty[block.id] = true
+  attach(chat)
   arm(chat)
-end
-
----The window scrolled. Nothing to do yet but keep the pass honest; the
----thumbnails that are only placed in view hang off this.
----@param chat table
-function M.scrolled(chat)
-  local st = chat.image_state
-  if st and next(st.dirty) then
-    arm(chat)
-  end
 end
 
 ---Everything the buffer showed is about to go (`transcript.reset`).
@@ -331,10 +566,19 @@ function M.clear(chat)
     st.timer:stop()
     st.timer:close()
   end
+  for _, recs in pairs(st and st.placed or {}) do
+    for _, rec in pairs(recs) do
+      pcall(rec.p.close, rec.p)
+    end
+  end
+  local attached = st and st.attached
   chat.image_state = nil
   local buf = chat.conversation
   if buf and api.nvim_buf_is_valid(buf) then
     api.nvim_buf_clear_namespace(buf, M.ns, 0, -1)
+    if attached then
+      state(chat).attached = attached
+    end
   end
 end
 
@@ -459,8 +703,7 @@ function M.available(cb)
     return cb(M._env)
   end
   local none = { float = false, inline = false }
-  local ok, snacks = pcall(require, "snacks")
-  local image = ok and type(snacks) == "table" and snacks.image
+  local image = snacks_image()
   if not image or cfg().enabled == false or (image.config and image.config.enabled == false) then
     M._env = none
     return cb(none)
@@ -545,7 +788,7 @@ function M.open(path)
     vim.bo[buf].modifiable = true
     api.nvim_buf_set_lines(buf, 0, -1, false, {})
     local ok = pcall(function()
-      Snacks.image.buf.attach(buf, { src = path })
+      snacks_image().buf.attach(buf, { src = path })
     end)
     if not ok then
       fallback()

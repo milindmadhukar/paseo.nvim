@@ -309,11 +309,20 @@ nearest the cursor in the same message. In the float: >
     o           open it outside Neovim (|vim.ui.open()|)
     y           copy its path
 <
-With snacks.nvim (https://github.com/folke/snacks.nvim) in a terminal that
-speaks the kitty graphics protocol -- kitty, Ghostty, WezTerm -- the float
-draws the picture itself. snacks' `image` module does not have to be
-enabled for this. Anywhere else it shows the file's name, size and
-dimensions, and `o` is the way to see it.
+THUMBNAILS. With snacks.nvim (https://github.com/folke/snacks.nvim) in a
+terminal that speaks the kitty graphics protocol with unicode placeholders
+-- kitty, Ghostty -- each picture is also drawn under the row that names it
+(an image read: under its card), at most `ui.images.max_height` rows. It is
+virtual lines, so no line of the conversation moves and `y` still yanks
+words. Only pictures near the window are drawn; the rest are drawn as you
+scroll to them. In tmux, snacks sets `allow-passthrough` itself. snacks'
+`image` module does not have to be enabled, and its own markdown pass is
+kept off Paseo's buffers. WezTerm has kitty graphics without placeholders:
+the float works there, the thumbnails do not.
+
+Without snacks, or in a terminal without kitty graphics, there are only the
+chips, and the float shows the file's name, size and dimensions; `o` is the
+way to see it.
 
 `ui.images` turns each source off, or all of it (|paseo-config.ui.images|).
 

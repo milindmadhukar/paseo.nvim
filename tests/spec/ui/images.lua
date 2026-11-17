@@ -188,6 +188,182 @@ local function test_images()
   vim.fn.delete(elsewhere)
 end
 
+---snacks.nvim, as far as paseo uses it: placements it can count.
+local function fake_snacks()
+  local created = {}
+  local placement = {}
+  placement.__index = placement
+  function placement:update()
+    if self.opts.on_update_pre then
+      self.opts.on_update_pre(self)
+    end
+    self.updates = self.updates + 1
+  end
+  function placement:show()
+    self.hidden = false
+    self:update()
+  end
+  function placement:close()
+    self.closed = true
+  end
+  local snacks = {
+    image = {
+      config = {},
+      terminal = {
+        detect = function(cb)
+          cb()
+        end,
+        env = function()
+          return { supported = true, placeholders = true }
+        end,
+      },
+      placement = {
+        new = function(buf, src, opts)
+          local p = setmetatable({ buf = buf, src = src, opts = opts, updates = 0 }, placement)
+          created[#created + 1] = p
+          return p
+        end,
+        clean = function() end,
+      },
+      buf = {
+        attach = function(buf)
+          vim.bo[buf].filetype = "image"
+        end,
+      },
+    },
+  }
+  return snacks, created
+end
+
+local function test_thumbnails()
+  local images = require "paseo.ui.images"
+  local transcript = require "paseo.ui.transcript"
+
+  local root = vim.fn.tempname()
+  vim.fn.mkdir(root .. "/shots", "p")
+  local pic = root .. "/shots/pic.png"
+  write(pic, PNG)
+
+  local snacks, created = fake_snacks()
+  local saved = package.loaded.snacks
+  package.loaded.snacks = snacks
+  images._env = nil
+
+  local ok, err = pcall(function()
+    local chat = fake_chat(root)
+    local live = function()
+      local n = 0
+      for _, p in ipairs(created) do
+        n = n + (p.closed and 0 or 1)
+      end
+      return n
+    end
+
+    -- A running command, open while it runs, ABOVE the picture: when it
+    -- finishes it folds, and everything under it moves up.
+    transcript.upsert(chat, {
+      kind = "tool",
+      callId = "sh-1",
+      name = "Bash",
+      status = "running",
+      display = { summary = "ls" },
+      detail = { type = "shell", command = "ls", output = "a\nb\nc\nd\ne\nf" },
+    })
+    local block = transcript.upsert(chat, { kind = "text", text = "look\n![shot](shots/pic.png)" })
+    vim.wait(1000, function()
+      return #created > 0
+    end, 10)
+    eq("thumb: one placement for the one picture", #created, 1)
+    local p = created[1]
+    local function link_row()
+      local start = transcript.row_of(chat, block)
+      for i = start, start + block.height - 1 do
+        if api.nvim_buf_get_lines(chat.conversation, i, i + 1, false)[1] == "![shot](shots/pic.png)" then
+          return i
+        end
+      end
+    end
+    eq("thumb: the file it means", p and p.src, pic)
+    eq("thumb: hung under the link's row", p and p.opts.pos, { link_row() + 1, 0 })
+    eq(
+      "thumb: the whole row as the range, so it hangs below and flush left",
+      p and p.opts.range,
+      { link_row() + 1, 0, link_row() + 1, #"![shot](shots/pic.png)" }
+    )
+    eq("thumb: capped at ui.images.max_height", p and p.opts.max_height, 12)
+    eq("thumb: inline, the text left showing", p and { p.opts.inline, p.opts.conceal }, { true, false })
+
+    local before = link_row()
+    transcript.upsert(chat, {
+      kind = "tool",
+      callId = "sh-1",
+      name = "Bash",
+      status = "completed",
+      display = { summary = "ls" },
+      detail = { type = "shell", command = "ls", output = "a\nb\nc\nd\ne\nf", exitCode = 0 },
+    })
+    truthy("thumb: (the card above did fold)", link_row() < before)
+    p:update()
+    eq("thumb: and the picture follows its row up", p.opts.pos, { link_row() + 1, 0 })
+
+    -- The same block drawn again is the same placement, not a second one.
+    transcript.redraw(chat, { force = true })
+    vim.wait(400, function()
+      return false
+    end, 10)
+    eq("thumb: a redraw does not place it twice", live(), 1)
+
+    -- FAR BELOW the window: left until you scroll to it.
+    local filler = {}
+    for i = 1, 120 do
+      filler[i] = "filler " .. i
+    end
+    transcript.upsert(chat, { kind = "text", text = table.concat(filler, "\n") })
+    -- Scrolled back to the top, so the window stops following the end.
+    api.nvim_win_set_cursor(chat.win_conversation, { 1, 0 })
+    vim.cmd "redraw"
+    transcript.upsert(chat, { kind = "text", text = "![later](shots/pic.png)" })
+    vim.wait(400, function()
+      return false
+    end, 10)
+    eq("view: a picture three screens down is not placed yet", live(), 1)
+    api.nvim_win_set_cursor(chat.win_conversation, { api.nvim_buf_line_count(chat.conversation), 0 })
+    vim.cmd "redraw"
+    images.scrolled(chat)
+    vim.wait(1000, function()
+      return live() == 2
+    end, 10)
+    eq("view: and is placed once it is scrolled to", live(), 2)
+
+    -- HIDDEN while off screen, shown again when the buffer comes back.
+    created[1].hidden = true
+    images.refresh(chat)
+    eq("refresh: a placement snacks hid is shown again", created[1].hidden, false)
+
+    -- The float draws the picture itself.
+    local win = images.open(pic)
+    vim.wait(500, function()
+      return vim.bo[api.nvim_win_get_buf(win)].filetype == "image"
+    end, 10)
+    eq("float: with snacks, snacks' image buffer", vim.bo[api.nvim_win_get_buf(win)].filetype, "image")
+    api.nvim_win_close(win, true)
+
+    transcript.reset(chat)
+    eq("reset: every placement is closed", live(), 0)
+
+    api.nvim_win_close(chat.win_conversation, true)
+    api.nvim_buf_delete(chat.conversation, { force = true })
+  end)
+
+  package.loaded.snacks = saved
+  images._env = nil
+  vim.fn.delete(root, "rf")
+  if not ok then
+    error(err, 0)
+  end
+end
+
 return {
   { "images", test_images },
+  { "images thumbnails", test_thumbnails },
 }
