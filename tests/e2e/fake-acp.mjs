@@ -138,6 +138,29 @@ async function turn(id, params) {
     });
   }
 
+  // `picture`: a Read of an IMAGE, which the transcript shows as a thumbnail
+  // under the card rather than as the file's bytes (tests/e2e/scenarios/images.sh).
+  if (has("picture")) {
+    const toolCallId = `call_${randomUUID().slice(0, 8)}`;
+    const path = `${session.cwd}/shots/pic.png`;
+    update(params.sessionId, {
+      sessionUpdate: "tool_call",
+      toolCallId,
+      title: "Read shots/pic.png",
+      kind: "read",
+      status: "in_progress",
+      locations: [{ path }],
+      rawInput: { path },
+    });
+    await sleep(gap * 4);
+    update(params.sessionId, {
+      sessionUpdate: "tool_call_update",
+      toolCallId,
+      status: "completed",
+      content: [],
+    });
+  }
+
   const answer = has("echo")
     ? `You said: ${text}`
     : "Done. The fixture has a README and nothing else worth reporting.";

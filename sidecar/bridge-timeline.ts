@@ -29,7 +29,19 @@ export function describeItem(
     case "user_message":
       // TWO-WAY SYNC. The timeline carries user messages too, whoever typed
       // them -- the Paseo app, another client, or us.
-      return { kind: "user", text: item.text ?? "" };
+      //
+      // The ids come back as they were sent: a send's `messageId` and a
+      // create's `clientMessageId` both return as `clientMessageId` (checked
+      // against 0.15.4). They are how the images you pasted -- which the
+      // timeline does not carry -- find their message again.
+      return {
+        kind: "user",
+        text: item.text ?? "",
+        ...(item.clientMessageId
+          ? { clientMessageId: String(item.clientMessageId) }
+          : {}),
+        ...(item.messageId ? { messageId: String(item.messageId) } : {}),
+      };
 
     case "reasoning":
       return { kind: "thinking", text: item.text ?? "" };

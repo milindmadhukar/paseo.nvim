@@ -9,9 +9,11 @@
 #   tests/e2e/nvim.sh shot <name>     capture the pane, in colour, to PNG
 #   tests/e2e/nvim.sh stop            close that Neovim and its tmux session
 #
-# Its own XDG state and data: the plugin remembers things there (whether the
-# rail is shown, for one), and a test Neovim reading and writing yours would
-# both depend on and change how your editor opens.
+# Its own XDG state, data and cache: the plugin remembers things there (whether
+# the rail is shown, for one; the images you sent), and a test Neovim reading
+# and writing yours would both depend on and change how your editor opens.
+# SNACKS_GHOSTTY=1 passes through, for a scenario that wants snacks.nvim to
+# believe it is in Ghostty.
 #
 # Why tmux and not --headless: the bugs worth catching are about windows --
 # a float one row off, a surface that swapped, a block split in three -- and a
@@ -43,6 +45,7 @@ case "${1:-}" in
     tmux new-session -d -s "$session" -x "$cols" -y "$rows" -c "$cwd" \
       "env PASEO_E2E_URL='$PASEO_E2E_URL' PASEO_E2E_HOME='$PASEO_E2E_HOME' \
        XDG_STATE_HOME='$PASEO_E2E_ROOT/xdg/state' XDG_DATA_HOME='$PASEO_E2E_ROOT/xdg/data' \
+       XDG_CACHE_HOME='$PASEO_E2E_ROOT/xdg/cache' ${SNACKS_GHOSTTY:+SNACKS_GHOSTTY=$SNACKS_GHOSTTY} \
        PASEO_E2E_SURFACE='${PASEO_E2E_SURFACE:-native}' PASEO_E2E_UI_COLORS='${PASEO_E2E_UI_COLORS:-auto}' PASEO_E2E_COLORS='${PASEO_E2E_COLORS:-habamax}' \
        PASEO_E2E_RTP='${PASEO_E2E_RTP:-}' \
        nvim --listen '$sock' -i NONE -u '$here/init.lua'"

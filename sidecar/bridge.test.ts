@@ -261,6 +261,7 @@ test("fresh workspace sessions receive initial settings", async () => {
     thinkingOptionId: "medium",
     featureValues: { plan_mode: false, fast_mode: true },
     prompt: "continue from here",
+    clientMessageId: "m-first",
     attachments: [
       {
         type: "text",
@@ -274,6 +275,8 @@ test("fresh workspace sessions receive initial settings", async () => {
   assert.deepEqual(createdOptions.config, creationConfig(request, request.provider));
   assert.equal(createdOptions.prompt, request.prompt);
   assert.deepEqual(createdOptions.attachments, request.attachments);
+  // The first message's id rides with it, as a send's does.
+  assert.equal(createdOptions.clientMessageId, "m-first");
 });
 
 function agentSendHarness(
@@ -333,6 +336,41 @@ test("a mid-turn send says how it meets the running turn, and an idle one says n
     {},
     {},
   ]);
+});
+
+test("a message's id goes out on the send and comes back on the timeline", async () => {
+  // The images you pasted are not on the timeline. The id is how the editor
+  // finds the message they went with when it comes back -- live or from
+  // history, after a restart.
+  const seen: any[] = [];
+  const ctx = new BridgeConnection();
+  ctx.connected = (() => ({
+    agents: {
+      ref: () => ({
+        async send(_prompt: string, options: any) {
+          seen.push(options);
+        },
+      }),
+    },
+  })) as any;
+  const send = agentOps(ctx)["agent.send"];
+  await send({ op: "agent.send", agentId: "a", prompt: "x [Image #1]", messageId: "m-1" });
+  await send({ op: "agent.send", agentId: "a", prompt: "no picture" });
+  assert.deepEqual(seen, [{ messageId: "m-1" }, {}]);
+
+  assert.deepEqual(
+    describeItem({
+      type: "user_message",
+      text: "x [Image #1]",
+      clientMessageId: "m-1",
+      messageId: "m-1",
+    }),
+    { kind: "user", text: "x [Image #1]", clientMessageId: "m-1", messageId: "m-1" },
+  );
+  assert.deepEqual(describeItem({ type: "user_message", text: "typed in the app" }), {
+    kind: "user",
+    text: "typed in the app",
+  });
 });
 
 test("a send is only a send: naming an agent is the daemon's job", async () => {

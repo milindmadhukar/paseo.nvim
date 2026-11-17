@@ -126,6 +126,51 @@ local function test_image()
   vim.fn.delete(text)
 end
 
+---The images a message carried, kept under its id.
+local function test_store()
+  local image = require "paseo.image"
+  local saved = image.cache_dir
+  local root = vim.fn.tempname()
+  image.cache_dir = function()
+    return root
+  end
+  local ok, err = pcall(function()
+    local id = image.message_id()
+    truthy(
+      "store: a message id is a UUIDv4",
+      id:match "^%x%x%x%x%x%x%x%x%-%x%x%x%x%-4%x%x%x%-[89ab]%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$" ~= nil,
+      id
+    )
+    truthy("store: and a fresh one each time", image.message_id() ~= id)
+
+    local png = "\137PNG\r\n\26\n\0\0"
+    local jpeg = "\255\216\255\0\n"
+    eq("store: written", image.store(id, {
+      { data = vim.base64.encode(png), mimeType = "image/png" },
+      { data = vim.base64.encode(jpeg), mimeType = "image/jpeg" },
+    }), true)
+    local files = image.stored(id)
+    eq("store: back in placeholder order, by type", vim.tbl_map(function(f)
+      return vim.fs.basename(f)
+    end, files), { "1.png", "2.jpg" })
+    local fd = assert(io.open(files[2], "rb"))
+    eq("store: the bytes, not the base64", fd:read "*a", jpeg)
+    fd:close()
+
+    eq("store: nothing for a message that carried none", image.stored(image.message_id()), {})
+    eq("store: nothing for no id", image.stored(nil), {})
+    eq("store: an id cannot climb out of the folder", image.store("../../x", {
+      { data = "", mimeType = "image/png" },
+    }), false)
+  end)
+  image.cache_dir = saved
+  vim.fn.delete(root, "rf")
+  if not ok then
+    error(err, 0)
+  end
+end
+
 return {
   { "image", test_image },
+  { "image store", test_store },
 }

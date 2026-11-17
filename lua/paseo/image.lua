@@ -332,6 +332,117 @@ function M.from_paste(lines)
   return images, nil
 end
 
+-- ------------------------------------------------------------ remembered
+
+---Where the images you sent are kept, by the id of the message they went
+---with. The timeline carries the words of a message and not its pictures, so
+---this is the only way a transcript can show them again -- after a restart
+---too, since the id comes back on the timeline as it was sent.
+---@return string
+function M.cache_dir()
+  return vim.fs.joinpath(vim.fn.stdpath "cache", "paseo", "images")
+end
+
+---A fresh message id: a UUIDv4, the shape the daemon makes its own.
+---@return string
+function M.message_id()
+  local bytes = vim.uv.random(16)
+  local b = { bytes:byte(1, 16) }
+  b[7] = bit.bor(bit.band(b[7], 0x0f), 0x40)
+  b[9] = bit.bor(bit.band(b[9], 0x3f), 0x80)
+  local hex = {}
+  for i = 1, 16 do
+    hex[i] = ("%02x"):format(b[i])
+  end
+  local h = table.concat(hex)
+  return ("%s-%s-%s-%s-%s"):format(h:sub(1, 8), h:sub(9, 12), h:sub(13, 16), h:sub(17, 20), h:sub(21, 32))
+end
+
+local BY_MIME = {}
+for ext, mime in pairs(BY_EXTENSION) do
+  if not BY_MIME[mime] or #ext < #BY_MIME[mime] then
+    BY_MIME[mime] = ext
+  end
+end
+
+---A message id is a file name here, so nothing that could leave the folder.
+---@param id string
+---@return boolean
+local function safe(id)
+  return type(id) == "string" and id:match "^[%w-]+$" ~= nil and #id <= 128
+end
+
+---Write the images a message is about to carry, in the order its
+---placeholders count. Before the request goes out, so the message can never
+---come back before its pictures are on disk.
+---@param id string
+---@param images { data: string, mimeType: string }[]
+---@return boolean ok
+function M.store(id, images)
+  if not safe(id) or #images == 0 then
+    return false
+  end
+  local dir = vim.fs.joinpath(M.cache_dir(), id)
+  vim.fn.mkdir(dir, "p")
+  for n, image in ipairs(images) do
+    local ext = BY_MIME[image.mimeType] or "png"
+    local ok, bytes = pcall(vim.base64.decode, image.data or "")
+    local fd = ok and io.open(vim.fs.joinpath(dir, ("%d.%s"):format(n, ext)), "wb")
+    if fd then
+      fd:write(bytes)
+      fd:close()
+    end
+  end
+  M.prune()
+  return true
+end
+
+---The images stored for message `id`, in placeholder order.
+---@param id string|nil
+---@return string[]
+function M.stored(id)
+  if not safe(id) then
+    return {}
+  end
+  local dir = vim.fs.joinpath(M.cache_dir(), id)
+  local found = {}
+  for name, kind in vim.fs.dir(dir) do
+    local n = kind == "file" and tonumber(name:match "^(%d+)%.")
+    if n then
+      found[#found + 1] = { n = n, path = vim.fs.joinpath(dir, name) }
+    end
+  end
+  table.sort(found, function(a, b)
+    return a.n < b.n
+  end)
+  return vim.tbl_map(function(f)
+    return f.path
+  end, found)
+end
+
+---How long a sent image is kept.
+M.keep_days = 30
+
+---Forget images sent more than `M.keep_days` ago. Once a session: it is a
+---directory listing, and nothing needs it sooner.
+function M.prune()
+  if M._pruned then
+    return
+  end
+  M._pruned = true
+  local cutoff = os.time() - M.keep_days * 86400
+  local root = M.cache_dir()
+  for name, kind in vim.fs.dir(root) do
+    if kind == "directory" and safe(name) then
+      local path = vim.fs.joinpath(root, name)
+      local stat = vim.uv.fs_stat(path)
+      if stat and stat.mtime.sec < cutoff then
+        vim.fn.delete(path, "rf")
+      end
+    end
+  end
+end
+
 ---One line about an image, for a notification.
 ---@param image paseo.Image
 ---@return string

@@ -1,9 +1,11 @@
 --- Pictures in the transcript: a chip on what names one, and a float to see it.
 ---
 --- THREE THINGS NAME A PICTURE in a conversation: an image you pasted, which
---- the prompt carries as `[Image #n]`; a markdown `![alt](path)` the agent
---- wrote; and a file it READ that is an image -- a screenshot it took to look
---- at. Each becomes an ENTRY: the file it means, and the row it hangs under.
+--- the prompt carries as `[Image #n]` and which is found again by the id the
+--- message was sent with (the timeline carries no pictures); a markdown
+--- `![alt](path)` the agent wrote; and a file it READ that is an image -- a
+--- screenshot it took to look at. Each becomes an ENTRY: the file it means,
+--- and the row it hangs under.
 ---
 --- None of it is in the buffer's text. The lines stay what the agent said, so
 --- `y` and `/` see words, not pictures; a chip is a highlight extmark, in a
@@ -131,6 +133,72 @@ local function link_target(inside)
   return inside:match "^%s*(%S+)" or inside
 end
 
+---The images YOU sent with a message, found again by the id it was sent with
+---(|paseo.image|.store), under its last line, each with a chip on its
+---`[Image #n]`.
+---
+---By number when the placeholders are exactly 1..N for N files; by order of
+---appearance otherwise -- a queue flushed as one message joins prompts that
+---each counted from `[Image #1]`.
+---@param item table
+---@param lines string[]
+---@return paseo.ImageEntry[]
+function M.pasted(item, lines)
+  if cfg().pasted == false then
+    return {}
+  end
+  local files = require("paseo.image").stored(item.clientMessageId or item.messageId)
+  if #files == 0 then
+    return {}
+  end
+  local last = 0
+  for i = #lines, 1, -1 do
+    if lines[i]:find "%S" then
+      last = i - 1
+      break
+    end
+  end
+
+  local chips, numbers = {}, {}
+  for i, line in ipairs(lines) do
+    local from = 1
+    while true do
+      local s, e, n = line:find("%[Image #(%d+)%]", from)
+      if not s then
+        break
+      end
+      chips[#chips + 1] = { line = i - 1, s = s - 1, e = e, n = tonumber(n) }
+      numbers[tonumber(n)] = (numbers[tonumber(n)] or 0) + 1
+      from = e + 1
+    end
+  end
+  local by_number = #chips == #files
+  for n = 1, #files do
+    if numbers[n] ~= 1 then
+      by_number = false
+    end
+  end
+
+  local found, used = {}, {}
+  for k, chip in ipairs(chips) do
+    local index = by_number and chip.n or k
+    local src = files[index]
+    if src then
+      used[index] = true
+      found[#found + 1] = { src = src, kind = "pasted", row = last, line = chip.line, s = chip.s, e = chip.e }
+    end
+  end
+  -- A picture whose placeholder you deleted from the text before sending is
+  -- not sent at all; but one sent from elsewhere with no placeholder still
+  -- went with this message, so it still hangs under it.
+  for index, src in ipairs(files) do
+    if not used[index] then
+      found[#found + 1] = { src = src, kind = "pasted", row = last }
+    end
+  end
+  return found
+end
+
 ---Every picture block `block` names, and where.
 ---@param chat table
 ---@param block table
@@ -160,6 +228,10 @@ function M.entries(chat, block, lines)
 
   if item.kind ~= "text" and item.kind ~= "user" then
     return found
+  end
+
+  if item.kind == "user" then
+    vim.list_extend(found, M.pasted(item, lines))
   end
 
   local fenced = false
@@ -344,9 +416,11 @@ local function might(block)
   if item.kind == "tool" then
     return item.detail ~= nil and item.detail.type == "read"
   end
+  if item.kind == "user" and (item.clientMessageId or item.messageId) then
+    return true
+  end
   if item.kind == "text" or item.kind == "user" then
-    local text = item.text or ""
-    return text:find("![", 1, true) ~= nil or text:find("[Image #", 1, true) ~= nil
+    return (item.text or ""):find("![", 1, true) ~= nil
   end
   return false
 end
@@ -356,8 +430,11 @@ end
 ---@param block table
 ---@return boolean done
 local function look(chat, block)
-  if chat.open and chat.open.id == block.id then
-    -- Still being written. `transcript.close` marks it again when it ends.
+  if chat.open and chat.open.id == block.id and chat.streaming then
+    -- Still being written. `transcript.close` marks it again when it ends,
+    -- and so does the turn ending (`set_streaming`). Only WHILE a turn runs:
+    -- a reply replayed into a reopened chat is the open block too, and no
+    -- turn will end to close it.
     return false
   end
   local st = state(chat)

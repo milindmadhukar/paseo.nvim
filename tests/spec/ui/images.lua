@@ -130,6 +130,45 @@ local function test_images()
     not table.concat(text, "\n"):find("iVBORw0KGgo", 1, true)
   )
 
+  -- ----------------------------------------------------- what you pasted
+  local image = require "paseo.image"
+  local saved_dir = image.cache_dir
+  local cache = vim.fn.tempname()
+  image.cache_dir = function()
+    return cache
+  end
+  local id = image.message_id()
+  image.store(id, {
+    { data = vim.base64.encode(PNG), mimeType = "image/png" },
+    { data = vim.base64.encode(PNG), mimeType = "image/png" },
+  })
+  local files = image.stored(id)
+  local user = transcript.upsert(chat, {
+    kind = "user",
+    text = "first [Image #2]\nthen [Image #1]",
+    clientMessageId = id,
+  })
+  local start = transcript.row_of(chat, user)
+  local rows = api.nvim_buf_get_lines(chat.conversation, start, start + user.height, false)
+  local pasted = images.pasted(user.item, rows)
+  eq("pasted: one entry per placeholder", #pasted, 2)
+  eq("pasted: by NUMBER when they are 1..N", { pasted[1].src, pasted[2].src }, { files[2], files[1] })
+  eq("pasted: all hung under the message's last line", { pasted[1].row, pasted[2].row }, { #rows - 1, #rows - 1 })
+  local queued = images.pasted({ kind = "user", clientMessageId = id }, { "a [Image #1]", "b [Image #1]" })
+  eq("pasted: by ORDER when a merged queue repeats #1", { queued[1].src, queued[2].src }, { files[1], files[2] })
+  eq("pasted: none for a message sent without an id", images.pasted({ kind = "user" }, rows), {})
+  local first_chip
+  for i, line in ipairs(rows) do
+    local s_ = line:find("[Image #2]", 1, true)
+    if s_ then
+      first_chip = { start + i, s_ }
+    end
+  end
+  api.nvim_win_set_cursor(chat.win_conversation, first_chip)
+  eq("pasted: <CR> on a chip opens that picture", (images.at_cursor(chat) or {}).src, files[2])
+  image.cache_dir = saved_dir
+  vim.fn.delete(cache, "rf")
+
   -- ------------------------------------------------------------ the float
   local tabs = vim.fn.tabpagenr "$"
   local before = api.nvim_get_current_win()
@@ -164,6 +203,7 @@ local function test_images()
   eq("debounce: sixty writes are one pass", st_passes(), 1)
   eq("debounce: and every one of them has its chip", #chips(chat), 60)
 
+  chat.streaming = true
   transcript.stream(chat, "streaming ![p](shots/pic.png)")
   local open = chat.open and chat.blocks[chat.open.id]
   images.sync(chat)
@@ -174,9 +214,22 @@ local function test_images()
     return #api.nvim_buf_get_extmarks(chat.conversation, images.ns, { row, 0 }, { last, -1 }, {}) > 0
   end
   eq("stream: the reply being written is left alone", chip_on(open_row), false)
+  chat.streaming = false
   transcript.close(chat)
   images.sync(chat)
   eq("stream: and looked at once it ends", chip_on(open_row), true)
+
+  -- A reply REPLAYED into a reopened chat is the open block too, and no turn
+  -- will end to close it: not streaming, it is looked at all the same.
+  transcript.stream(chat, "replayed ![p](shots/pic.png)")
+  local replayed = chat.blocks[chat.open.id]
+  images.sync(chat)
+  local replayed_row = transcript.row_of(chat, replayed)
+  eq(
+    "stream: an open block with no turn running is not left waiting",
+    #api.nvim_buf_get_extmarks(chat.conversation, images.ns, { replayed_row, 0 }, { replayed_row + replayed.height - 1, -1 }, {}) > 0,
+    true
+  )
 
   -- --------------------------------------------------- reset takes them all
   transcript.reset(chat)

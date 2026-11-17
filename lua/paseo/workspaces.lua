@@ -378,6 +378,7 @@ end
 ---@field featureValues? table
 ---@field attachments? table[]
 ---@field images? table[]
+---@field clientMessageId? string  The first message's id; its images are kept under it.
 ---@field title? string  The AGENT's title. The workspace's comes from the prompt.
 
 ---Branches a worktree could be cut from, most recently committed first: the
@@ -580,6 +581,7 @@ function M.assemble(plan, opts, callback)
     args.featureValues = first.featureValues
     args.attachments = first.attachments
     args.images = first.images
+    args.clientMessageId = first.clientMessageId
     args.agentTitle = first.title
     return args
   end

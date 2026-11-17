@@ -529,7 +529,8 @@ end
 ---@param prompt string
 ---@param images table[]
 ---@param done fun(err: string|nil, agent_id: string|nil)
-local function start_chat(task, prompt, images, done)
+---@param opts? { client_message_id?: string }  The first message's id.
+local function start_chat(task, prompt, images, done, opts)
   if task.kind == "terminal" then
     return done "a terminal takes no prompt — pick what to run above and press <CR> on it"
   end
@@ -559,7 +560,7 @@ local function start_chat(task, prompt, images, done)
     -- A NEW SESSION: its chat is open, and the draft goes.
     abandon(task)
     done(nil, nil)
-  end, { switch = switch })
+  end, { switch = switch, client_message_id = opts and opts.client_message_id })
 end
 
 -- ----------------------------------------------------------------- loading
@@ -882,8 +883,8 @@ function M.open(ctx, opts)
     surface = opts.surface,
     banner = scope == "agent" and ("new agent · " .. (ctx.title or "this session"))
       or ("new session · " .. vim.fs.basename(task.root or ctx.root)),
-    start = function(prompt, images, done)
-      start_chat(task, prompt, images, done)
+    start = function(prompt, images, done, opts)
+      start_chat(task, prompt, images, done, opts)
     end,
   }
   task.chat = chat

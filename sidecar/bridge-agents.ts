@@ -441,6 +441,9 @@ export function agentOps(ctx: BridgeConnection): Ops {
       await agent.send(prompt, {
         ...(images ? { images } : {}),
         ...(behavior ? { activeTurnBehavior: behavior } : {}),
+        // Ours rather than the SDK's random one, so the message can be found
+        // again when it comes back on the timeline.
+        ...(req.messageId ? { messageId: String(req.messageId) } : {}),
       } as any);
       return { sent: true, images: images?.length ?? 0 };
     },
@@ -526,6 +529,9 @@ export function agentOps(ctx: BridgeConnection): Ops {
         ...(req.title ? { title: String(req.title) } : {}),
         ...(req.prompt ? { prompt: String(req.prompt) } : {}),
         ...(images ? { images } : {}),
+        ...(req.prompt && req.clientMessageId
+          ? { clientMessageId: String(req.clientMessageId) }
+          : {}),
         ...(Array.isArray(req.attachments) && req.attachments.length > 0
           ? { attachments: req.attachments as any }
           : {}),

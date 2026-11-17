@@ -223,6 +223,7 @@ local function new_local(ctx, first, callback)
     args.thinkingOptionId = first.thinkingOptionId
     args.featureValues = first.featureValues
     args.images = first.images
+    args.clientMessageId = first.clientMessageId
   end
   require("paseo.bridge").request("workspace.create", args, function(err, result)
     vim.schedule(function()
@@ -308,11 +309,13 @@ end
 ---@param choice paseo.NewChoice
 ---@param prompt string
 ---@param images table[]
+---@param message_id? string  The message's id, which its images are kept under.
 ---@return paseo.FirstAgent
-local function first_agent(choice, prompt, images)
+local function first_agent(choice, prompt, images, message_id)
   return {
     prompt = prompt,
     images = #images > 0 and images or nil,
+    clientMessageId = message_id,
     provider = choice.provider,
     modeId = choice.modeId,
     thinkingOptionId = choice.thinkingOptionId,
@@ -331,13 +334,13 @@ end
 ---@param prompt string
 ---@param images table[]
 ---@param done fun(err: string|nil, agent_id: string|nil)
----@param opts? { switch?: boolean }  `switch`: point this Neovim at the new
+---@param opts? { switch?: boolean, client_message_id?: string }  `switch`: point this Neovim at the new
 ---       session's directory too (|paseo.workspaces|.open), when it is not
 ---       the one it is already in. Off on the full-screen surface, where the
 ---       Paseo tab is `tcd`'d into it when its row switches to that workspace,
 ---       and moving the tab you came from as well would move your code.
 function M.session(ctx, choice, prompt, images, done, opts)
-  local first = first_agent(choice, prompt, images)
+  local first = first_agent(choice, prompt, images, opts and opts.client_message_id)
   new_session(ctx, choice, first, function(workspace, err)
     if not workspace then
       return done(err)
@@ -376,11 +379,12 @@ end
 ---@param prompt string
 ---@param images table[]
 ---@param done fun(err: string|nil, agent_id: string|nil)
-function M.agent(ctx, choice, prompt, images, done)
+---@param opts? { client_message_id?: string }  The first message's id.
+function M.agent(ctx, choice, prompt, images, done, opts)
   if not ctx.workspace_id then
     return done "no session to add an agent to -- start a new session instead"
   end
-  local first = first_agent(choice, prompt, images)
+  local first = first_agent(choice, prompt, images, opts and opts.client_message_id)
   require("paseo.bridge").request("agent.create", {
     workspaceId = ctx.workspace_id,
     provider = first.provider,
@@ -389,6 +393,7 @@ function M.agent(ctx, choice, prompt, images, done)
     featureValues = first.featureValues,
     prompt = prompt,
     images = first.images,
+    clientMessageId = first.clientMessageId,
   }, function(err, result)
     vim.schedule(function()
       if err or not (result and result.id) then

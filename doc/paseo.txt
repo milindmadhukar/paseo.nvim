@@ -292,9 +292,16 @@ nothing at all, so that one cannot be caught: use `p` or `<C-v>`.
 
                                                     *paseo-images-transcript*
 Pictures in the conversation ~
-Two things in a conversation name a picture, and each is drawn as a chip
+Three things in a conversation name a picture, and each is drawn as a chip
 (the same `PaseoRef` highlight as a reference in the composer):
 
+  - an image YOU sent: its `[Image #n]`, with the picture under your
+    message. The timeline the daemon keeps has the words of a message and
+    not its pictures, so each image is also kept in
+    `stdpath("cache")/paseo/images/`, under the id the message was sent
+    with, for 30 days; the id comes back on the timeline, so they are found
+    again after a restart. A message sent from the Paseo app, or before
+    this, has its placeholder and no picture.
   - a markdown image the agent wrote, `![alt](path)`. The path is taken
     from the AGENT's directory, not Neovim's, and a remote agent's goes
     through the host's path mapping (|paseo-config.paseo.hosts|). Only a

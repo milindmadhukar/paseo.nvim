@@ -276,6 +276,10 @@ function M.set_streaming(chat, on)
   -- The same news in the conversation itself, under the last block: with the
   -- rail shut, the bar's spinner is the only other sign anything is happening.
   require("paseo.ui.pending").draw(chat)
+  -- A reply the image pass left alone while it was being written is done.
+  if not on then
+    require("paseo.ui.images").scrolled(chat)
+  end
 end
 
 ---Working on the DIRECTORY's word, or a caller's, rather than a turn event's.
@@ -350,6 +354,21 @@ function M.stop(chat)
   notice(chat, "stopped", "warning")
 end
 
+---Keep the images a message is about to carry, under an id of its own, and
+---return the id -- or nil for a message with none. The id goes out with the
+---message and comes back on the timeline, which is how the transcript shows
+---the pictures under it (|paseo-images-transcript|).
+---@param images table[]  `{ data, mimeType }`
+---@return string|nil
+local function remember_images(images)
+  if #images == 0 then
+    return nil
+  end
+  local image = require "paseo.image"
+  local id = image.message_id()
+  return image.store(id, images) and id or nil
+end
+
 ---Hand a prompt to the agent.
 ---@param chat paseo.Chat
 ---@param prompt string
@@ -363,6 +382,7 @@ local function deliver(chat, prompt, images, behavior)
     -- Absent rather than empty: an empty list is still a list on the wire, and
     -- the daemon should see a plain text message as a plain text message.
     images = #images > 0 and images or nil,
+    messageId = remember_images(images),
     activeTurnBehavior = behavior,
   }, function(err)
     if err then
@@ -669,6 +689,7 @@ local function send(chat, alternate)
 
     -- A draft that knows how to start itself -- a new WORKSPACE, whose first
     -- agent rides the request that creates it. See `M.draft`.
+    local message_id = remember_images(images)
     if draft.start then
       notice(chat, "starting…")
       return draft.start(prompt, images, function(err, agent_id)
@@ -682,7 +703,7 @@ local function send(chat, alternate)
             draft.bind(agent_id)
           end
         end)
-      end)
+      end, { client_message_id = message_id })
     end
 
     notice(chat, "starting…")
@@ -701,6 +722,7 @@ local function send(chat, alternate)
         featureValues = settings.featureValues,
         prompt = prompt,
         images = #images > 0 and images or nil,
+        clientMessageId = message_id,
       }, function(err, result)
         vim.schedule(function()
           if err or not (result and result.agentId) then
@@ -1665,7 +1687,7 @@ end
 ---the editor called `main`. `send` sees `chat.draft` and starts it.
 ---@param chat paseo.Chat
 ---@param key string  Where `chats` holds it until it is an agent.
----@param opts { settings: table, project?: string, start?: fun(prompt: string, images: table[], done: fun(err: string|nil, agent_id: string|nil)), banner?: string }
+---@param opts { settings: table, project?: string, start?: fun(prompt: string, images: table[], done: fun(err: string|nil, agent_id: string|nil), opts?: { client_message_id?: string }), banner?: string }
 local function make_draft(chat, key, opts)
   local settings = opts.settings
   local host = hosts.get(chat.host_id)
@@ -1713,12 +1735,12 @@ local draft_count = 0
 ---A chat of its own, never the one on screen: that one already has an agent,
 ---and a draft beside it is a second session in the same workspace.
 ---
----`start(prompt, images, done)` replaces the default start (`agent.start`,
+---`start(prompt, images, done, opts)` replaces the default start (`agent.start`,
 ---which may make a fresh directory workspace). It is handed the first message
 ---and answers `done(err)` on failure, `done(nil, agent_id)` to bind the agent
 ---it made to this chat, or `done(nil)` when it pointed the editor at a chat
 ---of its own.
----@param opts { root: string, local_root?: string, host_id?: string, settings: table, project?: string, start?: fun(prompt: string, images: table[], done: fun(err: string|nil, agent_id: string|nil)), banner?: string, surface?: "sidebar"|"native" }
+---@param opts { root: string, local_root?: string, host_id?: string, settings: table, project?: string, start?: fun(prompt: string, images: table[], done: fun(err: string|nil, agent_id: string|nil), opts?: { client_message_id?: string }), banner?: string, surface?: "sidebar"|"native" }
 ---@return paseo.Chat
 function M.draft(opts)
   local host = assert(hosts.get(opts.host_id), "unknown Paseo host")
@@ -2588,7 +2610,13 @@ function M.attach_events()
     if not chat or hold(chat, on_user, payload) or not fresh(chat, payload) then
       return
     end
-    transcript.upsert(chat, { kind = "user", text = payload.text or "" })
+    transcript.upsert(chat, {
+      kind = "user",
+      text = payload.text or "",
+      -- The id it was sent with: what finds the pictures that went with it.
+      clientMessageId = payload.clientMessageId,
+      messageId = payload.messageId,
+    })
     M.set_streaming(chat, true)
   end
   bridge.on("user", on_user)

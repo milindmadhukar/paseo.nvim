@@ -110,6 +110,9 @@ async function createWithFirstAgent(
       },
       initialPrompt: prompt,
       ...(images ? { images } : {}),
+      ...(req.clientMessageId
+        ? { clientMessageId: String(req.clientMessageId) }
+        : {}),
       ...(attachments ? { attachments } : {}),
       labels: { "paseo.nvim": "review" },
     };
@@ -445,6 +448,9 @@ export function workspaceOps(ctx: BridgeConnection): Ops {
           },
           prompt: String(req.prompt),
           ...(images ? { images } : {}),
+          ...(req.clientMessageId
+            ? { clientMessageId: String(req.clientMessageId) }
+            : {}),
           labels: { "paseo.nvim": "review" },
         } as any);
         return { agentId: agent.id, workspaceId: owner.id, created: false };

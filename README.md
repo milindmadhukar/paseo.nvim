@@ -146,8 +146,9 @@ manager, also attaches it: the terminal sends the path, and the plugin
 recognises it. Your terminal's own paste key on a raw screenshot sends
 Neovim nothing at all, so use `p` for those.
 
-Pictures in the conversation are chips: a `![alt](path)` the agent wrote
-(resolved from the agent's directory) and an image file it read. `<CR>` on
+Pictures in the conversation are chips: the images you sent (kept under
+the message's id, so they come back after a restart), a `![alt](path)` the
+agent wrote (resolved from the agent's directory), and an image file it read. `<CR>` on
 one opens it full size in a float. With
 [snacks.nvim](https://github.com/folke/snacks.nvim) in kitty or Ghostty, each
 one is also drawn as a thumbnail under the line (12 rows at most), and the
