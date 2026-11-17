@@ -304,8 +304,11 @@ Three things in a conversation name a picture, and each is drawn as a chip
     this, has its placeholder and no picture.
   - a markdown image the agent wrote, `![alt](path)`. The path is taken
     from the AGENT's directory, not Neovim's, and a remote agent's goes
-    through the host's path mapping (|paseo-config.paseo.hosts|). Only a
-    file on this machine counts; a link inside a code fence is code.
+    through the host's path mapping (|paseo-config.paseo.hosts|). A file
+    on this machine counts, and so does an inline `data:image/...;base64,`
+    picture (written once to the cache). A web address only with
+    `ui.images.remote`: the transcript does not fetch from the network
+    unasked. A link inside a code fence is code.
   - a picture file the agent READ -- a screenshot it took to look at. The
     card says `image` where it would have dumped the file's bytes.
 
@@ -775,7 +778,8 @@ is optional. >lua
         expand = "running",                  -- "always" | "never"
         animate = { bars = true, flash = true, fps = 30 },
         images = { enabled = true, max_height = 12, max_width = nil,
-                   pasted = true, links = true, read = true },
+                   pasted = true, links = true, read = true,
+                   remote = false },
         native = {
           markdown = true,
           rail = 32,
@@ -871,7 +875,8 @@ ui.images           Pictures in the conversation (|paseo-images-transcript|).
                     `enabled` (true) is all of it. `pasted`, `links` and
                     `read` (all true) each turn one source off.
                     `max_height` (12 rows) and `max_width` (nil: the window)
-                    cap a thumbnail.
+                    cap a thumbnail. `remote` (false) lets an `https://`
+                    image link be fetched (by snacks) and shown too.
                                                       *paseo-config.ui.native*
                                                                               
                                                  *paseo-config.ui.native.keys*

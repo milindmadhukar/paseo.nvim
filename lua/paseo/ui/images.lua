@@ -74,6 +74,37 @@ local function unescape(s)
   end))
 end
 
+---A `data:image/...;base64,` URI, written out once to the cache so it can be
+---placed and opened like any other file. Named by its content, so the same
+---picture written twice is one file.
+---@param uri string
+---@return string|nil
+function M.inline(uri)
+  local mime, data = uri:match "^data:(image/[%w.+-]+);base64,(.+)$"
+  if not mime then
+    return nil
+  end
+  local ext = mime:match "^image/(%w+)" or "png"
+  ext = ext == "jpeg" and "jpg" or ext
+  local dir = vim.fs.joinpath(require("paseo.image").cache_dir(), "inline")
+  local path = vim.fs.joinpath(dir, ("%s.%s"):format(vim.fn.sha256(data):sub(1, 32), ext))
+  if vim.uv.fs_stat(path) then
+    return path
+  end
+  local ok, bytes = pcall(vim.base64.decode, data)
+  if not ok or bytes == "" then
+    return nil
+  end
+  vim.fn.mkdir(dir, "p")
+  local fd = io.open(path, "wb")
+  if not fd then
+    return nil
+  end
+  fd:write(bytes)
+  fd:close()
+  return path
+end
+
 ---Where a picture named in the conversation is ON THIS MACHINE, or nil.
 ---
 ---Relative to the AGENT's directory, not Neovim's: the agent wrote the link
@@ -88,6 +119,14 @@ function M.resolve(chat, src)
   end
   src = vim.trim(src)
   src = src:gsub("^<(.*)>$", "%1")
+  if src:match "^data:" then
+    return M.inline(src)
+  end
+  if src:match "^https?://" then
+    -- snacks fetches a URL itself. Off by default: a transcript reaching out
+    -- to the network because an agent wrote a link is not a default.
+    return cfg().remote == true and src or nil
+  end
   if src:match "^%a[%w+.-]*://" and not src:match "^file://" then
     return nil
   end

@@ -189,6 +189,7 @@ local M = {}
 ---@field pasted boolean  The images you sent, under your message.
 ---@field links boolean  `![alt](path)` in what the agent wrote.
 ---@field read boolean  A picture file the agent read, under its card.
+---@field remote boolean  An `https://` image link too, fetched by snacks. Default false.
 
 ---@class paseo.Config.UI.Rail
 ---@field enabled boolean  Shown the first time. After that your last toggle
@@ -473,6 +474,9 @@ local defaults = {
       pasted = true,
       links = true,
       read = true,
+      -- An `![alt](https://...)` link too, fetched by snacks. Off: the
+      -- transcript does not reach out to the network unasked.
+      remote = false,
     },
 
     -- EXPERIMENTAL. The native surface (`:Paseo`): one Paseo tab, every
@@ -763,6 +767,7 @@ function M.setup(opts)
   vim.validate("ui.images.pasted", config.ui.images.pasted, "boolean")
   vim.validate("ui.images.links", config.ui.images.links, "boolean")
   vim.validate("ui.images.read", config.ui.images.read, "boolean")
+  vim.validate("ui.images.remote", config.ui.images.remote, "boolean")
   vim.validate("ui.native.markdown", config.ui.native.markdown, "boolean")
   vim.validate("ui.native.rail", config.ui.native.rail, "number")
   vim.validate("ui.native.panel", config.ui.native.panel, "number")

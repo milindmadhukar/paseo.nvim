@@ -62,6 +62,30 @@ local function test_images()
   eq("resolve: a web address is not a file here", images.resolve(chat, "https://example.com/a.png"), nil)
   eq("resolve: a file that is not there", images.resolve(chat, "shots/gone.png"), nil)
 
+  local image_mod = require "paseo.image"
+  local saved_cache = image_mod.cache_dir
+  local inline_cache = vim.fn.tempname()
+  image_mod.cache_dir = function()
+    return inline_cache
+  end
+  local uri = "data:image/png;base64," .. vim.base64.encode(PNG)
+  local inline = images.resolve(chat, uri)
+  truthy("resolve: a data: URI is written out to a file", inline and vim.uv.fs_stat(inline) ~= nil, inline)
+  local fd = inline and io.open(inline, "rb")
+  eq("resolve: holding its bytes", fd and fd:read "*a", PNG)
+  if fd then
+    fd:close()
+  end
+  eq("resolve: the same picture twice is one file", images.resolve(chat, uri), inline)
+  eq("resolve: a data: URI that is not an image is not", images.resolve(chat, "data:text/plain;base64,aGk="), nil)
+  image_mod.cache_dir = saved_cache
+  vim.fn.delete(inline_cache, "rf")
+
+  local ui = require("paseo.config").get().ui
+  ui.images.remote = true
+  eq("resolve: with ui.images.remote, a web image is its URL", images.resolve(chat, "https://example.com/a.png"), "https://example.com/a.png")
+  ui.images.remote = false
+
   -- ---------------------------------------------------------------- chips
   transcript.upsert(chat, { kind = "user", text = "what is this" })
   transcript.upsert(chat, {
