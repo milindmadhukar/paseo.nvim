@@ -110,13 +110,18 @@ run_pass() {
   tabs="$("$E" lua 'vim.fn.tabpagenr("$")')"
 
   if [ "$pass" = plain ]; then
-    "$E" keys ":lua require('paseo').paste_image('$repo/shots/pic.png')" Enter
-    "$E" wait "($composer):find(\"[Image #1]\", 1, true) ~= nil" 10 || fail "$pass: nothing attached"
-    "$E" lua '(function() local c = require("paseo.ui.chat").current(); vim.api.nvim_buf_set_lines(c.composer, 0, -1, false, { "echo picture [Image #1] and ![pic](shots/pic.png)" }); return 1 end)()' >/dev/null
+    # `p` in the composer, as you would, with a picture on the (stubbed)
+    # clipboard; then the words around it, typed.
+    "$E" lua "(function() local i = require(\"paseo.image\"); i.from_clipboard = function() return i.from_file(\"$repo/shots/pic.png\") end; return 1 end)()" >/dev/null
+    "$E" lua '(function() vim.api.nvim_set_current_win(require("paseo.ui.chat").current().win_composer); return 1 end)()' >/dev/null
+    "$E" keys Escape p
+    "$E" wait "($composer):find(\"[Image #1]\", 1, true) ~= nil" 10 || fail "$pass: p attached nothing"
+    "$E" keys I "echo picture " Escape A " and ![pic](shots/pic.png)" Escape
+    "$E" wait "($composer) == \"echo picture [Image #1] and ![pic](shots/pic.png)\"" 5 \
+      || fail "$pass: composer reads: $("$E" lua "$composer")"
     local before
     before="$("$E" lua '_G.paseo_e2e.users()')"
-    "$E" lua '(function() vim.api.nvim_set_current_win(require("paseo.ui.chat").current().win_composer); return 1 end)()' >/dev/null
-    "$E" keys Escape Enter
+    "$E" keys Enter
     "$E" wait "_G.paseo_e2e.turn_done($before)" 30 || fail "$pass: the turn never finished"
     "$E" wait "img.with_id() == 1" 10 || fail "$pass: the pasted image did not come back with its message"
   fi
