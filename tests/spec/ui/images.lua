@@ -193,6 +193,27 @@ local function test_images()
   image.cache_dir = saved_dir
   vim.fn.delete(cache, "rf")
 
+  -- ------------------------------------------- <CR>: the system's viewer
+  local opened
+  local real_open = vim.ui.open
+  vim.ui.open = function(target)
+    opened = target
+    return {}, nil
+  end
+  local tabs_before = vim.fn.tabpagenr "$"
+  local wins_before = #api.nvim_list_wins()
+  images.show(pic)
+  vim.ui.open = real_open
+  eq("open: by default, the system's viewer (xdg-open)", opened, pic)
+  eq("open: and no window of ours", { vim.fn.tabpagenr "$", #api.nvim_list_wins() }, { tabs_before, wins_before })
+  local ui_cfg = require("paseo.config").get().ui
+  ui_cfg.images.open = "float"
+  images.show(pic)
+  local shown = api.nvim_get_current_win()
+  eq("open: ui.images.open = \"float\" opens the float instead", api.nvim_win_get_config(shown).relative, "editor")
+  api.nvim_win_close(shown, true)
+  ui_cfg.images.open = "system"
+
   -- ------------------------------------------------------------ the float
   local tabs = vim.fn.tabpagenr "$"
   local before = api.nvim_get_current_win()

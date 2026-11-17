@@ -190,6 +190,8 @@ local M = {}
 ---@field links boolean  `![alt](path)` in what the agent wrote.
 ---@field read boolean  A picture file the agent read, under its card.
 ---@field remote boolean  An `https://` image link too, fetched by snacks. Default false.
+---@field open "system"|"float"  What <CR> on a picture does: the system's
+---                       viewer (xdg-open; the default) or a float.
 
 ---@class paseo.Config.UI.Rail
 ---@field enabled boolean  Shown the first time. After that your last toggle
@@ -477,6 +479,9 @@ local defaults = {
       -- An `![alt](https://...)` link too, fetched by snacks. Off: the
       -- transcript does not reach out to the network unasked.
       remote = false,
+      -- What <CR> on a picture does: "system" opens it in your image viewer
+      -- (xdg-open), "float" full size in a float over the editor.
+      open = "system",
     },
 
     -- EXPERIMENTAL. The native surface (`:Paseo`): one Paseo tab, every
@@ -768,6 +773,9 @@ function M.setup(opts)
   vim.validate("ui.images.links", config.ui.images.links, "boolean")
   vim.validate("ui.images.read", config.ui.images.read, "boolean")
   vim.validate("ui.images.remote", config.ui.images.remote, "boolean")
+  vim.validate("ui.images.open", config.ui.images.open, function(v)
+    return v == "system" or v == "float"
+  end, '"system" or "float"')
   vim.validate("ui.native.markdown", config.ui.native.markdown, "boolean")
   vim.validate("ui.native.rail", config.ui.native.rail, "number")
   vim.validate("ui.native.panel", config.ui.native.panel, "number")

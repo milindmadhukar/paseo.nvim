@@ -100,7 +100,7 @@ Everything else is a key inside the chat or a Lua function.
 | `<C-c>` | chat | stop the turn |
 | `f` | chat | fork the conversation |
 | `<Tab>` | conversation | expand or collapse a tool call |
-| `<CR>` / `gx` | conversation | open the picture under / nearest the cursor, full size (else `<CR>` folds like `<Tab>`) |
+| `<CR>` / `gx` | conversation | open the picture under / nearest the cursor in your image viewer (else `<CR>` folds like `<Tab>`) |
 | `gp` | conversation | reopen a pending permission |
 | `gs` | conversation | this agent's subagents |
 | `<C-b>` `<C-h>` | full screen | the rail: show or hide it / go into it (`<C-h>` in it stays: it is leftmost) |
@@ -149,11 +149,11 @@ Neovim nothing at all, so use `p` for those.
 Pictures in the conversation are chips: the images you sent (kept under
 the message's id, so they come back after a restart), a `![alt](path)` the
 agent wrote (resolved from the agent's directory), and an image file it read. `<CR>` on
-one opens it full size in a float. With
+one opens it in your image viewer (xdg-open), or in a float that it fills
+with `ui.images.open = "float"`. With
 [snacks.nvim](https://github.com/folke/snacks.nvim) in kitty or Ghostty, each
 one is also drawn as a thumbnail under the line (12 rows at most), and the
-float draws it full size. Without snacks, `o` in the float opens the file
-outside Neovim. `ui.images` switches each source off
+float draws it full size. `ui.images` switches each source off
 (`:help paseo-images-transcript`).
 
 ### Asking about code

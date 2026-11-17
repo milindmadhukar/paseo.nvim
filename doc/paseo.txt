@@ -214,8 +214,10 @@ completion and undo all work, and it grows with what you write.
 In the conversation ~
 
     <Tab> za    expand or collapse the tool call under the cursor
-    <CR>        on a picture, open it full size (|paseo-images-transcript|);
-                anywhere else, expand or collapse as <Tab>
+    <CR>        on a picture, open it in your image viewer (xdg-open), or
+                in a float with `ui.images.open = "float"`
+                (|paseo-images-transcript|); anywhere else, expand or
+                collapse as <Tab>
     gx          the picture nearest the cursor in this message; with none,
                 Neovim's own `gx` on the path or URL under it
     gp          reopen a pending permission request
@@ -312,9 +314,12 @@ Three things in a conversation name a picture, and each is drawn as a chip
   - a picture file the agent READ -- a screenshot it took to look at. The
     card says `image` where it would have dumped the file's bytes.
 
-`<CR>` on a chip, or anywhere on an image read's card, opens the picture
-full size in a float over the editor -- never a tab. `gx` opens the one
-nearest the cursor in the same message. In the float: >
+`<CR>` on a chip, or anywhere on an image read's card, opens the picture in
+your system's image viewer (|vim.ui.open()|: xdg-open on Linux). `gx` opens
+the one nearest the cursor in the same message. With
+`ui.images.open = "float"` both open it in a float over the editor instead
+-- never a tab -- enlarged to fill it (with ImageMagick; snacks does not
+scale a picture up on its own). In the float: >
     q <Esc>     close it
     o           open it outside Neovim (|vim.ui.open()|)
     y           copy its path
@@ -780,7 +785,7 @@ is optional. >lua
         animate = { bars = true, flash = true, fps = 30 },
         images = { enabled = true, max_height = 12, max_width = nil,
                    pasted = true, links = true, read = true,
-                   remote = false },
+                   remote = false, open = "system" },
         native = {
           markdown = true,
           rail = 32,
@@ -878,6 +883,9 @@ ui.images           Pictures in the conversation (|paseo-images-transcript|).
                     `max_height` (12 rows) and `max_width` (nil: the window)
                     cap a thumbnail. `remote` (false) lets an `https://`
                     image link be fetched (by snacks) and shown too.
+                    `open` ("system") is what <CR> does with a picture:
+                    "system" is your image viewer (xdg-open), "float" a
+                    float over the editor.
                                                       *paseo-config.ui.native*
                                                                               
                                                  *paseo-config.ui.native.keys*

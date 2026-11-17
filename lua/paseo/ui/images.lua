@@ -901,16 +901,83 @@ function M.open(path)
     if not (env.float and api.nvim_buf_is_valid(buf)) then
       return
     end
-    vim.bo[buf].modifiable = true
-    api.nvim_buf_set_lines(buf, 0, -1, false, {})
-    local ok = pcall(function()
-      snacks_image().buf.attach(buf, { src = path })
+    M.fit(path, win, function(src)
+      if not (api.nvim_buf_is_valid(buf) and api.nvim_win_is_valid(win)) then
+        return
+      end
+      vim.bo[buf].modifiable = true
+      api.nvim_buf_set_lines(buf, 0, -1, false, {})
+      local ok = pcall(function()
+        snacks_image().buf.attach(buf, { src = src })
+      end)
+      if not ok then
+        fallback()
+      end
     end)
-    if not ok then
-      fallback()
-    end
   end)
   return win
+end
+
+---`path`, enlarged to at least fill `win`, written to the cache; or `path`
+---itself when it is already that big or there is no ImageMagick.
+---
+---snacks never scales a picture UP: one smaller than the window is drawn at
+---its own size -- and a HiDPI screenshot, at half of it -- in the corner of a
+---float that was opened to show it big. So the float is handed a copy just
+---larger than the window (one cell either way, at 96 dpi so snacks reads its
+---size as its pixels), and snacks shrinks THAT to fit exactly.
+---@param path string
+---@param win integer
+---@param cb fun(src: string)
+function M.fit(path, win, cb)
+  local magick = vim.fn.executable "magick" == 1 and "magick" or nil
+  local image = snacks_image()
+  local okterm, term = pcall(function()
+    return image.terminal.size()
+  end)
+  if not (magick and okterm and term and vim.uv.fs_stat(path)) then
+    return cb(path)
+  end
+  local w = (api.nvim_win_get_width(win) + 1) * term.cell_width
+  local h = (api.nvim_win_get_height(win) + 1) * term.cell_height
+  local stat = vim.uv.fs_stat(path)
+  local name = vim.fn.sha256(("%s|%d|%d|%d"):format(path, stat.mtime.sec, w, h)):sub(1, 32) .. ".png"
+  local dir = vim.fs.joinpath(require("paseo.image").cache_dir(), "fit")
+  local out = vim.fs.joinpath(dir, name)
+  if vim.uv.fs_stat(out) then
+    return cb(out)
+  end
+  vim.fn.mkdir(dir, "p")
+  -- `[0]`: the first frame of a GIF, the first page of anything with pages.
+  -- `<`: only ever enlarge; a picture bigger than the window is left to
+  -- snacks to shrink, which it does well.
+  vim.system({
+    magick,
+    path .. "[0]",
+    "-resize",
+    ("%dx%d<"):format(w, h),
+    "-units",
+    "PixelsPerInch",
+    "-density",
+    "96",
+    out,
+  }, {}, vim.schedule_wrap(function(result)
+    cb(result.code == 0 and vim.uv.fs_stat(out) and out or path)
+  end))
+end
+
+---Open a picture the way `ui.images.open` says: with the system's viewer
+---(|vim.ui.open()|, xdg-open on Linux) or in a float over the editor.
+---@param path string
+function M.show(path)
+  if cfg().open == "float" then
+    M.open(path)
+    return
+  end
+  local _, err = vim.ui.open(path)
+  if err then
+    vim.notify("paseo: could not open " .. path .. ": " .. err, vim.log.levels.WARN)
+  end
 end
 
 ---Open the picture under the cursor. False when there is none, so `<CR>` can
@@ -923,7 +990,7 @@ function M.open_at_cursor(chat, opts)
   if not entry then
     return false
   end
-  M.open(entry.src)
+  M.show(entry.src)
   return true
 end
 

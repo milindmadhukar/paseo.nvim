@@ -1,5 +1,6 @@
 # Pictures in the transcript: what you pasted, a link the agent wrote, a file
-# it read -- each a chip that <CR> opens full size in a float, and the pasted
+# it read -- each a chip that <CR> hands to the system's viewer (or, with
+# ui.images.open = "float", opens full size in a float), and the pasted
 # one found again after a restart by the id its message was sent with.
 #
 # Twice: without snacks.nvim (chips, and a float that describes the file),
@@ -27,6 +28,20 @@ local function chat()
   return require("paseo.ui.native").chat() or require("paseo.ui.chat").current()
 end
 _G.img = {}
+-- <CR> hands a picture to the system's viewer by default. Recorded rather
+-- than run: xdg-open would open a real window on the desktop.
+img.opened = {}
+vim.ui.open = function(target)
+  img.opened[#img.opened + 1] = target
+  return {}, nil
+end
+function img.last_opened()
+  return img.opened[#img.opened] or ""
+end
+function img.mode(m)
+  require("paseo.config").get().ui.images.open = m
+  return 1
+end
 function img.chips()
   local c = chat()
   return c and #api.nvim_buf_get_extmarks(c.conversation, require("paseo.ui.images").ns, 0, -1, {}) or 0
@@ -109,6 +124,15 @@ run_pass() {
   # [Image #1] and the link in your message, and the link the agent echoed.
   "$E" wait "img.chips() >= 3" 10 || fail "$pass: chips: $("$E" lua 'img.chips()')"
 
+  # By default <CR> is the system's viewer, with nothing of ours on screen.
+  [ "$("$E" lua 'img.cursor_to("read")')" = 1 ] || fail "$pass: no read entry"
+  "$E" keys Enter
+  "$E" wait 'img.last_opened():find("shots/pic.png", 1, true) ~= nil' 10 \
+    || fail "$pass: <CR> did not hand the picture to xdg-open: $("$E" lua 'img.last_opened()')"
+  [ "$("$E" lua 'img.float()')" = "" ] || fail "$pass: <CR> opened a float as well"
+
+  # ui.images.open = "float": full size over the editor.
+  "$E" lua 'img.mode("float")' >/dev/null
   for kind in pasted link read; do
     [ "$("$E" lua "img.cursor_to(\"$kind\")")" = 1 ] || fail "$pass: no $kind entry"
     "$E" keys Enter
