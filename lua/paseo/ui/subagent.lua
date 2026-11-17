@@ -111,6 +111,8 @@ function M.open(subagent, opts)
   vim.bo[buf].bufhidden = "wipe"
   vim.bo[buf].filetype = "markdown"
   vim.bo[buf].modifiable = false
+  -- The conversation's reason: snacks' own image pass is not wanted here.
+  vim.b[buf].snacks_image_attached = true
   pcall(vim.api.nvim_buf_set_name, buf, ("paseo://subagent/%s/%s"):format(subagent.parent, subagent.id))
 
   -- A PEEK, NEVER A TAB. On the Paseo tab it takes the middle window in

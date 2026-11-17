@@ -1048,17 +1048,38 @@ local function make_buffers(chat)
     vim.bo[chat.conversation].bufhidden = "hide"
     vim.bo[chat.conversation].filetype = "markdown"
     vim.bo[chat.conversation].modifiable = false
+    -- Pictures here are |paseo.ui.images|'s to place. snacks.nvim would
+    -- otherwise attach its markdown image pass too, re-scanning the buffer on
+    -- every write and resolving paths against Neovim's cwd, not the agent's.
+    vim.b[chat.conversation].snacks_image_attached = true
     M.name_conversation(chat)
 
     -- The conversation buffer had no keymaps at all: there was nothing on it
     -- to act on. Now a tool card can be opened to see what the command
     -- actually printed, and a pending permission answered from the log.
     local conv = { buffer = chat.conversation, nowait = true }
-    for _, key in ipairs { "<Tab>", "<CR>", "za" } do
+    for _, key in ipairs { "<Tab>", "za" } do
       keys.set("conversation", "n", key, function()
         transcript.toggle_at_cursor(chat)
       end, vim.tbl_extend("force", conv, { desc = "paseo: expand/collapse" }))
     end
+    -- On a picture, the picture; anywhere else, the fold it always was. The
+    -- rows pictures are on -- prose, your messages -- are rows `<CR>` did
+    -- nothing on before.
+    keys.set("conversation", "n", "<CR>", function()
+      if not require("paseo.ui.images").open_at_cursor(chat) then
+        transcript.toggle_at_cursor(chat)
+      end
+    end, vim.tbl_extend("force", conv, { desc = "paseo: open the picture, or expand/collapse" }))
+    keys.set("conversation", "n", "gx", function()
+      if require("paseo.ui.images").open_at_cursor(chat, { nearest = true }) then
+        return
+      end
+      local target = vim.fn.expand "<cfile>"
+      if target ~= "" then
+        vim.ui.open(target)
+      end
+    end, vim.tbl_extend("force", conv, { desc = "paseo: open the picture nearest the cursor" }))
     keys.set("conversation", "n", "q", function()
       M.close()
     end, vim.tbl_extend("force", conv, { desc = "paseo: close chat" }))
@@ -1097,6 +1118,8 @@ local function make_buffers(chat)
     vim.bo[chat.composer].buftype = "nofile"
     vim.bo[chat.composer].bufhidden = "hide"
     vim.bo[chat.composer].filetype = "markdown"
+    -- Not snacks' to scan on every keystroke; see the conversation's.
+    vim.b[chat.composer].snacks_image_attached = true
     name_buffer(chat.composer, "compose", chat.root)
     composers[chat.composer] = chat
 

@@ -93,6 +93,7 @@ local M = {}
 ---                       own instead -- for a theme whose colours the agent
 ---                       surfaces read badly in, or which simply is not what
 ---                       you want them to look like.
+---@field images paseo.Config.UI.Images  Pictures in the conversation.
 ---@field palette paseo.Config.UI.Palette  Those eight colours, by name, laid
 ---                       over whichever source `colors` names. Everything
 ---                       downstream still runs: naming `bg` and `blue` alone
@@ -180,6 +181,14 @@ local M = {}
 ---@field backdrop boolean  Dimmed the editor behind the old float.
 ---@field tab_keys boolean  Bound bare `1`-`6` to the old dashboard's tabs.
 ---@field rail paseo.Config.UI.Rail  The workspace rail down the left.
+
+---@class paseo.Config.UI.Images
+---@field enabled boolean  Chips, the full-size float and thumbnails. Default true.
+---@field max_height integer  Thumbnail rows at most. Default 12.
+---@field max_width integer|nil  Thumbnail columns at most; nil is the window.
+---@field pasted boolean  The images you sent, under your message.
+---@field links boolean  `![alt](path)` in what the agent wrote.
+---@field read boolean  A picture file the agent read, under its card.
 
 ---@class paseo.Config.UI.Rail
 ---@field enabled boolean  Shown the first time. After that your last toggle
@@ -448,6 +457,22 @@ local defaults = {
       composer = function(lines)
         return math.max(7, math.floor(lines / 3))
       end,
+    },
+
+    -- Pictures in the conversation: an image you pasted, a markdown
+    -- `![alt](path)` the agent wrote, a picture file it read. Each is a chip
+    -- you can `<CR>` to see full size, and -- with snacks.nvim, in a terminal
+    -- that speaks the kitty graphics protocol (kitty, Ghostty, WezTerm) -- a
+    -- thumbnail under the line. See |paseo-images-transcript|.
+    images = {
+      enabled = true,
+      -- The thumbnail's ceiling, in rows and columns. nil columns: the window.
+      max_height = 12,
+      max_width = nil,
+      -- Which of the three to show.
+      pasted = true,
+      links = true,
+      read = true,
     },
 
     -- EXPERIMENTAL. The native surface (`:Paseo`): one Paseo tab, every
@@ -728,6 +753,16 @@ function M.setup(opts)
   vim.validate("ui.surface", config.ui.surface, function(v)
     return v == "native" or v == "sidebar" or v == "float" or v == "buffer"
   end, '"native" or "sidebar"')
+  vim.validate("ui.images.enabled", config.ui.images.enabled, "boolean")
+  vim.validate("ui.images.max_height", config.ui.images.max_height, function(v)
+    return type(v) == "number" and v >= 1
+  end, "a number of rows, at least 1")
+  vim.validate("ui.images.max_width", config.ui.images.max_width, function(v)
+    return v == nil or (type(v) == "number" and v >= 1)
+  end, "nil or a number of columns")
+  vim.validate("ui.images.pasted", config.ui.images.pasted, "boolean")
+  vim.validate("ui.images.links", config.ui.images.links, "boolean")
+  vim.validate("ui.images.read", config.ui.images.read, "boolean")
   vim.validate("ui.native.markdown", config.ui.native.markdown, "boolean")
   vim.validate("ui.native.rail", config.ui.native.rail, "number")
   vim.validate("ui.native.panel", config.ui.native.panel, "number")

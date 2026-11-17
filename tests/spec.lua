@@ -44,6 +44,7 @@ local files = {
   "ui.invariants",
   "ui.rail",
   "ui.native",
+  "ui.images",
   "ui.keys",
   "ui.editor",
   "provider",

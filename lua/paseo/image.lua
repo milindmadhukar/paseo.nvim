@@ -35,6 +35,18 @@ local BY_EXTENSION = {
   bmp = "image/bmp",
 }
 
+---Does `path` name a picture, by its extension? What the transcript asks of a
+---file an agent read or linked before it hangs a thumbnail under it.
+---@param path string|nil
+---@return boolean
+function M.is_image_path(path)
+  if type(path) ~= "string" or path == "" then
+    return false
+  end
+  local ext = path:match "%.([%w]+)$"
+  return ext ~= nil and BY_EXTENSION[ext:lower()] ~= nil
+end
+
 ---In order of preference. A clipboard usually carries the same picture several
 ---ways at once -- a screenshot copied from a browser arrives as PNG, as HTML
 ---and as a URL -- and PNG is the one every provider takes.

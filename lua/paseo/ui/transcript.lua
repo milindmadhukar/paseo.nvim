@@ -78,6 +78,8 @@ function M.reset(chat)
   chat.permission_blocks = {}
   chat.answer_state = {}
 
+  -- Every thumbnail and chip belongs to a block that is about to go.
+  require("paseo.ui.images").clear(chat)
   if chat.conversation and api.nvim_buf_is_valid(chat.conversation) then
     vim.bo[chat.conversation].modifiable = true
     api.nvim_buf_set_lines(chat.conversation, 0, -1, false, {})
@@ -209,6 +211,8 @@ function M.track(chat)
           local chat_ = tracked[api.nvim_win_get_buf(win)]
           if chat_ then
             note(chat_, win)
+            -- Thumbnails are placed as they come into view, not all at once.
+            require("paseo.ui.images").scrolled(chat_)
           end
         end
       end
@@ -479,6 +483,9 @@ local function draw(chat, block, row, old_height)
     right_gravity = true,
   })
   vim.bo[chat.conversation].modifiable = modifiable
+  -- Its pictures are looked at later, debounced, and never inside the write:
+  -- a history load is sixty of these and one image pass.
+  require("paseo.ui.images").touch(chat, block)
   -- The "thinking…" line goes under whatever is last now. Before the caller's
   -- `to_bottom`, which is what scrolls it into view.
   pending.pin(chat)
@@ -785,7 +792,12 @@ end
 ---@param chat table
 function M.close(chat)
   M.flush(chat)
+  local open = chat.open and chat.blocks and chat.blocks[chat.open.id]
   chat.open = nil
+  -- Its pictures waited for the reply to finish; see |paseo.ui.images|.
+  if open then
+    require("paseo.ui.images").touch(chat, open)
+  end
 end
 
 ---Assistant text and reasoning, which both arrive in PIECES.
@@ -849,6 +861,33 @@ function M.stream(chat, text, kind)
   end, wait)
 end
 
+---The block a row belongs to.
+---
+---Walks BACKWARDS from the row to the nearest anchor: a row is usually in the
+---middle of a card, not on its first line.
+---@param chat table
+---@param row integer  0-indexed
+---@return table|nil block
+---@return integer|nil start  The block's first row, 0-indexed.
+function M.block_at(chat, row)
+  M.ensure(chat)
+  local buf = chat.conversation
+  if not (buf and api.nvim_buf_is_valid(buf)) then
+    return nil
+  end
+  local marks = api.nvim_buf_get_extmarks(buf, hl.ns_anchor, { row, 0 }, { 0, 0 }, { limit = 1 })
+  local mark = marks[1]
+  if not mark then
+    return nil
+  end
+  for _, block in pairs(chat.blocks) do
+    if block.mark == mark[1] then
+      return block, mark[2]
+    end
+  end
+  return nil
+end
+
 ---Expand or collapse the block under the cursor.
 ---@param chat table
 function M.toggle_at_cursor(chat)
@@ -860,41 +899,23 @@ function M.toggle_at_cursor(chat)
   end
   local row = api.nvim_win_get_cursor(win)[1] - 1
 
-  -- Walk BACKWARDS from the cursor to the nearest anchor: the cursor is
-  -- usually in the middle of a card, not on its first line.
-  local marks = api.nvim_buf_get_extmarks(
-    chat.conversation,
-    hl.ns_anchor,
-    { row, 0 },
-    { 0, 0 },
-    { limit = 1 }
-  )
-  local mark_id = marks[1] and marks[1][1]
-  if not mark_id then
+  local block = M.block_at(chat, row)
+  if not (block and block.collapsible) then
     return
   end
-
-  for _, block in pairs(chat.blocks) do
-    if block.mark == mark_id then
-      if not block.collapsible then
-        return
-      end
-      block.expanded = not block.expanded
-      -- From here on this card is yours, and `default_expanded` stops having a
-      -- say in it.
-      block.pinned = true
-      -- Explicitly NOT following. You are up in the history with the cursor on
-      -- a card; scrolling to the bottom and then being yanked back by the two
-      -- lines below is a flicker with no purpose.
-      M.rerender(chat, block, nil, { follow = false })
-      -- Put the cursor back on the card's header, so repeated <Tab> toggles the
-      -- same card rather than walking off the end of a shrinking one.
-      local at = row_of(chat, block)
-      if at then
-        pcall(api.nvim_win_set_cursor, win, { at + 1, 0 })
-      end
-      return
-    end
+  block.expanded = not block.expanded
+  -- From here on this card is yours, and `default_expanded` stops having a
+  -- say in it.
+  block.pinned = true
+  -- Explicitly NOT following. You are up in the history with the cursor on
+  -- a card; scrolling to the bottom and then being yanked back by the two
+  -- lines below is a flicker with no purpose.
+  M.rerender(chat, block, nil, { follow = false })
+  -- Put the cursor back on the card's header, so repeated <Tab> toggles the
+  -- same card rather than walking off the end of a shrinking one.
+  local at = row_of(chat, block)
+  if at then
+    pcall(api.nvim_win_set_cursor, win, { at + 1, 0 })
   end
 end
 

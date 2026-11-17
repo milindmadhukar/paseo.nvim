@@ -100,6 +100,7 @@ Everything else is a key inside the chat or a Lua function.
 | `<C-c>` | chat | stop the turn |
 | `f` | chat | fork the conversation |
 | `<Tab>` | conversation | expand or collapse a tool call |
+| `<CR>` / `gx` | conversation | open the picture under / nearest the cursor, full size (else `<CR>` folds like `<Tab>`) |
 | `gp` | conversation | reopen a pending permission |
 | `gs` | conversation | this agent's subagents |
 | `<C-b>` `<C-h>` | full screen | the rail: show or hide it / go into it (`<C-h>` in it stays: it is leftmost) |
@@ -144,6 +145,14 @@ Dragging an image file onto the terminal, or pasting one copied in a file
 manager, also attaches it: the terminal sends the path, and the plugin
 recognises it. Your terminal's own paste key on a raw screenshot sends
 Neovim nothing at all, so use `p` for those.
+
+Pictures in the conversation are chips: a `![alt](path)` the agent wrote
+(resolved from the agent's directory) and an image file it read. `<CR>` on
+one opens it full size in a float. With
+[snacks.nvim](https://github.com/folke/snacks.nvim) in a kitty-graphics
+terminal (kitty, Ghostty, WezTerm) the float draws the picture; elsewhere `o`
+in it opens the file outside Neovim. `ui.images` switches each source off
+(`:help paseo-images-transcript`).
 
 ### Asking about code
 

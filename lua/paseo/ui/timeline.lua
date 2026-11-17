@@ -228,8 +228,15 @@ local function detail_body(detail, width, summary)
     if where ~= short_path(summary) then
       lines[#lines + 1] = { { where, "PaseoPath" } }
     end
-    for _, line in ipairs(vim.list_slice(vim.split(detail.content or "", "\n"), 1, 20)) do
-      lines[#lines + 1] = { { line, "PaseoDim" } }
+    -- A PICTURE has no text to show: what comes back is base64 or nothing,
+    -- and twenty lines of it is noise. The thumbnail hangs under the card
+    -- instead (|paseo.ui.images|), and <CR> opens it full size.
+    if require("paseo.image").is_image_path(detail.filePath) then
+      lines[#lines + 1] = { { "image", "PaseoDim" } }
+    else
+      for _, line in ipairs(vim.list_slice(vim.split(detail.content or "", "\n"), 1, 20)) do
+        lines[#lines + 1] = { { line, "PaseoDim" } }
+      end
     end
   elseif detail.type == "edit" then
     if short_path(detail.filePath) ~= short_path(summary) then

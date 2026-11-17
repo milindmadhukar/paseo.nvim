@@ -88,18 +88,45 @@ function M.pin(chat)
   chat.pending_mark = ok and id or nil
 end
 
+---How many virtual lines hang BELOW the buffer's last line, from anyone:
+---this line, and a thumbnail under the last message (|paseo.ui.images|).
+---@param buf integer
+---@param last integer  0-indexed
+---@return integer
+local function below_last(buf, last)
+  local rows = 0
+  local ok, marks = pcall(api.nvim_buf_get_extmarks, buf, -1, { last, 0 }, { last, -1 }, {
+    details = true,
+    type = "virt_lines",
+  })
+  for _, mark in ipairs(ok and marks or {}) do
+    local details = mark[4] or {}
+    if details.virt_lines and not details.virt_lines_above then
+      rows = rows + #details.virt_lines
+    end
+  end
+  return rows
+end
+
 ---Scroll just far enough that the line is on screen, when the window is
 ---showing the end of the transcript. A window you scrolled up in is left
 ---alone.
+---
+---Everything virtual under the last line counts, not only this one: a picture
+---under the last message is clipped by exactly the same rule.
 ---@param chat table
 function M.reveal(chat)
   local win = window(chat)
-  if not (win and chat.pending_mark) then
+  if not win then
     return
   end
   local buf = chat.conversation
   local count = api.nvim_buf_line_count(buf)
   if vim.fn.line("w$", win) < count then
+    return
+  end
+  local below = below_last(buf, count - 1)
+  if below == 0 then
     return
   end
   local top = vim.fn.line("w0", win)
@@ -109,7 +136,7 @@ function M.reveal(chat)
   if not ok then
     return
   end
-  local over = size.all + 1 - api.nvim_win_get_height(win)
+  local over = size.all + below - api.nvim_win_get_height(win)
   if over > 0 then
     api.nvim_win_call(win, function()
       vim.cmd(("noautocmd normal! %d\5"):format(over))
