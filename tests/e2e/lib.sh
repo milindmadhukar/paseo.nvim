@@ -1,4 +1,11 @@
 # Sourced by scenarios. Small assertions over `nvim.sh state` and the CLI.
+# NOT AS AN AGENT. Run from inside a Paseo agent, the shell carries that
+# agent's PASEO_WORKSPACE_ID / PASEO_AGENT_ID, and the CLI acts on them: `paseo
+# run` went to a workspace that exists only on the live daemon ("Workspace not
+# found") and no scenario could seed an agent. A scenario that wants to be an
+# agent says so on the one command (agent-message.sh).
+unset PASEO_WORKSPACE_ID PASEO_AGENT_ID PASEO_AGENT_CWD
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 E="$here/nvim.sh"
 D="$here/daemon.sh"

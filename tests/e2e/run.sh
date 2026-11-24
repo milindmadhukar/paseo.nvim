@@ -10,6 +10,8 @@
 # daemon is started if it is not up and left running for the next run: it is
 # yours, isolated, and `daemon.sh stop` takes it down.
 set -uo pipefail
+# Not as an agent: see lib.sh. The daemon this starts should not inherit it.
+unset PASEO_WORKSPACE_ID PASEO_AGENT_ID PASEO_AGENT_CWD
 
 here="$(cd "$(dirname "$0")" && pwd)"
 filter="${1:-}"
