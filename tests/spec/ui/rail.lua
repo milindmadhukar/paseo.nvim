@@ -895,6 +895,34 @@ local function test_tree()
       return l:find("#9", 1, true) ~= nil
     end, below) == 1, vim.inspect(below))
 
+    -- A RESIZE IS A NEW LAYOUT. Names are cut to the width when the rows are
+    -- built, and only opening and closing built them -- so a rail dragged
+    -- narrower kept its full names and the `+5 -2` was painted over them.
+    local wide = api.nvim_win_get_width(win)
+    local row = line_of "alpha"
+    local before = lines()[row]
+    local used = vim.fn.strdisplaywidth(before:sub(1, before:find("alpha", 1, true) - 1))
+    -- Narrow enough that "alpha" has to give, wide enough to keep its stat.
+    api.nvim_win_set_width(win, used + 11)
+    rail.refit()
+    local cut = lines()[row]
+    truthy("tree: dragged narrower, the name is cut to fit", cut:find("…", 1, true) ~= nil and not cut:find("alpha", 1, true), cut)
+    local stat
+    for _, mark in ipairs(api.nvim_buf_get_extmarks(buf, -1, { row - 1, 0 }, { row - 1, -1 }, { details = true })) do
+      if mark[4].virt_text_pos == "right_align" then
+        stat = text_of(mark[4].virt_text)
+      end
+    end
+    eq("tree: and keeps its diff stat", stat, "+5 -2 ")
+    truthy(
+      "tree: with a space between the name and the stat",
+      vim.fn.strdisplaywidth(cut) + 1 + vim.fn.strdisplaywidth(stat or "") <= api.nvim_win_get_width(win),
+      ("%q + %q in %d"):format(cut, stat or "", api.nvim_win_get_width(win))
+    )
+    api.nvim_win_set_width(win, wide)
+    rail.refit()
+    eq("tree: and wider again, the whole name back", lines()[row], before)
+
     -- KEY HINTS ARE OPT-IN: no `a new  w worktree` line unless asked for.
     local function hint_line()
       for _, l in ipairs(rail.build(32).below[#rail.build(32).lines] or {}) do

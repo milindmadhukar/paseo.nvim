@@ -1129,6 +1129,31 @@ function M.win()
   return win and api.nvim_win_is_valid(win) and win or nil
 end
 
+---The width the rows were last laid out for. Names are cut to fit at BUILD
+---time, so a rail dragged narrower and not rebuilt keeps its full names, and
+---the right-aligned `+120 -7` is painted over the end of them.
+---@type integer|nil
+local drawn_width
+
+---The columns the rows have: the window less any sign or number column.
+---@return integer
+local function text_width()
+  local w = M.win()
+  if not w then
+    return 32
+  end
+  local info = vim.fn.getwininfo(w)[1]
+  return api.nvim_win_get_width(w) - (info and info.textoff or 0)
+end
+
+---Lay the rows out again if the window is no longer the width they were
+---laid out for. What a resize calls: cheap when nothing changed.
+function M.refit()
+  if M.win() and text_width() ~= drawn_width then
+    M.draw()
+  end
+end
+
 ---The row under the cursor.
 ---@return paseo.RailRow|nil, integer|nil line
 local function cursor_row()
@@ -1180,7 +1205,8 @@ function M.draw()
   if not (buf and api.nvim_buf_is_valid(buf)) then
     return
   end
-  local width = M.win() and api.nvim_win_get_width(win) or 32
+  local width = text_width()
+  drawn_width = M.win() and width or nil
   local held_path, held_col
   if M.win() then
     local row = cursor_row()
@@ -2050,6 +2076,15 @@ function M.buf(keys)
   end
 
   local group = api.nvim_create_augroup("paseo.rail", { clear = true })
+  -- A drag, `<C-w><`, or the editor itself changing size: the names are cut
+  -- to the width, so a new width is a new layout.
+  api.nvim_create_autocmd({ "WinResized", "VimResized" }, {
+    group = group,
+    desc = "paseo: refit the rail's rows to its width",
+    callback = function()
+      vim.schedule(M.refit)
+    end,
+  })
   -- THE CURSOR ON THE NAME, wherever a motion left it: nvim-tree's
   -- `hijack_cursor`. Normal mode only, so a visual selection can still be
   -- made, and not while a search is landing on its match.
