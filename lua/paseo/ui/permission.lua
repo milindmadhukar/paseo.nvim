@@ -51,6 +51,13 @@ end
 local open_dialog
 local arm
 
+---The augroup a held request waits in, per chat.
+---@param chat table
+---@return string
+local function arm_group(chat)
+  return "paseo.permission." .. tostring(chat.agent_id or chat.root)
+end
+
 -- ------------------------------------------------------------------ geometry
 
 local function dimensions(lines)
@@ -312,6 +319,9 @@ end
 ---@param request table
 local function open(chat, request)
   M.close()
+  -- On screen now, so nothing is waiting to put it there: an armed hold left
+  -- behind would bring it straight back after you dismissed it with <Esc>.
+  pcall(api.nvim_del_augroup_by_name, arm_group(chat))
 
   local view = viewer(chat, request)
 
@@ -446,7 +456,7 @@ end
 ---request you dismiss with <Esc> stays dismissed, and `gp` reopens it.
 ---@param chat table
 arm = function(chat)
-  local group = api.nvim_create_augroup("paseo.permission." .. tostring(chat.agent_id or chat.root), { clear = true })
+  local group = api.nvim_create_augroup(arm_group(chat), { clear = true })
   api.nvim_create_autocmd({ "WinEnter", "BufEnter", "InsertLeave" }, {
     group = group,
     callback = function()
@@ -775,6 +785,17 @@ end
 ---@return string|nil
 function M._showing()
   return open_dialog and open_dialog.request and open_dialog.request.id or nil
+end
+
+---Hold the pending request until its chat is in front of you again. The
+---overlay calls this when the chat it was over leaves the screen -- a new
+---chat, another agent, a terminal in the middle window -- rather than when you
+---dismiss it, which stays dismissed.
+---@param chat table
+function M.hold(chat)
+  if (chat.permissions or {})[1] then
+    arm(chat)
+  end
 end
 
 ---Reopen the pending prompt. Bound to `gp` in the conversation.

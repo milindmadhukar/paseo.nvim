@@ -572,6 +572,10 @@ at a time (`2 of 3`):
     s           skip (where allowed)      n N       decline (N stops too)
     <Esc> q     later; `gp` reopens it
 
+A question (or a plan) belongs to its chat, not to the window: open another
+chat, agent or terminal in its place and it goes, then comes back where you
+left it when that chat is in front of you again. Only `<Esc>` waits for `gp`.
+
                                                        *paseo-permission-plan*
                                                   *paseo-permission-plan-keys*
 Plans ~

@@ -1144,6 +1144,29 @@ function M.showing()
   return open_overlay and open_overlay.request.id or nil
 end
 
+---Whether the overlay's chat is still the one in the window it sits over.
+---@param o paseo.Answer
+---@return boolean
+local function on_screen(o)
+  local win = o.chat.win_conversation
+  if o.anchor and win ~= o.anchor then
+    return false
+  end
+  return win ~= nil and api.nvim_win_is_valid(win) and api.nvim_win_get_buf(win) == o.chat.conversation
+end
+
+---Its chat has left the screen: put it away, and back when the chat is.
+---
+---Not a dismissal. `<Esc>` means "not now, I will `gp` it"; this means the
+---chat went, and the request should be in front of you again the moment it
+---is. The picks are held on the chat (`chat.answer_state`), so it comes back
+---where you left it.
+---@param o paseo.Answer
+local function away(o)
+  M.close()
+  require("paseo.ui.permission").hold(o.chat)
+end
+
 ---Answer a question, or decide a plan.
 ---@param chat table
 ---@param request table
@@ -1262,11 +1285,30 @@ function M.open(chat, request, view, handlers)
       group = o.augroup,
       pattern = tostring(o.anchor),
       callback = function()
-        vim.schedule(M.close)
+        vim.schedule(function()
+          if open_overlay == o then
+            away(o)
+          end
+        end)
       end,
       desc = "paseo: close the answer overlay with its chat window",
     })
   end
+  -- NOR when the window stays and the CHAT goes: the full screen swaps agents,
+  -- a new session's screen and terminals through one middle window, so a new
+  -- chat opened over a question left the card on top of it. Scheduled, so a
+  -- swap that ends with this chat back in the window is not a leave.
+  api.nvim_create_autocmd("BufWinEnter", {
+    group = o.augroup,
+    callback = function()
+      vim.schedule(function()
+        if open_overlay == o and not on_screen(o) then
+          away(o)
+        end
+      end)
+    end,
+    desc = "paseo: put the answer overlay away when its chat leaves the screen",
+  })
   -- Debounced: a drag-resize fires this per column, and each one is a
   -- `gen_data` plus a window reconfigure.
   api.nvim_create_autocmd({ "VimResized", "WinResized" }, {

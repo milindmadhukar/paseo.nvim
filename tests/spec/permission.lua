@@ -106,6 +106,75 @@ local function test_permission_held()
   vim.api.nvim_win_close(chat.win_conversation, true)
 end
 
+--- A question over a chat that leaves the screen goes with it, and comes back
+--- with it. On the full screen a new chat, another agent or a terminal takes
+--- the SAME middle window, so the card -- anchored to that window, closed only
+--- when the window closes -- stayed on top of whatever came next.
+local function test_permission_away()
+  local permission = require "paseo.ui.permission"
+  local answer = require "paseo.ui.answer"
+  local transcript = require "paseo.ui.transcript"
+
+  vim.cmd "silent only"
+  local chat = { agent_id = "away", conversation = vim.api.nvim_create_buf(false, true) }
+  transcript.reset(chat)
+  vim.cmd "vsplit"
+  local win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(win, chat.conversation)
+  vim.api.nvim_win_set_width(win, 90)
+  chat.win_conversation = win
+
+  local request = {
+    id = "q-away",
+    kind = "question",
+    name = "AskUserQuestion",
+    actions = { { id = "deny", label = "Deny", behavior = "deny" } },
+    input = {
+      questions = {
+        { question = "Which way?", header = "Way", options = { { label = "Left" }, { label = "Right" } } },
+      },
+    },
+  }
+  permission.offer(chat, request)
+  truthy("away: the question is up over its chat", vim.wait(500, function()
+    return answer.showing() == "q-away"
+  end))
+  vim.api.nvim_feedkeys("j", "x", false)
+
+  -- Another chat into the same window: what the full screen does for a new one.
+  local other = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_win_set_buf(win, other)
+  chat.win_conversation = nil
+  vim.api.nvim_set_current_win(win)
+  truthy("away: a new chat in its window puts it away", vim.wait(500, function()
+    return answer.showing() == nil
+  end))
+  vim.cmd "wincmd p"
+  vim.cmd "wincmd p"
+  vim.wait(100)
+  eq("away: and it stays away while you are in the other chat", answer.showing(), nil)
+
+  -- Back to the chat: the question is in front of you again, where you left it.
+  vim.api.nvim_win_set_buf(win, chat.conversation)
+  chat.win_conversation = win
+  vim.api.nvim_set_current_win(win)
+  truthy("away: back in the chat, it comes back", vim.wait(500, function()
+    return answer.showing() == "q-away"
+  end))
+  eq("away: on the option you were on", chat.answer_state["q-away"].focus[1], 2)
+
+  -- <Esc> is still "not now": it does not come back on its own after that.
+  answer.close()
+  vim.cmd "wincmd p"
+  vim.cmd "wincmd p"
+  vim.wait(100)
+  eq("away: dismissed stays dismissed until `gp`", answer.showing(), nil)
+
+  chat.permissions = {}
+  vim.cmd "silent only"
+  pcall(vim.api.nvim_buf_delete, other, { force = true })
+end
+
 --- A Paseo subagent's request is answered in its parent's chat.
 ---
 --- The bug, reproduced against a real daemon: an agent started by another
@@ -264,4 +333,5 @@ return {
   { "relay", test_permission_relay },
   { "sync", test_permission_sync },
   { "held", test_permission_held },
+  { "away", test_permission_away },
 }
