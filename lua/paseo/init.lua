@@ -315,6 +315,13 @@ function M.toggle()
   require("paseo.ui.chat").toggle()
 end
 
+---Open or close the chat in the sidebar, beside your code, whatever
+---`ui.surface` says. From the full screen it brings the chat in the middle
+---back beside the code; a second press puts it away.
+function M.sidebar()
+  require("paseo.ui.chat").surface("sidebar", { toggle = true })
+end
+
 ---Ask about code: the hunk, selection or file, or every quickfix entry.
 ---@param kind? "hunk"|"visual"|"file"|"cursor"|"qf"
 function M.ask(kind)
@@ -449,7 +456,7 @@ function M.setup(opts)
   -- One per action of |paseo-native-api|, and one per panel: `<Plug>(paseo-rail)`,
   -- `<Plug>(paseo-panel-changes)`. `<Plug>(paseo-native)` is the toggle.
   local native = require "paseo.native"
-  local plugs = { native = native.toggle, search = M.search }
+  local plugs = { native = native.toggle, sidebar = M.sidebar, search = M.search }
   for name, action in pairs(native.ACTIONS) do
     if name ~= "toggle" then
       plugs[name] = action.run

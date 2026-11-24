@@ -2484,6 +2484,15 @@ function M.surface(name, opts)
       return
     end
   end
+  -- From the full screen, the chat to move is the one in the middle, as for
+  -- `<C-f>` -- not whichever was current last.
+  local moving = false
+  if name == "sidebar" and opts and opts.toggle and require("paseo.ui.native").on_tab() then
+    local middle = require("paseo.ui.native").chat()
+    if middle and not require("paseo.ui.newtask").task(middle) then
+      chat, current, moving = middle, middle, true
+    end
+  end
   if not chat then
     -- ON THE SURFACE THAT WAS ASKED FOR, not on the default one first.
     return M.open({ surface = name }, function(opened)
@@ -2493,7 +2502,14 @@ function M.surface(name, opts)
     end)
   end
 
-  if opts and opts.toggle and name == "sidebar" and sidebar.is_open(chat) then
+  -- THE SIDEBAR, ON THIS TAB. `sidebar.is_open` asks only whether the
+  -- conversation window is valid, and on the full screen it is -- so the
+  -- toggle took "open" for "the sidebar is up" and closed the full screen
+  -- instead of bringing the chat beside the code.
+  local win = chat.win_conversation
+  if opts and opts.toggle and name == "sidebar" and chat.surface == "sidebar" and sidebar.is_open(chat)
+    and vim.api.nvim_win_get_tabpage(win) == vim.api.nvim_get_current_tabpage()
+  then
     return M.close()
   end
 
@@ -2508,7 +2524,15 @@ function M.surface(name, opts)
     return
   end
   M.to_sidebar(chat)
+  -- Taking it off the full screen puts the next one up there, and that made
+  -- the NEXT chat current: the key that brought this one beside the code then
+  -- acted on the other one.
+  current = chat
   transcript.restore(chat)
+  -- You were in it, and the key moved it: you are still in it.
+  if moving and chat.win_composer and vim.api.nvim_win_is_valid(chat.win_composer) then
+    vim.api.nvim_set_current_win(chat.win_composer)
+  end
 end
 
 ---`<C-f>`: between the sidebar beside your code and the Paseo tab, both ways.

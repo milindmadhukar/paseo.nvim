@@ -78,6 +78,7 @@ plugin before its first command.)
 The plugin maps NO global keys. Bind the commands (|paseo-commands|), the Lua
 functions (|paseo-api|) or the `<Plug>` names (|paseo-plug|) you want: >lua
     vim.keymap.set({ "n", "t" }, "<C-\\>", "<Plug>(paseo-native)")
+    vim.keymap.set({ "n", "t" }, "<C-M-\\>", "<Plug>(paseo-sidebar)")
     vim.keymap.set("n", "<leader>an", "<cmd>Paseo new<cr>")
     vim.keymap.set("n", "<leader>ak", "<cmd>Paseo ask<cr>")
     vim.keymap.set("v", "<leader>ak", "<cmd>Paseo ask visual<cr>")
@@ -184,8 +185,8 @@ where |:Paseo-ask| and |:Paseo-explain| put the chat, so the code you asked
 about stays on screen (|paseo-config.review.surface|). `<C-f>` moves the
 chat between it and full screen, both ways: from the Paseo tab it comes back
 beside the code on the tab you came from, and the other agents open there
-stay where they are. There is one sidebar per tab. Open it yourself with
-`require("paseo.ui.chat").surface("sidebar")`.
+stay where they are. There is one sidebar per tab. Open and close it with
+|paseo.sidebar()| or `<Plug>(paseo-sidebar)`.
 
                                                              *paseo-chat-keys*
 In the composer ~
@@ -1038,6 +1039,11 @@ require("paseo") ~
 setup({opts})               See |paseo-configuration|.
                                                               *paseo.toggle()*
 toggle()                    Open or close the chat. The same as |:Paseo|.
+                                                             *paseo.sidebar()*
+sidebar()                   Open or close the chat in the sidebar, beside
+                            your code, whatever `ui.surface` says. From the
+                            full screen it brings the chat in the middle back
+                            beside the code. `<Plug>(paseo-sidebar)`.
                                                             *paseo.new_task()*
 new_task({opts})            The new-task screen. {opts}: `scope`
                             (`"session"`, the default, or `"agent"`: one
@@ -1286,6 +1292,7 @@ User PaseoReview
 One per |paseo-native-api| action, in normal and terminal mode:
 
     <Plug>(paseo-native)            the toggle
+    <Plug>(paseo-sidebar)           the sidebar's toggle (|paseo.sidebar()|)
     <Plug>(paseo-open)              <Plug>(paseo-code)
     <Plug>(paseo-close)             <Plug>(paseo-rail)
     <Plug>(paseo-focus)             <Plug>(paseo-panel)
