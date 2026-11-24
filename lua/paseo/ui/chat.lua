@@ -1144,6 +1144,9 @@ local function make_buffers(chat)
     vim.b[chat.composer].snacks_image_attached = true
     name_buffer(chat.composer, "compose", chat.root)
     composers[chat.composer] = chat
+    -- `./` from the agent's directory: the name above is a URL, and path
+    -- completion resolves relative paths against the buffer's name.
+    require("paseo.ui.complete").attach(chat.composer, require("paseo.ui.complete").root(chat))
 
     -- The box is the size of what is in it: three rows for a question, more
     -- for a paragraph, back to three once it is sent. A fixed eight rows was

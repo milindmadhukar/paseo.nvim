@@ -47,6 +47,7 @@ local files = {
   "ui.images",
   "ui.keys",
   "ui.editor",
+  "ui.complete",
   "provider",
   "questions",
   "plan",

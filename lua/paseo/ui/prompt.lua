@@ -105,6 +105,7 @@ function M.open(opts, callback)
   -- whatever completion and keymaps you have there should work here too.
   vim.bo[buf].filetype = "markdown"
   pcall(api.nvim_buf_set_name, buf, "paseo://ask/" .. vim.fs.basename(opts.root or vim.uv.cwd()))
+  require("paseo.ui.complete").attach(buf, opts.root)
 
   local win = api.nvim_open_win(buf, true, {
     relative = "editor",

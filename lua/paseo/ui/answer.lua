@@ -869,6 +869,7 @@ local function open_box(o, insert, note)
   -- an answer, because it is the same act.
   vim.bo[buf].filetype = "markdown"
   pcall(api.nvim_buf_set_name, buf, "paseo://answer/" .. vim.fs.basename(o.chat.root or "paseo"))
+  require("paseo.ui.complete").attach(buf, require("paseo.ui.complete").root(o.chat))
   -- Seeded with whatever is already typed, so an answer can be edited rather
   -- than retyped from nothing.
   local seed = note and (o.state.notes[o.state.current] or "")

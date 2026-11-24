@@ -267,6 +267,8 @@ function M.open(chat)
     vim.bo[buf].filetype = "markdown"
   end
   bind(chat, buf)
+  -- `./` from the agent's directory, not from the cache this file is in.
+  require("paseo.ui.complete").attach(buf, require("paseo.ui.complete").root(chat))
   -- The box's look, which `:edit` reset for the new buffer: no `~` rows.
   vim.wo[win].fillchars = "eob: "
 

@@ -192,6 +192,14 @@ In the composer ~
 The box you type in is an ordinary buffer: your insert-mode mappings,
 completion and undo all work, and it grows with what you write.
 
+                                                          *paseo-completion*
+A relative path you type (`./`, `../`) completes from the agent's directory,
+in the composer, the |paseo-prompt-editor|, the ask box and an answer. With
+nvim-cmp this needs no setup: its `path` and `async_path` sources are pointed
+there for those buffers alone. Another engine resolves relative paths against
+the buffer's name, which here is a `paseo://` URL; the directory is on each
+box as `b:paseo_root` for its own `get_cwd` to read.
+
     <CR>        (normal) send
     <M-CR>      send, from normal or insert mode (<C-CR> where the
                 terminal can send it)
