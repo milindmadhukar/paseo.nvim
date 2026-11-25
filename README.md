@@ -77,7 +77,7 @@ vim.keymap.set("n", "<leader>as", "<cmd>Paseo settings<cr>")        -- mode, mod
 | Command | What it does |
 |---|---|
 | `:Paseo` | Open or close the chat |
-| `:Paseo new [worktree]` | Start an agent here, in a new worktree, or a terminal |
+| `:Paseo new [worktree\|existing]` | Start an agent here, in a new worktree, in a worktree you already have, or a terminal |
 | `:Paseo ask [hunk\|visual\|file\|cursor\|qf]` | Ask about code; `qf` covers the whole quickfix list |
 | `:Paseo explain [kind]` | Explain code with the bundled review rubric, sent at once |
 | `:Paseo workspaces [all]` | This project's workspaces (`all`: every project's) |

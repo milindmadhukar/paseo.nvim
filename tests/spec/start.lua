@@ -70,7 +70,7 @@ local function test_commands()
     seen = nil
     vim.cmd "Paseo new agent"
     eq(":Paseo new agent asks for an agent in the session on screen", seen and seen.opts, { scope = "agent" })
-    eq(":Paseo new completes both", vim.fn.getcompletion("Paseo new ", "cmdline"), { "agent", "worktree" })
+    eq(":Paseo new completes all three", vim.fn.getcompletion("Paseo new ", "cmdline"), { "agent", "existing", "worktree" })
 
     -- THE WHOLE SET. Anything else is a key in the chat or a Lua function.
     eq(

@@ -95,11 +95,13 @@ readers and the microphone.
                         agent here yet it opens the new-task screen.
 
                                                                 *:Paseo-new*
-:Paseo new [worktree|agent]
-                        A new session: Local (the project's own directory)
-                        or in a new worktree. See |paseo-new|. `worktree`
-                        opens the screen with "New worktree" chosen. `agent`
-                        is a new agent in the session on screen instead.
+:Paseo new [worktree|existing|agent]
+                        A new session: Local (the project's own directory),
+                        in a new worktree, or in one the project already
+                        has. See |paseo-new|. `worktree` opens the screen
+                        with "New worktree" chosen, `existing` with
+                        "Existing worktree". `agent` is a new agent in the
+                        session on screen instead.
 
                                                                 *:Paseo-ask*
 :Paseo ask [kind]       Ask an agent about code. The code becomes a chip
@@ -484,7 +486,10 @@ There are two things to start, as in the app:
                        the agent chooser.
 
 A session's Where is "Local" -- the project's own directory, beside the
-sessions already there -- or "New worktree". Local is the PROJECT's
+sessions already there -- "New worktree", or, when the project has git
+worktrees besides its own directory (Paseo 0.17), "Existing worktree": a
+session at one of them, whoever made it, chosen under `b` by its branch
+(newest first). Local is the PROJECT's
 directory, not the directory of the session you are looking at: from a
 worktree it is the checkout that worktree was cut from, from inside an
 assembled multi-repo workspace it is the project that holds them, and a

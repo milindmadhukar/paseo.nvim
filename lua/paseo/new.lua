@@ -30,7 +30,8 @@ local M = {}
 
 ---@class paseo.NewChoice
 ---@field kind "chat"|"terminal"
----@field where "here"|"worktree"
+---@field where "here"|"worktree"|"existing"
+---@field existing? string  With `where = "existing"`: the worktree's path.
 ---@field base? string  A branch, or nil for "whatever is checked out".
 ---@field provider? string  `provider/model`
 ---@field modeId? string
@@ -213,9 +214,13 @@ end
 ---@param ctx paseo.StartContext
 ---@param first paseo.FirstAgent|nil
 ---@param callback fun(workspace: table|nil, err: string|nil)
-local function new_local(ctx, first, callback)
+---
+---`dir`, when given, is an EXISTING worktree of the project to make the
+---session in: a directory workspace at its path, inside the project -- what
+---the app's "Existing worktree" sends.
+local function new_local(ctx, first, callback, dir)
   local root = M.project_root(ctx)
-  local args = { cwd = root, project = root }
+  local args = { cwd = dir or root, project = root }
   if first and first.prompt and first.prompt ~= "" then
     args.prompt = first.prompt
     args.provider = first.provider
@@ -234,7 +239,7 @@ local function new_local(ctx, first, callback)
         id = result.id,
         name = result.name,
         agent_id = result.agentId,
-        directory = result.directory or root,
+        directory = result.directory or dir or root,
         hostId = ctx.host_id,
       }, nil)
     end)
@@ -261,6 +266,12 @@ local function new_session(ctx, choice, first, callback)
     end
     if choice.where == "worktree" then
       return new_worktree(ctx, choice, first, done)
+    end
+    if choice.where == "existing" then
+      if not choice.existing then
+        return callback(nil, "no worktree chosen")
+      end
+      return new_local(ctx, first, done, choice.existing)
     end
     new_local(ctx, first, done)
   end)
@@ -404,6 +415,25 @@ function M.agent(ctx, choice, prompt, images, done, opts)
   end, ctx.host_id)
 end
 
+---The project's worktrees other than its own directory, newest first (Paseo
+---0.17): what "Existing worktree" offers. Each `{ path, name }`, `name` the
+---branch it has checked out, or its directory's name when HEAD is detached.
+---Empty on a host that cannot list them.
+---@param ctx paseo.StartContext
+---@param callback fun(worktrees: { path: string, name: string }[])
+function M.worktrees(ctx, callback)
+  local root = M.project_root(ctx)
+  require("paseo.bridge").request("checkout.worktrees", { cwd = root }, function(err, result)
+    local out = {}
+    for _, w in ipairs((not err and result and result.worktrees) or {}) do
+      out[#out + 1] = { path = w.path, name = w.branch or vim.fs.basename(w.path) }
+    end
+    vim.schedule(function()
+      callback(out)
+    end)
+  end, ctx.host_id)
+end
+
 ---Can a NEW worktree be made from here? A git checkout, yes (Paseo cuts it);
 ---a multi-repo project, yes, on this machine (it is assembled); a plain
 ---directory, no -- there is nothing to isolate it with.
@@ -434,7 +464,7 @@ end
 ---put it in -- the rail's project line, a buffer of code -- gets the new
 ---session screen, and a word saying why.
 ---@param ctx paseo.StartContext|nil  nil: from the current directory.
----@param opts? { scope?: "session"|"agent", kind?: "chat"|"terminal", where?: "here"|"worktree", surface?: "sidebar"|"native" }
+---@param opts? { scope?: "session"|"agent", kind?: "chat"|"terminal", where?: "here"|"worktree"|"existing", surface?: "sidebar"|"native" }
 ---@return table|nil chat  The draft chat the screen is on.
 function M.open(ctx, opts)
   ctx = ctx or M.context()

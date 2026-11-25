@@ -523,6 +523,39 @@ export function workspaceOps(ctx: BridgeConnection): Ops {
     },
 
     /**
+     * The git worktrees of the checkout at `cwd` (0.17), whoever made them:
+     * what "Existing worktree" offers on the new-session screen. Each is
+     * `{ path, branchName, head, createdAt, containsCwd }`; the one holding
+     * `cwd` is the project directory itself, which is Local, not a choice.
+     * Empty on a host that cannot list them.
+     */
+    async "checkout.worktrees"(req) {
+      const cwd = String(need(req.cwd, "cwd"));
+      if (
+        ctx.raw().getLastServerInfoMessage()?.features?.checkoutWorktreeList !== true
+      ) {
+        return { worktrees: [], supported: false };
+      }
+      const list: any[] = await ctx.raw().listCheckoutWorktrees(cwd);
+      return {
+        supported: true,
+        worktrees: (list ?? [])
+          .filter((w) => w && !w.containsCwd && w.path)
+          .map((w) => ({
+            path: String(w.path),
+            branch: w.branchName ?? null,
+            head: w.head ?? null,
+            createdAt: w.createdAt ?? null,
+          }))
+          .sort(
+            (a, b) =>
+              (Date.parse(b.createdAt ?? "") || 0) -
+              (Date.parse(a.createdAt ?? "") || 0),
+          ),
+      };
+    },
+
+    /**
      * Take an archive back (0.16): the app's six-second Undo. The daemon
      * restores the workspace, and recreates its worktree when the archive
      * removed one -- not files that were never committed. It waits for an

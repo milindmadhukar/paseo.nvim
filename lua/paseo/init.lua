@@ -255,15 +255,16 @@ commands.search = {
 }
 
 commands.new = {
-  desc = "A new session (Local, or `worktree`), or `agent`: one more in the session on screen",
+  desc = "A new session (Local, a new `worktree`, or an `existing` one), or `agent`: one more in the session on screen",
   run = function(args)
     if args[1] == "agent" then
       return require("paseo.native").new_agent()
     end
-    M.new_task(args[1] == "worktree" and { where = "worktree" } or nil)
+    local where = (args[1] == "worktree" or args[1] == "existing") and args[1] or nil
+    M.new_task(where and { where = where } or nil)
   end,
   complete = function()
-    return { "agent", "worktree" }
+    return { "agent", "existing", "worktree" }
   end,
 }
 
@@ -422,7 +423,7 @@ end
 ---Start something from wherever you are: a new session, Local or in a new
 ---worktree, or (`scope = "agent"`) an agent in the session on screen -- see
 ---|paseo-new|.
----@param opts? { scope?: "session"|"agent", where?: "here"|"worktree", kind?: "chat"|"terminal" }
+---@param opts? { scope?: "session"|"agent", where?: "here"|"worktree"|"existing", kind?: "chat"|"terminal" }
 function M.new_task(opts)
   return require("paseo.new").open(nil, opts)
 end

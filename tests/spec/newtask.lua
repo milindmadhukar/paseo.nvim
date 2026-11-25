@@ -78,7 +78,11 @@ local function test_newtask()
       cb { "main", "dev", "feat/x" }
     end
     local requested
+    local worktrees = {}
     bridge.request = function(op, args, cb)
+      if op == "checkout.worktrees" then
+        return cb(nil, { supported = true, worktrees = worktrees })
+      end
       requested = { op = op, args = args }
       if op == "providers.features" then
         return cb(nil, { features = {} })
@@ -208,6 +212,47 @@ local function test_newtask()
     )
     native.close(chat4)
     chats.discard(chat4)
+
+    -- EXISTING WORKTREE (Paseo 0.17): one the project already has. Offered
+    -- only when there is one; a session at its path, inside the project.
+    local chat6 = newtask.open(ctx, { kind = "chat", where = "here" })
+    local task6 = newtask.task(chat6)
+    vim.wait(500, function()
+      return task6.draft ~= nil and not task6.draft.loading and task6.worktrees ~= nil
+    end)
+    local shown6 = text(api.nvim_win_get_buf(chat6.win_conversation))
+    truthy("newtask: no Existing worktree when there is none", not shown6:find("Existing worktree", 1, true), shown6)
+    native.close(chat6)
+    chats.discard(chat6)
+
+    worktrees = {
+      { path = dir .. "-feature", branch = "feature", createdAt = "2026-11-20T00:00:00.000Z" },
+      { path = dir .. "-detached", branch = nil, createdAt = "2026-11-01T00:00:00.000Z" },
+    }
+    local chat7 = newtask.open(ctx, { kind = "chat", where = "existing" })
+    local task7 = newtask.task(chat7)
+    vim.wait(500, function()
+      return task7.draft ~= nil and not task7.draft.loading and task7.worktrees ~= nil and #task7.worktrees > 0
+    end)
+    vim.wait(50)
+    local shown7 = text(api.nvim_win_get_buf(chat7.win_conversation))
+    truthy("newtask: Existing worktree is offered", shown7:find("Existing worktree", 1, true), shown7)
+    truthy("newtask: its worktrees, by branch", shown7:find("feature", 1, true), shown7)
+    truthy("newtask: a detached one by its directory", shown7:find(vim.fs.basename(dir) .. "-detached", 1, true), shown7)
+    truthy("newtask: the footer names the worktree", shown7:find("a new session in", 1, true), shown7)
+    answer, opened = nil, nil
+    chat7.draft.start("carry on", {}, function(err, agent_id)
+      answer = { err = err, agent_id = agent_id }
+    end)
+    vim.wait(500, function()
+      return answer ~= nil
+    end)
+    eq("newtask: an existing worktree made a session, no error", answer and answer.err, nil)
+    eq("newtask: through workspace.create", requested and requested.op, "workspace.create")
+    eq("newtask: at the newest worktree's path", requested.args.cwd, dir .. "-feature")
+    eq("newtask: inside the project", real(requested.args.project), real(dir))
+    eq("newtask: remembered as existing", new.remembered(ctx).where, "existing")
+    chats.discard(chat7)
 
     -- An agent with NO session to go into is a new session, not a guess.
     local chat5 = new.open(ctx, { scope = "agent", kind = "chat" })

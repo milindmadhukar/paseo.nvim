@@ -43,6 +43,8 @@ local ns = api.nvim_create_namespace "paseo.newtask"
 
 M.FILETYPE = "paseo-new"
 
+local existing_of
+
 ---The mnemonics. `a` for what to start (Agent or terminal) because `c`,
 ---`t` and `s` are taken by the settings cards it shares a screen with.
 M.KEYS = {
@@ -66,7 +68,9 @@ local RECENT = 4
 ---@field scope "session"|"agent"  A new workspace, or one more agent in `ctx.workspace_id`.
 ---@field chat table           The draft chat.
 ---@field kind "chat"|"terminal"
----@field where "here"|"worktree"
+---@field where "here"|"worktree"|"existing"
+---@field worktrees { path: string, name: string }[]|nil  The project's existing ones.
+---@field existing string|nil  The existing worktree chosen, by path.
 ---@field iso table|nil        |paseo.new|.isolation: can a new one be made here?
 ---@field base string|nil      An explicit base; nil is what is checked out.
 ---@field branches string[]|nil
@@ -94,6 +98,19 @@ end
 
 -- ------------------------------------------------------------------ choice
 
+---The existing worktree chosen: the remembered one while it is still there,
+---else the newest.
+---@param task paseo.NewTask
+---@return string|nil
+function existing_of(task)
+  for _, w in ipairs(task.worktrees or {}) do
+    if w.path == task.existing then
+      return w.path
+    end
+  end
+  return task.worktrees and task.worktrees[1] and task.worktrees[1].path or nil
+end
+
 ---What the screen says right now, as |paseo.new| takes it.
 ---@param task paseo.NewTask
 ---@return paseo.NewChoice
@@ -101,6 +118,7 @@ local function choice(task)
   local out = {
     kind = task.kind,
     where = task.where,
+    existing = task.where == "existing" and existing_of(task) or nil,
     base = task.base,
     preset = task.preset,
   }
@@ -186,6 +204,7 @@ local function keep(task)
     scope = task.scope,
     kind = task.kind,
     where = task.where,
+    existing = task.existing,
     base = task.base,
     preset = task.preset,
     ctx = ctx,
@@ -240,6 +259,32 @@ local function groups(task)
         },
       },
       current = task.where,
+    }
+    -- A worktree the project already has (Paseo 0.17), whoever made it: the
+    -- app's "Existing worktree". Only when there is one.
+    if task.worktrees and #task.worktrees > 0 then
+      table.insert(out[#out].entries, {
+        id = "existing",
+        label = "Existing worktree",
+        description = "one this project already has: a session at its path, on its branch",
+      })
+    end
+  end
+
+  if task.scope == "session" and task.where == "existing" and task.worktrees and #task.worktrees > 0 then
+    local entries = {}
+    for _, w in ipairs(task.worktrees) do
+      entries[#entries + 1] = { id = w.path, label = w.name, note = vim.fn.fnamemodify(w.path, ":~") }
+    end
+    out[#out + 1] = {
+      -- `b` as the base branch is: the two never show together.
+      id = "existing",
+      key = M.KEYS.base,
+      icon = "",
+      label = "Worktree",
+      kind = "radio",
+      entries = entries,
+      current = existing_of(task),
     }
   end
 
@@ -356,6 +401,9 @@ local function footer(task)
       local where
       if task.scope == "agent" then
         where = "a new agent in " .. (task.ctx.title or "this session")
+      elseif task.where == "existing" then
+        local path = existing_of(task)
+        where = "a new session in " .. (path and vim.fn.fnamemodify(path, ":~") or "the worktree")
       elseif task.where == "worktree" then
         where = task.iso and task.iso.kind == "worktree" and ("a new session in a worktree off " .. (base_of(task) or "?"))
           or "a new session in a new workspace"
@@ -478,6 +526,10 @@ local function apply_choice(task, group, entry, done)
   end
   if group.id == "where" then
     task.where = entry.id
+    return done()
+  end
+  if group.id == "existing" then
+    task.existing = entry.id
     return done()
   end
   if group.id == "base" then
@@ -630,6 +682,17 @@ local function load(task, done)
       done()
     end)
   end, ctx.host_id)
+
+  if task.scope == "session" and task.iso and task.iso.kind == "worktree" then
+    require("paseo.new").worktrees(ctx, function(worktrees)
+      task.worktrees = worktrees
+      -- Remembered "existing" with none left to offer: Local.
+      if task.where == "existing" and #worktrees == 0 then
+        task.where = "here"
+      end
+      done()
+    end)
+  end
 
   if task.iso and task.iso.kind == "worktree" then
     require("paseo.workspaces").branches(cwd, function(branches)
@@ -833,7 +896,7 @@ end
 ---own, the sidebar its window. The composer is focused, in insert mode, so
 ---the first thing you do is type.
 ---@param ctx paseo.StartContext
----@param opts { scope?: "session"|"agent", kind?: "chat"|"terminal", where?: "here"|"worktree", surface?: "sidebar"|"native" }
+---@param opts { scope?: "session"|"agent", kind?: "chat"|"terminal", where?: "here"|"worktree"|"existing", surface?: "sidebar"|"native" }
 ---@return table chat  The draft chat.
 function M.open(ctx, opts)
   if api.nvim_get_mode().mode == "t" then
@@ -846,6 +909,7 @@ function M.open(ctx, opts)
     remembered = vim.tbl_extend("force", remembered, saved.choice or {}, {
       kind = saved.kind,
       where = saved.where,
+      existing = saved.existing,
       base = saved.base,
       preset = saved.preset,
     })
@@ -860,11 +924,16 @@ function M.open(ctx, opts)
     iso = iso,
     kind = opts.kind or remembered.kind or "chat",
     where = opts.where or remembered.where or "here",
+    existing = remembered.existing,
     base = remembered.base,
     preset = remembered.preset,
     busy = false,
   }
   if not iso or scope == "agent" then
+    task.where = "here"
+  end
+  -- Remembered from a git checkout, opened on something that is not one.
+  if task.where == "existing" and iso.kind ~= "worktree" then
     task.where = "here"
   end
   if ctx.project == nil then

@@ -1709,3 +1709,29 @@ test("turn stats: history follows the stamped row, and settings carry the sessio
   ]);
   assert.equal(describeSettings({}).sessionMetrics, null);
 });
+
+test("checkout.worktrees: the project's other worktrees, newest first", async () => {
+  let features: Record<string, boolean> = { checkoutWorktreeList: true };
+  const ctx = new BridgeConnection();
+  ctx.raw = (() => ({
+    getLastServerInfoMessage: () => ({ features }),
+    // `checkout.worktrees.list.response` items at 0.17.4.
+    async listCheckoutWorktrees(cwd: string) {
+      assert.equal(cwd, "/repo");
+      return [
+        { path: "/repo", branchName: "main", head: "a1", createdAt: "2026-01-01T00:00:00.000Z", containsCwd: true },
+        { path: "/wt/old", branchName: "old", head: "b2", createdAt: "2026-02-01T00:00:00.000Z", containsCwd: false },
+        { path: "/wt/detached", branchName: null, head: "c3", createdAt: "2026-03-01T00:00:00.000Z", containsCwd: false },
+      ];
+    },
+  })) as any;
+  const ops = workspaceOps(ctx);
+  const result: any = await ops["checkout.worktrees"]({ op: "checkout.worktrees", cwd: "/repo" });
+  assert.deepEqual(
+    result.worktrees.map((w: any) => [w.path, w.branch]),
+    [["/wt/detached", null], ["/wt/old", "old"]],
+  );
+  features = {};
+  const none: any = await ops["checkout.worktrees"]({ op: "checkout.worktrees", cwd: "/repo" });
+  assert.deepEqual([none.supported, none.worktrees], [false, []]);
+});
