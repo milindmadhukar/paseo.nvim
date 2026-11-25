@@ -201,9 +201,10 @@ local M = {}
 ---@field keys { toggle: string|false, focus: string|false }  Normal mode, on
 ---                       the native surface's conversation, composer and rail.
 ---                       `false` unbinds.
----@field show_background boolean  Show the workspaces agents and plugins make
----                       for themselves, which the app's sidebar hides unless
----                       "Show background" is on. Default false.
+---@field show_background boolean  Show the workspaces and background agents
+---                       that agents and plugins make for themselves, which
+---                       the app's sidebar hides unless "Show background" is
+---                       on. Default false.
 
 ---@class paseo.Config.UI.Buffer
 ---

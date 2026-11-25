@@ -215,6 +215,52 @@ local function test_background()
   end
 end
 
+local function test_background_agents()
+  local agents = require "paseo.agents"
+  local hosts = require "paseo.hosts"
+  local cfg = require("paseo.config").get().ui.float.rail
+  local was = cfg.show_background
+  local ok, failure = pcall(function()
+    local root = vim.fn.tempname()
+    cfg.show_background = false
+    agents._apply {
+      kind = "snapshot",
+      hostId = hosts.selected(),
+      entries = {
+        { id = "mine", status = "idle", cwd = root, workspaceId = "w1" },
+        -- An agent started for itself: busy, and none of your business.
+        { id = "bg", status = "running", cwd = root, workspaceId = "w1", background = true },
+      },
+    }
+    local ids = vim.tbl_map(function(a)
+      return a.id
+    end, agents.all())
+    eq("background agents: left out of the list", ids, { "mine" })
+    eq("background agents: and out of a directory's", #agents.for_root(root), 1)
+    eq("background agents: and out of a workspace's", #agents.for_workspace { id = "w1", directory = root }, 1)
+    eq("background agents: so its turn does not make the workspace run", agents.workspace_bucket(root), "done")
+    truthy("background agents: still there by id", agents.get "bg" ~= nil)
+
+    cfg.show_background = true
+    agents._apply {
+      kind = "snapshot",
+      hostId = hosts.selected(),
+      entries = {
+        { id = "mine", status = "idle", cwd = root, workspaceId = "w1" },
+        { id = "bg", status = "running", cwd = root, workspaceId = "w1", background = true },
+      },
+    }
+    eq("background agents: shown with show_background", #agents.all(), 2)
+    eq("background agents: and then counted", agents.workspace_bucket(root), "running")
+  end)
+  cfg.show_background = was
+  agents._apply { kind = "snapshot", entries = {} }
+  if not ok then
+    error(failure, 0)
+  end
+end
+
 return {
   { "background", test_background },
+  { "background agents", test_background_agents },
 }

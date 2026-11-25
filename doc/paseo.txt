@@ -975,8 +975,11 @@ ui.pr               Pull-request status from `gh`: `enabled`, and `ttl`
                                                                               
 ui.float            An older name, kept for these: `rail.enabled` (shown the
                     first time; your last toggle wins after that),
-                    `rail.show_background` (also show the workspaces agents
-                    make for themselves), `rail.indent_markers` (`│ ├ └` down
+                    `rail.show_background` (also show the workspaces and
+                    the background agents that agents and plugins make for
+                    themselves, which are otherwise left out of the rail,
+                    the lists and a workspace's status, as the app's sidebar
+                    leaves them out), `rail.indent_markers` (`│ ├ └` down
                     the left), and `zindex`.
 
 ------------------------------------------------------------------------------

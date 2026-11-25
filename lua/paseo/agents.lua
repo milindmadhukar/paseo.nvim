@@ -177,6 +177,24 @@ function M.get(id, host_id)
   return host_id and agents[host_id] and agents[host_id][id] or nil
 end
 
+---Is `agent` one the lists leave out? A BACKGROUND agent (Paseo 0.16) is one
+---an agent or a plugin started for itself; the app keeps it out of its
+---sidebar, tabs and notifications, and so do the lists here, unless
+---`ui.float.rail.show_background` -- the same switch as background
+---workspaces -- says to show them. Opened by id, it still opens.
+---@param agent table
+---@return boolean
+local function hidden(agent)
+  if not agent.background then
+    return false
+  end
+  local ok, cfg = pcall(function()
+    return require("paseo.config").get().ui.float.rail.show_background
+  end)
+  return not (ok and cfg)
+end
+M.hidden = hidden
+
 ---@param host_id string|nil  Already resolved, or "*".
 ---@return table[]
 local function collect(host_id)
@@ -193,7 +211,9 @@ local function collect(host_id)
   end
   local out = {}
   for _, agent in pairs(source) do
-    out[#out + 1] = agent
+    if not hidden(agent) then
+      out[#out + 1] = agent
+    end
   end
   table.sort(out, function(a, b)
     return (a.title or a.id) < (b.title or b.id)
@@ -404,7 +424,7 @@ function M.for_root(root, host_id)
     root = local_host and paths.canonical(root) or (root:gsub("/+$", ""))
     kept = {}
     for _, agent in pairs((host_id and agents[host_id]) or {}) do
-      if agent.cwd then
+      if agent.cwd and not hidden(agent) then
         local cwd = local_host and (paths.resolve(agent.cwd):gsub("/+$", ""))
           or (agent.cwd:gsub("/+$", ""))
         if cwd == root or vim.startswith(cwd, root .. "/") then
