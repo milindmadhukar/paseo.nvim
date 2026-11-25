@@ -9,10 +9,57 @@ process is the `paseo-upstream` skill in `.claude/skills/`.
 
 | | |
 |---|---|
-| Last reviewed | **0.16.0-beta.1** (2026-11-10), upstream `aade09d` |
-| SDK pin | `@getpaseo/client` / `@getpaseo/protocol` **0.15.4**, exact |
-| Daemon it was verified against | 0.15.3 |
-| Reviewed on | 2026-11-11 |
+| Last reviewed | **0.17.4** (2026-11-23) |
+| SDK pin | `@getpaseo/client` / `@getpaseo/protocol` **0.17.4**, exact |
+| Daemon it was verified against | 0.17.4 (`@getpaseo/cli` from npm via `PASEO_BIN`, isolated e2e daemon; the desktop daemon was still 0.16.2) |
+| Reviewed on | 2026-11-25 |
+
+## 0.16.0-beta.1 → 0.17.4 (reviewed 2026-11-25)
+
+### SDK
+
+| Change | Status |
+|---|---|
+| `@getpaseo/client` 0.15.4 → 0.17.4, exact pin; `internal/daemon-client` export still there | **adopted** `e186ccc` |
+| `features` / `featureValues` / `setAgentFeature` → `controls` + `options` / `setAgentOptions` / `listControls` (COMPAT removal 2027-05-01) | **adopted** `e186ccc`: sidecar only; `featuresOf` joins controls and options into the shape the Lua reads, and falls back to `features` on an older daemon |
+| `sendMessage` returns `AgentMessageReceipt`; `activeTurnBehavior` gained `"queue"` (throws without `sourceAgentId`) | **no change needed**: the plugin never sends `"queue"`; its queue is client-side. In the upgrade checklist |
+| `agent.background_work.{list,stop,update}`, `backgroundWork {count, runningCount?}` on the snapshot | **adopted** `b69b02d` |
+| `undoWorkspaceArchive` (`workspaceArchiveUndo`) | **adopted** `fef546f` |
+| `listCheckoutWorktrees` (`checkoutWorktreeList`) | **adopted** `0e9eff6` |
+| `turnMetrics` on timeline entries, `metrics` on `turn_completed`, `sessionMetrics` on the snapshot | **adopted** `2509ecd` |
+| `setWorkspaceBaseBranch`, `entityMetadata`, `setLabel` | **deferred**: no editor surface asks for them yet (the Changes panel diffs against the checkout) |
+| provider installation / update RPCs (`providerInstallation`) | **deferred**: `:checkhealth paseo` could show versions; low value |
+| `observeDiff` / `readDiff` | **deferred**: the Changes panel reads git itself |
+| `observeTimeline` freshness cursors, `wholeTurns` | **deferred** still: the history path works; revisit if reopen gets slow |
+
+### Features (app → editor)
+
+| Upstream | Status |
+|---|---|
+| 0.16 background tasks above the composer, with Stop; 0.17.1 heartbeats and PR watches in the same list | **adopted** `e4a22bc`, `1632d0b`: an idle agent with running work spins (heartbeats count, do not run), `&N` on its rail row, ` N background gb` on the bar, `gb` lists it live, `x` stops (a heartbeat asks first: stopping deletes its schedule). Verified on a real Claude `run_in_background` shell and on a heartbeat |
+| 0.16 background agents (`background: true`) | **adopted** `3cdb267`: out of `agents.all` / `for_root`, so out of the rail, lists, subagents and workspace status; `ui.float.rail.show_background` shows them |
+| 0.16 undo workspace archive (six-second toast) | **adopted** `fef546f`: `u` on the rail, `require("paseo").undo_archive()`; not for `:Paseo ws` workspaces |
+| 0.17.2 turn and session stats | **adopted** `2509ecd`: a dim footer under each finished turn (live and from history), a Session section on Usage |
+| 0.17.1 use existing worktrees | **adopted** `0e9eff6`: "Existing worktree" on the new-session screen, `:Paseo new existing` |
+| 0.17.1 create a workspace from a branch or pull request | **deferred**: `worktreeRefActions`; the base-branch chooser covers branches |
+| 0.16 Change base picker | **deferred**: `setBaseBranch`; the Changes panel has no base of its own yet |
+| 0.17.1 Rewind the latest turn | **deferred**: no SDK call reviewed yet; `f` forks |
+| 0.17.1 provider quota forecasts, OpenRouter / Antigravity / Copilot usage | **no change needed** for the data (it rides `providers.usage`); the forecast line is **deferred** |
+| 0.17.2 automatic model list refresh; 0.17.1/0.17.2 agents steer and queue other agents' turns | **no change needed**: daemon-side |
+| 0.16 question cards wait for Next/Submit; 0.16 `/exit` no longer default in the slash menu | **to check**: the answer overlay and the composer's `/` completion were not re-verified |
+| fx, goose, Hermes, Antigravity approvals, Codex Flex speed, Claude Ultracode toggle | **no change needed**: providers, models and controls arrive through `providers.list` and `controls` |
+| 0.14 collapse completed turns | **deferred** still (Neovim folds over transcript blocks) |
+| Workspace scripts (`paseo.json` services) | **deferred** still: needs a panel |
+
+### Declined, app-only
+
+Plugin gallery and plugin settings pages; plugin sidebar views, composer
+controls, screens and badges; command center tabs and Rewind in it; content
+width presets; arranging Usage cards and sidebar usage summary; mobile, iPad,
+Android, iPhone Duo and touch-sized controls; the rebuilt mobile chat; desktop
+updater, window and dock badge; Mermaid, Markdown and syntax-highlighting
+fixes; Hub and relay connection fixes. None has an editor-side equivalent
+worth building.
 
 ## 0.9.0 → 0.16.0-beta.1 (reviewed 2026-11-11)
 
