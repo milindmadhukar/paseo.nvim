@@ -24,7 +24,13 @@ for scenario in "$here"/scenarios/*.sh; do
   if [ -n "$filter" ] && [[ "$name" != *"$filter"* ]]; then
     continue
   fi
+  # The LAST scenario's Neovim saves its new-session drafts as it quits, and
+  # the next one would restore them onto its row: new-folder.sh ends on a
+  # refused start that keeps its prompt, and native, rail-sessions and sticky
+  # then counted a draft they never made. Stop it, then forget them. A
+  # scenario that tests drafts across a restart (drafts.sh) does its own.
   "$here/nvim.sh" stop
+  rm -f "$(eval "$("$here/daemon.sh" env)"; echo "$PASEO_E2E_ROOT")/xdg/state/nvim/paseo/drafts.json"
   if "$here/nvim.sh" start && bash "$scenario"; then
     echo "ok    $name"
     passed=$((passed + 1))

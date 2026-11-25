@@ -95,12 +95,17 @@ end
 
 ---A turn begun after `before` user messages has finished: a newer user
 ---message is on screen, the chat is no longer streaming, and the last block is
----the answer.
+---the answer -- under its stats footer, on a daemon that reports them (0.17).
 function _G.paseo_e2e.turn_done(before)
   local chat = current()
   if not chat or chat.streaming or _G.paseo_e2e.users() <= before then
     return false
   end
-  local last = chat.blocks[chat.order[#chat.order]]
+  local i = #chat.order
+  local last = chat.blocks[chat.order[i]]
+  if last and last.item.kind == "metrics" then
+    i = i - 1
+    last = chat.blocks[chat.order[i]]
+  end
   return last ~= nil and last.item.kind == "text"
 end
