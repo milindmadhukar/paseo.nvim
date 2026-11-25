@@ -1111,6 +1111,9 @@ local function make_buffers(chat)
     keys.set("conversation", "n", "gs", function()
       require("paseo.pickers.subagents").open(chat)
     end, vim.tbl_extend("force", conv, { desc = "paseo: this agent's subagents" }))
+    keys.set("conversation", "n", "gb", function()
+      M.background(chat)
+    end, vim.tbl_extend("force", conv, { desc = "paseo: this agent's background work" }))
     keys.set("conversation", "n", "f", function()
       require("paseo.fork").start(chat)
     end, vim.tbl_extend("force", conv, { desc = "paseo: fork this conversation" }))
@@ -1673,6 +1676,8 @@ initialise = function(chat)
   M.load_settings(chat)
   -- Its subagents, both kinds: the count in the header and `gs`.
   require("paseo.subagents").follow(chat.agent_id, chat.host_id)
+  -- What it left running: the count on the bar and `gb`.
+  require("paseo.background").follow(chat.agent_id, chat.host_id)
   -- And any of them already blocked on a permission when the chat opened.
   if M.relay_permissions then
     M.relay_permissions(chat)
@@ -2726,6 +2731,16 @@ function M.attach_events()
     end
   end)
 
+  -- Its background work changed: the bar counts it.
+  require("paseo.background").on_change(function(host_id, agent_id)
+    for _, chat in pairs(chats) do
+      if chat.agent_id and (agent_id == nil or chat.agent_id == agent_id)
+        and (host_id == nil or chat.host_id == host_id) then
+        M.refresh(chat)
+      end
+    end
+  end)
+
   -- A permission request. The agent is BLOCKED until this is answered.
   bridge.on("permission", function(payload)
     local chat = by_agent(payload.agentId, payload.hostId)
@@ -2874,6 +2889,9 @@ function M.attach_events()
       -- The rail's parents too, which it re-tracks as it next draws.
       require("paseo.subagents").untrack()
       require("paseo.subagents").follow(chat.agent_id, chat.host_id)
+      -- So was the background-work stream, and its list.
+      require("paseo.background").unfollow()
+      require("paseo.background").follow(chat.agent_id, chat.host_id)
     end
   end)
 
@@ -2935,6 +2953,17 @@ end
 ---@return paseo.Chat|nil
 function M.current()
   return current
+end
+
+---The background work of `chat`'s agent -- the current chat's when absent --
+---as a live list: |paseo.ui.background|.
+---@param chat? paseo.Chat
+function M.background(chat)
+  chat = chat or current
+  if not (chat and chat.agent_id) then
+    return vim.notify("paseo: no agent session in the chat to list background work of", vim.log.levels.WARN)
+  end
+  require("paseo.ui.background").open(chat.agent_id, chat.host_id, { title = chat.title })
 end
 
 ---Make `chat` the current one. For |paseo.ui.native|, whose tab pages each

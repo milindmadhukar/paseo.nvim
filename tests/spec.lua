@@ -66,6 +66,7 @@ local files = {
   "workspace_create",
   "skills",
   "subagents",
+  "background",
   "chat",
   "perf",
   "archive",

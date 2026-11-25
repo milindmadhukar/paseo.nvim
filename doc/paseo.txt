@@ -231,6 +231,7 @@ In the conversation ~
                 Neovim's own `gx` on the path or URL under it
     gp          reopen a pending permission request
     gs          this agent's subagents (|paseo-subagents|)
+    gb          what this agent left running (|paseo-background|)
     f           fork the conversation
     <C-c>       stop the turn
     q           close the chat; on a subagent's view, back to its parent
@@ -410,7 +411,10 @@ app's sidebar lays them out. One status character leads each row: >
     $   a terminal
 <
 A workspace's row ends with its lines changed (`+120 -7`), and one with a pull
-request has a line under it with its checks and review state.
+request has a line under it with its checks and review state. An agent's row
+ends with `&2` when it left work running in the background, bright while any
+of it runs (|paseo-background|); an idle agent with a running dev server
+spins, as it does in the app.
 
 A project the daemon does not have yet reads `new` where the count would be
 (|paseo-new-folder|).
@@ -434,6 +438,7 @@ The keys follow nvim-tree's (`g?` lists them):
     t c         a new terminal in this row's session
     f           fork the agent
     y           copy the agent's ID
+    gb          the agent's background work (|paseo-background|)
     R           rename the terminal
     d           archive the agent or the workspace, kill the terminal,
                 discard the draft (asks first)
@@ -545,6 +550,27 @@ Subagents ~
 clock on each running one. A Paseo subagent opens as a chat you can message;
 a provider's own (Claude's Task tool) opens read-only and follows along. The
 rail shows them under their parent too.
+
+                                                          *paseo-background*
+Background work ~
+What an agent left running after its turn: a shell it started in the
+background (Claude's `run_in_background`, a Codex or OpenCode monitor), and
+on Paseo 0.17 the daemon's own -- a heartbeat schedule aimed at the agent, or
+a pull request it was asked to watch. The bar over the composer counts them
+(` 2 background gb`), the rail ends the agent's row with `&2`, and an idle
+agent whose work still runs shows as working.
+
+`gb`, in the conversation or on an agent's row in the rail, lists them live:
+each one's title, its command, how long it has run and its kind.
+
+    x           stop the one under the cursor; a failed stop stays on its
+                row with the reason, and `x` again dismisses it
+    r           list again
+    <CR>        the whole command, when the row is too narrow for it
+
+A heartbeat is counted but is not "running": it is waiting for its next beat.
+Stopping one DELETES its schedule -- there is no pause from here -- so `x`
+asks first. Work the host will not let this client stop has no `x`.
 
                                                             *paseo-permission*
                                                        *paseo-permission-keys*
@@ -1064,6 +1090,9 @@ toggle_feature({id})        Toggle one of the chat agent's features: Fast
 toggle_plan()               Toggle Plan.
                                                                 *paseo.stop()*
 stop()                      Interrupt the chat agent's turn.
+                                                          *paseo.background()*
+background()                The chat agent's background work: `gb`
+                            (|paseo-background|).
                                                          *paseo.paste_image()*
 paste_image({path})         Attach an image to the chat: the clipboard's, or
                             the file at {path}. Returns false when there was

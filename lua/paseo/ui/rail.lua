@@ -534,6 +534,19 @@ function M.subagent_badge(ws)
   }
 end
 
+---An agent row's background-work count, or nil when it has none: `&2`, in
+---the running colour while any of it runs. From the agent's own summary, so
+---it needs nobody to have opened the agent.
+---@param agent table
+---@return table[]|nil
+function M.background_badge(agent)
+  local running, total = require("paseo.background").summary_counts(agent)
+  if total == 0 then
+    return nil
+  end
+  return { { ("  &%d"):format(total), running > 0 and "PaseoTreeRunning" or "PaseoTreeMeta" } }
+end
+
 ---@param path string
 ---@return string
 local function canonical(path)
@@ -994,6 +1007,15 @@ function M.build(width)
           local text = node.running > 0 and ("  %d/%d"):format(node.running, #node.kids)
             or ("  +%d"):format(#node.kids)
           after = { { text, node.running > 0 and "PaseoTreeRunning" or "PaseoTreeMeta" } }
+        end
+        -- What the agent left running: `&2`, the shell's own word for it, in
+        -- the running colour while any of it runs (a heartbeat waits).
+        if node.kind == "agent" then
+          local bg = M.background_badge(node.item)
+          if bg then
+            after = after or {}
+            vim.list_extend(after, bg)
+          end
         end
         local line = emit(row, last, {
           mark = m,
@@ -1804,6 +1826,27 @@ local function keymap(keys)
       "copy the agent ID",
       menu = function(row)
         return row.node and row.node.kind ~= "terminal" and "Copy the agent ID"
+      end,
+    },
+    {
+      -- The same key as in the conversation: what this agent left running.
+      "gb",
+      on_session(function(node, chat)
+        if node.kind == "agent" then
+          require("paseo.ui.background").open(
+            node.item.id,
+            node.item.hostId or chat.host_id,
+            { title = node.item.title }
+          )
+        end
+      end),
+      "this agent's background work (x stops)",
+      menu = function(row)
+        if not tree_is_agent(row) then
+          return nil
+        end
+        local _, total = require("paseo.background").summary_counts(row.node.item)
+        return total > 0 and "Background work (" .. total .. ")" or nil
       end,
     },
     {

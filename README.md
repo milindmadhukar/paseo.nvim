@@ -103,6 +103,7 @@ Everything else is a key inside the chat or a Lua function.
 | `<CR>` / `gx` | conversation | open the picture under / nearest the cursor in your image viewer (else `<CR>` folds like `<Tab>`) |
 | `gp` | conversation | reopen a pending permission |
 | `gs` | conversation | this agent's subagents |
+| `gb` | conversation, rail | what this agent left running (shells, monitors, heartbeats); `x` stops one |
 | `<C-b>` `<C-h>` | full screen | the rail: show or hide it / go into it (`<C-h>` in it stays: it is leftmost) |
 | `<C-p>` | full screen | the Settings / Changes / Usage panel |
 | `<C-n>` | full screen | a new session (Local or a new worktree) |
@@ -240,6 +241,7 @@ paseo.toggle_feature()               -- Fast
 paseo.toggle_plan()
 paseo.paste_image("~/shot.png")      -- from a code buffer
 paseo.stop()
+paseo.background()                   -- gb: the agent's background work
 paseo.search()                       -- :Paseo search
 
 local native = require("paseo.native")   -- the full-screen surface

@@ -448,14 +448,33 @@ end
 ---MID-TURN it says what sending will DO, because that is no longer just
 ---"send": `<CR>` steers (or interrupts, or queues -- `ui.send_behavior`) and
 ---`g<CR>` does the other thing. A queue waiting behind the turn is counted.
+---What the agent left running, counted, with the key that lists it:
+---` 2 background gb ·`. Nothing when there is none.
+---@param chat? table
+---@return table[]
+function M.background_hint(chat)
+  if not (chat and chat.agent_id) then
+    return {}
+  end
+  local running, total = require("paseo.background").counts(chat.agent_id, chat.host_id)
+  if total == 0 then
+    return {}
+  end
+  return {
+    { (" %d background "):format(total), running > 0 and "PaseoToolRunning" or "PaseoComposerHint" },
+    { "gb", "PaseoComposerKey" },
+    { " ·", "PaseoComposerHint" },
+  }
+end
+
 ---@param chat? table
 ---@return table[]
 function M.send_hint(chat)
+  local out = M.background_hint(chat)
   if chat and chat.streaming and chat.agent_id then
     local chat_ui = require "paseo.ui.chat"
     local primary = chat_ui.send_behavior(chat)
     local other = chat_ui.send_behavior(chat, true)
-    local out = {}
     if chat.queued and #chat.queued > 0 then
       out[#out + 1] = { (" %d queued ·"):format(#chat.queued), "PaseoComposerKey" }
     end
@@ -468,13 +487,13 @@ function M.send_hint(chat)
     })
     return out
   end
-  return {
+  return vim.list_extend(out, {
     { " ", "PaseoComposerHint" },
     { icons.spell "<CR>", "PaseoComposerKey" },
     { " / ", "PaseoComposerHint" },
     { icons.spell "<M-CR>", "PaseoComposerKey" },
     { " send ", "PaseoComposerHint" },
-  }
+  })
 end
 
 ---The row above the box, sized to the box.

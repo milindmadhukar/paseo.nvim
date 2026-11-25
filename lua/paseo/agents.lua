@@ -327,6 +327,12 @@ function M.bucket(agent)
   if WORKING[agent.status] then
     return "running"
   end
+  -- Idle, with something it started still going -- a dev server, a monitor:
+  -- running, as the app's `isAgentRunning` has it. A heartbeat is counted and
+  -- does not run (`running` leaves it out), so it never makes a row spin.
+  if type(agent.backgroundWork) == "table" and (agent.backgroundWork.running or 0) > 0 then
+    return "running"
+  end
   if agent.daemonAttention then
     return "attention"
   end

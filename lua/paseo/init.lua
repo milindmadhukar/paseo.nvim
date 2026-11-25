@@ -373,6 +373,11 @@ function M.stop()
   require("paseo.ui.chat").stop()
 end
 
+---The chat agent's background work, live, with `x` to stop an item.
+function M.background()
+  require("paseo.ui.chat").background()
+end
+
 ---Attach an image to the chat: the clipboard's, or the file at `path`.
 ---@param path? string
 ---@return boolean attached
