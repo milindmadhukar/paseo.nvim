@@ -1880,6 +1880,21 @@ local function keymap(keys)
       end,
     },
     {
+      -- Vim's undo, for the one thing here that has one: the workspace `d`
+      -- archived a moment ago (the app's six-second Undo).
+      "u",
+      function()
+        local offered = require("paseo.workspaces").undo_archive(function()
+          cache.loading = false
+          M.load(nil, { force = true })
+        end)
+        if not offered then
+          vim.notify("paseo: nothing to undo", vim.log.levels.INFO)
+        end
+      end,
+      "undo the workspace archive just made",
+    },
+    {
       "r",
       function()
         M.load(nil, { force = true })

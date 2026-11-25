@@ -443,12 +443,23 @@ The keys follow nvim-tree's (`g?` lists them):
     d           archive the agent or the workspace, kill the terminal,
                 discard the draft (asks first)
     m           pin or unpin the workspace
+    u           undo the workspace archive `d` just made, within six
+                seconds (|paseo-archive-undo|)
     r           re-fetch
     .           everything you can do to this row, in a chooser (also a
                 right-click)
     g?          these keys
     q <Esc>     back to where you were (`<C-w>l` too: it is a split)
     <C-h>       nothing: the rail is leftmost, so `<C-w>h` stays put
+
+                                                          *paseo-archive-undo*
+Taking an archive back ~
+Archiving a workspace (`d` on the rail, or in |:Paseo-workspaces|) can be
+undone for six seconds, as the app's Undo toast can: `u` on the rail, or
+|paseo.undo_archive()| from a mapping of your own. The workspace comes back
+with its agents, and its worktree is made again if the archive removed one;
+files that were never committed are not. A workspace assembled with
+|:Paseo-ws| is not offered: its worktrees went by this plugin's hand.
 
                                                                    *paseo-new*
 Starting something ~
@@ -1093,6 +1104,10 @@ toggle_feature({id})        Toggle one of the chat agent's features: Fast
 toggle_plan()               Toggle Plan.
                                                                 *paseo.stop()*
 stop()                      Interrupt the chat agent's turn.
+                                                        *paseo.undo_archive()*
+undo_archive()              Take back the workspace archive just made
+                            (|paseo-archive-undo|). False when there is
+                            nothing left to undo.
                                                           *paseo.background()*
 background()                The chat agent's background work: `gb`
                             (|paseo-background|).

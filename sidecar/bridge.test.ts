@@ -1632,3 +1632,28 @@ test("an agent summary carries its background work and the background flag", () 
   assert.equal(describeAgent({ id: "a", background: true }).background, true);
   assert.equal(describeAgent({ id: "a" }).background, false);
 });
+
+test("workspace.archive.undo asks the daemon, and only one that can", async () => {
+  const undone: string[] = [];
+  let features: Record<string, boolean> = { workspaceArchiveUndo: true };
+  const ctx = new BridgeConnection();
+  ctx.raw = (() => ({
+    getLastServerInfoMessage: () => ({ features }),
+    async undoWorkspaceArchive(id: string) {
+      undone.push(id);
+    },
+  })) as any;
+  const ops = workspaceOps(ctx);
+  const result: any = await ops["workspace.archive.undo"]({
+    op: "workspace.archive.undo",
+    workspaceId: "w9",
+  });
+  assert.deepEqual(result, { workspaceId: "w9", undone: true });
+  assert.deepEqual(undone, ["w9"]);
+  features = {};
+  await assert.rejects(
+    () => ops["workspace.archive.undo"]({ op: "workspace.archive.undo", workspaceId: "w9" }),
+    /cannot undo/,
+  );
+  assert.equal(undone.length, 1);
+});

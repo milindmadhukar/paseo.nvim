@@ -112,7 +112,9 @@ Everything else is a key inside the chat or a Lua function.
 The rail uses nvim-tree's keys: `l`/`h` unfold and fold, `a` starts a new
 session, `A` a new agent in the session under the cursor, `w` a session in a
 new worktree, `t` a terminal, `d` archives (an agent, or a whole workspace) or
-throws a draft away, and `.` lists everything you can do to the row. `g?` shows them all.
+throws a draft away, `u` takes a workspace archive back for six seconds after,
+`gb` lists an agent's background work, and `.` lists everything you can do to
+the row. `g?` shows them all.
 
 For a long prompt, `<C-g>` moves the box into a real `.md` buffer in the
 same window, grown to the column's height. `:w` puts it in the box as you go,
@@ -242,6 +244,7 @@ paseo.toggle_plan()
 paseo.paste_image("~/shot.png")      -- from a code buffer
 paseo.stop()
 paseo.background()                   -- gb: the agent's background work
+paseo.undo_archive()                 -- u on the rail: the archive just made
 paseo.search()                       -- :Paseo search
 
 local native = require("paseo.native")   -- the full-screen surface

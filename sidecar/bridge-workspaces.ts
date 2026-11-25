@@ -521,5 +521,22 @@ export function workspaceOps(ctx: BridgeConnection): Ops {
       const result = await workspace.archive();
       return { archivedAt: (result as any)?.archivedAt ?? null };
     },
+
+    /**
+     * Take an archive back (0.16): the app's six-second Undo. The daemon
+     * restores the workspace, and recreates its worktree when the archive
+     * removed one -- not files that were never committed. It waits for an
+     * archive still in flight to settle first, so this can take a while.
+     */
+    async "workspace.archive.undo"(req) {
+      const workspaceId = String(need(req.workspaceId, "workspaceId"));
+      if (
+        ctx.raw().getLastServerInfoMessage()?.features?.workspaceArchiveUndo !== true
+      ) {
+        throw new Error("this host cannot undo an archive; update Paseo");
+      }
+      await ctx.raw().undoWorkspaceArchive(workspaceId);
+      return { workspaceId, undone: true };
+    },
   };
 }

@@ -373,6 +373,21 @@ function M.stop()
   require("paseo.ui.chat").stop()
 end
 
+---Take back the workspace archive just made: the rail's `u`, for a mapping
+---of your own. Within the app's six seconds.
+---@return boolean offered  False when there was nothing left to undo.
+function M.undo_archive()
+  local offered = require("paseo.workspaces").undo_archive(function()
+    pcall(function()
+      require("paseo.ui.rail").load(nil, { force = true })
+    end)
+  end)
+  if not offered then
+    vim.notify("paseo: nothing to undo", vim.log.levels.INFO)
+  end
+  return offered
+end
+
 ---The chat agent's background work, live, with `x` to stop an item.
 function M.background()
   require("paseo.ui.chat").background()

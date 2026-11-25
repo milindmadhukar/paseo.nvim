@@ -808,7 +808,14 @@ function M.confirm_archive(ws, after)
   local function go(force)
     M.archive(ws, { force = force }, function(err)
       if not err then
-        vim.notify("paseo: archived " .. label, vim.log.levels.INFO)
+        -- Undoable for a moment, as the app's toast is -- except one we
+        -- assembled: its worktrees are already gone, by our hand.
+        if ws.id and not ws.assembled then
+          M.archived = { id = ws.id, hostId = ws.hostId, label = label, at = vim.uv.now() }
+          vim.notify(("paseo: archived %s — u on the rail to undo"):format(label), vim.log.levels.INFO)
+        else
+          vim.notify("paseo: archived " .. label, vim.log.levels.INFO)
+        end
         return after and vim.schedule(after)
       end
 
@@ -831,6 +838,41 @@ function M.confirm_archive(ws, after)
   end
 
   go(false)
+end
+
+---How long an archive can be taken back, in ms: the app's Undo toast.
+M.UNDO_WINDOW = 6000
+
+---The last archive, while it can still be undone.
+---@type { id: string, hostId: string|nil, label: string, at: integer }|nil
+M.archived = nil
+
+---Take back the archive just made, inside |paseo.workspaces|.UNDO_WINDOW.
+---The workspace comes back, and its worktree with it if the archive removed
+---one; uncommitted files that went with the worktree do not.
+---@param after? fun(err: string|nil)  After the daemon answers.
+---@return boolean offered  False when there is nothing (left) to undo.
+function M.undo_archive(after)
+  local last = M.archived
+  if not last or vim.uv.now() - last.at > M.UNDO_WINDOW then
+    M.archived = nil
+    return false
+  end
+  M.archived = nil
+  vim.notify(("paseo: restoring %s…"):format(last.label), vim.log.levels.INFO)
+  bridge.request("workspace.archive.undo", { workspaceId = last.id }, function(err)
+    vim.schedule(function()
+      if err then
+        vim.notify(("paseo: could not undo the archive of %s — %s"):format(last.label, err), vim.log.levels.ERROR)
+      else
+        vim.notify(("paseo: restored %s"):format(last.label), vim.log.levels.INFO)
+      end
+      if after then
+        after(err)
+      end
+    end)
+  end, last.hostId)
+  return true
 end
 
 ---Forget a project -- Paseo's record of it, never the files.
