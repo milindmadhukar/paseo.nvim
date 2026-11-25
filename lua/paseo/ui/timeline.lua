@@ -16,6 +16,24 @@ local render = require "paseo.ui.render"
 
 local M = {}
 
+---A metric's tone, as a highlight. "default" (or none) is the dim of the rest
+---of the line.
+M.TONE = { ok = "PaseoToolOk", warning = "PaseoToolRunning", danger = "PaseoToolFail" }
+
+---The metrics a turn footer shows: all of them but the model, which the bar
+---already names.
+---@param list table[]|nil
+---@return { label: string, value: string, tone?: string }[]
+function M.metrics(list)
+  local out = {}
+  for _, metric in ipairs(list or {}) do
+    if metric.label and metric.value and metric.label ~= "Model" then
+      out[#out + 1] = metric
+    end
+  end
+  return out
+end
+
 ---Status glyphs for a tool call. A running card is visibly unfinished.
 ---
 ---From the registry rather than written out here, because the Sessions panel
@@ -542,6 +560,36 @@ local function card_lines(item, opts)
       lines = render.wrap(item.message or "", width, hl, { { " ", hl } }),
       collapsible = false,
     }
+  end
+
+  -- A finished turn's stats (Paseo 0.17), one dim line under its answer:
+  -- what the app keeps behind its chart button. The model is left out -- the
+  -- bar already says it -- and a tone the provider gave colours its value.
+  if kind == "metrics" then
+    -- Flowed, a whole metric at a time: a narrow sidebar breaks between
+    -- `Elapsed 12s` and `Tokens 3k`, never inside one.
+    local lines, line, used = {}, nil, 0
+    for _, metric in ipairs(M.metrics(item.metrics)) do
+      local piece = {
+        { metric.label .. " ", "PaseoDim" },
+        { metric.value, M.TONE[metric.tone] or "PaseoDim" },
+      }
+      local w = render.width(piece)
+      if line and used + 3 + w > width then
+        lines[#lines + 1] = line
+        line = nil
+      end
+      if not line then
+        line, used = { { " ", "PaseoDim" } }, 1
+      else
+        line[#line + 1] = { " · ", "PaseoDim" }
+        used = used + 3
+      end
+      vim.list_extend(line, piece)
+      used = used + w
+    end
+    lines[#lines + 1] = line
+    return { lines = lines, collapsible = false }
   end
 
   if kind == "compaction" then

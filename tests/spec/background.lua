@@ -260,7 +260,87 @@ local function test_background_agents()
   end
 end
 
+--- Turn stats (Paseo 0.17): a dim footer under a finished turn, and the
+--- session's totals on the Usage panel.
+local function test_turn_stats()
+  local timeline = require "paseo.ui.timeline"
+  local metrics = {
+    { label = "Model", value = "opus" },
+    { label = "Elapsed", value = "12.3s" },
+    { label = "Tokens", value = "8.1k in / 1.2k out" },
+    { label = "Cache", value = "91%", tone = "ok" },
+    { label = "Cost", value = "$0.0412", tone = "danger" },
+  }
+  local function text(lines)
+    local out = {}
+    for _, line in ipairs(lines) do
+      local row = {}
+      for _, cell in ipairs(line) do
+        row[#row + 1] = cell[1]
+      end
+      out[#out + 1] = table.concat(row)
+    end
+    return out
+  end
+  local wide = timeline.card({ kind = "metrics", metrics = metrics }, { width = 120, gap = false })
+  eq(
+    "stats: one line, the model left to the bar",
+    text(wide.lines),
+    { " Elapsed 12.3s · Tokens 8.1k in / 1.2k out · Cache 91% · Cost $0.0412" }
+  )
+  local hls = {}
+  for _, cell in ipairs(wide.lines[1]) do
+    hls[cell[1]] = cell[2]
+  end
+  eq("stats: a tone colours its value", hls["91%"], "PaseoToolOk")
+  eq("stats: and danger is danger", hls["$0.0412"], "PaseoToolFail")
+  eq("stats: no tone is dim", hls["12.3s"], "PaseoDim")
+
+  local narrow = timeline.card({ kind = "metrics", metrics = metrics }, { width = 30, gap = false })
+  eq("stats: a narrow window breaks between metrics", text(narrow.lines), {
+    " Elapsed 12.3s",
+    " Tokens 8.1k in / 1.2k out",
+    " Cache 91% · Cost $0.0412",
+  })
+  eq(
+    "stats: only a model is nothing",
+    #timeline.card({ kind = "metrics", metrics = { { label = "Model", value = "x" } } }, { width = 80, gap = false }).lines,
+    0
+  )
+
+  -- The Usage panel's Session section.
+  local bridge = require "paseo.bridge"
+  local old_ensure, old_request = bridge.ensure, bridge.request
+  bridge.ensure = function(fn)
+    fn(nil)
+  end
+  bridge.request = function(_, _, cb)
+    cb(nil, { providers = {} })
+  end
+  local ok, failure = pcall(function()
+    local drawn = {}
+    for _, line in ipairs(require("paseo.ui.panels.usage").lines({
+      session_metrics = { { label = "Tokens", value = "40k in / 9k out" }, { label = "Cost", value = "$1.20" } },
+    }, 100)) do
+      local row = {}
+      for _, cell in ipairs(line) do
+        row[#row + 1] = cell[1] or ""
+      end
+      drawn[#drawn + 1] = table.concat(row)
+    end
+    local all = table.concat(drawn, "\n")
+    truthy("stats: the usage panel has a Session section", all:find("Session", 1, true), all)
+    truthy("stats: with its figures, aligned", all:find("Cost%s+%$1%.20"), all)
+    truthy("stats: and is not 'no usage'", not all:find("no usage reported yet", 1, true), all)
+  end)
+  bridge.ensure, bridge.request = old_ensure, old_request
+  if not ok then
+    error(failure, 0)
+  end
+end
+
 return {
+  { "turn stats", test_turn_stats },
   { "background", test_background },
   { "background agents", test_background_agents },
 }

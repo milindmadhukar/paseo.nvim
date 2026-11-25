@@ -398,7 +398,17 @@ The right-hand split on the full screen (`<C-p>`):
 
 Changes lists the files the agent's workspace has changed (`<CR>` opens one
 on the tab you came from). Usage shows the context window, the last turn's
-cost, and the account's plan limits.
+cost, the session's running totals (|paseo-turn-stats|), and the account's
+plan limits.
+
+                                                            *paseo-turn-stats*
+A finished turn ends with one dim line of what the provider measured for it
+-- `Elapsed 2.3s · TTFT 1.3s · Tokens 4 ↑ · 114 ↓ · Cache 66% · Cost $0.007`
+-- the figures the Paseo app keeps behind its chart button (Paseo 0.17;
+Claude, OpenCode v2, Pi and plugin providers report them). The model is left
+to the bar, a value the provider marks good or bad is coloured so, and the
+line wraps between figures in a narrow sidebar. Reopened chats show them
+too, for the turns the daemon recorded them on.
 
                                                                   *paseo-rail*
                                             *paseo-rail-sessions* *paseo-tree*

@@ -1657,3 +1657,55 @@ test("workspace.archive.undo asks the daemon, and only one that can", async () =
   );
   assert.equal(undone.length, 1);
 });
+
+test("turn stats: history follows the stamped row, and settings carry the session's", async () => {
+  // A 0.17 projected page: the daemon stamps `turnMetrics` on the entry the
+  // turn's footer hangs on (its last assistant message).
+  const ctx = new BridgeConnection();
+  ctx.connected = (() => ({
+    agents: {
+      ref: () => ({
+        timeline: {
+          async refetch() {
+            return {
+              entries: [
+                { seqStart: 1, seqEnd: 1, item: { type: "user_message", text: "hi" } },
+                {
+                  seqStart: 2,
+                  seqEnd: 3,
+                  item: { type: "assistant_message", text: "hello" },
+                  turnMetrics: [
+                    { label: "Model", value: "opus" },
+                    { label: "Elapsed", value: "1.2s" },
+                    { label: "Cost", value: "$0.01", tone: "default" },
+                    { label: "Cache", value: "12%", tone: "warning" },
+                  ],
+                },
+              ],
+              hasOlder: false,
+            };
+          },
+        },
+      }),
+    },
+  })) as any;
+  const page: any = await timelineOps(ctx)["timeline.history"]({
+    op: "timeline.history",
+    agentId: "a",
+  });
+  assert.deepEqual(
+    page.items.map((i: any) => i.kind),
+    ["user", "text", "metrics"],
+  );
+  assert.deepEqual(page.items[2].metrics[1], { label: "Elapsed", value: "1.2s", tone: null });
+  assert.equal(page.items[2].metrics[3].tone, "warning");
+  assert.equal(page.items[2].seq, undefined);
+
+  const settings: any = describeSettings({
+    sessionMetrics: [{ label: "Tokens", value: "12k in / 3k out" }],
+  });
+  assert.deepEqual(settings.sessionMetrics, [
+    { label: "Tokens", value: "12k in / 3k out", tone: null },
+  ]);
+  assert.equal(describeSettings({}).sessionMetrics, null);
+});

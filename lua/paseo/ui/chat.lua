@@ -182,6 +182,12 @@ function M.apply_settings(chat, payload)
     end
   end
 
+  -- The session's running stats (Paseo 0.17), for the Usage panel.
+  if payload.sessionMetrics and not vim.deep_equal(chat.session_metrics, payload.sessionMetrics) then
+    chat.session_metrics = payload.sessionMetrics
+    panel = true
+  end
+
   -- The pending list rides this payload now, and it is AUTHORITATIVE -- it is
   -- the daemon's own, it arrives on reconnect, and it is the only thing that
   -- reports a request cleared by an agent-session refresh or answered while the
@@ -2826,6 +2832,11 @@ function M.attach_events()
       -- The open assistant block is finished; the next reply starts a new one
       -- rather than being appended to this answer.
       transcript.close(chat)
+      -- Its stats, under it (Paseo 0.17): what a history fetch shows too, from
+      -- the row the daemon stamped them on.
+      if payload.metrics and #payload.metrics > 0 then
+        transcript.upsert(chat, { kind = "metrics", metrics = payload.metrics })
+      end
       -- Whatever was queued behind it goes now -- but not behind a failure
       -- or a stop, which is you or the agent saying "not like this".
       if payload.outcome == "turn_completed" then
@@ -2932,6 +2943,7 @@ function M.load_settings(chat)
         chat.provider = config.model and (config.provider .. "/" .. config.model) or config.provider
       end
       chat.usage = config.usage or chat.usage
+      chat.session_metrics = config.sessionMetrics or chat.session_metrics
       chat.config_snapshot = config
       chat.available_modes = config.availableModes
 

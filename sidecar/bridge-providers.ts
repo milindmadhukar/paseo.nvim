@@ -1,6 +1,6 @@
 import { need, type Ops } from "./bridge-io.ts";
 import { BridgeConnection } from "./bridge-connection.ts";
-import { withFallbackActions } from "./bridge-normalize.ts";
+import { withFallbackActions, describeMetrics } from "./bridge-normalize.ts";
 
 /**
  * The provider's toggles and selects in the one shape the Lua reads:
@@ -80,6 +80,9 @@ export function describeSettings(snap: any): Record<string, unknown> {
       description: m.description ?? null,
     })),
     features: featuresOf(snap),
+    // The session's own stats (0.17), for the usage panel: totals the
+    // provider keeps across turns, formatted as it formats them.
+    sessionMetrics: describeMetrics(snap?.sessionMetrics),
     // What the usage panel draws. `contextWindowUsedTokens` over
     // `contextWindowMaxTokens` is the fill bar; the rest is the table.
     usage: snap?.lastUsage

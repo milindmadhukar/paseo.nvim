@@ -1,7 +1,7 @@
 import { buildToolCallDisplayModel } from "@getpaseo/protocol/tool-call-display";
 import { need, guarded, emit, type Ops } from "./bridge-io.ts";
 import { BridgeConnection } from "./bridge-connection.ts";
-import { withFallbackActions } from "./bridge-normalize.ts";
+import { withFallbackActions, describeMetrics } from "./bridge-normalize.ts";
 import { followDirectory } from "./bridge-agents.ts";
 import { describeSettings } from "./bridge-providers.ts";
 
@@ -200,6 +200,9 @@ export function timelineOps(ctx: BridgeConnection): Ops {
               emit("turn", {
                 agentId: id,
                 outcome: event.type,
+                // The turn's stats (0.17): timing, tokens, cache, cost, as
+                // the provider formatted them. Only a completed turn has them.
+                metrics: describeMetrics(event.metrics),
                 error: event.error ?? null,
                 // What the provider said, beyond the one-line error: a session
                 // limit, an invalid key, an exit code. Shown under the error.
@@ -330,6 +333,11 @@ export function timelineOps(ctx: BridgeConnection): Ops {
         } else {
           items.push(described);
         }
+        // A finished turn's stats (0.17): the daemon stamps them on the row
+        // the turn's footer hangs on -- its last answer, else its last tool
+        // call -- so they follow that row, as an item of their own.
+        const metrics = describeMetrics(entry.turnMetrics);
+        if (metrics) items.push({ kind: "metrics", metrics });
       }
 
       return {

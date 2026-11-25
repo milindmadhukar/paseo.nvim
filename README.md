@@ -62,7 +62,10 @@ vim.keymap.set("n", "<leader>as", "<cmd>Paseo settings<cr>")        -- mode, mod
    replaces `vim.ui.select` (snacks, telescope, fzf-lua), so you can type to
    filter.
 3. When the agent asks for permission, a dialog opens. `y` allows, `n` denies,
-   and `1`–`9` pick a specific action.
+   and `1`–`9` pick a specific action. A finished turn ends with a dim line
+   of its stats (time, tokens, cache, cost), and anything the agent left
+   running in the background is counted on the bar: `gb` lists it, `x` stops
+   it.
 4. Back in your code, put the cursor on a hunk and run `:Paseo ask`. The
    chat opens beside your code with the hunk as a chip, `@path:42-58`, in
    its composer. Type your question and send it; the agent gets the file and

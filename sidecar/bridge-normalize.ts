@@ -61,3 +61,22 @@ export function withFallbackActions(request: any): any {
     ],
   };
 }
+
+/**
+ * A turn's (or a session's) stats, as `{ label, value, tone }` -- values come
+ * formatted by the provider ("12.3s", "$0.04") and are drawn as they are.
+ * Nil for none, so the Lua side draws nothing rather than an empty line.
+ */
+export function describeMetrics(
+  metrics: any,
+): { label: string; value: string; tone: string | null }[] | null {
+  if (!Array.isArray(metrics) || metrics.length === 0) return null;
+  const out = metrics
+    .filter((m: any) => m && m.label != null && m.value != null)
+    .map((m: any) => ({
+      label: String(m.label),
+      value: String(m.value),
+      tone: m.tone && m.tone !== "default" ? String(m.tone) : null,
+    }));
+  return out.length > 0 ? out : null;
+}

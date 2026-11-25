@@ -417,6 +417,25 @@ function M.lines(chat, width, height)
     }
   end
 
+  -- THE SESSION'S OWN FIGURES (Paseo 0.17): what the provider totals across
+  -- turns -- tokens, cache, cost -- formatted as it formats them.
+  local session = chat.session_metrics
+  if detail and session and #session > 0 then
+    lines[#lines + 1] = {}
+    lines[#lines + 1] = { { "  " .. icons.ui.tokens .. "  ", "PaseoBlue1" }, { "Session", "PaseoHeader" } }
+    local label_w = 0
+    for _, metric in ipairs(session) do
+      label_w = math.max(label_w, vim.fn.strdisplaywidth(metric.label))
+    end
+    local tone = require("paseo.ui.timeline").TONE
+    for _, metric in ipairs(session) do
+      lines[#lines + 1] = {
+        { "    " .. metric.label .. string.rep(" ", label_w - vim.fn.strdisplaywidth(metric.label) + 2), "PaseoDim" },
+        { metric.value, tone[metric.tone] or "PaseoText" },
+      }
+    end
+  end
+
   if #lines == 0 then
     lines[#lines + 1] = { { "  no usage reported yet", "PaseoDim" } }
     lines[#lines + 1] = {}
