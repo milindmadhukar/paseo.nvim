@@ -19,6 +19,8 @@ Check every item on every SDK bump. Add whatever broke this time.
 | — | `removeProject` returns `{ removedWorkspaceIds }`; the code read `removed`, and the mock agreed. | `bridge-workspaces.ts` |
 | — | Agent-to-agent messages are tool calls with `agentMessage`; dropping unknown fields in `describeItem` hides them. | `bridge-timeline.ts` |
 | 0.15 → 0.17 | `features` became `controls` (no value) + `options` (the values). `features` is a COMPAT copy until 2027-05-01; `featuresOf` joins the new pair into the shape the Lua reads. Typed create takes `options`, raw `createWorkspace` takes `providerOptions`. | `bridge-providers.ts` `featuresOf` |
+| 0.15 → 0.17 | A finished turn's stats footer (a `metrics` block) now follows its answer, so "the last block is the answer" stopped holding: the e2e `turn_done` timed out on ten scenarios. Anything that reads the transcript's last block should step over `metrics`. | `tests/e2e/init.lua` `turn_done` |
+| — | A scenario that leaves a new-session draft (new-folder.sh) leaked it into every later one through `drafts.json`, saved as Neovim quits. `run.sh` clears it between scenarios. | `tests/e2e/run.sh` |
 | 0.15 → 0.17 | `sendMessage` returns an `AgentMessageReceipt`, and `activeTurnBehavior` gained `"queue"`, which THROWS without a `sourceAgentId`. The plugin's queue stays client-side (`chat.queued`); never send `"queue"`. | `bridge-agents.ts` send |
 
 ## Re-verify on each bump
