@@ -77,10 +77,12 @@ export function creationConfig(req: Request, provider: string) {
     ...(req.thinkingOptionId
       ? { thinkingOptionId: String(req.thinkingOptionId) }
       : {}),
+    // The Lua's `featureValues` are provider options under their control keys;
+    // `featureValues` on the wire is COMPAT until 2027-05-01.
     ...(req.featureValues &&
     typeof req.featureValues === "object" &&
     !Array.isArray(req.featureValues)
-      ? { featureValues: req.featureValues as Record<string, unknown> }
+      ? { options: req.featureValues as Record<string, unknown> }
       : {}),
   };
 }

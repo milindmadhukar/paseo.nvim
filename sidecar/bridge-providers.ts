@@ -3,6 +3,59 @@ import { BridgeConnection } from "./bridge-connection.ts";
 import { withFallbackActions } from "./bridge-normalize.ts";
 
 /**
+ * The provider's toggles and selects in the one shape the Lua reads:
+ * `{ id, type, label, description, value }`, plus `options` on a select.
+ *
+ * Since 0.16 an agent carries `controls` (what can be set, with no value) and
+ * `options` (what IS set), and the old `features` -- the two joined -- is a
+ * COMPAT field the daemon builds for old apps until 2027-05-01. So this joins
+ * them here, the way the daemon does (`featuresFromControls` in
+ * `@getpaseo/protocol/option-controls`): a control's `key` is the old feature
+ * `id`, and an option that is unset takes the control's `defaultValue`. A
+ * snapshot with no `controls` (a daemon older than that) still has `features`.
+ */
+export function featuresOf(source: any): Record<string, unknown>[] {
+  if (!Array.isArray(source?.controls)) {
+    return (source?.features ?? []).map((f: any) => ({
+      id: f.id,
+      type: f.type,
+      label: f.label,
+      description: f.description ?? null,
+      value: f.value,
+      ...(f.type === "select" ? { options: f.options ?? [] } : {}),
+    }));
+  }
+  const options = source.options ?? {};
+  return source.controls.map((control: any) => {
+    const set = options[control.key];
+    if (control.type === "toggle") {
+      return {
+        id: control.key,
+        type: "toggle",
+        label: control.label,
+        description: control.description ?? null,
+        value: typeof set === "boolean" ? set : (control.defaultValue ?? false),
+      };
+    }
+    const choices = control.choices ?? [];
+    const chosen = choices.some((c: any) => c.value === set) ? set : null;
+    return {
+      id: control.key,
+      type: control.type,
+      label: control.label,
+      description: control.description ?? null,
+      value: chosen ?? control.defaultValue ?? null,
+      options: choices.map((c: any) => ({
+        id: c.value,
+        label: c.label,
+        description: c.description ?? null,
+        isDefault: c.value === control.defaultValue,
+      })),
+    };
+  });
+}
+
+/**
  * Everything adjustable about a session, read out of ONE agent snapshot.
  *
  * Shared by `agent.config` (a pull) and the state subscription in
@@ -26,13 +79,7 @@ export function describeSettings(snap: any): Record<string, unknown> {
       label: m.label,
       description: m.description ?? null,
     })),
-    features: (snap?.features ?? []).map((f: any) => ({
-      id: f.id,
-      type: f.type,
-      label: f.label,
-      description: f.description ?? null,
-      value: f.value,
-    })),
+    features: featuresOf(snap),
     // What the usage panel draws. `contextWindowUsedTokens` over
     // `contextWindowMaxTokens` is the fill bar; the rest is the table.
     usage: snap?.lastUsage
@@ -130,13 +177,13 @@ export function providerOps(ctx: BridgeConnection): Ops {
 
     async "providers.features"(req) {
       const provider = String(need(req.provider, "provider"));
-      const result = await connected().providers.listFeatures({
+      const result = await connected().providers.listControls({
         provider,
         cwd: String(need(req.cwd, "cwd")),
         ...(req.modeId ? { modeId: String(req.modeId) } : {}),
       });
       if (result.error) throw new Error(result.error);
-      return { features: result.features ?? [] };
+      return { features: featuresOf({ controls: result.controls ?? [], options: result.options }) };
     },
 
     /**
@@ -234,11 +281,11 @@ export function providerOps(ctx: BridgeConnection): Ops {
     },
 
     async "agent.setFeature"(req) {
-      await raw().setAgentFeature(
-        String(need(req.agentId, "agentId")),
-        String(need(req.featureId, "featureId")),
-        req.value,
-      );
+      // One option, by the key its control writes (the old feature id). The
+      // client falls back to `setAgentFeature` on a host that predates options.
+      await raw().setAgentOptions(String(need(req.agentId, "agentId")), {
+        [String(need(req.featureId, "featureId"))]: req.value,
+      });
       return { featureId: req.featureId, value: req.value };
     },
 

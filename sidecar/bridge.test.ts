@@ -9,7 +9,7 @@ import {
   creationConfig,
   describeHistory,
 } from "./bridge-agents.ts";
-import { providerOps, describeSettings } from "./bridge-providers.ts";
+import { providerOps, describeSettings, featuresOf } from "./bridge-providers.ts";
 import { describeItem, timelineOps } from "./bridge-timeline.ts";
 import { terminalOps } from "./bridge-terminals.ts";
 import {
@@ -125,7 +125,7 @@ test("review reuse requires the requested provider and model", async () => {
     provider: requested.provider,
     modeId: "auto-review",
     thinkingOptionId: "high",
-    featureValues: { plan_mode: true, fast_mode: false },
+    options: { plan_mode: true, fast_mode: false },
   });
   assert.deepEqual(
     await ops["agent.ensure"]({
@@ -490,12 +490,17 @@ test("catalog retains choices and feature lookup follows the model", async () =>
       async snapshot() {
         return { entries: [entry] };
       },
-      async listFeatures(draft: any) {
+      // The daemon's `provider.controls.list.response` payload: controls
+      // carry no value, `options` are the effective ones.
+      async listControls(draft: any) {
         featureRequests.push(draft);
         return {
-          features: [
-            { id: "plan_mode", type: "toggle", label: "Plan", value: false },
-          ],
+          provider: "codex",
+          controls: [{ type: "toggle", key: "plan_mode", label: "Plan" }],
+          options: { plan_mode: true },
+          error: null,
+          fetchedAt: "2026-11-25T00:00:00.000Z",
+          requestId: "r1",
         };
       },
     },
@@ -514,6 +519,7 @@ test("catalog retains choices and feature lookup follows the model", async () =>
     cwd: "/work",
   });
   assert.equal(features.features[0].id, "plan_mode");
+  assert.equal(features.features[0].value, true);
   assert.equal(featureRequests[0].provider, "codex/gpt-5.6-sol");
   await ops["providers.features"]({
     op: "providers.features",
@@ -1456,4 +1462,44 @@ test("prompt index is capability-gated without throwing", async () => {
     prompts: [{ seq: 4, timestamp: "t", preview: "fix the rail" }],
   });
   assert.equal(asked, "a1");
+});
+
+test("featuresOf joins controls with options, and falls back to features", () => {
+  // A 0.16+ snapshot: controls name the keys, options hold the values, an
+  // unset one takes the control's default.
+  const joined: any[] = featuresOf({
+    controls: [
+      { type: "toggle", key: "plan_mode", label: "Plan" },
+      { type: "toggle", key: "fast_mode", label: "Fast", defaultValue: true },
+      {
+        type: "select",
+        key: "service_tier",
+        label: "Speed",
+        defaultValue: "standard",
+        choices: [
+          { value: "standard", label: "Standard" },
+          { value: "flex", label: "Flex" },
+        ],
+      },
+    ],
+    options: { plan_mode: true, service_tier: "flex" },
+    // The COMPAT copy a 0.17 daemon still sends; controls win.
+    features: [{ id: "stale", type: "toggle", label: "Stale", value: true }],
+  });
+  assert.deepEqual(
+    joined.map((f) => [f.id, f.type, f.value]),
+    [
+      ["plan_mode", "toggle", true],
+      ["fast_mode", "toggle", true],
+      ["service_tier", "select", "flex"],
+    ],
+  );
+  assert.equal(joined[2].options[0].isDefault, true);
+
+  // A daemon older than controls: its features, as they were.
+  const legacy: any[] = featuresOf({
+    features: [{ id: "plan_mode", type: "toggle", label: "Plan", value: false }],
+  });
+  assert.deepEqual(legacy.map((f) => [f.id, f.value]), [["plan_mode", false]]);
+  assert.deepEqual(featuresOf({}), []);
 });

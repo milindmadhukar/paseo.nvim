@@ -105,7 +105,7 @@ async function createWithFirstAgent(
         ...(req.featureValues &&
         typeof req.featureValues === "object" &&
         !Array.isArray(req.featureValues)
-          ? { featureValues: req.featureValues }
+          ? { providerOptions: req.featureValues }
           : {}),
       },
       initialPrompt: prompt,
@@ -443,7 +443,7 @@ export function workspaceOps(ctx: BridgeConnection): Ops {
               ? { thinkingOptionId: String(req.thinkingOptionId) }
               : {}),
             ...(req.featureValues && typeof req.featureValues === "object"
-              ? { featureValues: req.featureValues as Record<string, unknown> }
+              ? { options: req.featureValues as Record<string, unknown> }
               : {}),
           },
           prompt: String(req.prompt),
