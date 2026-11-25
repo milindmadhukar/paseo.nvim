@@ -174,16 +174,28 @@ function M.stop(item)
     end)
   end
   if item.kind == "heartbeat" then
+    -- One chooser at a time: a chooser closes when its window is left, and
+    -- closing hands focus back -- which, with the question already open over
+    -- it, closed the question too. So the list goes, the question is asked,
+    -- and the list comes back with the answer.
     local title = background.text(item)
-    return require("paseo.ui.choose").confirm(
-      ("Stop the heartbeat %q? This deletes its schedule."):format(title),
-      { no = "Keep it", yes = "Delete the heartbeat" },
-      function(yes)
-        if yes then
-          go()
+    local label = view.title
+    M.close()
+    vim.schedule(function()
+      require("paseo.ui.choose").confirm(
+        ("Stop the heartbeat %q? This deletes its schedule."):format(title),
+        { no = "Keep it", yes = "Delete the heartbeat" },
+        function(yes)
+          if yes then
+            go()
+          end
+          vim.schedule(function()
+            M.open(agent_id, host_id, { title = label })
+          end)
         end
-      end
-    )
+      )
+    end)
+    return
   end
   go()
 end
