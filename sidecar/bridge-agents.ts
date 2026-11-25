@@ -111,6 +111,19 @@ export function describeAgent(agent: any): Record<string, unknown> {
     // that did the work. `explain` lists the latter for the review agent to
     // interrogate, and listing itself would be a loop.
     labels: agent.labels ?? null,
+    // What the agent left running after its turn (0.16): `count` of it, and
+    // how much of that is RUNNING -- a heartbeat counts but does not run, and
+    // the daemon omits `runningCount` when it equals `count`.
+    backgroundWork: agent.backgroundWork
+      ? {
+          count: agent.backgroundWork.count ?? 0,
+          running:
+            agent.backgroundWork.runningCount ?? agent.backgroundWork.count ?? 0,
+        }
+      : null,
+    // A background agent (0.16) stays out of activity, lists and
+    // notifications, as the app keeps it out of its sidebar.
+    background: agent.background === true,
   };
 }
 

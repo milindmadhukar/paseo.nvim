@@ -20,6 +20,7 @@ import {
 import { voiceOps } from "./bridge-voice.ts";
 import { emit } from "./bridge-io.ts";
 import { subagentOps } from "./bridge-subagents.ts";
+import { backgroundOps } from "./bridge-background.ts";
 
 /** stdout IS the protocol, so asserting on it is asserting on the wire. */
 function captureStdout(run: () => void): string[] {
@@ -1502,4 +1503,132 @@ test("featuresOf joins controls with options, and falls back to features", () =>
   });
   assert.deepEqual(legacy.map((f) => [f.id, f.value]), [["plan_mode", false]]);
   assert.deepEqual(featuresOf({}), []);
+});
+
+test("background work: list, stream and stop, on the daemon's real shapes", async () => {
+  // `agent.background_work.list.response` items at 0.17.4: a provider shell
+  // and a daemon-owned heartbeat (id `heartbeat:<scheduleId>`, no command).
+  const shell = {
+    id: "bash_1",
+    kind: "shell",
+    description: "Run dev server",
+    command: "npm run dev",
+    startedAt: "2026-11-25T10:00:00.000Z",
+    canStop: true,
+    stopToken: "tok-shell",
+  };
+  const heartbeat = {
+    id: "heartbeat:sched-1",
+    kind: "heartbeat",
+    description: "nightly check",
+    startedAt: "2026-11-20T10:00:00.000Z",
+    canStop: true,
+    stopToken: "tok-hb",
+  };
+  let features: Record<string, boolean> = {
+    agentBackgroundWork: true,
+    agentBackgroundWorkStop: true,
+  };
+  let deliver: ((message: any) => void) | null = null;
+  let snapshot: (() => void) | null = null;
+  const stops: any[] = [];
+  const ctx = new BridgeConnection();
+  ctx.raw = (() => ({
+    getLastServerInfoMessage: () => ({ features }),
+    async listAgentBackgroundWork(agentId: string) {
+      assert.equal(agentId, "a1");
+      return [shell, heartbeat];
+    },
+    async stopAgentBackgroundWork(agentId: string, item: any) {
+      stops.push({ agentId, id: item.id, stopToken: item.stopToken });
+      if (item.stopToken === "stale") {
+        throw new Error("Background work is no longer available to stop");
+      }
+    },
+    observeAgentBackgroundWork() {
+      return {
+        subscribe(observer: any) {
+          deliver = observer.update;
+          snapshot = observer.snapshot;
+        },
+        ready: Promise.resolve(),
+        async release() {},
+      };
+    },
+  })) as any;
+  const ops = backgroundOps(ctx);
+
+  const listed: any = await ops["background.list"]({ op: "background.list", agentId: "a1" });
+  assert.equal(listed.supported, true);
+  assert.deepEqual(listed.items[0], {
+    id: "bash_1",
+    kind: "shell",
+    description: "Run dev server",
+    command: "npm run dev",
+    startedAt: "2026-11-25T10:00:00.000Z",
+    canStop: true,
+    stopToken: "tok-shell",
+  });
+  assert.equal(listed.items[1].command, null);
+
+  assert.equal((await ops["background.follow"]({ op: "background.follow" }) as any).following, true);
+  const lines = captureStdout(() => {
+    snapshot!(); // the first snapshot is the subscription itself, not news
+    deliver!({
+      type: "agent.background_work.update",
+      payload: { subscriptionId: "s1", agentId: "a1", items: [heartbeat] },
+    });
+    snapshot!(); // a later one is a reconnect: list again
+  }).map((line) => JSON.parse(line));
+  assert.deepEqual(
+    lines.map((l) => l.event),
+    ["background", "background_resync"],
+  );
+  assert.equal(lines[0].agentId, "a1");
+  assert.equal(lines[0].items[0].id, "heartbeat:sched-1");
+
+  await ops["background.stop"]({
+    op: "background.stop",
+    agentId: "a1",
+    itemId: "heartbeat:sched-1",
+    stopToken: "tok-hb",
+  });
+  assert.deepEqual(stops[0], { agentId: "a1", id: "heartbeat:sched-1", stopToken: "tok-hb" });
+  await assert.rejects(
+    () =>
+      ops["background.stop"]({
+        op: "background.stop",
+        agentId: "a1",
+        itemId: "bash_1",
+        stopToken: "stale",
+      }),
+    /no longer available/,
+  );
+
+  // A host that lists but cannot stop: no Stop is offered.
+  features = { agentBackgroundWork: true };
+  const unstoppable: any = await ops["background.list"]({ op: "background.list", agentId: "a1" });
+  assert.equal(unstoppable.items[0].canStop, false);
+  assert.equal(unstoppable.items[0].stopToken, null);
+
+  // A host without background work at all: an empty, unsupported answer.
+  features = {};
+  const none: any = await ops["background.list"]({ op: "background.list", agentId: "a1" });
+  assert.deepEqual([none.supported, none.items], [false, []]);
+});
+
+test("an agent summary carries its background work and the background flag", () => {
+  // 0.17: `runningCount` omitted means all of it runs.
+  assert.deepEqual(describeAgent({ id: "a", backgroundWork: { count: 2 } }).backgroundWork, {
+    count: 2,
+    running: 2,
+  });
+  // A heartbeat-only agent: counted, not running.
+  assert.deepEqual(
+    describeAgent({ id: "a", backgroundWork: { count: 1, runningCount: 0 } }).backgroundWork,
+    { count: 1, running: 0 },
+  );
+  assert.equal(describeAgent({ id: "a" }).backgroundWork, null);
+  assert.equal(describeAgent({ id: "a", background: true }).background, true);
+  assert.equal(describeAgent({ id: "a" }).background, false);
 });

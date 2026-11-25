@@ -41,6 +41,7 @@ import { timelineOps } from "./bridge-timeline.ts";
 import { terminalOps } from "./bridge-terminals.ts";
 import { voiceOps } from "./bridge-voice.ts";
 import { subagentOps } from "./bridge-subagents.ts";
+import { backgroundOps } from "./bridge-background.ts";
 import { createScheduler } from "./bridge-dispatch.ts";
 
 const ctx = new BridgeConnection();
@@ -53,6 +54,7 @@ const ops: Ops = {
   ...timelineOps(ctx),
   ...terminalOps(ctx),
   ...subagentOps(ctx),
+  ...backgroundOps(ctx),
 };
 setShutdown(() => ops.close({ op: "close" }));
 
